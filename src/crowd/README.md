@@ -9,7 +9,7 @@ The Tribe that the 2026 Endshow never had, plus everyone who *was* on the ground
 | `populated: boolean` / `setPopulated(on)` | `true` = Tribe mode ("As it should have been"), `false` = the empty grounds "As filmed" (crowd hidden, crew shown) |
 | `setCount(n)` / `targetCount` / `count` / `maxCount` | crowd size 0…65,000 (default 45,000). The headcount cap per preset is decoupled from the detailed-LOD budgets (extra people are far impostors): ultra 65k, high 45k, medium 26k, mobile 11k; rebuild is debounced (150 ms) |
 | `densityAt(x, z)` | people per m² at a ground point (0 in "As filmed" mode); used by the player controller and ambience |
-| `stats()` | total, near, mid, far, flags, performers, crew, mood, drawCalls, cpuMs, bucketMs … |
+| `stats()` | total, hero, near, mid, far, crowdTris, lod, flags, performers, crew, mood, drawCalls, cpuMs, bucketMs … |
 
 URL params: `crowd=<n>`, `filmed` (start in "As filmed" mode), `crowdenv[=rrggbb]` (stand-in light
 environment for testing without the lighting system), `crowdslope` (analytic bank relief instead of
@@ -21,7 +21,7 @@ environment for testing without the lighting system), `crowdslope` (analytic ban
 |---|---|
 | hero | ~2.8k-tri smooth body (lofted torso, capsule limbs with domed joints, tapered forearms, mitten hands + thumb, shaped shoes, ears, hair-cap shell) for the nearest people |
 | near | ~0.7k-tri smooth body (same construction, fewer segments) + optional slots: hair cap, cap, bucket hat, long hair, pony tail, bandana, flag cape |
-| mid | ~80-tri prism body, same skeleton, per-vertex lighting |
+| mid | ~110-tri lofted body (rounded head, 3-sided limbs), same skeleton, per-vertex lighting |
 | far | camera-facing impostors from a procedural silhouette atlas (8 poses × 4 bodies, region + rim channels) |
 | flags | pole + waving cloth attached to the carrier's hand; lowered away from and furled next to a viewer |
 | phones | 7 × 15 cm screens showing a dim "video of the stage", flashlight LEDs from the stage side, lighter flames; energy-conserving sub-pixel dots, fogged |
@@ -30,16 +30,20 @@ environment for testing without the lighting system), `crowdslope` (analytic ban
 
 Per-person data lives in three float textures (position/yaw, height/build/seed/zone, packed look).
 The crowd is sorted into 8 m chunks; every 3rd frame (or when the camera jumps) chunks are frustum
-tested and counting-sorted by distance. Chunks within `nearR` are classified per person (the nearest
-`heroN` within `heroR` → hero, then near, then mid / far when budgets run out), further chunks go to
-mid (≤ `midR`, `midN`) or far. That index list is the only per-instance CPU work.
+tested and counting-sorted by distance. Everyone in chunks within `nearR` is ranked by distance
+(128 bins): the nearest `heroN` within `heroR` → hero, the next `nearN` → near, the rest mid / far;
+further chunks go to mid (≤ `midR`, `midN`) or far. That index list is the only per-instance CPU work.
 
 | preset | hero | near | mid | headcount | worst-case crowd tris |
 |---|---|---|---|---|---|
-| ultra | 150 @ 8 m | 1000 @ 20 m | 4200 @ 70 m | 65k | ~1.7M |
-| high | 100 @ 7 m | 500 @ 15 m | 2800 @ 55 m | 45k | ~1.06M |
-| medium | 60 @ 6 m | 340 @ 12 m | 1800 @ 45 m | 26k | ~0.67M |
-| mobile | 30 @ 5 m | 150 @ 10 m | 850 @ 36 m | 11k | ~0.31M |
+| ultra | 150 @ 8 m | 1000 @ 20 m | 4000 @ 70 m | 65k | ~1.8M |
+| high | 100 @ 7 m | 500 @ 15 m | 2400 @ 55 m | 45k | ~1.09M |
+| medium | 60 @ 6 m | 340 @ 12 m | 1600 @ 45 m | 26k | ~0.72M |
+| mobile | 30 @ 5 m | 150 @ 10 m | 800 @ 36 m | 11k | ~0.33M |
+
+Measured at t = 1515 s, spot `middle` (crowd triangles incl. phones + flags / whole frame):
+ultra 1.61M / 3.18M, high 0.95M / 2.34M, medium 0.61M / 1.76M, mobile 0.28M / 0.92M
+(before: high 1.88M / 3.22M with 28k people, mobile 1.04M frame with 6.5k people).
 
 Lighting (shaders.ts `LIGHTING`): the rig, its strobes and blinders face the audience, so they only
 reach surfaces facing the stage (max(N·L, 0), no wrap); backs get the dim sky and a directional haze
