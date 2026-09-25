@@ -47,8 +47,12 @@ export class YouTubeTrack implements AudioTrack {
     return this._duration ? this._duration - this.offset : 0;
   }
 
+  /**
+   * Only PLAYING counts as advancing: while the player buffers (3) its clock stands still, and the
+   * ShowClock must hold instead of predicting ahead and snapping back.
+   */
   get playing() {
-    return this.state === 1 || this.state === 3; // playing or buffering
+    return this.state === 1;
   }
 
   async load(): Promise<void> {
