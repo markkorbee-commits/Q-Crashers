@@ -509,7 +509,8 @@ export function buildHead(k: Kit): HeadResult {
       const b = baseFor(side, psi, zc);
       const d = dirFor(b, 0.62);
       const bend = len * 0.12;
-      const L2 = len * 0.72;
+      // tall central spikes are kept shorter so the crest tops out near Y 22 (design bible 21.5)
+      const L2 = len * (0.78 - 0.55 * Math.max(0, d.y - 0.4));
       const g = spike(L2, r * 1.55, { sides, segs: segs(k, 7, 4), bendZ: -bend, tipR: 0.03 });
       const m = frameY(b, d, 0, 1, v3(0, 0, 1));
       W.steel.add(g, m, 0x9aa2ac);

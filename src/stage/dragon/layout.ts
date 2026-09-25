@@ -13,14 +13,14 @@ import * as THREE from 'three';
  *   rosettes: 3 per wing, diameter ~4.5 m, centres near (±16, 16.5), (±24, 16.5), (±32, 15.5)
  */
 export const HEAD = {
-  hinge: new THREE.Vector3(-1.2, 14.7, -11.6),
+  hinge: new THREE.Vector3(-1.0, 15.2, -11.6),
   /** radians, negative = snout turned towards audience-left (-X) */
-  yaw: -0.35,
-  /** radians, positive = nose down */
-  pitch: 0.09,
-  /** jaw opening at look.jaw = 0 / 1 (radians); the default look.jaw 0.6 gives the observed ~41 deg */
-  jawMin: 0.45,
-  jawMax: 0.9,
+  yaw: -0.3,
+  /** radians, positive = nose down (the head glares down at the field; the jaw hangs almost vertical) */
+  pitch: 0.38,
+  /** jaw opening at look.jaw = 0 / 1 (radians); the default look.jaw 0.6 gives a ~5.5 m tall gape */
+  jawMin: 0.6,
+  jawMax: 1.05,
 };
 
 export function headMatrix(): THREE.Matrix4 {

@@ -301,7 +301,7 @@ export class DragonCrown {
     U.uMouthCol.value.copy(fire).multiplyScalar(look.mouth * 11 + 0.3);
     U.uLava.value.copy(fire).multiplyScalar(look.mouth * 0.5 + (look.mode === 'ember' || look.mode === 'rage' ? 0.22 : 0.03));
 
-    this.eyeMat.color.copy(look.eyes).multiplyScalar(Math.max(0.05, look.eyesIntensity) * 1.3);
+    this.eyeMat.color.copy(look.eyes).multiplyScalar(Math.max(0.05, look.eyesIntensity) * 0.45);
 
     // jaw
     this.jawPivot.rotation.x = THREE.MathUtils.lerp(HEAD.jawMin, HEAD.jawMax, THREE.MathUtils.clamp(look.jaw, 0, 1));
