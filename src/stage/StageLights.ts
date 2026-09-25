@@ -66,6 +66,9 @@ export class StageLights {
     const wash = look.wash;
     // soft-limited: env wash intensities above ~1 compress instead of blowing out the set
     const wi = 1.5 * (1 - Math.exp(-Math.max(0, look.washIntensity) / 1.1));
+    // the constant "work light" parts follow the set practicals (0 in blackouts); the wash-driven parts
+    // come from the lighting cues. Nothing here lights the set while the show asks for darkness.
+    const E = look.emit * (1 - 0.7 * look.ember);
     for (const rig of this.rigs) {
       const l = rig.light;
       if (!l.visible) continue;
@@ -79,20 +82,20 @@ export class StageLights {
           break;
         }
         case 'center':
-          l.color.copy(wash).lerp(look.led, 0.45);
-          l.intensity = (60 + 140 * wi) * (0.5 + 0.7 * look.energy) * (1 + look.pulse);
+          l.color.copy(wash).lerp(look.led, 0.45 * E);
+          l.intensity = (60 * E + 140 * wi) * (0.5 + 0.7 * look.energy) * (1 + look.pulse);
           break;
         case 'front':
-          l.color.copy(wash).lerp(look.led2, rig.side > 0 ? 0.25 : 0.1);
-          l.intensity = (50 + 130 * wi) * (0.6 + 0.5 * look.energy) * (1 + 0.6 * look.pulse + look.strobe * 2);
+          l.color.copy(wash).lerp(look.led2, (rig.side > 0 ? 0.25 : 0.1) * E);
+          l.intensity = (50 * E + 130 * wi) * (0.6 + 0.5 * look.energy) * (1 + 0.6 * look.pulse + look.strobe * 2);
           break;
         case 'base':
           l.color.copy(look.led2).lerp(wash, 0.35);
-          l.intensity = 45 * (0.4 + look.ledIntensity);
+          l.intensity = 45 * (0.4 * E + look.ledIntensity);
           break;
         case 'rim':
           l.color.copy(look.led).lerp(wash, 0.5);
-          l.intensity = 220 * (0.4 + 0.6 * look.energy) * (0.5 + wi);
+          l.intensity = 220 * (0.4 + 0.6 * look.energy) * (0.5 * E + wi);
           break;
       }
     }

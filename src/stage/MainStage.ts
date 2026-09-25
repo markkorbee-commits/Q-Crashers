@@ -12,6 +12,7 @@ import { DragonCrown } from './DragonCrown';
 import { createKit, type StageKit } from './kit';
 import { armX, L } from './layout';
 import { LookResolver } from './look/LookResolver';
+import { createLedOverlayMaterial } from './materials/LedMaterial';
 import { StageMaterials } from './materials/StageMaterials';
 import { StageLights } from './StageLights';
 import { createStageLookEx, type StageLookEx } from './StageLook';
@@ -52,6 +53,9 @@ export class MainStageSystem implements System {
   private resolver!: LookResolver;
   private meshes: THREE.Mesh[] = [];
   private barrier: THREE.InstancedMesh | null = null;
+  /** additive far-field / above-haze pass of the castle's point + line emitters */
+  private overlay: THREE.Mesh | null = null;
+  private overlayMat: THREE.ShaderMaterial | null = null;
   private kitStats = { tris: 0, ledMetres: 0, windows: 0, lamps: 0, lanterns: 0, barrier: 0 };
   private buildMs = 0;
   private timing = { materials: 0, geometry: 0, crown: 0 };
@@ -129,8 +133,18 @@ export class MainStageSystem implements System {
     add(kit.gold.build(), m.gold, 'stage-gold');
     add(kit.decor.build(), m.decor, 'stage-decor');
     add(kit.speaker.build(), m.speaker, 'stage-speaker');
+    const ov = kit.led.buildOverlay();
     const led = kit.led.build();
     add(led, m.led, 'stage-led');
+    if (ov.attributes.position.count > 0) {
+      this.overlayMat = createLedOverlayMaterial(m.led);
+      this.overlay = new THREE.Mesh(ov, this.overlayMat);
+      this.overlay.name = 'stage-led-overlay';
+      this.overlay.matrixAutoUpdate = false;
+      this.overlay.updateMatrix();
+      this.overlay.renderOrder = 12;
+      this.root.add(this.overlay);
+    } else ov.dispose();
     this.kitStats.ledMetres = Math.round(kit.led.metres);
     this.kitStats.windows = kit.led.count.windows;
     this.kitStats.lamps = kit.led.count.lamps;
@@ -296,12 +310,22 @@ export class MainStageSystem implements System {
       look.pulse = Math.max(look.pulse, look.strobe * 0.6);
     }
     this.applyUniforms(ctx, look);
+    this.updateOverlay(ctx.camera);
     this.lights.update(look, app.env.flashPos, app.env.flashIntensity);
     try {
       this.crown.update(ctx, look);
     } catch (e) {
       if (app.frame % 300 === 1) console.error('[stage] crown update failed', e);
     }
+  }
+
+  /** metres per screen pixel at 1 m for the minimum-width lines of the overlay pass */
+  private updateOverlay(cam: THREE.PerspectiveCamera): void {
+    const mat = this.overlayMat;
+    if (!mat) return;
+    const h = typeof window !== 'undefined' ? window.innerHeight : 720;
+    mat.uniforms.uPixel.value = (2 * Math.tan(THREE.MathUtils.degToRad(cam.fov) * 0.5)) / Math.max(200, h) / Math.max(1e-3, cam.zoom);
+    mat.uniforms.uMinPx.value = this.app.quality.level === 'mobile' ? 1.5 : 2.0;
   }
 
   private applyUniforms(ctx: FrameContext, look: StageLookEx): void {
@@ -318,34 +342,44 @@ export class MainStageSystem implements System {
     addScaled(u.uBack.value.setRGB(0.012, 0.02, 0.045), look.led, 0.06 * look.ledIntensity);
     u.uFlash.value.copy(look.flash).multiplyScalar(1.6);
     u.uFlashPos.value.copy(this.app.env.flashPos);
-    addScaled(u.uEnvTint.value.setRGB(0.35, 0.35, 0.42), look.wash, wi * 1.2);
+    // env reflections carry the rig's hot fixture spots: they fade with the practicals (blackouts)
+    const E = look.emit;
+    const castle = E * (1 - look.ember);
+    addScaled(u.uEnvTint.value.setRGB(0.35, 0.35, 0.42).multiplyScalar(0.12 + 0.88 * E), look.wash, wi * 1.2);
     u.uGlow.value.set(look.bannerGlow, look.skullGlow * (0.6 + look.eyesIntensity * 0.5), look.emblemGlow, 1);
 
     const l = this.mats.led.uniforms;
     const M = look.master;
-    const dorm = look.mode === 'dormant' ? 0.45 : 1;
     l.uTime.value = ctx.showTime;
     l.uBeat.value = ctx.beat.beat;
     l.uKick.value = ctx.beat.kick;
     l.uPhase.value = look.ledPhase;
     l.uPattern.value = look.ledPatternX;
-    const ledGain = 9 * look.ledIntensity;
+    // castle battens: ledIntensity already carries master x presence; 'ember' leaves the castle dark
+    const ledGain = 9 * look.ledIntensity * (1 - look.ember);
     (l.uLed.value as THREE.Color).copy(look.led).multiplyScalar(ledGain);
     (l.uLed2.value as THREE.Color).copy(look.led2).multiplyScalar(ledGain);
     (l.uAccent.value as THREE.Color).copy(look.accent).multiplyScalar(ledGain * 0.75);
     (l.uWin.value as THREE.Color).copy(look.windowColor).multiplyScalar(2.3 * look.windows);
     l.uWinMode.value = look.windowMode;
-    (l.uArcade.value as THREE.Color).copy(look.arcade).multiplyScalar(1.6 * (0.25 + 0.75 * look.windows) * M);
-    (l.uLamp.value as THREE.Color).copy(look.lamp).multiplyScalar((2 + 10 * look.ledIntensity) * M * dorm);
-    (l.uLantern.value as THREE.Color).copy(look.lantern).multiplyScalar((3.5 + 3 * look.energy) * M * dorm);
-    (l.uCandle.value as THREE.Color).copy(CANDLE).multiplyScalar(1.4 * Math.max(M, 0.15));
-    (l.uPortal.value as THREE.Color).copy(look.portal).multiplyScalar((0.5 + 0.8 * look.mouth) * M);
+    (l.uArcade.value as THREE.Color).copy(look.arcade).multiplyScalar(1.6 * (0.25 + 0.75 * look.windows) * castle);
+    // front-line lamp row + crystal lanterns (ramparts, arm posts): they carry the U of the stage from
+    // far away, so they are bright HDR points; their level follows the look's window level (the
+    // dormant opening shows them at ~30 %, blackouts turn them off)
+    const lampLvl = Math.pow(THREE.MathUtils.smoothstep(look.windows, 0, 0.4), 0.6) * M * (1 - look.ember);
+    (l.uLamp.value as THREE.Color).copy(look.lamp).multiplyScalar((4 + 10 * look.ledIntensity) * (0.5 + 0.5 * lampLvl) * castle);
+    (l.uLantern.value as THREE.Color).copy(look.lantern).multiplyScalar((7 + 4 * look.energy) * lampLvl);
+    (l.uCandle.value as THREE.Color).copy(CANDLE).multiplyScalar(1.4 * castle);
+    (l.uPortal.value as THREE.Color).copy(look.portal).multiplyScalar((0.5 + 0.8 * look.mouth) * castle);
     l.uPulse.value = look.pulse;
     l.uStrobe.value = look.strobe;
     l.uContent.value = look.content;
     l.uContentMix.value = look.contentMix;
-    (l.uContentCol.value as THREE.Color).copy(look.contentColor).multiplyScalar(2.2 * M);
-    u.uGlow.value.multiplyScalar(M);
+    (l.uContentCol.value as THREE.Color).copy(look.contentColor).multiplyScalar(2.2);
+    // every panel content mode (incl. the absolute fire / ice / ember looks) follows the master level;
+    // under 'ember' the castle panels stay low so only the dragon reads
+    l.uContentGain.value = M * (1 - 0.8 * look.ember);
+    u.uGlow.value.multiplyScalar(castle);
   }
 
   setQuality(q: QualitySettings): void {
@@ -385,7 +419,8 @@ export class MainStageSystem implements System {
       tris: this.kitStats.tris + bTris + crownTris,
       setTris: this.kitStats.tris + bTris,
       crownTris,
-      calls: this.meshes.length + (this.barrier ? 1 : 0) + crownCalls,
+      calls: this.meshes.length + (this.barrier ? 1 : 0) + (this.overlay ? 1 : 0) + crownCalls,
+      overlayTris: this.overlay ? (this.overlay.geometry.attributes.position.count / 3) | 0 : 0,
       lights: this.lights.count,
       ledMetres: this.kitStats.ledMetres,
       windows: this.kitStats.windows,
@@ -409,6 +444,8 @@ export class MainStageSystem implements System {
     this.app.scene.remove(this.root);
     for (const m of this.meshes) m.geometry.dispose();
     this.barrier?.geometry.dispose();
+    this.overlay?.geometry.dispose();
+    this.overlayMat?.dispose();
     this.mats.dispose();
   }
 }

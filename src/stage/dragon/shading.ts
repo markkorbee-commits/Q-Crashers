@@ -41,6 +41,12 @@ export interface CrownUniforms {
   uShowT: THREE.IUniform<number>;
   /** 0..1 strength of the moving-head light pools sweeping over the set */
   uPoolAmt: THREE.IUniform<number>;
+  /** 0..1 level of the crown's practicals (constant glows, bulbs, rosette hubs): 0 in blackouts */
+  uEmit: THREE.IUniform<number>;
+  /** 0..1 'ember' mask: only the dragon and the inner wings stay lit */
+  uEmber: THREE.IUniform<number>;
+  /** minimum on-screen width (px) of the LED strips / bulbs, so outlines never alias away */
+  uMinPx: THREE.IUniform<number>;
 }
 
 export function createUniforms(): CrownUniforms {
@@ -70,6 +76,9 @@ export function createUniforms(): CrownUniforms {
     uFlashV: { value: 0 },
     uShowT: { value: 0 },
     uPoolAmt: { value: 0.35 },
+    uEmit: { value: 1 },
+    uEmber: { value: 0 },
+    uMinPx: { value: 2 },
   };
 }
 
@@ -81,7 +90,11 @@ uniform float uLedI;
 uniform float uPattern;
 uniform float uPhase;
 uniform float uPulse;
+uniform float uEmit;
+uniform float uEmber;
 float crownHash(float n) { return fract(sin(n * 12.9898) * 43758.5453); }
+// 'ember': the dragon and the inner wings stay lit, the outer wings fade to a dim red silhouette
+float emberMask(float x) { return mix(1.0, mix(0.2, 1.0, 1.0 - smoothstep(16.0, 36.0, abs(x))), uEmber); }
 // u: metres along the strip, grp: 0 primary / 1 accent, side: -1 left / +1 right, seed: per strip
 vec3 crownLed(float u, float grp, float side, float seed) {
   vec3 base = grp > 0.5 ? uLed2 : uLed;
@@ -277,9 +290,10 @@ iblIrradiance *= uEnvTint;`,
   vec3 lc = crownLed(vMemb.y, 0.0, side, abs(vMemb.z) + lane * 2.7027027);
   // pixel canvas fades out towards the wrist
   float grow = smoothstep(1.5, 5.0, vMemb.y);
-  totalEmissiveRadiance += lc * line * dash * inside * grow * uWings * 2.2;
+  float em = emberMask(vCrownPos.x);
+  totalEmissiveRadiance += lc * line * dash * inside * grow * uWings * 2.2 * em;
   // the printed skin is flooded by its own warm uplights (follows the wing glow level)
-  totalEmissiveRadiance += diffuseColor.rgb * (0.04 + 0.85 * uWings) * mix(1.0, 0.72, smoothstep(3.0, 18.0, vMemb.y));
+  totalEmissiveRadiance += diffuseColor.rgb * (0.04 * uEmit + 0.85 * uWings) * em * mix(1.0, 0.72, smoothstep(3.0, 18.0, vMemb.y));
   // printed fabric lets some of the back light (sky, fireworks behind the stage) shine through
   totalEmissiveRadiance += diffuseColor.rgb * uRim * 0.35;
 }`;
@@ -309,10 +323,13 @@ attribute vec3 iB;
 attribute vec2 iU;
 attribute vec4 iInfo; // group, side, seed, width
 uniform float uPixel;
+uniform float uMinPx;
 varying float vU;
 varying float vAcross;
 varying float vFade;
+varying float vFar;
 varying vec3 vInfo;
+varying float vWX;
 void main() {
   vec4 mvA = modelViewMatrix * vec4(iA, 1.0);
   vec4 mvB = modelViewMatrix * vec4(iB, 1.0);
@@ -325,21 +342,31 @@ void main() {
   float sl = length(side);
   side = sl > 1e-4 ? side / sl : vec3(1.0, 0.0, 0.0);
   float px = max(-mv.z, 0.1) * uPixel;
-  float w = max(iInfo.w, 1.6 * px);
-  vFade = clamp(iInfo.w / w, 0.18, 1.0);
+  // never thinner than uMinPx on screen: far away the strip becomes a crisp line of light. The line
+  // keeps most of its radiance (an LED pixel is a point source much brighter than the set), so the
+  // outlines read from the back of the field and from the drone instead of dissolving into haze.
+  float w = max(iInfo.w, uMinPx * px);
+  float ratio = iInfo.w / w;
+  vFade = clamp(sqrt(ratio), 0.7, 1.0);
+  vFar = smoothstep(0.1, 0.7, 1.0 - ratio);
   mv.xyz += side * corner.y * 0.5 * w;
   mv.xyz += dir * (corner.x * 2.0 - 1.0) * 0.35 * w;
+  // a widened line is pulled towards the camera so it is not buried in the surface it runs on
+  mv.xyz += toCam * (w - iInfo.w) * 0.8;
   gl_Position = projectionMatrix * mv;
   vU = mix(iU.x, iU.y, corner.x);
   vAcross = corner.y;
   vInfo = iInfo.xyz;
+  vWX = (modelMatrix * vec4(mix(iA, iB, corner.x), 1.0)).x;
 }`,
     fragmentShader: /* glsl */ `
 ${LED_GLSL}
 varying float vU;
 varying float vAcross;
 varying float vFade;
+varying float vFar;
 varying vec3 vInfo;
+varying float vWX;
 void main() {
   float a = 1.0 - abs(vAcross);
   float core = smoothstep(0.0, 0.7, a);
@@ -348,7 +375,11 @@ void main() {
   float fw = fwidth(pu);
   float dots = mix(0.35 + 0.65 * smoothstep(0.42, 0.18, abs(fract(pu) - 0.5)), 1.0, clamp(fw * 1.5, 0.0, 1.0));
   vec3 c = crownLed(vU, vInfo.x, vInfo.y, vInfo.z);
-  gl_FragColor = vec4(c * core * dots * vFade * 2.4, 1.0);
+  // from far away a chase / sparkle averages over many pixels: the outline keeps a steady level and
+  // is pushed above the lit haze around the crown, so the wing ribs read as lines of light
+  vec3 steady = (vInfo.x > 0.5 ? uLed2 : uLed) * uLedI * 0.7;
+  c = max(c, steady * vFar) * (1.0 + 1.2 * vFar);
+  gl_FragColor = vec4(c * core * dots * vFade * 3.2 * emberMask(vWX), 1.0);
 }`,
   });
 }
@@ -407,7 +438,8 @@ export class Strips {
     g.boundingSphere = box.getBoundingSphere(new THREE.Sphere());
     const m = new THREE.Mesh(g, mat);
     m.frustumCulled = true;
-    m.renderOrder = 2;
+    // after the haze (renderOrder 10) and the beams: LED outlines pierce the haze instead of being veiled by it
+    m.renderOrder = 12;
     this.d = { a: [], b: [], u: [], info: [] };
     return m;
   }
@@ -432,18 +464,27 @@ attribute vec2 corner;
 attribute vec3 iPos;
 attribute vec4 iInfo; // type, u, size, seed
 uniform float uPixel;
+uniform float uMinPx;
 varying vec2 vC;
 varying vec4 vInfo;
 varying float vFade;
+varying float vWX;
 void main() {
   vec4 mv = modelViewMatrix * vec4(iPos, 1.0);
   float px = max(-mv.z, 0.1) * uPixel;
-  float s = max(iInfo.z, 2.2 * px);
-  vFade = clamp(pow(iInfo.z / s, 1.2), 0.06, 1.0);
+  float s = max(iInfo.z, 1.1 * uMinPx * px);
+  // far away a sparse bulb is a point source: keep a good part of its radiance on the minimum-size
+  // dot. Dense clusters (eye rings, the ~200 mouth pixels) stay energy-conserving so they do not
+  // pile up into a white blob.
+  float ratio = iInfo.z / s;
+  int bt = int(iInfo.x + 0.5);
+  vFade = (bt == 2 || bt == 3) ? clamp(pow(ratio, 1.2), 0.06, 1.0) : clamp(pow(ratio, 0.8), 0.28, 1.0);
   mv.xy += corner * s * 1.6;
+  mv.xyz += normalize(-mv.xyz) * (s - iInfo.z) * 1.5;
   gl_Position = projectionMatrix * mv;
   vC = corner;
   vInfo = iInfo;
+  vWX = (modelMatrix * vec4(iPos, 1.0)).x;
 }`,
     fragmentShader: /* glsl */ `
 ${LED_GLSL}
@@ -453,6 +494,7 @@ uniform float uTime;
 varying vec2 vC;
 varying vec4 vInfo;
 varying float vFade;
+varying float vWX;
 void main() {
   float r2 = dot(vC, vC) * 2.56;
   float core = exp(-r2 * 7.0);
@@ -464,12 +506,12 @@ void main() {
   if (t == 0 || t == 1) c = crownLed(vInfo.y, float(t), sign(vInfo.w - 0.5), vInfo.w) * 1.4;
   else if (t == 2) c = uEyes * 3.0;
   else if (t == 3) {
-    // mouth bulbs: warm white ring, chasing slowly, brighter with the mouth glow
+    // mouth bulbs (palate, gums, tongue): pale pink-white pixels, chasing slowly, brighter with the mouth glow
     vec3 led = crownLed(vInfo.y, 0.0, 1.0, 0.5);
-    c = mix(vec3(1.0, 0.86, 0.7) * (0.25 + 0.75 * uLedI) , led, 0.25) * (0.35 + 0.7 * uMouth) * 1.1;
-  } else if (t == 4) c = vec3(1.0, 0.96, 0.92) * (0.35 + 1.2 * min(1.0, dot(uEyes, vec3(0.3, 0.5, 0.2)) * 1.5)) + uEyes * 0.3;
-  else c = vec3(1.0, 0.7, 0.4) * (0.3 + uLedI);
-  gl_FragColor = vec4(c * m * vFade * 2.4, 1.0);
+    c = mix(vec3(1.0, 0.8, 0.84) * (0.25 + 0.75 * uLedI), led, 0.2) * (0.2 * uEmit + 0.9 * uMouth) * 1.2;
+  } else if (t == 4) c = (vec3(1.0, 0.96, 0.92) * (0.35 * uEmit + 1.2 * min(1.0, dot(uEyes, vec3(0.3, 0.5, 0.2)) * 1.5)) + uEyes * 0.3);
+  else c = vec3(1.0, 0.7, 0.4) * (0.3 * uEmit + uLedI);
+  gl_FragColor = vec4(c * m * vFade * 2.4 * emberMask(vWX), 1.0);
 }`,
   });
 }
@@ -497,7 +539,7 @@ export class Bulbs {
     g.boundingBox = box;
     g.boundingSphere = box.getBoundingSphere(new THREE.Sphere());
     const m = new THREE.Mesh(g, mat);
-    m.renderOrder = 3;
+    m.renderOrder = 13;
     this.pos = [];
     this.info = [];
     return m;
@@ -550,27 +592,40 @@ void main() {
   vec3 led = crownLed(r * 2.0 + vSeed * 0.1, 1.0, sign(vSeed), 0.3);
   float lv = max(uLedI, 0.2);
   vec3 c = uRosette * (star * 2.2 + glow) * (0.35 + 0.9 * uWings) + (uRosette * 0.5 + led * 0.6) * spokes * 1.5 * lv + led * rim * 0.9;
-  gl_FragColor = vec4(c * 1.5, 1.0);
+  gl_FragColor = vec4(c * 1.5 * emberMask(vSeed), 1.0);
 }`,
   });
 }
 
+/**
+ * Throat glow: a soft, additive haze of pale pink / white light deep in the jaws with a hint of the
+ * blue light at the back of the throat (design bible §5.6). No hard edge and no dark rim, so it never
+ * reads as a big eye inside the mouth; the pixel dots on palate, gums and tongue carry the detail.
+ */
 export function createThroatMaterial(U: CrownUniforms): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     uniforms: U,
     side: THREE.DoubleSide,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
     vertexShader: /* glsl */ `
 varying vec2 vUv;
 void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
     fragmentShader: /* glsl */ `
-uniform vec3 uMouthCol;
 uniform float uMouth;
+uniform float uEmit;
 varying vec2 vUv;
 void main() {
-  float r = length(vUv - 0.5) * 2.0;
-  vec3 deep = vec3(0.12, 0.3, 1.0) * (0.5 + 1.5 * uMouth);
-  vec3 c = mix(deep, uMouthCol * 0.05 + vec3(0.08, 0.01, 0.02), smoothstep(0.05, 0.8, r));
-  c *= (1.0 - smoothstep(0.85, 1.0, r) * 0.7);
+  vec2 d = (vUv - 0.5) * 2.0;
+  float r2 = dot(d, d);
+  // soft falloff that reaches exactly 0 well before the disc edge
+  float g = exp(-r2 * 2.4) * (1.0 - smoothstep(0.3, 0.85, r2));
+  // the glow rises from the tongue root instead of filling the whole opening evenly
+  g *= mix(1.0, 0.3, smoothstep(0.35, 0.95, vUv.y));
+  float core = exp(-r2 * 16.0);
+  vec3 c = mix(vec3(1.0, 0.5, 0.62), vec3(0.4, 0.5, 1.0), core * 0.6);
+  c *= g * (0.05 * uEmit + 0.5 * uMouth);
   gl_FragColor = vec4(c, 1.0);
 }`,
   });

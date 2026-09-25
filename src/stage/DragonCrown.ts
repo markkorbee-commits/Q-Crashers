@@ -208,6 +208,7 @@ export class DragonCrown {
       const throat = new THREE.Mesh(head.throat, throatMat);
       throat.name = 'crown-throat';
       throat.matrixAutoUpdate = false;
+      throat.renderOrder = 12;
       this.group.add(throat);
       this.meshes.push(throat);
     }
@@ -228,7 +229,7 @@ export class DragonCrown {
       const glowGeo = new THREE.CircleGeometry(2.35, 48);
       const glow = new THREE.InstancedMesh(glowGeo, glowMat, frames.length);
       glow.name = 'crown-rosette-glow';
-      glow.renderOrder = 2;
+      glow.renderOrder = 12;
       frames.forEach((f, i) => {
         inst.setMatrixAt(i, f);
         glow.setMatrixAt(i, f.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0, 0.2)));
@@ -277,6 +278,11 @@ export class DragonCrown {
     U.uTime.value = ctx.time;
     U.uShowT.value = ctx.showTime;
     U.uPoolAmt.value = look.mode === 'dormant' ? 0 : 0.4;
+    // practicals (constant glows) follow the look's emitter level: 0 in blackouts
+    const E = Math.max(0, Math.min(1, look.emit));
+    U.uEmit.value = E;
+    U.uEmber.value = look.ember;
+    U.uMinPx.value = this.level === 'mobile' ? 1.5 : 2.0;
 
     // LEDs
     U.uLed.value.copy(look.led);
@@ -286,7 +292,7 @@ export class DragonCrown {
     U.uPhase.value = look.ledPhase;
     U.uPulse.value = Math.max(0, Math.min(1, look.pulse));
     U.uWings.value = look.wings;
-    U.uRosette.value.copy(look.rosettes);
+    U.uRosette.value.copy(look.rosettes).multiplyScalar(E);
     U.uMouth.value = look.mouth;
     U.uEyes.value.copy(look.eyes).multiplyScalar(look.eyesIntensity);
 
@@ -296,16 +302,20 @@ export class DragonCrown {
     const wash = this.tmpC.copy(look.wash).multiplyScalar(wi * 9 * (1 + 0.5 * pulse));
     U.uWashA.value.copy(wash);
     U.uWashB.value.copy(wash).lerp(this.tmpC2.copy(look.led2).multiplyScalar(wi * 5), 0.18);
-    addScaled(U.uKey.value.setRGB(0.05, 0.06, 0.1), wash, 0.22);
+    // a faint FOH work light that goes out with the practicals (blackouts: only sky + moon remain)
+    addScaled(U.uKey.value.setRGB(0.05, 0.06, 0.1).multiplyScalar(0.35 + 0.65 * E), wash, 0.22);
     const flash = look.flash;
     U.uFlash.value.copy(flash).multiplyScalar(6);
     addScaled(addScaled(U.uRim.value.setRGB(0.06, 0.08, 0.18), flash, 2.5), look.led, 0.35 * U.uLedI.value);
-    addScaled(addScaled(U.uEnvTint.value.setRGB(0.3, 0.34, 0.46), look.wash, wi * 0.9), flash, 1.2);
+    // the env map carries the rig's hot fixture spots: dim them with the practicals
+    addScaled(addScaled(U.uEnvTint.value.setRGB(0.3, 0.34, 0.46).multiplyScalar(0.2 + 0.8 * E), look.wash, wi * 0.9), flash, 1.2);
     addScaled(U.uAmbient.value.setRGB(0.015, 0.018, 0.03), look.led, 0.05 * U.uLedI.value);
     // inner fire: throat point light + lava cracks
+    // throat light: pale pink-red (the mouth interior glows pink / white, not orange), lava stays fiery
     const fire = this.tmpC2.setRGB(1.0, 0.32, 0.06).lerp(look.eyes, 0.55);
-    U.uMouthCol.value.copy(fire).multiplyScalar(look.mouth * 11 + 0.3);
-    U.uLava.value.copy(fire).multiplyScalar(look.mouth * 0.5 + (look.mode === 'ember' || look.mode === 'rage' ? 0.22 : 0.03));
+    U.uLava.value.copy(fire).multiplyScalar(look.mouth * 0.5 + (look.mode === 'ember' || look.mode === 'rage' ? 0.22 : 0.03) * E);
+    const throat = this.tmpC2.setRGB(1.0, 0.45, 0.42).lerp(look.eyes, 0.3);
+    U.uMouthCol.value.copy(throat).multiplyScalar(look.mouth * 10 + 0.3 * E);
     if (look.mode === 'frozen') {
       // frozen: the inner fire dies, the metal takes a cold frosty sheen
       U.uLava.value.setRGB(0, 0, 0);
@@ -313,7 +323,7 @@ export class DragonCrown {
       addScaled(U.uKey.value, FROST, 0.25);
     }
 
-    this.eyeMat.color.copy(look.eyes).multiplyScalar(Math.max(0.05, look.eyesIntensity) * 0.45);
+    this.eyeMat.color.copy(look.eyes).multiplyScalar(Math.max(0.05 * E, look.eyesIntensity) * 0.45);
 
     // jaw
     this.jawPivot.rotation.x = THREE.MathUtils.lerp(HEAD.jawMin, HEAD.jawMax, THREE.MathUtils.clamp(look.jaw, 0, 1));
