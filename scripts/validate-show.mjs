@@ -6,7 +6,7 @@
  *
  * The vocabulary is read from the contract sources themselves (no copy that can drift):
  *   docs/show-format.md     fx per system + enumerated param values (`param`: `a` \| `b` ...)
- *   src/core/Anchors.ts     AnchorName union (valid cue targets, + filters all/left/right/center)
+ *   src/data/layout.gen.ts  LAYOUT_ANCHORS keys = AnchorName (valid cue targets, + filters all/left/right/center)
  *   src/show/colors.ts      NAMED_COLORS
  *   src/show/ShowTypes.ts   SystemId, SectionKind, RepeatEvery
  * Repeats are expanded with a line-by-line port of TempoMap + ShowEngine.expand, so the counts are
@@ -42,7 +42,10 @@ const typesSrc = read('src/show/ShowTypes.ts');
 const SYSTEMS = new Set(unionOf(typesSrc, 'SystemId'));
 const KINDS = new Set(unionOf(typesSrc, 'SectionKind'));
 const EVERY = new Set(unionOf(typesSrc, 'RepeatEvery'));
-const ANCHORS = new Set(unionOf(read('src/core/Anchors.ts'), 'AnchorName'));
+const ANCHORS = new Set([
+  ...unionOf(read('src/core/Anchors.ts'), 'AnchorName'),
+  ...[...read('src/data/layout.gen.ts').matchAll(/^  ([a-z_]+):/gm)].map((m) => m[1]),
+]);
 const FILTERS = new Set(['all', 'left', 'right', 'center']);
 const NAMED = new Set([...read('src/show/colors.ts').matchAll(/^\s*([a-z]+):\s*'#[0-9a-fA-F]{6}'/gm)].map((m) => m[1]));
 const PALETTE_REFS = new Set(['primary', 'secondary', 'accent']);
