@@ -282,7 +282,9 @@ Pose personPose(Person P) {
   vec4 fistUp = mix(AR(122.0, 22.0, 112.0, 0.0), AR(168.0, 12.0, 12.0, 0.0), pump);
   vec4 fistOther = AR(12.0, 12.0, 55.0 + 20.0 * kick, 0.0);
   float hsw = sin(b * PI * 0.5 + ph);
-  vec4 hands = AR(158.0 + 8.0 * sin(st * 1.1 + ph), 17.0 + 12.0 * hh(sd, 10.0) + 5.0 * hsw, 16.0, -12.0);
+  float ha = hh(sd, 10.0), hb = hh(sd, 24.0), hc = hh(sd, 25.0);
+  vec4 handsL = AR(146.0 + 22.0 * ha + 7.0 * sin(st * 1.1 + ph), 12.0 + 22.0 * hb + 6.0 * hsw, 8.0 + 34.0 * hc, -12.0);
+  vec4 handsR = AR(146.0 + 22.0 * hb + 7.0 * sin(st * 1.1 + ph + 0.9), 12.0 + 22.0 * ha - 6.0 * hsw, 8.0 + 34.0 * (1.0 - hc), -12.0);
   float wv = sin(TAU * b / 4.0 + P.pos.x * 0.03);
   vec4 waveL = AR(156.0, 22.0 + 24.0 * wv, 18.0, 0.0);
   vec4 waveR = AR(156.0, 22.0 - 24.0 * wv, 18.0, 0.0);
@@ -295,8 +297,8 @@ Pose personPose(Person P) {
   float hi = hh(sd, 9.0);
   vec4 phoneA = AR(116.0 + 42.0 * hi, 6.0, 72.0 - 56.0 * hi, -12.0);
 
-  vec4 aL = idL * wId + hands * wHa + waveL * wWa + clap * wCl + hug * wHu + polL * wPo;
-  vec4 aR = idR * wId + hands * wHa + waveR * wWa + clap * wCl + hug * wHu + polR * wPo;
+  vec4 aL = idL * wId + handsL * wHa + waveL * wWa + clap * wCl + hug * wHu + polL * wPo;
+  vec4 aR = idR * wId + handsR * wHa + waveR * wWa + clap * wCl + hug * wHu + polR * wPo;
   if (leftH) { aL += fistUp * wFi + phoneA * wPh; aR += fistOther * wFi + idR * wPh; }
   else { aR += fistUp * wFi + phoneA * wPh; aL += fistOther * wFi + idL * wPh; }
 
@@ -590,6 +592,7 @@ uniform vec3 uSkyLow;
 uniform vec3 uTwilight;
 uniform vec3 uMoonCol;
 uniform vec3 uMoonDir;
+uniform vec3 uHazeAmb;   // lit haze over the field scatters the show colour from above
 
 float washPattern(vec3 wp) {
   float t = uClock.x;
@@ -620,6 +623,7 @@ vec3 stageLight(vec3 wp, vec3 N) {
 vec3 envLight(vec3 wp, vec3 N) {
   vec3 c = stageLight(wp, N);
   c += mix(uSkyLow, uSkyUp, N.y * 0.5 + 0.5);
+  c += uHazeAmb * (0.35 + 0.65 * max(N.y, 0.0)) / (1.0 + max(0.0, wp.z - 20.0) / 160.0);
   c += uTwilight * max(dot(N, normalize(vec3(0.12, 0.3, 1.0))), 0.0);
   c += uMoonCol * max(dot(N, uMoonDir), 0.0);
   vec3 Lf = uFlashPos - wp;
@@ -698,7 +702,7 @@ ${
   gl_Position = projectionMatrix * mvPosition;
 ${
   mid
-    ? `  vec3 alb = albedoOf(bone, slot, p, P.look);
+    ? `  vec3 alb = max(albedoOf(bone, slot, p, P.look), vec3(0.022));
   vec3 V = normalize(cameraPosition - wp);
   float ao = mix(0.28, 1.0, smoothstep(0.35, 1.5, p.y));
   vCol = alb * envLight(wp, wn) * ao + rimLight(wp, wn, V) * (0.35 + 0.65 * smoothstep(0.9, 1.6, p.y));`
@@ -728,7 +732,7 @@ ${ALBEDO_HEADER}
 ${LIGHTING}
 ${FOG_F}
 uniform sampler2D tFlags;
-${performer ? 'uniform vec4 uLantern; uniform vec4 uTube; varying float vGlow;' : ''}
+${performer ? 'uniform vec4 uLantern; uniform vec4 uTube; uniform vec4 uKey; varying float vGlow;' : ''}
 varying vec3 vN; varying vec3 vW; varying vec3 vLocal; flat varying ivec4 vLook; flat varying int vBone; flat varying int vSlot;
 
 void main() {
@@ -753,9 +757,10 @@ ${
   }`
     : ''
 }
-  // slight sheen on skin (humid, hot night)
-  float spec = 0.0;
-  if (alb == uPal[vLook.x & 7]) spec = 0.06;
+  // black cotton still reflects ~3 %; humid skin gets a sheen towards the stage (hot night)
+  bool isSkin = alb == uPal[vLook.x & 7];
+  alb = max(alb, vec3(0.022));
+  float spec = isSkin ? 1.0 : 0.0;
   // crowd occlusion: bodies below the head plane are shadowed by the neighbours
   float ao = ${performer ? '1.0' : 'mix(0.28, 1.0, smoothstep(0.35, 1.5, vLocal.y))'};
   vec3 light = envLight(vW, N) * ao;
@@ -764,10 +769,16 @@ ${
     ? `  light += uLantern.rgb * uLantern.a * (0.55 + 0.45 * max(N.y, 0.0));
   vec3 Lt = vec3(0.12, 1.95, 58.75) - vW;
   float dt = length(Lt);
-  light += uTube.rgb * uTube.a * (max(dot(N, Lt / dt), 0.0) * 1.6 + 0.15) / (1.0 + dt * dt * 0.5);`
+  light += uTube.rgb * uTube.a * (max(dot(N, Lt / dt), 0.0) * 1.6 + 0.15) / (1.0 + dt * dt * 0.5);
+  // performers on the deck: front key from the FOH follow spots + the set wash spilling onto the deck
+  float onDeck = smoothstep(3.0, -0.5, vW.z);
+  vec3 Lk = normalize(vec3(0.0, 11.0, 88.0) - vW);
+  light += uKey.rgb * uKey.a * onDeck * (max(dot(N, Lk), 0.0) * 0.9 + 0.12);`
     : ''
 }
-  vec3 col = alb * light + rimLight(vW, N, V) * (0.4 + 0.6 * smoothstep(0.9, 1.6, vLocal.y)) * (1.0 + spec * 4.0) + emit;
+  vec3 Hs = normalize(normalize(uStagePos - vW) + V);
+  float sheen = pow(max(dot(N, Hs), 0.0), 24.0) * spec * 0.35;
+  vec3 col = alb * light + rimLight(vW, N, V) * (0.4 + 0.6 * smoothstep(0.9, 1.6, vLocal.y)) * (1.0 + spec * 0.5) + (uStageCol + uRimCol * 0.5) * sheen + emit;
   gl_FragColor = vec4(col, 1.0);
   #include <fog_fragment>
   #include <colorspace_fragment>
@@ -884,7 +895,7 @@ void main() {
   vec4 a = texture2D(tAtlas, vUv);
   float ao = mix(0.28, 1.0, smoothstep(0.2, 0.86, vH));
   if (a.r < 0.5) discard;
-  vec3 alb = a.g < 0.17 ? vSkin : (a.g < 0.5 ? vHair : (a.g < 0.83 ? vTop : vBot));
+  vec3 alb = max(a.g < 0.17 ? vSkin : (a.g < 0.5 ? vHair : (a.g < 0.83 ? vTop : vBot)), vec3(0.022));
   vec3 col = alb * vLight * ao + vRim * a.b;
   gl_FragColor = vec4(col, 1.0);
   #include <fog_fragment>
@@ -1027,12 +1038,13 @@ void main() {
   float flash = Q.light;
   // screens show the stage: tinted by the show colours, a few brighter / whiter
   vec3 col = mix(uScreen, vec3(0.9, 0.95, 1.0), hh(P.seed, 22.0) * 0.6) * (1.2 + 0.9 * hh(P.seed, 23.0)) * seesScreen;
-  if (flash > 0.5) col = lighter ? vec3(1.0, 0.62, 0.22) * (3.2 + 0.8 * sin(uClock.y * 19.0 + P.seed)) : col + vec3(0.9, 0.95, 1.0) * 6.0 * (1.0 - 0.6 * seesScreen);
+  // flashlight LEDs sit on the back of the phone (seen from the stage side); lighters glow all round
+  if (flash > 0.5) col = lighter ? vec3(1.0, 0.62, 0.22) * (3.2 + 0.8 * sin(uClock.y * 19.0 + P.seed)) : col + vec3(0.9, 0.95, 1.0) * 6.0 * (1.0 - seesScreen);
   float vis = on * step(0.02, dot(col, vec3(1.0)));
   float real = 0.036;
   float size = max(real, dist * uPixel * 1.6);
   float k = real / size;
-  vCol = col * vis * max(k * k, 0.045) * (0.6 + 0.4 * k);
+  vCol = col * vis * max(k * k, mix(0.012, 0.035, 1.0 - seesScreen)) * (0.6 + 0.4 * k);
   vShape = k;
   vQ = position.xy;
   vec3 up = vec3(0.0, 1.0, 0.0);

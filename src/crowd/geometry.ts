@@ -18,8 +18,14 @@ import { BONE, SLOT } from './constants';
 type G = THREE.BufferGeometry;
 
 function tag(g: G, bone: number, slot = 0): G {
-  const geo = g.index ? g.toNonIndexed() : g;
-  if (geo !== g) g.dispose();
+  // keep (or add) an index so shared vertices are skinned once (post-transform cache)
+  const geo = g;
+  if (!geo.index) {
+    const n0 = geo.getAttribute('position').count;
+    const ix = new Array<number>(n0);
+    for (let i = 0; i < n0; i++) ix[i] = i;
+    geo.setIndex(ix);
+  }
   geo.deleteAttribute('uv');
   const n = geo.getAttribute('position').count;
   const a = new Float32Array(n).fill(bone + 32 * slot);
@@ -42,6 +48,14 @@ function limb(a: THREE.Vector3, bb: THREE.Vector3, r0: number, r1: number, seg: 
 
 function box(w: number, h: number, d: number, x: number, y: number, z: number): G {
   const g = new THREE.BoxGeometry(w, h, d);
+  g.translate(x, y, z);
+  return g;
+}
+
+/** round joint (icosahedron, 20 tris) */
+function ball(r: number, x: number, y: number, z: number, sx = 1, sy = 1, sz = 1): G {
+  const g = new THREE.IcosahedronGeometry(r, 0);
+  g.scale(sx, sy, sz);
   g.translate(x, y, z);
   return g;
 }
@@ -170,9 +184,9 @@ function nearParts(): G[] {
   head.scale(0.8, 1.12, 0.98);
   head.translate(0, 1.645, 0.012);
   parts.push(tag(head, BONE.HEAD));
-  const nose = new THREE.ConeGeometry(0.018, 0.045, 4);
+  const nose = new THREE.ConeGeometry(0.014, 0.03, 4);
   nose.rotateX(Math.PI / 2);
-  nose.translate(0, 1.625, 0.105);
+  nose.translate(0, 1.625, 0.1);
   parts.push(tag(nose, BONE.HEAD));
   for (const s of [L, R]) {
     const ua = s > 0 ? BONE.UARM_L : BONE.UARM_R;
@@ -181,12 +195,12 @@ function nearParts(): G[] {
     const th = s > 0 ? BONE.THIGH_L : BONE.THIGH_R;
     const sh = s > 0 ? BONE.SHIN_L : BONE.SHIN_R;
     // shoulder cap + upper arm + elbow + forearm + hand
-    parts.push(tag(octa(0.062, 0.185 * s, 1.415, -0.01, 1, 0.9, 0.95), ua));
+    parts.push(tag(ball(0.056, 0.187 * s, 1.415, -0.01, 1, 0.92, 0.95), ua));
     parts.push(tag(limb(v(0.19 * s, 1.42, -0.01), v(0.205 * s, 1.13, -0.01), 0.047, 0.037, 6), ua));
-    parts.push(tag(octa(0.038, 0.205 * s, 1.13, -0.01), fa));
+    parts.push(tag(ball(0.034, 0.205 * s, 1.13, -0.01), fa));
     parts.push(tag(limb(v(0.205 * s, 1.13, -0.01), v(0.21 * s, 0.885, 0.0), 0.037, 0.027, 6), fa));
-    const hand = new THREE.CylinderGeometry(0.036, 0.03, 0.15, 5, 1, false);
-    hand.scale(0.62, 1, 1.15);
+    const hand = new THREE.CylinderGeometry(0.034, 0.02, 0.15, 5, 1, false);
+    hand.scale(0.6, 1, 1.15);
     hand.translate(0.212 * s, 0.81, 0.008);
     parts.push(tag(hand, ha));
     // thigh + knee + shin + foot

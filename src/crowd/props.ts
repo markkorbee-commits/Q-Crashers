@@ -135,7 +135,6 @@ export function buildProps(): G {
     parts.push(part(box(0.016, 0.022, 0.09, x, base.y + 0.775, base.z + 0.11), '#0c0c0c'));
   }
   parts.push(part(box(1.5, 0.12, 0.08, base.x, base.y + 0.82, base.z + 0.01), lacquer)); // fallboard
-  parts.push(part(box(0.9, 0.3, 0.02, base.x, base.y + 1.12, base.z - 0.06), '#e9e6de')); // music desk
   // legs + pedal lyre
   for (const [lx, lz] of [
     [-0.66, -0.12],

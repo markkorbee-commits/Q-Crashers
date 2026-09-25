@@ -143,6 +143,8 @@ type Mode = 'both' | 'filmed' | 'tribe';
 
 interface Perf {
   name: string;
+  /** index within its group (dancer k, safety k, security k) */
+  k: number;
   mode: Mode;
   look: Look;
   height: number;
@@ -177,6 +179,8 @@ export class Performers {
   pianoTube = 0;
   visibleCount = 0;
   crewVisible = 0;
+  /** the MC is on stage (for the follow spot) */
+  mcOn = false;
   private pose = newPose();
   private fr: PerfFrame = { visible: false, x: 0, y: 0, z: 0, yaw: 0, glow: 0 };
   private pp = { x: 0, z: 0, dist: 0, speed: 0, dx: 0, dz: 0 };
@@ -187,7 +191,8 @@ export class Performers {
     const add = (name: string, mode: Mode, f: (l: Look) => void, height: number, build = 1) => {
       const l = newLook();
       f(l);
-      this.perfs.push({ name, mode, look: l, height, build, seed: hash32(this.perfs.length * 977 + 31) & 0xffffff });
+      const m = /(\d+)$/.exec(name);
+      this.perfs.push({ name, k: m ? Number(m[1]) : 0, mode, look: l, height, build, seed: hash32(this.perfs.length * 977 + 31) & 0xffffff });
     };
     add('mc', 'both', (l) => {
       l.skin = 3; l.hairColor = 0; l.headwear = HEAD.CAP; l.capColor = 0; l.top = TOP.DENIM; l.bottom = BOTTOM.BLACK;
@@ -259,6 +264,7 @@ export class Performers {
   update(t: number, rt: number, beat: number, bpm: number, lookUp: number, populated: boolean): void {
     this.visibleCount = 0;
     this.crewVisible = 0;
+    this.mcOn = t > 332 && t < 498;
     let lanternOn = 0;
     this.pedestal = t > 640 && t < 735 ? 1 : 0;
     this.strap = t > 676 && t < 706 ? 1 : 0;
@@ -317,7 +323,7 @@ export class Performers {
       return;
     }
     if (name.startsWith('dancer')) {
-      const k = Number(name.slice(6));
+      const k = pf.k;
       const enter = 642 + k * 0.6;
       const exit = 725 + (DANCERS - k) * 0.5;
       if (t < enter || t > exit + 8) return;
@@ -528,7 +534,7 @@ export class Performers {
       return;
     }
     if (name.startsWith('safety')) {
-      const k = Number(name.slice(6));
+      const k = pf.k;
       const side = k % 2 === 0 ? -1 : 1;
       const slot = k >> 1;
       f.visible = true;
@@ -564,7 +570,7 @@ export class Performers {
       return;
     }
     if (name.startsWith('security')) {
-      const k = Number(name.slice(8));
+      const k = pf.k;
       f.visible = true;
       f.x = -40 + (80 * k) / (SECURITY - 1);
       f.z = 4.3;

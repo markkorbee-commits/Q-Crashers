@@ -111,6 +111,7 @@ export class CrowdSystem implements System {
   private cpuMs = 0;
   private rebuildTimer = 0;
   private testEnv = false;
+  private testColor: THREE.Color | null = null;
   private tmpC = new THREE.Color();
   private tmpC2 = new THREE.Color();
   private sky: { t: number; z: THREE.Color; w: THREE.Color }[] = [];
@@ -160,9 +161,11 @@ export class CrowdSystem implements System {
     if (Number.isFinite(cnt)) this.target = clamp(cnt, 0, MAX_COUNT);
     if (P.has('filmed') || P.get('populated') === '0') this.populated = false;
     this.testEnv = P.has('crowdenv');
+    const envHex = P.get('crowdenv') ?? '';
+    if (/^[0-9a-f]{6}$/i.test(envHex)) this.testColor = new THREE.Color(`#${envHex}`);
 
     const terrain = app.get('terrain') as unknown as { heightAt?: (x: number, z: number) => number } | undefined;
-    if (terrain && typeof terrain.heightAt === 'function') {
+    if (terrain && typeof terrain.heightAt === 'function' && !P.has('crowdslope')) {
       const fn = terrain.heightAt.bind(terrain);
       this.heightAt = (x, z) => {
         const y = fn(x, z);
@@ -183,8 +186,9 @@ export class CrowdSystem implements System {
     this.buildMeshes();
     this.rebuild();
 
-    // the piano riser is ours (bible §5.11): block the player
+    // the piano riser is ours (bible §5.11): block the player, offer it as a viewpoint
     app.addCollider({ kind: 'box', minX: -2.8, maxX: 2.8, minZ: 57, maxZ: 61, tag: 'piano-riser' });
+    app.addSpot({ id: 'piano', label: 'Piano riser (Domitor Draconis)', position: new THREE.Vector3(4.6, 0, 64.2), yaw: 0.72, pitch: -0.05 });
     this.setPopulated(this.populated);
   }
 
@@ -230,10 +234,12 @@ export class CrowdSystem implements System {
       uTwilight: { value: new THREE.Color() },
       uMoonCol: { value: new THREE.Color('#f2dcc0').multiplyScalar(0.035) },
       uMoonDir: { value: new THREE.Vector3(0.282, 0.128, -0.951).normalize() },
+      uHazeAmb: { value: new THREE.Color() },
       uWind: { value: WIND_DIR.clone() },
       uScreen: { value: new THREE.Color('#dfe8ff') },
       uPixel: { value: 0.001 },
       uLantern: { value: new THREE.Vector4() },
+      uKey: { value: new THREE.Vector4() },
       uGroups: { value: new THREE.Vector4() },
       uTube: { value: new THREE.Vector4(0.85, 0.92, 1, 0) },
     };
@@ -275,6 +281,7 @@ export class CrowdSystem implements System {
     const midBase = buildMidGeometry();
     const farBase = buildImpostorGeometry();
     this.tris.near = triCount(nearBase);
+    this.nearVerts = nearBase.getAttribute('position').count;
     this.tris.mid = triCount(midBase);
     const near = this.lodMesh(nearBase, this.material(bodyVertex('near'), bodyFragment('near')), 'crowd-near');
     const mid = this.lodMesh(midBase, this.material(bodyVertex('mid'), bodyFragment('mid')), 'crowd-mid');
@@ -395,6 +402,7 @@ export class CrowdSystem implements System {
     this.buildMs = performance.now() - t0;
   }
   private buildMs = 0;
+  private nearVerts = 0;
   private bucketMs = 0;
 
   setQuality(q: QualitySettings): void {
@@ -444,8 +452,18 @@ export class CrowdSystem implements System {
 
     // --- performers (both modes), props
     this.perf.update(t, ctx.time, ctx.beat.beat, ctx.beat.bpm, m[M.LOOKUP], this.populated);
-    for (const a of this.perfAttrs) a.needsUpdate = true;
+    for (let i = 0; i < this.perfAttrs.length; i++) this.perfAttrs[i].needsUpdate = true;
     (u.uLantern.value as THREE.Vector4).copy(this.perf.lantern);
+    // front key on the deck: set wash + a white follow spot while the MC performs
+    const env = app.env;
+    const key = u.uKey.value as THREE.Vector4;
+    const spot = this.perf.mcOn ? 0.55 : 0;
+    key.set(
+      env.stageWashColor.r * env.stageWashIntensity * 0.5 + spot * 0.85,
+      env.stageWashColor.g * env.stageWashIntensity * 0.5 + spot * 0.92,
+      env.stageWashColor.b * env.stageWashIntensity * 0.5 + spot,
+      1,
+    );
     (u.uGroups.value as THREE.Vector4).set(1, this.perf.pedestal, this.perf.strap, 0);
     (u.uTube.value as THREE.Vector4).w = this.perf.pianoTube;
     const cam = ctx.camera;
@@ -564,6 +582,12 @@ export class CrowdSystem implements System {
     rim.r += env.stageColor.r * si * 0.9 + env.palettePrimary.r * 0.08;
     rim.g += env.stageColor.g * si * 0.9 + env.palettePrimary.g * 0.08;
     rim.b += env.stageColor.b * si * 0.9 + env.palettePrimary.b * 0.08;
+    softClamp(stage, 2.2);
+    softClamp(rim, 1.8);
+    // haze scattering: the lit haze above the field acts like a coloured sky dome
+    const hz = u.uHazeAmb.value as THREE.Color;
+    hz.copy(stage).multiplyScalar(0.5).add(this.tmpC.copy(rim).multiplyScalar(0.25));
+    hz.multiplyScalar(0.14 * clamp(env.haze, 0, 1.2));
     const wash = u.uWashCol.value as THREE.Color;
     wash.copy(env.stageColor).lerp(env.paletteSecondary, 0.25).multiplyScalar(env.audienceWash * (0.35 + si * 0.4));
     (u.uScreen.value as THREE.Color).setRGB(0.55, 0.62, 0.75).lerp(env.stageColor, 0.35).lerp(env.palettePrimary, 0.2);
@@ -592,10 +616,10 @@ export class CrowdSystem implements System {
     const env = this.app.env;
     if (env.stageIntensity > 0.001) return;
     const e = ctx.beat.energy;
-    env.stageColor.copy(env.palettePrimary);
+    env.stageColor.copy(this.testColor ?? env.palettePrimary);
     env.stageIntensity = 0.6 + 1.4 * e * (0.5 + 0.5 * ctx.beat.kick);
     env.audienceWash = 0.35 + 0.4 * e;
-    env.stageWashColor.copy(env.palettePrimary).lerp(env.paletteSecondary, 0.3);
+    env.stageWashColor.copy(this.testColor ?? env.palettePrimary).lerp(env.paletteSecondary, this.testColor ? 0.1 : 0.3);
     env.stageWashIntensity = 0.9 + 0.6 * e;
   }
 
@@ -617,10 +641,25 @@ export class CrowdSystem implements System {
       cue: this.choreo.cueState,
       zones: L ? L.zoneCounts.join('/') : '-',
       tris: `${this.tris.near}/${this.tris.mid}/${this.tris.far}`,
+      nearVerts: this.nearVerts,
+      drawCalls: this.drawCalls(),
       cpuMs: this.cpuMs.toFixed(3),
       bucketMs: this.bucketMs.toFixed(3),
       buildMs: this.buildMs.toFixed(0),
     };
+  }
+
+  /** draw calls issued by this module this frame (crowd LODs, flags, phones, performers, props) */
+  private drawCalls(): number {
+    let n = 2; // performers + props
+    if (this.populated && this.meshes) {
+      if (this.meshes.near.visible) n++;
+      if (this.meshes.mid.visible) n++;
+      if (this.meshes.far.visible) n++;
+      if (this.flagMesh.visible) n++;
+      if (this.lightsMesh.visible) n++;
+    }
+    return n;
   }
 
   dispose(): void {
@@ -631,6 +670,14 @@ export class CrowdSystem implements System {
     this.atlas?.dispose();
     this.flagTex?.dispose();
   }
+}
+
+/** compress a light colour so its brightest channel approaches `max` smoothly (keeps the hue) */
+function softClamp(c: THREE.Color, max: number): void {
+  const m = Math.max(c.r, c.g, c.b);
+  if (m <= max * 0.5) return;
+  const k = max * 0.5 + (max * 0.5) * Math.tanh((m - max * 0.5) / (max * 0.5));
+  c.multiplyScalar(k / m);
 }
 
 void MOOD_CHANNELS;
