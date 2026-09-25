@@ -51,6 +51,28 @@ export function buildBody(k: Kit): BodyResult {
     }
   }
 
+  // overlapping armour plates along both flanks of the neck (the "armoured neck plates")
+  {
+    const kite = [v2(0, 1.25), v2(0.95, 0.1), v2(0, -1.45), v2(-0.95, 0.1)];
+    const proto = plate(kite, 0.2, 0.06);
+    const n = segs(k, 11, 6);
+    for (let i = 0; i < n; i++) {
+      const t = 0.1 + (i / (n - 1)) * 0.82;
+      const p = neck.at(t);
+      const d = neck.tangent(t);
+      const side0 = v3().crossVectors(d, v3(0, 1, 0)).normalize();
+      const up0 = v3().crossVectors(side0, d).normalize();
+      for (const a of [-1.0, -0.35, 0.35, 1.0]) {
+        if (Math.abs(a) < 0.5 && t > 0.2 && t < 0.5) continue; // leave the rider's seat clear
+        const dir = up0.clone().multiplyScalar(Math.cos(a)).addScaledVector(side0, Math.sin(a)).normalize();
+        const pos = p.clone().addScaledVector(dir, neckR(t) + 0.12);
+        const m = basisZ(dir, d.clone().negate(), pos);
+        m.multiply(new THREE.Matrix4().makeRotationX(-0.18));
+        W.armor.add(proto.clone(), m, (i + (a > 0 ? 1 : 0)) % 3 === 0 ? PAL.darkBronze : PAL.plateRed);
+      }
+    }
+  }
+
   // ------------------------------------------------------------------ body mass + shoulder yoke
   {
     const g = new THREE.SphereGeometry(1, radial, Math.round(radial * 0.6));

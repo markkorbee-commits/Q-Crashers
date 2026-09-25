@@ -265,12 +265,16 @@ iblIrradiance *= uEnvTint;`,
   dash = mix(dash, 0.62, clamp(wD * 1.5, 0.0, 1.0));
   float inside = step(0.5, lane) * step(lane, lanes - 1.5);
   float side = sign(vMemb.z);
-  vec3 lc = crownLed(vMemb.y + lane * 0.8, 0.0, side, abs(vMemb.z) + lane);
+  // lanes run in phase so chases read as horizontal bands climbing the membrane (design bible §7.3)
+  // (seed step 1/0.37 keeps the chase phase identical per lane but decorrelates the sparkle hash)
+  vec3 lc = crownLed(vMemb.y, 0.0, side, abs(vMemb.z) + lane * 2.7027027);
   // pixel canvas fades out towards the wrist
   float grow = smoothstep(1.5, 5.0, vMemb.y);
   totalEmissiveRadiance += lc * line * dash * inside * grow * uWings * 2.2;
   // the printed skin is flooded by its own warm uplights (follows the wing glow level)
   totalEmissiveRadiance += diffuseColor.rgb * (0.04 + 0.85 * uWings) * mix(1.0, 0.72, smoothstep(3.0, 18.0, vMemb.y));
+  // printed fabric lets some of the back light (sky, fireworks behind the stage) shine through
+  totalEmissiveRadiance += diffuseColor.rgb * uRim * 0.35;
 }`;
     }
     if (o.fxLed) {

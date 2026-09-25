@@ -143,7 +143,7 @@ export async function installCrownDev(app: App, o: DevOpts = {}): Promise<Record
 function placeholderCastle(crown: DragonCrown): THREE.Group {
   const g = new THREE.Group();
   g.name = 'dev-castle';
-  const stone = new THREE.MeshStandardMaterial({ color: '#3a3836', roughness: 0.9, flatShading: true });
+  const stone = new THREE.MeshStandardMaterial({ color: '#242226', roughness: 0.9, flatShading: true });
   const dark = new THREE.MeshStandardMaterial({ color: '#141416', roughness: 0.6, metalness: 0.3 });
   const red = new THREE.MeshStandardMaterial({ color: '#5c0a19', roughness: 0.9 });
   const gold = new THREE.MeshStandardMaterial({ color: '#b08d57', roughness: 0.4, metalness: 0.8 });

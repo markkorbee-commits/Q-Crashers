@@ -414,6 +414,8 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
     // flame plate in the wing plane
     const fm = basisZ(nrm, d, tip.clone().addScaledVector(d, 0.1));
     W.copper.add(flameProto.clone(), fm, i === 1 ? PAL.flameOrange : PAL.flameRed);
+    // a second, smaller flame plate across the first so the finial reads as a flame from the side too
+    W.copper.add(flameProto.clone(), fm.clone().multiply(new THREE.Matrix4().makeRotationY(Math.PI / 2)).multiply(new THREE.Matrix4().makeScale(0.72, 0.85, 1)), i === 1 ? PAL.flameRed : PAL.flameOrange);
     const fo = flameOutline.map((p) => v3(p.x * 1.35, p.y * 1.35, 0.2).applyMatrix4(fm));
     fo.push(fo[0].clone());
     W.strips.add(fo, 0, 0.1, 0, 0.9);
