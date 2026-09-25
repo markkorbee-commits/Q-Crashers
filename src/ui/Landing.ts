@@ -33,7 +33,7 @@ export class Landing {
         'div',
         { class: 'content' },
         h('div', { html: emblem(), style: 'display:contents' }),
-        h('div', { class: 'dateline' }, 'Biddinghuizen · 26 June 2026 · Dusk'),
+        h('div', { class: 'dateline' }, 'Holy Grounds, Biddinghuizen · Saturday 27 June 2026 · 22:40'),
         h('h1', { html: 'DEFQON<span class="dot">.</span>1 2026' }),
         h('h2', null, 'The Endshow Experience'),
         h('p', { class: 'tribute' }, 'The festival that never was. The Endshow that still happened.'),
@@ -49,7 +49,7 @@ export class Landing {
       h(
         'div',
         { class: 'footnote' },
-        'Cancelled on 26 June 2026 by the first-ever extreme-heat red warning in the Netherlands, the Endshow was filmed on the empty grounds at dusk. A digital memory of a festival weekend that never got to happen.',
+        'Cancelled on 26 June 2026 by the first-ever extreme-heat red warning in the Netherlands, the Endshow was still performed on the empty grounds on Saturday 27 June at dusk. A digital memory of a festival weekend that never got to happen.',
       ),
     );
     parent.appendChild(this.el);

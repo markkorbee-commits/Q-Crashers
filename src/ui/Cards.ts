@@ -82,7 +82,7 @@ export function openHelp(ui: UI, trigger?: HTMLElement | null): void {
     h(
       'p',
       { class: 'small' },
-      'On 26 June 2026 Defqon.1 was cancelled because of an extreme-heat red warning — the first ever in the Netherlands. The Endshow was still filmed on the empty grounds at dusk and released on 2 July 2026. This is a fan-made, real-time reconstruction: a digital memory of a festival weekend that never got to happen.',
+      'On 26 June 2026 Defqon.1 was cancelled because of an extreme-heat red warning — the first ever in the Netherlands. The Endshow was still performed on the empty grounds on Saturday evening 27 June, filmed, and released on 2 July 2026. This is a fan-made, real-time reconstruction: a digital memory of a festival weekend that never got to happen.',
     ),
     h('p', { class: 'small muted' }, 'Fan-made tribute. Not affiliated with, endorsed by or connected to Q-dance or Defqon.1. No music or video is bundled: audio comes from your own file, the official YouTube video or a synthesized rehearsal track. Built with Three.js.'),
     h('p', { class: 'small muted' }, 'The alcohol and XTC modes are educational simulations with health information. They never encourage drug use. Feeling unwell at a real festival? Go to the first-aid post or call 112.'),
