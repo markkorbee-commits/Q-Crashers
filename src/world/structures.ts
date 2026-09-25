@@ -13,8 +13,6 @@ import { patchWorldMaterial } from './worldLights';
  * deck over the lake. Everything is instanced or merged per material.
  */
 
-type Seg = [number, number, number, number];
-
 export interface StructureOut {
   colliders: Collider2D[];
   triangles: number;
@@ -218,7 +216,6 @@ export function buildStructures(scene: THREE.Object3D, lowDetail: boolean): Stru
     // press camera on a tripod (the Endshow photo was taken from about here)
     b.beam(V(0.6, FOH.deck2, FOH.z0 + 0.8), V(0.6, FOH.deck2 + 1.45, FOH.z0 + 0.8), 0.04, galv, true);
     b.box(0.2, 0.16, 0.3, 0.6, y0 + FOH.deck2 + 1.52, FOH.z0 + 0.7, lin('#0c0c0c'));
-    tris += 0;
     addMesh(b.build(), metal, 'foh-scaffold');
 
     // black scrim + roof canvas (cloth material)
@@ -277,9 +274,10 @@ export function buildStructures(scene: THREE.Object3D, lowDetail: boolean): Stru
   // ------------------------------------------------------------------ entrance gates (E1 back-right main, E2 back-left)
   {
     const b = new GeoBuilder();
+    // yaw: local +Z = walking direction into the field (towards its centre)
     const gates: [number, number, number][] = [
-      [116, 144, -0.62],
-      [-116, 132, 0.72],
+      [116, 144, Math.atan2(-0.6, -0.8)],
+      [-116, 132, Math.atan2(0.85, -0.53)],
     ];
     const banners: THREE.Matrix4[] = [];
     for (const [x, z, yaw] of gates) {
@@ -327,8 +325,6 @@ export function buildStructures(scene: THREE.Object3D, lowDetail: boolean): Stru
       const a = new THREE.Vector3(x, terrainHeight(x, DECKING.z1 - 3) + 0.1, DECKING.z1 - 3);
       const c2 = new THREE.Vector3(x, deckY, PREMIUM.z0 + 4.5);
       b.beam(a, c2, 0.1, wood);
-      const m = new THREE.Matrix4().lookAt(a, c2, THREE.Object3D.DEFAULT_UP);
-      void m;
       b.box(2.4, 0.15, c2.z - a.z, x, (a.y + c2.y) / 2, (a.z + c2.z) / 2, wood);
     }
     addMesh(b.build(), metal, 'premium-deck');

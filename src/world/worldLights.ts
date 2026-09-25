@@ -48,7 +48,7 @@ vec3 wlSky( vec3 r ) {
 /** Per-pillar light gains (HDR) — tuned against the Endshow frames (lanterns read as bright points
  * with coloured pools on the floor, shafts glow orange from the base). */
 const LAMP_GAIN = 70;
-const SPILL_GAIN = 40;
+const SPILL_GAIN = 90;
 const STAGE_GAIN = 5200;
 const FLASH_GAIN = 2600;
 
@@ -138,7 +138,7 @@ const APPLY = /* glsl */ `
     if ( s2 < 484.0 ) {
       float w2 = 1.0 - s2 / 484.0;
       float nd = max( dot( geometryNormal, S * inversesqrt( s2 ) ), 0.0 ) * 0.85 + 0.15;
-      reflectedLight.directDiffuse += uWSpillCol[ i ] * ( w2 * w2 * nd / ( s2 + 2.0 ) ) * BRDF_Lambert( material.diffuseColor );
+      reflectedLight.directDiffuse += uWSpillCol[ i ] * ( w2 * w2 * nd / ( s2 + 6.0 ) ) * BRDF_Lambert( material.diffuseColor );
     }
   }
 #endif

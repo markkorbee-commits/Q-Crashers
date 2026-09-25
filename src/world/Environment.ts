@@ -121,7 +121,8 @@ void main() {
 
   // --- clouds on a deck ~1.8 km up
   float cover = 0.0;
-  vec3 cloudCol = vec3( 0.0 );
+  vec3 cloudCol = vec3( 0.0 );   // twilight-lit part (scaled by the sky level)
+  vec3 cloudAdd = vec3( 0.0 );   // light from the show / flashes / lightning / moon (absolute)
   if ( e > 0.004 ) {
     vec2 p = d.xz / ( e + 0.035 ) * 0.075 + vec2( uTime * 0.00022, - uTime * 0.00061 );
     float f = cloudField( p );
@@ -132,24 +133,25 @@ void main() {
     // lighting: twilight from the NW, show from below over the stage, moon edges
     vec3 lit = mix( uCloudDark, uCloudLit, pow( sunSide, 2.2 ) );
     lit *= 1.0 - thick * 0.45;
-    float nearStage = pow( max( dot( d, uStageDir ), 0.0 ), 5.0 );
-    lit += uShowCol * ( 0.25 + 0.75 * nearStage ) * ( 0.5 + 0.5 * thick );
-    float nearMoon = exp( - ang / 0.09 );
-    lit += moonCol * nearMoon * ( 1.0 - thick ) * 0.08 * uMoonI;
-    lit += uFlashCol * pow( max( dot( d, uFlashDir ), 0.0 ), 3.0 ) * ( 0.6 + 0.8 * thick );
-    float lg = pow( max( dot( d, uLightning.xyz ), 0.0 ), 8.0 );
-    lit += vec3( 0.75, 0.8, 1.0 ) * uLightning.w * lg * ( 0.3 + thick );
     cloudCol = lit;
+    float nearStage = pow( max( dot( d, uStageDir ), 0.0 ), 5.0 );
+    cloudAdd += uShowCol * ( 0.25 + 0.75 * nearStage ) * ( 0.5 + 0.5 * thick );
+    float nearMoon = exp( - ang / 0.09 );
+    cloudAdd += moonCol * nearMoon * ( 1.0 - thick ) * 0.08 * uMoonI;
+    cloudAdd += uFlashCol * pow( max( dot( d, uFlashDir ), 0.0 ), 3.0 ) * ( 0.6 + 0.8 * thick );
+    // distant lightning inside the storm clouds: a broad lobe + a hot core
+    float lc = max( dot( d, uLightning.xyz ), 0.0 );
+    cloudAdd += vec3( 0.72, 0.78, 1.0 ) * uLightning.w * ( pow( lc, 10.0 ) * 0.5 + pow( lc, 60.0 ) * 2.0 ) * ( 0.35 + thick );
   }
   // clear-sky contributions from the show / flashes / lightning (haze glow)
   float hazeK = 0.35 + 0.65 * uHaze;
-  col += uShowCol * pow( max( dot( d, uStageDir ), 0.0 ), 8.0 ) * 0.35 * hazeK;
-  col += uFlashCol * pow( max( dot( d, uFlashDir ), 0.0 ), 6.0 ) * 0.25 * hazeK;
-  col += vec3( 0.7, 0.75, 1.0 ) * uLightning.w * pow( max( dot( d, uLightning.xyz ), 0.0 ), 20.0 ) * exp( - eh / 0.08 ) * 0.15;
+  vec3 add = uShowCol * pow( max( dot( d, uStageDir ), 0.0 ), 8.0 ) * 0.35 * hazeK;
+  add += uFlashCol * pow( max( dot( d, uFlashDir ), 0.0 ), 6.0 ) * 0.25 * hazeK;
+  add += vec3( 0.7, 0.75, 1.0 ) * uLightning.w * pow( max( dot( d, uLightning.xyz ), 0.0 ), 16.0 ) * exp( - eh / 0.1 ) * 0.35;
 
-  col = col * uLevel;
+  col = col * uLevel + add;
   col += glow;
-  col = mix( col, cloudCol * uLevel + glow * 0.6, cover );
+  col = mix( col, cloudCol * uLevel + cloudAdd + add * 0.5 + glow * 0.6, cover );
   col += moonDisc * ( 1.0 - cover * 0.85 );
 
   // atmos cue tint
@@ -241,7 +243,6 @@ export class EnvironmentSystem implements System {
   private readonly rotM = new THREE.Matrix4();
   private fogBase = 0.0012;
   private level = 1;
-  private lightning = 0;
   private stats_ = { level: 0, sunAlt: 0, moonAlt: 0, cover: 0, lightning: 0 };
 
   init(app: App): void {
@@ -461,7 +462,6 @@ export class EnvironmentSystem implements System {
 
     // distant lightning over the W horizon (storm front arriving from the west) — deterministic
     const li = this.lightningAt(t, lightningAmt, U.uLightning.value as THREE.Vector4);
-    this.lightning = li;
 
     // --- fog colour: dark haze over the polder, lit by flashes / strobes
     this.fog.color.setRGB(0.0066 * L + 0.001, 0.028 * L + 0.002, 0.085 * L + 0.004);
@@ -527,12 +527,13 @@ export class EnvironmentSystem implements System {
       out.w = 0;
       return 0;
     }
-    const slot = 34 / (0.6 + amount);
+    // fixed 16 s grid (seek-stable); `amount` only sets how many slots carry a strike and how bright
+    const slot = 16;
     const k = Math.floor(t / slot);
     let best = 0;
     for (let j = k - 1; j <= k; j++) {
       const h = hash32(j * 2654435761 + 12345);
-      if ((h & 0xff) / 255 > 0.55 + 0.25 * amount) continue; // not every slot has a strike
+      if ((h & 0xff) / 255 > 0.12 + 0.4 * Math.min(1, amount)) continue; // not every slot has a strike
       const t0 = j * slot + ((h >>> 8) & 0xffff) / 65535 * slot * 0.8;
       const dt = t - t0;
       if (dt < 0 || dt > 1.2) continue;

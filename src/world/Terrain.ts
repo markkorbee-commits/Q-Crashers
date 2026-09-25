@@ -24,7 +24,6 @@ export class TerrainSystem implements System {
   private app!: App;
   private enabled = true;
   private ground!: THREE.Mesh;
-  private groundMat!: THREE.MeshStandardMaterial;
   private water!: THREE.Mesh;
   private waterMat!: THREE.ShaderMaterial;
   private vegetation!: Vegetation;
@@ -176,10 +175,11 @@ export class TerrainSystem implements System {
           .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n${GROUND_REFLECT}`);
       },
     });
-    this.groundMat = mat;
     this.ground = new THREE.Mesh(g, mat);
     this.ground.name = 'ground';
-    this.ground.renderOrder = -10;
+    // drawn late among the opaques (the sky is last): early-z skips ground pixels hidden by the
+    // crowd, stage and props, which matters because the splat + show-light shader is the heaviest
+    this.ground.renderOrder = 900000;
     this.app.scene.add(this.ground);
   }
 
@@ -244,7 +244,7 @@ export class TerrainSystem implements System {
         for (let i = 0; i < n; i++) {
           const t = (i + 0.5) / n;
           for (const lat of [-1.02, 1.02]) {
-            const x = ax + (bx - ax) * t + Math.sin(yaw) * lat * 1.5 * 0 + -Math.sin(-yaw) * 0;
+            const x = ax + (bx - ax) * t;
             const z = az + (bz - az) * t;
             // two plates side by side across the route (3 m each, 2 m along)
             const px = x + Math.cos(yaw + Math.PI / 2) * lat * 1.5;
@@ -563,8 +563,8 @@ if ( gDamp > 0.01 ) {
   float cosT = max( dot( -V, Nw ), 0.0 );
   float F = 0.02 + 0.98 * pow( 1.0 - cosT, 5.0 );
   vec3 sky = wlSky( R );
-  float glint = pow( max( dot( R, uWMoonDir ), 0.0 ), 600.0 ) * uWMoonI;
-  totalEmissiveRadiance += ( sky * 0.55 + vec3( 1.0, 0.8, 0.6 ) * glint * 0.3 ) * F * gDamp;
+  float glint = pow( max( dot( R, uWMoonDir ), 0.0 ), 3000.0 ) * uWMoonI;
+  totalEmissiveRadiance += ( sky * 0.55 + vec3( 1.0, 0.8, 0.6 ) * glint * 0.08 ) * F * gDamp * gDamp;
 }
 `;
 

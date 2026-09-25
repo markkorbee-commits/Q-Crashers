@@ -28,9 +28,6 @@ const R_DARK: [number, number, number, number] = [0.76, 0.52, 0.99, 0.72];
 
 export class LanternPillars {
   readonly group = new THREE.Group();
-  private stone!: THREE.InstancedMesh;
-  private metal!: THREE.InstancedMesh;
-  private crystal!: THREE.InstancedMesh;
   private halo!: THREE.InstancedMesh;
   private chase: THREE.InstancedBufferAttribute;
   private readonly U = {
@@ -98,7 +95,7 @@ export class LanternPillars {
       new THREE.MeshStandardMaterial({ map: atlas, emissive: 0xffffff, emissiveMap: glow, roughness: 0.86, metalness: 0, vertexColors: true }),
       { key: 'pillar-stone', edit: (sh) => this.editPillar(sh, 'stone') },
     );
-    this.stone = this.instanced(b.build(), stoneMat, 'pillar-stone');
+    this.instanced(b.build(), stoneMat, 'pillar-stone');
   }
 
   private buildMetal(): void {
@@ -170,7 +167,7 @@ export class LanternPillars {
         }
     }
     const mat = patchWorldMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0.55, roughness: 0.5 }), { key: 'pillar-metal' });
-    this.metal = this.instanced(b.build(), mat, 'pillar-metal');
+    this.instanced(b.build(), mat, 'pillar-metal');
   }
 
   private buildCrystal(): void {
@@ -215,7 +212,7 @@ export class LanternPillars {
       new THREE.MeshStandardMaterial({ color: '#2a3036', emissive: 0xffffff, emissiveMap: tex, map: tex, metalness: 0.4, roughness: 0.18, vertexColors: true }),
       { key: 'pillar-crystal', lamps: false, edit: (sh) => this.editPillar(sh, 'crystal') },
     );
-    this.crystal = this.instanced(b.build(), mat, 'pillar-crystal');
+    this.instanced(b.build(), mat, 'pillar-crystal');
   }
 
   /** additive billboard glow around each lantern (light scattering in the haze) */

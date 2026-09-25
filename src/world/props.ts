@@ -249,8 +249,8 @@ export function buildProps(scene: THREE.Object3D, lowDetail: boolean): PropsOut 
     g.cylinder(0.12, 0.05, 0, 0.98, 0, lin('#202022'), 8);
     const rng = new Rng(19);
     const groups: [number, number][] = [
-      [60, 130], [-60, 126], [100, 140], [-100, 136], [48, 118], [-48, 118], [96, 96], [-96, 96], [0, 138], [140, 165], [-140, 110],
-      [-80, 168], [110, 124], [-106, 150], [20, 146], [-20, 146], [96, 30], [-96, 30], [102, 60], [-102, 60],
+      [60, 130], [-60, 126], [100, 140], [-100, 136], [48, 118], [-48, 118], [96, 96], [-96, 96], [-16, 139], [140, 165], [-140, 110],
+      [-80, 168], [110, 124], [-106, 150], [24, 147], [-24, 147], [96, 30], [-96, 30], [102, 60], [-102, 60],
     ];
     const mats: THREE.Matrix4[] = [];
     const cols: THREE.Color[] = [];
@@ -358,7 +358,8 @@ export function buildProps(scene: THREE.Object3D, lowDetail: boolean): PropsOut 
       const n = Math.floor(len / 34);
       for (let k = 0; k <= n; k++) {
         const t = n ? k / n : 0;
-        const x = ax + (bx - ax) * t + 7.5 * Math.sign(bz - az || 1) * 0,
+        // lamp posts on the south verge of the road
+        const x = ax + (bx - ax) * t,
           z = az + (bz - az) * t + 7.5;
         if (Math.abs(x) < 50 && z < 160) continue; // keep the back of the RED floor dark
         const y = terrainHeight(x, z);

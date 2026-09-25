@@ -27,6 +27,7 @@ export class GroundsSystem implements System {
   private structTris = 0;
   private proxy?: THREE.Object3D;
   private readonly size = new THREE.Vector2();
+  private envSys: (System & { skyLevel?: number }) | null | undefined;
 
   init(app: App): void {
     this.app = app;
@@ -66,10 +67,10 @@ export class GroundsSystem implements System {
     A.set('foh', [v(0, yF + FOH.roof + 0.3, FOH.z0 - 0.4)]);
     // field laser emitters: pillar capitals (beams between pillar tops) + the FOH roof corners
     A.set('laser_field', [...PILLARS.map((p) => v(p.x, PILLAR.capTop + 0.5, p.z)), v(-6.5, yF + FOH.roof + 0.2, FOH.z0), v(6.5, yF + FOH.roof + 0.2, FOH.z0)]);
-    // aerial shells from mortar racks on the rear bank behind the stage (research: Z −30 … −50)
+    // aerial shells from mortar racks on the rear bank between the stage rear (z ≈ −30) and the tree belt (z ≈ −57)
     A.set('fireworks_back', Array.from({ length: 9 }, (_, i) => {
       const x = -80 + i * 20;
-      const z = -52;
+      const z = -40;
       return v(x, terrainHeight(x, z), z);
     }));
     // ground fireworks / gerb fans along both bank crests (frames f025/f033: fans along the sides)
@@ -90,7 +91,7 @@ export class GroundsSystem implements System {
       return { id, label, position, yaw: yawTowards(eye, look), pitch: pitchTowards(eye, look) * pitchScale };
     };
     const spots: NamedSpot[] = [
-      S('entrance', 'Field entrance (E1)', 112, 147),
+      S('entrance', 'Field entrance (E1)', 121.4, 151.2),
       S('back', 'Back of the field', 0, 134),
       S('foh', 'FOH tower', 4, 146),
       S('middle', 'Middle of the field', -4, 74),
@@ -100,7 +101,7 @@ export class GroundsSystem implements System {
       S('side_right', 'Right bank', 70, 40),
       S('dragon_view', 'Dragon view', 0, 45, new THREE.Vector3(0, 14, -4), 0.75),
       S('aisle', 'Lantern aisle', 0, 118),
-      S('crest_left', 'Left crest (bars)', -100, 12),
+      S('crest_left', 'Left crest (bars)', -93, 90),
       S('decking', 'Decking by the lake', -24, 162),
     ];
     for (const s of spots) this.app.addSpot(s);
@@ -153,8 +154,8 @@ export class GroundsSystem implements System {
     this.pillars.update(env, env.haze);
     this.props.update(ctx.showTime);
     this.app.renderer.getDrawingBufferSize(this.size);
-    const envSys = this.app.get<System & { skyLevel?: number }>('environment');
-    this.landmarks.update(ctx.showTime, this.app.renderer.getPixelRatio(), this.size.y, envSys?.skyLevel ?? 1);
+    if (this.envSys === undefined) this.envSys = this.app.get<System & { skyLevel?: number }>('environment') ?? null;
+    this.landmarks.update(ctx.showTime, this.app.renderer.getPixelRatio(), this.size.y, this.envSys?.skyLevel ?? 1);
   }
 
   setQuality(_q: QualitySettings): void {}
