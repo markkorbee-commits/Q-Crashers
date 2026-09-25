@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "fetch-audio": "bash scripts/fetch-audio.sh",
     "build:artifact": "node scripts/build-artifact.mjs",
-    "validate-show": "node scripts/validate-show.mjs"
+    "validate-show": "node scripts/validate-show.mjs",
+    "check-sync": "python3 scripts/check-sync.py"
   },
   "license": "UNLICENSED",
   "dependencies": {
