@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { App } from '../core/App';
-import { clamp, hashN, lerp, rand01 } from '../core/rng';
+import { clamp, hashN, lerp, rand01, smoothstep } from '../core/rng';
 import type { BeatInfo } from '../core/types';
 import type { Cue } from '../show/ShowTypes';
 import { easeDolly, easeInOut, wobble } from '../player/motion';
@@ -11,6 +11,13 @@ export interface ShotPose {
   look: THREE.Vector3;
   fov: number;
   roll: number;
+  /**
+   * 0.35..1 how much of the atmospheric haze veil this framing should show (1 = as the eye sees
+   * it). Long lenses and cameras standing inside the stage haze cloud would otherwise stack tens
+   * of metres of lit haze in front of the subject and turn the frame milky: real show cameras
+   * avoid that with position, filtration and grading. Read by the haze renderers via CameraRig.
+   */
+  haze: number;
 }
 
 /** World layout the shots are framed on (resolved from anchors when the show camera starts). */
@@ -33,6 +40,8 @@ interface SlotMood {
   kick: boolean;
   fireworks: number;
   pyro: number;
+  /** 0..1 how thick the stage haze / low fog is (close shots in the pit turn milky) */
+  fog: number;
 }
 
 interface ShotDef {
@@ -63,7 +72,8 @@ const SHOTS: ShotDef[] = [
   {
     id: 'front_low',
     kind: 'stage',
-    weight: (m) => 0.6 + m.pyro * 1.6 + m.energy * 0.4 - m.fireworks * 0.4,
+    // standing in the pit inside the haze cloud: only when the air is clear enough
+    weight: (m) => (0.6 + m.pyro * 1.6 + m.energy * 0.4 - m.fireworks * 0.4) * (1 - smoothstep(0.25, 0.7, m.fog)),
     frame(L, k, v, _t, o) {
       const s = side(v);
       o.pos.set(s * lerp(2, 7, k), 1.15, 7.5);
@@ -117,7 +127,7 @@ const SHOTS: ShotDef[] = [
   {
     id: 'dragon_close',
     kind: 'stage',
-    weight: (m) => 0.7 + (1 - m.energy) * 0.7 - m.fireworks * 0.3,
+    weight: (m) => (0.7 + (1 - m.energy) * 0.7 - m.fireworks * 0.3) * (1 - 0.6 * smoothstep(0.3, 0.8, m.fog)),
     frame(L, k, v, _t, o) {
       const s = side(v);
       o.pos.set(L.head.x + s * lerp(-9, 9, k), L.head.y - 7, L.head.z + 36);
@@ -139,7 +149,7 @@ const SHOTS: ShotDef[] = [
   {
     id: 'pit_track',
     kind: 'stage',
-    weight: (m) => 0.35 + m.pyro * 2.6,
+    weight: (m) => (0.35 + m.pyro * 2.6) * (1 - 0.8 * smoothstep(0.25, 0.7, m.fog)),
     frame(L, k, v, _t, o) {
       const s = side(v);
       const x = s * lerp(-34, 34, k);
@@ -209,6 +219,7 @@ const SHOT_BY_ID = new Map(SHOTS.map((s) => [s.id, s]));
 const CUE_LABEL = new Map(SHOTS.map((s) => [s.id, `cue:${s.id}`]));
 const FIREWORK_FX = new Set(['shell', 'salvo', 'finale', 'cake', 'comet', 'mine']);
 const PYRO_FX = new Set(['flame', 'firewall', 'dragon_breath', 'burst', 'gerb', 'jet']);
+const LOWFOG_FX = new Set(['lowfog', 'burst']);
 
 /**
  * Show camera: follows authored `camera.shot` cues when present; otherwise an automatic
@@ -228,6 +239,8 @@ export class ShowDirector {
   private tmp2 = new THREE.Vector3();
   /** id of the current shot (debug / UI) */
   current = '';
+  /** comfort (reduced motion): no handheld drift or kick shake on the operated cameras */
+  steady = false;
 
   constructor(private app: App) {}
 
@@ -253,8 +266,21 @@ export class ShowDirector {
   evaluate(t: number, beat: BeatInfo, o: ShotPose): void {
     if (!this.L) this.build();
     o.roll = 0;
-    if (this.fromCue(t, o)) return;
-    this.auto(t, beat, o);
+    if (!this.fromCue(t, o)) this.auto(t, beat, o);
+    o.haze = ShowDirector.hazeFor(o.pos, o.look, o.fov);
+  }
+
+  /**
+   * Haze scale a real camera crew would get for this framing (see ShotPose.haze): long lenses
+   * compress the lit haze between camera and subject into a veil (≈0.5 at 16°), and cameras
+   * standing in the pit / on the deck sit inside the stage haze cloud. Wide and aerial = 1.
+   */
+  static hazeFor(pos: THREE.Vector3, look: THREE.Vector3, fov: number): number {
+    const tele = smoothstep(34, 12, fov);
+    const dist = Math.hypot(look.x - pos.x, look.y - pos.y, look.z - pos.z);
+    // in front of / on the stage below the wings, close to the set: inside the stage haze cloud
+    const inCloud = (1 - smoothstep(10, 34, pos.z)) * (1 - smoothstep(60, 100, Math.abs(pos.x))) * (1 - smoothstep(24, 40, pos.y)) * (1 - smoothstep(26, 60, dist));
+    return clamp(1 - 0.6 * Math.max(tele, inCloud * 0.9), 0.35, 1);
   }
 
   // --- authored cues ---------------------------------------------------------------------------
@@ -354,7 +380,7 @@ export class ShowDirector {
     o.fov = 50;
     shot.frame(this.L, k, this.slotVariant, t, o);
     // handheld operators breathe; cameras near the stage feel the kick
-    const sh = shot.shake ?? 0;
+    const sh = this.steady ? 0 : (shot.shake ?? 0);
     if (sh > 0) {
       o.pos.x += sh * wobble(t * 0.9, 1);
       o.pos.y += sh * 0.7 * wobble(t * 1.1, 2) - sh * 0.4 * beat.kick * beat.energy;
@@ -367,7 +393,21 @@ export class ShowDirector {
     const fw = countIn(this.app.show.all('fireworks'), a - 1.5, b, FIREWORK_FX);
     const py = countIn(this.app.show.all('pyro'), a - 0.5, b, PYRO_FX);
     const per = 6 / Math.max(1, b - a); // normalise to "per 6 seconds"
-    return { energy, kick, fireworks: Math.min(1, (fw * per) / 3), pyro: Math.min(1, (py * per) / 3) };
+    return { energy, kick, fireworks: Math.min(1, (fw * per) / 3), pyro: Math.min(1, (py * per) / 3), fog: this.fogAt(a, b) };
+  }
+
+  /** 0..1 haze thickness over the slot [a, b): the authored haze level + low fog / smoke bursts */
+  private fogAt(a: number, b: number): number {
+    const fog = this.app.show.all('fog');
+    let level = 0.55;
+    for (let i = 0; i < fog.length && fog[i].t <= a; i++) {
+      const c = fog[i];
+      if (c.fx !== 'level') continue;
+      const v = typeof c.p.haze === 'number' ? c.p.haze : typeof c.p.density === 'number' ? c.p.density : level;
+      if (Number.isFinite(v)) level = v;
+    }
+    const low = countIn(fog, a - 8, b, LOWFOG_FX);
+    return clamp((level - 0.45) * 1.6 + low * 0.35, 0, 1);
   }
 
   /** end time of the latest authored camera cue that finished at or before t (0 if none) */

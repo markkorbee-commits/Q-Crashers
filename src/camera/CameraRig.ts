@@ -13,6 +13,9 @@ export type CameraMode = 'first' | 'third' | 'free' | 'flyover' | 'showcam' | 'p
 /** keyboard order: 1..6 */
 export const CAMERA_MODES: readonly CameraMode[] = ['first', 'third', 'free', 'flyover', 'showcam', 'photo'];
 
+/** photo-mode lens range in degrees (12° ≈ 200 mm telephoto … 110° ≈ 12 mm ultra-wide, full frame) */
+export const PHOTO_FOV = { min: 12, max: 110 } as const;
+
 const DIGITS = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6'];
 const NUMPAD = ['Numpad1', 'Numpad2', 'Numpad3', 'Numpad4', 'Numpad5', 'Numpad6'];
 /** modes that sit near the spectator and may glide into each other instead of cutting */
@@ -59,10 +62,21 @@ export class CameraRig implements System {
   private pivot = new THREE.Vector3();
   private arm = 3.2;
   private seenTeleports = -1;
+  /** 0..1 how far the third-person camera is raised over a dense crowd */
+  private crowdLift = 0;
+  /** 0..1 third-person "this is you" rim on the avatar */
+  private selfRim = 0;
   private pendingMode: CameraMode | null = null;
   private pendingFocus = false;
   private blend = { t: 1, dur: 0.65, checked: true, pos: new THREE.Vector3(), quat: new THREE.Quaternion(), fov: 72 };
-  private pose: ShotPose = { pos: new THREE.Vector3(), look: new THREE.Vector3(), fov: 50, roll: 0 };
+  private pose: ShotPose = { pos: new THREE.Vector3(), look: new THREE.Vector3(), fov: 50, roll: 0, haze: 1 };
+  /**
+   * 0.35..1 atmospheric haze scale requested by the current camera (1 = as the eye sees it).
+   * The show camera lowers it for telephoto and in-pit framings (ShowDirector.hazeFor), photo
+   * mode for long lenses. Haze renderers multiply their veil density by it (read it at render
+   * time, e.g. in onBeforeRender, to stay in sync with cuts).
+   */
+  hazeScale = 1;
   private euler = new THREE.Euler(0, 0, 0, 'YXZ');
   private q1 = new THREE.Quaternion();
   private raycaster = new THREE.Raycaster();
@@ -80,7 +94,9 @@ export class CameraRig implements System {
     this.snapPivot();
 
     const cam = app.params.get('cam');
-    const want = (app.params.get('camera') ?? this.pendingMode) as CameraMode | null;
+    // a viewer who chose the directed show camera last time starts there again
+    const remembered = !app.params.has('spot') && this.player.rememberedStart === 'showcam' ? 'showcam' : null;
+    const want = (app.params.get('camera') ?? this.pendingMode ?? remembered) as CameraMode | null;
     // free / photo start at the spectator's eyes unless ?cam= gives a pose
     const p = app.playerPos;
     this.freePos.set(p.x, p.y + PlayerController.EYE_HEIGHT, p.z);
@@ -133,8 +149,9 @@ export class CameraRig implements System {
 
   // --- photo mode API -------------------------------------------------------------------------
 
+  /** photo-mode field of view (degrees), same range as the photo panel slider (PHOTO_FOV) */
   setFov(v: number): void {
-    this.photo.fov = clamp(v, 15, 100);
+    this.photo.fov = clamp(v, PHOTO_FOV.min, PHOTO_FOV.max);
   }
 
   setRoll(r: number): void {
@@ -205,7 +222,7 @@ export class CameraRig implements System {
       this.freeVel.set(0, 0, 0);
     }
     if (mode === 'photo') {
-      this.photo.fov = clamp(cam.fov, 15, 100);
+      this.photo.fov = clamp(cam.fov, PHOTO_FOV.min, PHOTO_FOV.max);
       this.photo.roll = 0;
       app.postfx.photo.enabled = true;
       app.events.emit('photo:mode', { on: true });
@@ -271,9 +288,10 @@ export class CameraRig implements System {
       case 'flyover': {
         this.flyTime += ctx.dt;
         const roll = this.flyover.sample(this.flyTime, this.pose.pos, this.pose.look);
-        // a real drone never holds perfectly still
-        this.pose.pos.x += 0.12 * wobble(ctx.time * 0.7, 21);
-        this.pose.pos.y += 0.08 * wobble(ctx.time * 0.9, 22);
+        // a real drone never holds perfectly still (unless the viewer asked for reduced motion)
+        const drift = this.player.reduceMotion ? 0 : 1;
+        this.pose.pos.x += 0.12 * drift * wobble(ctx.time * 0.7, 21);
+        this.pose.pos.y += 0.08 * drift * wobble(ctx.time * 0.9, 22);
         cam.position.copy(this.pose.pos);
         cam.up.set(0, 1, 0);
         cam.lookAt(this.pose.look);
@@ -282,6 +300,7 @@ export class CameraRig implements System {
         break;
       }
       case 'showcam':
+        this.director.steady = this.player.reduceMotion;
         this.director.evaluate(ctx.showTime, ctx.beat, this.pose);
         cam.position.copy(this.pose.pos);
         cam.up.set(0, 1, 0);
@@ -290,6 +309,8 @@ export class CameraRig implements System {
         fov = this.pose.fov;
         break;
     }
+
+    this.hazeScale = this.mode === 'showcam' ? this.pose.haze : this.mode === 'photo' ? clamp(1 - 0.6 * smoothstep(34, 12, this.photo.fov), 0.35, 1) : 1;
 
     // glide between nearby modes instead of cutting
     const b = this.blend;
@@ -328,13 +349,16 @@ export class CameraRig implements System {
     let y = p.y + PlayerController.EYE_HEIGHT + pl.jumpY + o.y;
     // felt bass: a sub-perceptual body jolt on the kick close to the stacks (max ~2 mm)
     const beat = ctx.beat;
-    if (this.bassShake && beat.hasKick && ctx.showPlaying) {
+    if (this.bassShake && !pl.reduceMotion && beat.hasKick && ctx.showPlaying) {
       const d = Math.hypot(p.x * 0.6, Math.max(0, p.z));
       const a = (1 - smoothstep(8, 40, d)) * beat.kick * beat.kick * (0.4 + 0.6 * beat.energy);
       y -= 0.002 * a;
       pitch += 0.0004 * a;
     }
-    cam.position.set(p.x + rx * o.x, y, p.z + rz * o.x);
+    // eye offset is camera-local: x right, z back (back = -forward = (sin yaw, cos yaw))
+    const bx = Math.sin(yaw),
+      bz = Math.cos(yaw);
+    cam.position.set(p.x + rx * o.x + bx * o.z, y, p.z + rz * o.x + bz * o.z);
     cam.rotation.set(pitch, yaw, pl.eyeRot.z, 'YXZ');
   }
 
@@ -346,7 +370,13 @@ export class CameraRig implements System {
     if (input.wheel) this.armLength = clamp(this.armLength * Math.exp(input.wheel * 0.0012), 1.5, 8);
 
     const yaw = pl.yaw + pl.eyeRot.y * 0.5;
-    const pitch = clamp(pl.pitch, -1.2, 1.25);
+    // in a packed crowd, raised arms (2.1–2.3 m) would fill a shoulder-height frame: the camera
+    // rises above the hands and comes a little closer, tilting down onto the avatar. Looking up
+    // (at the dragon, at fireworks) no longer swings the arm down between the neighbours: the arm
+    // stays level above the heads and only the lens tilts up.
+    const lift = (this.crowdLift += (smoothstep(0.9, 2.4, pl.crowdDensity) - this.crowdLift) * damp(2.5, dt));
+    const pitch = clamp(pl.pitch - 0.2 * lift, -1.2, 1.25 - 1.2 * lift);
+    const armPitch = pitch + (Math.min(pitch, -0.08) - pitch) * lift;
     const rx = Math.cos(yaw),
       rz = -Math.sin(yaw);
     // follow the head with a little lag (vertical lag softens jumps)
@@ -357,13 +387,13 @@ export class CameraRig implements System {
     this.pivot.z += (tz - this.pivot.z) * damp(16, dt);
     this.pivot.y += (ty - this.pivot.y) * damp(9, dt);
 
-    const cp = Math.cos(pitch);
+    const cp = Math.cos(armPitch);
     const fx = -Math.sin(yaw) * cp,
-      fy = Math.sin(pitch),
+      fy = Math.sin(armPitch),
       fz = -Math.cos(yaw) * cp;
-    const side = 0.34,
-      up = 0.28;
-    const L = this.armLength;
+    const side = 0.34 * (1 - 0.35 * lift),
+      up = 0.28 + 0.34 * lift;
+    const L = this.armLength * (1 - 0.2 * lift);
     // desired camera position and spring-arm collision against the 2D colliders
     const dx = -fx * L + rx * side,
       dz = -fz * L + rz * side;
@@ -374,7 +404,9 @@ export class CameraRig implements System {
     const x = this.pivot.x + dx * k;
     const z = this.pivot.z + dz * k;
     let y = this.pivot.y + (-fy * L + up) * k;
-    y = Math.max(y, this.floorAt(x, z) + 0.25);
+    const floor = this.floorAt(x, z);
+    // over a dense crowd: never below the raised hands (~2.3 m)
+    y = Math.max(y, floor + 0.25, floor + (1.62 + 0.76 * lift + pl.jumpY * 0.6) * lift);
     cam.position.set(x, y, z);
     cam.rotation.set(pitch, yaw, pl.eyeRot.z * 0.5, 'YXZ');
   }
@@ -469,10 +501,12 @@ export class CameraRig implements System {
     const nearHead = (cam.x - p.x) ** 2 + dy * dy + (cam.z - p.z) ** 2 < 0.6 * 0.6;
     const show = (this.mode !== 'first' || this.blend.t < this.blend.dur * 0.7) && !nearHead;
     av.root.visible = show;
+    this.selfRim += ((this.mode === 'third' ? 1 : 0) - this.selfRim) * damp(4, ctx.dt);
     if (!show) {
       av.bodyYaw = this.player.yaw; // keep facing in sync so switching views does not spin the body
       return;
     }
+    av.setSelfHighlight(this.selfRim);
     av.update(ctx, this.player, this.app.playerPos);
     av.updateLighting(this.app.env, this.app.camera, STAGE_FOCUS);
   }
@@ -486,6 +520,7 @@ export class CameraRig implements System {
       mode: this.mode,
       fov: this.app.camera.fov.toFixed(1),
       shot: this.mode === 'showcam' ? this.director.current : '-',
+      haze: this.hazeScale.toFixed(2),
     };
   }
 

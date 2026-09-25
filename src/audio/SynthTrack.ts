@@ -23,6 +23,8 @@ export class SynthTrack implements AudioTrack {
   private samples: SynthSamples | null = null;
   private gain: GainNode | null = null;
   private _playing = false;
+  /** the first sample of the current session has been heard (see `playing`) */
+  private audible = false;
   private pausedAt = 0;
   private showStart = 0;
   private ctxStart = 0;
@@ -45,8 +47,22 @@ export class SynthTrack implements AudioTrack {
     return this.show.duration;
   }
 
+  /**
+   * True once the audio of the current session actually reaches the listener. Between play()/seek()
+   * and the first HEARD sample (START_DELAY + output latency + limiter look-ahead, ~0.1 s) this stays
+   * false, so the ShowClock holds the picture at the start position instead of running ahead of the
+   * sound and slewing back over the next second (visible flame/kick offset on every play or seek).
+   */
   get playing(): boolean {
-    return this._playing && this.audio.ctx?.state === 'running';
+    if (!this._playing || this.audio.ctx?.state !== 'running') return false;
+    if (!this.audible) this.audible = this.heardShowOffset() >= 0;
+    return this.audible;
+  }
+
+  /** seconds of the current session that have been heard (negative before the first sample) */
+  private heardShowOffset(): number {
+    // the synth's glue compressor and the master limiter each add a look-ahead delay
+    return this.heardContextTime() - 2 * AudioEngine.COMPRESSOR_DELAY - this.ctxStart;
   }
 
   load(): Promise<void> {
@@ -124,9 +140,7 @@ export class SynthTrack implements AudioTrack {
   /** show time of the audio being HEARD right now */
   getTime(): number {
     if (!this._playing) return this.pausedAt;
-    // the synth's glue compressor and the master limiter each add a look-ahead delay
-    const heard = this.heardContextTime() - 2 * AudioEngine.COMPRESSOR_DELAY;
-    return Math.min(this.duration, this.showStart + Math.max(0, heard - this.ctxStart));
+    return Math.min(this.duration, this.showStart + Math.max(0, this.heardShowOffset()));
   }
 
   setVolume(v: number): void {
@@ -167,6 +181,7 @@ export class SynthTrack implements AudioTrack {
     const ctx = this.audio.ctx!;
     this.showStart = t;
     this.ctxStart = ctx.currentTime + START_DELAY;
+    this.audible = false;
     this.engine!.startSession(t, this.ctxStart);
     this.tick();
   }

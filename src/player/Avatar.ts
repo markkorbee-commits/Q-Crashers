@@ -64,7 +64,7 @@ export class Avatar {
   private mesh!: THREE.SkinnedMesh;
   private parts: { geo: THREE.BufferGeometry; bone: THREE.Bone; look: Look }[] = [];
   private walkEnv = 0;
-  private rim = { uRimColor: { value: new THREE.Color() }, uRimDir: { value: new THREE.Vector3(0, 0, -1) } };
+  private rim = { uRimColor: { value: new THREE.Color() }, uRimDir: { value: new THREE.Vector3(0, 0, -1) }, uSelf: { value: new THREE.Color(0, 0, 0) } };
   private texture!: THREE.CanvasTexture;
   private tmp = new THREE.Vector3();
 
@@ -267,8 +267,9 @@ export class Avatar {
     mat.onBeforeCompile = (shader) => {
       shader.uniforms.uRimColor = this.rim.uRimColor;
       shader.uniforms.uRimDir = this.rim.uRimDir;
+      shader.uniforms.uSelf = this.rim.uSelf;
       shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', '#include <common>\nuniform vec3 uRimColor;\nuniform vec3 uRimDir;')
+        .replace('#include <common>', '#include <common>\nuniform vec3 uRimColor;\nuniform vec3 uRimDir;\nuniform vec3 uSelf;')
         .replace(
           '#include <roughnessmap_fragment>',
           '#include <roughnessmap_fragment>\n#ifdef USE_COLOR_ALPHA\n  roughnessFactor = vColor.a; // per-part roughness\n#endif',
@@ -283,6 +284,8 @@ export class Avatar {
             float toward = dot(rN, uRimDir);
             float fres = pow(1.0 - nv, 3.0);
             totalEmissiveRadiance += uRimColor * (fres * clamp(toward * 0.7 + 0.45, 0.0, 1.0) * 1.3 + max(toward, 0.0) * 0.1);
+            // third person: a soft even outline so "you" read at a glance among thousands
+            totalEmissiveRadiance += uSelf * pow(1.0 - nv, 1.8);
           }`,
         );
     };
@@ -392,6 +395,11 @@ export class Avatar {
   }
 
   // --- per frame --------------------------------------------------------------------------------
+
+  /** 0..1 strength of the neutral "this is you" outline (third-person view) */
+  setSelfHighlight(k: number): void {
+    this.rim.uSelf.value.setRGB(0.8, 0.86, 0.95).multiplyScalar(clamp(k, 0, 1));
+  }
 
   /** stage-facing rim light from the show's light environment (view-space direction) */
   updateLighting(env: LightEnv, camera: THREE.Camera, stageFocus: THREE.Vector3): void {

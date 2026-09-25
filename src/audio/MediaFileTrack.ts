@@ -24,6 +24,9 @@ export class MediaFileTrack implements AudioTrack {
   private gain: GainNode | null = null;
   private objectUrl: string | null = null;
   private wantPlay = false;
+  /** show time the element (re)started from; `playing` stays false until it is actually heard */
+  private resumeAt = 0;
+  private audible = false;
   private waiting = false;
   private seeking = false;
   /** silent clock covering show times outside the file */
@@ -96,7 +99,11 @@ export class MediaFileTrack implements AudioTrack {
   get playing(): boolean {
     if (!this.wantPlay) return false;
     if (this.virtual) return true;
-    return !this.el.paused && !this.el.ended && !this.waiting && !this.seeking && this.el.readyState >= 3;
+    if (this.el.paused || this.el.ended || this.waiting || this.seeking || this.el.readyState < 3) return false;
+    // after play / seek the first samples need the output latency to reach the listener: hold the
+    // show clock at the start position until then instead of running ahead and slewing back
+    if (!this.audible) this.audible = this.getTime() >= this.resumeAt - 0.004;
+    return this.audible;
   }
 
   load(): Promise<void> {
@@ -134,6 +141,8 @@ export class MediaFileTrack implements AudioTrack {
   async play(): Promise<void> {
     this.connect();
     this.wantPlay = true;
+    this.resumeAt = this.el.currentTime - this.offset;
+    this.audible = false;
     if (this.virtual) {
       this.virtual.perf = performance.now();
       this.pump(this.virtual.base);
@@ -167,6 +176,8 @@ export class MediaFileTrack implements AudioTrack {
     }
     this.virtual = null;
     this.el.currentTime = a;
+    this.resumeAt = t;
+    this.audible = false;
     if (this.wantPlay && this.el.paused) void this.el.play().catch((e) => console.warn('[audio] resume after seek failed', e));
   }
 
@@ -240,6 +251,8 @@ export class MediaFileTrack implements AudioTrack {
     if (a >= 0 && Number.isFinite(dur) && a < dur - 0.05) {
       this.virtual = null;
       this.el.currentTime = a;
+      this.resumeAt = t;
+      this.audible = false;
       void this.el.play().catch((e) => console.warn('[audio] resume failed', e));
     }
   }
