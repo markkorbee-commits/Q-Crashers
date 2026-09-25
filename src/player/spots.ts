@@ -39,5 +39,28 @@ export const DEFAULT_SPOTS: NamedSpot[] = [
   spot('dragon_view', 'Dragon view', 0, 0, 45, new THREE.Vector3(0, 26, -5), 0.75),
 ];
 
-/** Spot used when the URL has no ?spot= parameter. */
-export const DEFAULT_START_SPOT = 'foh';
+/**
+ * Spot used when the URL has no ?spot= parameter and the viewer never chose one: the middle of the
+ * field (Grounds registers it at (-4, 74)), inside the Tribe with the whole set, both wings and the
+ * sky above it in view. (The FOH tower at 146 m made the stage a thin strip on the horizon.)
+ */
+export const DEFAULT_START_SPOT = 'middle';
+/** extra upward look (rad) when arriving at the default start: dragon + firework sky over the heads */
+export const DEFAULT_START_PITCH = 0.06;
+
+/** A curated starting position for an onboarding "choose your position" picker. */
+export interface StartChoice {
+  /** spot id (app.spots), or 'showcam' for the directed show camera */
+  id: string;
+  title: string;
+  blurb: string;
+}
+
+/** Start positions offered on arrival, closest to the stage first. */
+export const START_CHOICES: readonly StartChoice[] = [
+  { id: 'front', title: 'Front row', blurb: 'On the barrier. The dragon towers over you, the flames hit your face.' },
+  { id: 'crowd', title: 'In the crowd', blurb: 'Packed in the pit with the Tribe, 30 m from the stage.' },
+  { id: 'middle', title: 'Middle of the field', blurb: 'The whole set, both wings and the firework sky. The classic view.' },
+  { id: 'foh', title: 'FOH tower', blurb: 'The official camera position: the full symmetry of the show.' },
+  { id: 'showcam', title: 'Show camera', blurb: 'Sit back: a director cuts the Endshow like the film.' },
+];

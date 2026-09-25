@@ -4,7 +4,7 @@ import { clamp, lerp, smoothstep } from '../core/rng';
 import type { FrameContext, Interactable, NamedSpot, System } from '../core/types';
 import type { MotorEffects } from '../intoxication/PerceptionSystem';
 import { damp, wobble } from './motion';
-import { DEFAULT_SPOTS, DEFAULT_START_SPOT } from './spots';
+import { DEFAULT_SPOTS, DEFAULT_START_PITCH, DEFAULT_START_SPOT, START_CHOICES, type StartChoice } from './spots';
 
 /** A raised walkable area (e.g. the stage deck). Walkers below its top treat it as a wall. */
 export interface Platform {
@@ -22,6 +22,38 @@ type HeightProvider = { heightAt(x: number, z: number): number };
 const SOBER: MotorEffects = { sway: 0, inputLag: 0, balance: 0, lookJitter: 0, speedScale: 1 };
 const GRAVITY = 9.81;
 const TAU = Math.PI * 2;
+/** hard cap on camera roll from sway / bob / jostle (1°): rolled horizons cause simulator sickness */
+const MAX_ROLL = 0.0175;
+/** localStorage keys (per-viewer conveniences, never required) */
+const LS_REDUCE_MOTION = 'defqon.reduceMotion';
+const LS_START_SPOT = 'defqon.startSpot';
+
+function readStorage(key: string): string | null {
+  try {
+    return typeof localStorage !== 'undefined' ? localStorage.getItem(key) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStorage(key: string, value: string | null): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
+  } catch {
+    /* private mode / blocked storage: the setting just is not remembered */
+  }
+}
+
+/** the OS / browser asks for reduced motion */
+function prefersReducedMotion(): boolean {
+  try {
+    return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Replays movement intent `lag` seconds late (reaction time under the influence).
@@ -35,21 +67,22 @@ class InputDelay {
   private flags = new Uint8Array(InputDelay.N);
   private head = 0;
   private count = 0;
-  readonly out = { x: 0, y: 0, run: false, jump: false };
+  readonly out = { x: 0, y: 0, run: false, jump: false, interact: false };
 
-  push(time: number, x: number, y: number, run: boolean, jump: boolean): void {
+  push(time: number, x: number, y: number, run: boolean, jump: boolean, interact: boolean): void {
     if (this.count === InputDelay.N) this.consume(); // overflow: oldest sample is due anyway
     const i = (this.head + this.count) % InputDelay.N;
     this.t[i] = time;
     this.x[i] = x;
     this.y[i] = y;
-    this.flags[i] = (run ? 1 : 0) | (jump ? 2 : 0);
+    this.flags[i] = (run ? 1 : 0) | (jump ? 2 : 0) | (interact ? 4 : 0);
     this.count++;
   }
 
   /** advance to `time - lag`; `out` then holds the delayed intent */
   sample(time: number, lag: number): void {
     this.out.jump = false;
+    this.out.interact = false;
     const due = time - lag;
     while (this.count > 0 && this.t[this.head] <= due) this.consume();
   }
@@ -57,7 +90,7 @@ class InputDelay {
   clear(): void {
     this.count = 0;
     this.out.x = this.out.y = 0;
-    this.out.run = this.out.jump = false;
+    this.out.run = this.out.jump = this.out.interact = false;
   }
 
   private consume(): void {
@@ -66,6 +99,7 @@ class InputDelay {
     this.out.y = this.y[i];
     this.out.run = (this.flags[i] & 1) !== 0;
     if (this.flags[i] & 2) this.out.jump = true;
+    if (this.flags[i] & 4) this.out.interact = true;
     this.head = (i + 1) % InputDelay.N;
     this.count--;
   }
@@ -75,6 +109,14 @@ class InputDelay {
  * The spectator's body: human-scale walking / running / jumping with smooth acceleration,
  * collision sliding, crowd slow-down and jostle, intoxication motor effects, head bob and
  * interaction targeting. The CameraRig turns the exposed `eyeOffset` / `eyeRot` into the view.
+ *
+ * Comfort: mouse / touch look is always 1:1 (reaction-time lag only delays walking, jumping and
+ * interacting), camera roll is capped at 1°, and `reduceMotion` (default: the OS setting
+ * prefers-reduced-motion, remembered per viewer) removes head bob, sway, roll and jostle.
+ *
+ * Determinism: standing still, the view is a pure function of (real time, spot, intoxication):
+ * crowd sway and balance loss are an eye offset, not accumulated body drift, and the crowd density
+ * snaps on arrival / seek, so a seek or restart frames the show exactly like the first pass.
  *
  * Human scale: body 1.80 m, eyes 1.68 m, walk 1.4 m/s, run 3.4 m/s, jump ~0.35 m.
  */
@@ -104,9 +146,9 @@ export class PlayerController implements System {
   stridePhase = 0;
   grounded = true;
   running = false;
-  /** smoothed crowd density at the body (people / m²) */
+  /** crowd density at the body (people / m²); smoothed while walking, exact when standing */
   crowdDensity = 0;
-  /** camera-local eye offset from bob / landing / sway (x right, y up) in metres */
+  /** camera-local eye offset from bob / landing / sway / jostle (x right, y up, z back) in metres */
   readonly eyeOffset = new THREE.Vector3();
   /** eye rotation offsets (x pitch, y yaw, z roll) in radians */
   readonly eyeRot = new THREE.Vector3();
@@ -126,8 +168,8 @@ export class PlayerController implements System {
   private jumpQueued = false;
   private platform: Platform | null = null;
   private delay = new InputDelay();
-  private pendingLookX = 0;
-  private pendingLookY = 0;
+  private densityValid = false;
+  private reduced = false;
   private bobEnv = 0;
   private dip = 0;
   private dipV = 0;
@@ -142,12 +184,58 @@ export class PlayerController implements System {
     const deck = app.anchors.get('deck_front');
     if (deck.length) this.platforms[0].y = deck[0].y; // stage system owns the deck height
     for (const s of DEFAULT_SPOTS) if (!app.spots.some((x) => x.id === s.id)) app.addSpot(s);
-    const want = app.params.get('spot') ?? DEFAULT_START_SPOT;
+    const P = app.params;
+    const rm = P.get('reducemotion') ?? P.get('comfort');
+    const stored = readStorage(LS_REDUCE_MOTION);
+    this.reduced = rm !== null ? rm !== '0' && rm !== 'off' : stored !== null ? stored === '1' : prefersReducedMotion();
+    // start: ?spot= > the viewer's last chosen viewing position > the middle of the field
+    const remembered = readStorage(LS_START_SPOT);
+    const want = P.get('spot') ?? (remembered && START_CHOICES.some((c) => c.id === remembered) ? remembered : DEFAULT_START_SPOT);
     const start = app.spots.find((s) => s.id === want) ?? app.spots.find((s) => s.id === DEFAULT_START_SPOT);
-    if (start) this.teleport(start);
+    if (start) {
+      this.teleport(start, false);
+      // arriving with the default framing: a touch more upward look so the dragon and the sky
+      // (where the fireworks happen) fill the frame instead of the dark ground
+      if (!P.has('spot') && start.id === DEFAULT_START_SPOT) this.pitch += DEFAULT_START_PITCH;
+    }
   }
 
-  teleport(spot: NamedSpot): void {
+  /** Comfort setting: no head bob, sway, roll or jostle (motion-sensitive viewers). */
+  get reduceMotion(): boolean {
+    return this.reduced;
+  }
+
+  setReduceMotion(on: boolean, remember = true): void {
+    this.reduced = on;
+    if (remember) writeStorage(LS_REDUCE_MOTION, on ? '1' : '0');
+  }
+
+  /** Curated start positions (id, title, blurb) for an onboarding position picker. */
+  get startChoices(): readonly StartChoice[] {
+    return START_CHOICES;
+  }
+
+  /** the viewer's remembered start choice (a spot id or 'showcam'), null when never chosen */
+  get rememberedStart(): string | null {
+    const id = readStorage(LS_START_SPOT);
+    return id && START_CHOICES.some((c) => c.id === id) ? id : null;
+  }
+
+  /** remember a start choice for the next visit (e.g. 'showcam' picked in an onboarding picker) */
+  rememberStart(id: string): void {
+    if (START_CHOICES.some((c) => c.id === id)) writeStorage(LS_START_SPOT, id);
+  }
+
+  /** Teleport to a registered spot by id (remembered as the next start when it is a start choice). */
+  teleportTo(id: string): boolean {
+    const spot = this.app.spots.find((s) => s.id === id);
+    if (!spot) return false;
+    this.teleport(spot);
+    return true;
+  }
+
+  teleport(spot: NamedSpot, remember = true): void {
+    if (remember && START_CHOICES.some((c) => c.id === spot.id)) writeStorage(LS_START_SPOT, spot.id);
     const p = this.app.playerPos;
     p.copy(spot.position);
     this.platform = this.platformAt(p.x, p.z, p.y);
@@ -160,6 +248,7 @@ export class PlayerController implements System {
     this.dip = this.dipV = 0;
     this.grounded = true;
     this.delay.clear();
+    this.densityValid = false; // snap to the new spot's crowd on the next frame
     this.teleports++;
   }
 
@@ -196,32 +285,27 @@ export class PlayerController implements System {
     const p = app.playerPos;
     const t = ctx.time;
 
-    // --- look (sluggish when reaction time is impaired) --------------------------------------
+    // --- look: always 1:1 with the mouse / touch (lagged or smoothed head rotation is the main
+    // trigger of simulator sickness); impaired reaction time delays walking, jumping, interacting
     const cmd = this.delay.out;
     if (this.controlsActive) {
-      this.pendingLookX += input.look.x;
-      this.pendingLookY += input.look.y;
-      const k = motor.inputLag > 0.01 ? damp(1 / (motor.inputLag * 0.6), dt) : 1;
-      const lx = this.pendingLookX * k;
-      const ly = this.pendingLookY * k;
-      this.pendingLookX -= lx;
-      this.pendingLookY -= ly;
-      this.yaw -= lx * this.lookSensitivity;
-      this.pitch = clamp(this.pitch - ly * this.lookSensitivity, -1.45, 1.45);
-
-      this.delay.push(t, input.move.x, input.move.y, input.run, this.jumpQueued || input.pressed('Space'));
+      this.yaw -= input.look.x * this.lookSensitivity;
+      this.pitch = clamp(this.pitch - input.look.y * this.lookSensitivity, -1.45, 1.45);
+      this.delay.push(t, input.move.x, input.move.y, input.run, this.jumpQueued || input.pressed('Space'), input.pressed('KeyE'));
       this.jumpQueued = false;
       this.delay.sample(t, motor.inputLag);
-      if (input.pressed('KeyE')) this.interact();
+      if (cmd.interact) this.interact();
     } else {
-      this.pendingLookX = this.pendingLookY = 0;
       this.jumpQueued = false;
       this.delay.clear();
     }
 
-    // --- crowd density ---------------------------------------------------------------------
+    // --- crowd density: exact when standing (seek / restart reproduce the same view), smoothed
+    // while walking so crossing the density grid never pops
     const density = this.densityAt(p.x, p.z);
-    this.crowdDensity += (density - this.crowdDensity) * damp(3, dt);
+    if (!this.densityValid || ctx.seeked || this.speed < 0.05) this.crowdDensity = density;
+    else this.crowdDensity += (density - this.crowdDensity) * damp(3, dt);
+    this.densityValid = true;
     const crowd01 = smoothstep(0.3, 3, this.crowdDensity);
 
     // --- walking intent -> target velocity -------------------------------------------------
@@ -247,16 +331,17 @@ export class PlayerController implements System {
     this.speed = Math.hypot(this.velocity.x, this.velocity.z);
     const moving01 = smoothstep(0.1, 1.2, this.speed);
 
-    // balance loss + crowd jostle: bounded lateral / longitudinal nudges on top of walking
+    // balance loss + crowd jostle while WALKING: bounded lateral nudges that make a drunk or
+    // squeezed walker drift off their line. Standing still, the same forces only sway the upper
+    // body (eye offset in updateEyes), so the body never creeps and the view stays reproducible.
     let ex = 0,
       ez = 0;
-    if (this.controlsActive) {
-      const lateral = motor.balance * (0.12 + 0.45 * moving01) * wobble(t * 0.43, 7) + crowd01 * (0.06 + 0.2 * moving01) * wobble(t * 1.7, 11);
-      const along = crowd01 * 0.08 * wobble(t * 1.3, 5);
+    if (this.controlsActive && moving01 > 0 && !this.reduced) {
+      const lateral = moving01 * (motor.balance * 0.45 * wobble(t * 0.43, 7) + crowd01 * 0.2 * wobble(t * 1.7, 11));
       const s = Math.sin(this.yaw),
         c = Math.cos(this.yaw);
-      ex = c * lateral - s * along;
-      ez = -s * lateral - c * along;
+      ex = c * lateral;
+      ez = -s * lateral;
     }
     p.x += (this.velocity.x + ex) * dt;
     p.z += (this.velocity.z + ez) * dt;
@@ -413,8 +498,11 @@ export class PlayerController implements System {
     this.bobEnv += (env - this.bobEnv) * damp(6, dt);
     const runK = clamp((v - 1.6) / 1.6, 0, 1);
     const ph = this.stridePhase * TAU;
-    const ampV = lerp(0.0075, 0.013, runK) * this.bobEnv; // 1.5 cm peak-to-peak when walking
-    const ampL = lerp(0.008, 0.006, runK) * this.bobEnv;
+    // comfort: reduced motion keeps the view rock steady (only a softened landing remains)
+    const m = this.reduced ? 0 : 1;
+    const bob = this.bobEnv * m;
+    const ampV = lerp(0.0075, 0.013, runK) * bob; // 1.5 cm peak-to-peak when walking
+    const ampL = lerp(0.008, 0.006, runK) * bob;
 
     // landing dip: critically-ish damped spring, sub-stepped for stability
     const steps = Math.max(1, Math.ceil(dt / 0.012));
@@ -424,17 +512,28 @@ export class PlayerController implements System {
       this.dip += this.dipV * h;
     }
 
-    const sway = motor.sway;
-    const jit = motor.lookJitter;
-    const idle = 1 - this.bobEnv; // standing people breathe and shift their weight a little
+    const sway = motor.sway * m;
+    const bal = motor.balance * m;
+    const jit = motor.lookJitter * m;
+    const idle = (1 - this.bobEnv) * m; // standing people breathe and shift their weight a little
+    // standing in a crowd / unsteady on your feet: the upper body sways around planted feet
+    // (a pure function of real time and the instantaneous density: no accumulated drift)
+    const still = (1 - smoothstep(0.1, 1.2, v)) * m;
+    const press = crowd01 * still;
     const o = this.eyeOffset;
-    o.x = ampL * Math.sin(ph) + sway * 0.07 * wobble(t * 0.37, 1) + idle * 0.004 * wobble(t * 0.21, 13);
-    o.y = -ampV * Math.cos(2 * ph) + this.dip + sway * 0.02 * wobble(t * 0.29, 2) + idle * 0.0025 * Math.sin(t * 1.45);
-    o.z = 0;
+    o.x =
+      ampL * Math.sin(ph) +
+      sway * 0.07 * wobble(t * 0.37, 1) +
+      idle * 0.004 * wobble(t * 0.21, 13) +
+      still * bal * 0.22 * wobble(t * 0.43, 7) +
+      press * 0.035 * wobble(t * 1.7, 11);
+    o.y = -ampV * Math.cos(2 * ph) + this.dip * (this.reduced ? 0.5 : 1) + sway * 0.02 * wobble(t * 0.29, 2) + idle * 0.0025 * Math.sin(t * 1.45);
+    o.z = press * 0.045 * wobble(t * 1.3, 5);
     const r = this.eyeRot;
-    r.x = 0.0015 * Math.sin(2 * ph) * this.bobEnv + sway * 0.012 * wobble(t * 0.31, 5) + jit * 0.004 * wobble(t * 6.1, 8) + idle * 0.0006 * wobble(t * 0.33, 14);
+    r.x = 0.0015 * Math.sin(2 * ph) * bob + sway * 0.012 * wobble(t * 0.31, 5) + jit * 0.004 * wobble(t * 6.1, 8) + idle * 0.0006 * wobble(t * 0.33, 14);
     r.y = sway * 0.02 * wobble(t * 0.19, 4) + jit * 0.005 * wobble(t * 5.3, 9) + idle * 0.0008 * wobble(t * 0.17, 15);
-    r.z = 0.0022 * Math.sin(ph) * this.bobEnv + sway * 0.04 * wobble(t * 0.23, 3) + crowd01 * 0.006 * wobble(t * 1.9, 12);
+    // roll is the most nauseating component: never more than 1°
+    r.z = clamp(0.0022 * Math.sin(ph) * bob + sway * 0.012 * wobble(t * 0.23, 3) + crowd01 * m * 0.004 * wobble(t * 1.9, 12), -MAX_ROLL, MAX_ROLL);
     this.bodyLean.roll = sway * 0.07 * wobble(t * 0.23, 3);
     this.bodyLean.pitch = sway * 0.04 * wobble(t * 0.31, 5);
   }
@@ -476,6 +575,7 @@ export class PlayerController implements System {
       speed: this.speed.toFixed(2),
       density: this.crowdDensity.toFixed(2),
       target: this.currentLabel ?? '-',
+      comfort: this.reduced ? 'reduced motion' : 'full',
     };
   }
 }

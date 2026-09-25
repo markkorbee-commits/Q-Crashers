@@ -3,7 +3,7 @@ import type { App } from '../core/App';
 import { clamp, Rng, smoothstep } from '../core/rng';
 import type { FrameContext, QualitySettings, System } from '../core/types';
 import type { Cue, Section, SectionKind } from '../show/ShowTypes';
-import { renderCrowdBank, type CrowdBank } from './ambience/CrowdBank';
+import { CHANT_LEAD, renderCrowdBank, type CrowdBank } from './ambience/CrowdBank';
 
 /** centre of the main PA (music distance / direction reference) */
 const STAGE_PA = new THREE.Vector3(0, 14, -4);
@@ -29,6 +29,24 @@ const EXCITEMENT: Record<SectionKind, number> = {
   silence: 0.25,
 };
 const QUIET: Partial<Record<SectionKind, true>> = { silence: true, breakdown: true, intro: true, orchestral: true, outro: true };
+
+/** rhythmic crowd vocals (Tribe mode) */
+type VocalKind = 'defqon' | 'onetribe' | 'singalong' | 'scream' | 'thump';
+const VOCAL_KINDS: readonly VocalKind[] = ['defqon', 'onetribe', 'singalong', 'scream', 'thump'];
+interface VocalEvent {
+  /** show time the event's downbeat must be HEARD at */
+  t: number;
+  kind: VocalKind;
+  level: number;
+}
+/** vocals are scheduled on the audio clock this far ahead of their downbeat (s) */
+const VOCAL_LOOKAHEAD = 0.3;
+/** a vocal whose downbeat already passed by more than this is skipped (s) */
+const VOCAL_LATE = 0.25;
+/** simultaneous vocal one-shots (chant + tail of the previous one + thumps) */
+const MAX_VOCALS = 8;
+/** tracks whose tempo map is an assumption (measured: no steady kick grid in the Endshow audio) */
+const UNGRIDDED_TRACK = /domitor/i;
 
 /** A looping bank layer that only runs while audible (buffer sources cost CPU even when muted). */
 class LoopLayer {
@@ -133,6 +151,14 @@ export class AmbienceSystem implements System {
   private rig: { mode?: unknown } | null | undefined = undefined;
   private crowdSys: { densityAt?: (x: number, z: number) => number } | null | undefined = undefined;
   private hum = { sum: 0, x: 0, z: 0 };
+  /** crowd vocal timeline (chants, sing-along, scream, jump landings) of the current show revision */
+  private vocalEvents: VocalEvent[] = [];
+  private vocalRev = -1;
+  private vocalCursor = 0;
+  private vocalBus!: GainNode;
+  private readonly activeVocals: { src: AudioBufferSourceNode; gain: GainNode }[] = [];
+  private vocalsFired = 0;
+  private crowdMode: { mode?: unknown } | null | undefined = undefined;
   /** current values (stats / debug) */
   private readonly st = { density: 0, crowd: 0, width: 0, musicDist: 0, height: 0, excitement: 0, mode: 'first' };
 
@@ -149,6 +175,7 @@ export class AmbienceSystem implements System {
     if (!actx || !this.enabled) return;
     if (!this.out) this.build(actx);
     this.cues(ctx);
+    this.vocals(ctx);
     this.acc += ctx.dt;
     if (this.acc < UPDATE_DT) return;
     const dt = this.acc;
@@ -166,6 +193,7 @@ export class AmbienceSystem implements System {
     if (!a?.ctx || !this.out) return;
     this.out.gain.setTargetAtTime(on ? 1 : 0, a.ctx.currentTime, 0.3);
     if (!on) {
+      this.stopVocals();
       a.setMusicDistance(40);
       a.setMusicDirection(0, 0);
       for (const l of [this.bedA, this.bedB, this.roar, this.applause, this.wind]) l.set(0, 10);
@@ -185,6 +213,7 @@ export class AmbienceSystem implements System {
       excitement: s.excitement.toFixed(2),
       fired: this.fired,
       grains: this.activeGrains,
+      vocals: `${this.vocalsFired}/${this.vocalEvents.length}`,
     };
   }
 
@@ -247,6 +276,8 @@ export class AmbienceSystem implements System {
     this.applause = new LoopLayer(actx, applause, this.rng, 1);
     this.cheerBus = g(1);
     this.cheerBus.connect(this.crowdIn);
+    this.vocalBus = g(1);
+    this.vocalBus.connect(this.cheerBus);
     this.fxBus = g(1);
     this.fxBus.connect(out);
 
@@ -346,6 +377,169 @@ export class AmbienceSystem implements System {
     this.applauseBoost = 1;
   }
 
+  // ------------------------------------------------------------------ crowd vocals (Tribe mode)
+
+  /**
+   * The Tribe's voice (design bible §9.4), built once per show revision as a pure function of the
+   * show data, so seeking never replays or skips anything:
+   *  - "DEF-QON!" chanted on every bar of the anthem's silences (409.2 s blackout, 531.6 s)
+   *  - a mass "woah-oh" sing-along every two bars under the anthem's vocal and melodic breakdowns
+   *  - a scream when a blackout section hits (612.3 s)
+   *  - jump landings on the first 8 beats of the biggest drops (243.5, 415.4, 536.2 … 1511.2 s)
+   *  - "ONE TRIBE!" chanted once per bar over the last 20 s
+   * Crowd cues `{fx: 'chant', p: {text, every?, intensity?}}` replace the built-in events of that kind.
+   */
+  private buildVocals(): void {
+    const show = this.app.show;
+    const tempo = show.tempo;
+    const secs = tempo.sections;
+    const ev: VocalEvent[] = [];
+    const authored = new Set<VocalKind>();
+    const barAt = (t: number) => tempo.stepSeconds('bar', t);
+    /** first bar line at or after t (60 ms tolerance) */
+    const barFrom = (t: number) => {
+      const seg = tempo.segmentAt(t);
+      const bar = barAt(t);
+      return seg.anchor + Math.ceil((t - seg.anchor - 0.06) / bar) * bar;
+    };
+    for (const c of this.crowdCues) {
+      if (c.fx !== 'chant') continue;
+      const kind = (typeof c.p.text === 'string' ? c.p.text.toLowerCase().replace(/[^a-z]/g, '') : 'defqon') as VocalKind;
+      if (!VOCAL_KINDS.includes(kind)) continue;
+      authored.add(kind);
+      const level = typeof c.p.intensity === 'number' ? clamp(c.p.intensity, 0, 1.5) : 1;
+      const every = c.p.every;
+      const step =
+        typeof every === 'number'
+          ? every
+          : every === 'beat' || every === '2bar' || every === 'bar'
+            ? tempo.stepSeconds(every, c.t)
+            : kind === 'scream'
+              ? 0
+              : tempo.stepSeconds(kind === 'singalong' ? '2bar' : kind === 'thump' ? 'beat' : 'bar', c.t);
+      if (step <= 0.2) ev.push({ t: c.t, kind, level });
+      else for (let t = c.t; t < c.t + Math.max(c.dur, 0.01) - 0.05; t += step) ev.push({ t, kind, level });
+    }
+    for (let i = 0; i < secs.length; i++) {
+      const s = secs[i];
+      const anthem = /sacred oath/i.test(s.track ?? '');
+      if (anthem && s.kind === 'silence' && s.end - s.start >= 2 && !authored.has('defqon')) {
+        for (let t = barFrom(s.start), k = 0; t < s.end - barAt(t) * 0.45; t += barAt(t), k++) ev.push({ t, kind: 'defqon', level: k ? 1 : 0.85 });
+      }
+      if (anthem && (s.kind === 'vocal' || (s.kind === 'breakdown' && s.energy >= 0.45)) && !authored.has('singalong')) {
+        const level = s.kind === 'vocal' ? 0.55 : 0.45;
+        for (let t = barFrom(s.start), k = 0; t + barAt(t) * 2 <= s.end + 0.25; t += barAt(t) * 2, k++) ev.push({ t, kind: 'singalong', level: level * (k % 4 === 3 ? 0.8 : 1) });
+      }
+      // the lights die while the music drives on (612.3 L.P.A. "kick in the dark", 1529.8 after the finale)
+      if (s.palette === 'blackout' && (isDrop(s.kind) || s.kind === 'build') && !authored.has('scream')) ev.push({ t: s.start, kind: 'scream', level: 0.95 });
+    }
+    // jump landings: the biggest drops, where the whole field jumps on the downbeat
+    if (!authored.has('thump')) {
+      for (const c of this.crowdCues) {
+        if (c.fx !== 'mood' || c.p.state !== 'jump' || !(typeof c.p.intensity === 'number' && c.p.intensity >= 0.95)) continue;
+        const idx = tempo.sectionIndexAt(c.t + 0.01);
+        const sec = idx >= 0 ? secs[idx] : null;
+        const seg = tempo.segmentAt(c.t + 0.01);
+        if (!sec || !isDrop(sec.kind) || Math.abs(sec.start - c.t) > 0.15 || !seg.kick) continue;
+        // Domitor Draconis (unreleased) has no steady beat grid in the real audio: landings on an
+        // assumed grid would audibly drift, so the crowd only cheers there
+        if (UNGRIDDED_TRACK.test(sec.track ?? '')) continue;
+        const beat = 60 / seg.bpm;
+        for (let k = 1; k <= 8; k++) ev.push({ t: c.t + k * beat, kind: 'thump', level: 1 - 0.07 * (k - 1) });
+      }
+    }
+    // "ONE TRIBE!" over the final applause
+    const dur = show.duration;
+    if (dur > 30 && !authored.has('onetribe')) {
+      const t0 = dur - 20;
+      const bar = clamp(barAt(t0), 1.5, 2.4);
+      const n = Math.floor((dur - 2.5 - t0) / bar);
+      for (let k = 0; k <= n; k++) ev.push({ t: t0 + k * bar, kind: 'onetribe', level: Math.min(1, 0.55 + 0.15 * k) * (k >= n - 1 ? 0.75 : 1) });
+    }
+    ev.sort((a, b) => a.t - b.t);
+    this.vocalEvents = ev;
+    this.vocalRev = show.revision;
+  }
+
+  private vocals(ctx: FrameContext): void {
+    const show = this.app.show;
+    const t = ctx.showTime;
+    if (this.vocalRev !== show.revision) {
+      if (show.revision !== this.rev) this.crowdCues = show.all('crowd');
+      this.buildVocals();
+      this.vocalCursor = firstVocalAfter(this.vocalEvents, t);
+    }
+    // (a slow frame is not a jump: events it skipped over are dropped by playVocal's lateness check)
+    const jumped = ctx.seeked || ctx.showDt < -1e-4 || ctx.showDt > 2;
+    if (jumped || !ctx.showPlaying) {
+      // never replay the past; whatever was scheduled for the old position goes silent
+      if (this.activeVocals.length) this.stopVocals();
+      this.vocalCursor = firstVocalAfter(this.vocalEvents, t);
+      return;
+    }
+    const ev = this.vocalEvents;
+    while (this.vocalCursor < ev.length && ev[this.vocalCursor].t <= t + VOCAL_LOOKAHEAD) {
+      const i = this.vocalCursor++;
+      this.playVocal(ev[i], i, t);
+    }
+  }
+
+  /** schedule one vocal on the audio clock so that its downbeat is HEARD at the event's show time */
+  private playVocal(e: VocalEvent, index: number, showTime: number): void {
+    const actx = this.ctx;
+    if (!actx || !this.enabled || this.activeVocals.length >= MAX_VOCALS || !this.tribe()) return;
+    const bank = this.bank;
+    const list = e.kind === 'thump' ? (bank.thump ? [bank.thump] : undefined) : bank[e.kind];
+    if (!list?.length) return;
+    const buf = list[index % list.length];
+    const now = actx.currentTime;
+    let when = now + (e.t - showTime) - this.app.audio.outputDelay() - CHANT_LEAD;
+    let offset = 0;
+    if (when < now) {
+      offset = now - when;
+      if (offset > CHANT_LEAD + VOCAL_LATE) return;
+      when = now;
+    }
+    const src = actx.createBufferSource();
+    src.buffer = buf;
+    const g = actx.createGain();
+    g.gain.value = e.level * VOCAL_GAIN[e.kind];
+    src.connect(g).connect(this.vocalBus);
+    src.start(when, offset);
+    // the closing chant rides on applause (design bible §9.4: "applause and One Tribe chant")
+    if (e.kind === 'onetribe') this.applauseBoost = Math.max(this.applauseBoost, 0.55 * e.level);
+    const entry = { src, gain: g };
+    this.activeVocals.push(entry);
+    this.vocalsFired++;
+    src.onended = () => {
+      const k = this.activeVocals.indexOf(entry);
+      if (k >= 0) this.activeVocals.splice(k, 1);
+      g.disconnect();
+    };
+  }
+
+  /** fade out (60 ms, no click) and release everything scheduled or sounding */
+  private stopVocals(): void {
+    const now = this.ctx?.currentTime ?? 0;
+    for (const v of this.activeVocals) {
+      try {
+        v.gain.gain.cancelScheduledValues(now);
+        v.gain.gain.setTargetAtTime(0, now, 0.02);
+        v.src.stop(now + 0.1);
+      } catch {
+        /* ignore */
+      }
+    }
+    this.activeVocals.length = 0;
+  }
+
+  /** crowd vocals only exist where there is a crowd (Tribe mode, crowd system on) */
+  private tribe(): boolean {
+    if (!this.app.isSystemEnabled('crowd')) return false;
+    if (this.crowdMode === undefined) this.crowdMode = (this.app.get('crowd') as unknown as { mode?: unknown } | undefined) ?? null;
+    return this.crowdMode?.mode !== 'filmed';
+  }
+
   // ------------------------------------------------------------------ one-shots
 
   /** big crowd reaction + `whistles` whistles scattered over the next seconds */
@@ -443,7 +637,11 @@ export class AmbienceSystem implements System {
 
     // --- position -> crowd presence
     this.refreshBars(ctx.time);
-    const d = this.densityAt(this.pos.x, this.pos.z);
+    // how crowded the surroundings are (a lane or a plinth right under the listener must not
+    // silence the thousands around it): the spot itself plus a 5 m ring
+    const px = this.pos.x,
+      pz = this.pos.z;
+    const d = 0.4 * this.densityAt(px, pz) + 0.15 * (this.densityAt(px + 5, pz) + this.densityAt(px - 5, pz) + this.densityAt(px, pz + 5) + this.densityAt(px, pz - 5));
     const heightF = 1 - 0.92 * smoothstep(4, 30, h);
     const crowd = heightF * (0.28 + 0.72 * d);
     const width = clamp(0.3 + 0.7 * d, 0, 1);
@@ -601,6 +799,21 @@ export class AmbienceSystem implements System {
       if (/bar|drink|beer|tap/i.test(`${it.id} ${it.label}`)) this.bars.push(it.position);
     }
   }
+}
+
+/** per-kind gain of the vocal one-shots into the (density / height scaled) crowd bus */
+const VOCAL_GAIN: Record<VocalKind, number> = { defqon: 1.05, onetribe: 0.95, singalong: 0.8, scream: 1, thump: 0.75 };
+
+/** index of the first vocal event whose downbeat lies after `time` */
+function firstVocalAfter(ev: readonly VocalEvent[], time: number): number {
+  let lo = 0,
+    hi = ev.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (ev[mid].t <= time) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
 }
 
 function isDrop(k: SectionKind): boolean {
