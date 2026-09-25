@@ -227,6 +227,7 @@ class LookSlot {
   nEff = 0;
   /** 0 = beam figure layer, 1 = sheet layer */
   layer = 0;
+  heightGiven = false;
   /** optional world aim point (param `aim: [x,y,z]`) */
   hasAim = false;
   aim = new THREE.Vector3();
@@ -585,7 +586,9 @@ export class LaserSystem implements System {
       s.env = rel < hold ? 1 : Math.exp(-(rel - hold) * 9);
       if (s.env < 0.01) return false;
     } else {
-      const pr = PRESETS[p.preset as Preset] ? (p.preset as Preset) : 'fan';
+      // no preset -> fan; an unknown preset is ignored (contract: unknown values never break the show)
+      if (p.preset !== undefined && !(typeof p.preset === 'string' && Object.prototype.hasOwnProperty.call(PRESETS, p.preset))) return false;
+      const pr = (p.preset as Preset | undefined) ?? 'fan';
       const def = PRESETS[pr];
       s.preset = pr;
       resolveColor(p.color, palette, this.tmpColor, 'primary');
@@ -601,6 +604,7 @@ export class LaserSystem implements System {
       s.tilt = num(p.tilt, def.tilt, -45, 90) * DEG;
       s.speed = num(p.speed, def.speed, -8, 8);
       s.height = num(p.height, 4, 0.6, 40);
+      s.heightGiven = typeof p.height === 'number' && Number.isFinite(p.height);
       s.intensity = num(p.intensity, 1, 0, 1);
       s.kick = p.kick === true;
       s.fade = num(p.fade, 0, 0, 8);
@@ -624,7 +628,7 @@ export class LaserSystem implements System {
       else if (tk === 'right') s.filter = 1;
       else if (tk === 'center') s.filter = 2;
       else {
-        const m = TOKENS[tk];
+        const m = typeof tk === 'string' && Object.prototype.hasOwnProperty.call(TOKENS, tk) ? TOKENS[tk] : undefined;
         if (m) {
           s.groupMask |= m[0];
           if (m[1] !== 0) s.groupSide = m[1];
@@ -668,16 +672,9 @@ export class LaserSystem implements System {
     return pick ? pick(e) : true;
   }
 
+  /** beams one projector asks for (a sheet only draws its two bright scan edges; the surface is the sheet) */
   private beamsPerEmitter(s: LookSlot): number {
-    if (s.hit) return s.count;
-    switch (s.preset) {
-      case 'sheet':
-        return 2; // bright scan edges (surfaces carry the sheet itself)
-      case 'crossfire':
-        return s.count;
-      default:
-        return s.count;
-    }
+    return !s.hit && s.preset === 'sheet' ? 2 : s.count;
   }
 
   /** weight of the look being replaced on layer slot `li` (= emitter * 2 + layer) */
@@ -950,8 +947,9 @@ export class LaserSystem implements System {
     const n = s.nEff;
     const ph = TAU * s.speed * s.bars;
     const pb = I * this.perBeam(n);
-    if (e.group === 'base' || e.group === 'pillar' || e.group === 'turret') {
-      // the web over the field: flat fans across the aisle at `height` (show-analysis 2.2)
+    if (e.group === 'base' || e.group === 'pillar' || e.group === 'turret' || (e.group === 'deck' && s.heightGiven && !this.tribe)) {
+      // the web over the field: flat fans across the aisle at `height` (show-analysis 2.2: plinth corners
+      // + deck front)
       const h = this.tribe ? Math.max(s.height, TRIBE_MIN_H) : Math.min(s.height, 6);
       const pitch = Math.atan2(h - e.pos.y, 40);
       const sway = 0.08 * Math.sin(ph + (e.row + 1) * 1.3);

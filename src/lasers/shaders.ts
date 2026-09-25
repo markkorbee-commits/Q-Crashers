@@ -104,7 +104,7 @@ void main() {
   float sl = length(side);
   side = sl > 1e-5 ? side / sl : normalize(cross(D, vec3(0.31, 0.93, 0.17)));
   float pix = dist * uPixAng;
-  float rPhys = (0.0032 + 0.00055 * along) * iC.w;
+  float rPhys = (0.003 + 0.00035 * along) * iC.w;
   float sigC = max(rPhys * 0.5, 0.6 * pix);
   float sigH = max((0.006 + 0.0004 * along) * uHalo * iC.w, 1.7 * pix);
   // shutter smear: where the beam was one exposure ago, projected on the ribbon's lateral axis
@@ -285,7 +285,11 @@ void main() {
   float faceOn = smoothstep(0.25, 0.7, nv) * step(0.0, dot(normalize(vNormal), V) * sign(vNormal.y + 1e-4));
   float t3 = mix(tex * tex * tex * 3.4 + 0.04, tex * 0.9 + 0.3, faceOn);
   float haze = uHaze * hazeProfile(vWorld.y) * t3;
-  float I = uGainS * haze * hazePhase(c) * pow(max(vR, 4.0), -0.75) / max(nv, 0.05);
+  // edge-on the sheet glows (1/|n.v|); when the eye is right next to the plane the whole ceiling would be
+  // edge-on, so the boost is limited there (the sheet has a finite thickness and waves)
+  float planeDist = abs(dot(cameraPosition - vWorld, normalize(vNormal)));
+  float nvMin = mix(0.13, 0.05, smoothstep(0.5, 4.5, planeDist));
+  float I = uGainS * haze * hazePhase(c) * pow(max(vR, 4.0), -0.75) / max(nv, nvMin);
   float pattern;
   if (vMode < 0.5) {
     // scan structure: two slowly sliding line families -> a moving interference (moire) texture
