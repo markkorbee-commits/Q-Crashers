@@ -9,3 +9,4 @@ public/assets/audio/*
 .shots/
 .claude/
 dist-artifact/
+*.whl
