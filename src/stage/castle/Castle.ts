@@ -128,9 +128,9 @@ export class CastleBuilder {
     }
     for (let i = -3; i <= 3; i++) {
       const a = (i / 3) * 0.9;
-      const g = new THREE.ConeGeometry(0.12, 0.9 - Math.abs(i) * 0.1, 5);
+      const g = new THREE.ConeGeometry(0.11, 0.7 - Math.abs(i) * 0.08, 5);
       const m = new THREE.Matrix4().makeRotationZ(-a);
-      m.setPosition(Math.sin(a) * 1.1, L.portalApex + 0.75 + Math.cos(a) * 0.9, z + 0.3);
+      m.setPosition(Math.sin(a) * 1.15, L.portalApex + 0.3 + Math.cos(a) * 0.8, z + 0.3);
       k.gold.add(g, m);
       g.dispose();
     }
