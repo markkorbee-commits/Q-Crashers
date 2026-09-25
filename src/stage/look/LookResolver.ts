@@ -209,7 +209,7 @@ export class LookResolver {
       const c = scr[i];
       if (c.fx !== 'content') continue;
       const env01 = smoothstep(0, 0.3, t - c.t) * (1 - smoothstep(c.dur - 0.5, c.dur, t - c.t));
-      const mode = String(c.p.mode ?? 'color');
+      const mode = typeof c.p.mode === 'string' ? c.p.mode : 'color';
       const col = resolveColor(c.p.color, pal, _c, 'primary');
       let cPat = pat;
       let cI = ledI;
@@ -325,6 +325,17 @@ export class LookResolver {
     }
     out.portal.copy(pal.primary).lerp(out.eyes, 0.35);
     out.lamp.copy(WHITE).lerp(out.led, 0.25);
+    switch (out.mode) {
+      case 'rage':
+      case 'ember':
+        out.accent.copy(out.led).lerp(FIRE, 0.5);
+        break;
+      case 'frozen':
+        out.accent.copy(ICE);
+        break;
+      default:
+        out.accent.copy(pal.accent).lerp(ICE, 0.35).lerp(out.led, 0.15);
+    }
 
     // ---- 5. app.env: wash, flash, strobe --------------------------------------------------------------
     out.wash.copy(env.stageWashColor);

@@ -40,7 +40,7 @@ export class StageLights {
       this.group.add(l);
       this.rigs.push({ light: l, rank, role, side });
     };
-    point('flash', 0, 0, new THREE.Vector3(0, 25, -10), 260, 1.1);
+    point('flash', 0, 0, new THREE.Vector3(0, 25, -10), 110, 2);
     spot('center', 0, 0, new THREE.Vector3(0, 2.3, -1.2), new THREE.Vector3(0, 13, -7), 0.6, 60);
     spot('front', 1, -1, new THREE.Vector3(-30, 17, 38), new THREE.Vector3(-14, 7, -7), 0.5, 140);
     spot('front', 1, 1, new THREE.Vector3(30, 17, 38), new THREE.Vector3(14, 7, -7), 0.5, 140);
@@ -74,7 +74,7 @@ export class StageLights {
           _c.copy(look.flash);
           const m = Math.max(_c.r, _c.g, _c.b);
           if (m > 1e-4) l.color.copy(_c).multiplyScalar(1 / m);
-          l.intensity = Math.min(3, flashI) * 900;
+          l.intensity = Math.min(3, flashI) * 2600;
           break;
         }
         case 'center':

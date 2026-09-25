@@ -78,6 +78,8 @@ export interface StageLookEx extends StageLook {
   portal: THREE.Color;
   /** front-line fixture lenses */
   lamp: THREE.Color;
+  /** accent LED battens (pilaster strips: white / cyan in most looks) */
+  accent: THREE.Color;
   /** decor glow multipliers */
   bannerGlow: number;
   skullGlow: number;
@@ -99,6 +101,7 @@ export function createStageLookEx(): StageLookEx {
     arcade: new THREE.Color('#5a2cff'),
     portal: new THREE.Color('#ff3a6a'),
     lamp: new THREE.Color('#dfe8ff'),
+    accent: new THREE.Color('#e8f4ff'),
     bannerGlow: 1,
     skullGlow: 1,
     emblemGlow: 1,

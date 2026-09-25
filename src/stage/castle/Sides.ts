@@ -51,7 +51,7 @@ export class SidesBuilder {
     boxMinMax(k.stone, xa, L.sideWallTop, z - 0.6, xb, L.sideWallTop + 0.5, z + 0.05, TINT.warm);
     this.merlons(xa, xb, L.sideWallTop + 0.5, z + 0.05, 0.6);
     boxMinMax(k.stone, xa, L.sideWallTop - 0.3, z - 9, xb, L.sideWallTop - 0.05, z - 0.6, TINT.dark);
-    k.led.bar(new THREE.Vector3(xa, L.sideWallTop - 0.35, z + 0.36), new THREE.Vector3(xb, L.sideWallTop - 0.35, z + 0.36), OUT, 0.07);
+    k.led.bar(new THREE.Vector3(xa, L.sideWallTop - 0.35, z + 0.36), new THREE.Vector3(xb, L.sideWallTop - 0.35, z + 0.36), OUT, 0.1);
     // banner (variant) between the arches + lantern post
     decorPanel(k, 'banner2', s * 55.1, 4.75, z + 0.05, 2.0, 4.8, GLOW.banner);
     this.post(new THREE.Vector3(s * 55.1, 0, z - 0.3), 0, L.sideWallTop + 1.4);
@@ -149,7 +149,7 @@ export class SidesBuilder {
         pg.dispose();
       }
     }
-    k.led.bar(new THREE.Vector3(cx - w / 2 - 0.26, h - 0.4, cz + w / 2 + 0.27), new THREE.Vector3(cx + w / 2 + 0.26, h - 0.4, cz + w / 2 + 0.27), OUT, 0.07);
+    k.led.bar(new THREE.Vector3(cx - w / 2 - 0.26, h - 0.4, cz + w / 2 + 0.27), new THREE.Vector3(cx + w / 2 + 0.26, h - 0.4, cz + w / 2 + 0.27), OUT, 0.1);
     this.post(new THREE.Vector3(cx, h, cz), 0, 1.1, 1.1);
     k.pts.towersTop.push(new THREE.Vector3(cx, h + 0.9, cz));
     k.pts.fixturesTruss.push(new THREE.Vector3(cx, h + 0.9, cz + 1.5));
@@ -256,8 +256,8 @@ export class SidesBuilder {
     const sTop = k.led.newStrip();
     const sLip = k.led.newStrip();
     const n0 = az.clone();
-    k.led.bar(toWorld(u0, top - 0.36, 0.33), toWorld(u1, top - 0.36, 0.33), n0, 0.07, sTop);
-    k.led.bar(toWorld(u0 - 2.5, Y - 0.2, L.armLedge + 0.01), toWorld(u1, Y - 0.2, L.armLedge + 0.01), n0, 0.07, sLip);
+    k.led.bar(toWorld(u0, top - 0.36, 0.33), toWorld(u1, top - 0.36, 0.33), n0, 0.1, sTop);
+    k.led.bar(toWorld(u0 - 2.5, Y - 0.2, L.armLedge + 0.01), toWorld(u1, Y - 0.2, L.armLedge + 0.01), n0, 0.1, sLip);
     // turret posts with crystal lanterns
     for (const pu of posts) {
       const p = toWorld(pu, 0, -0.3);
@@ -266,7 +266,7 @@ export class SidesBuilder {
       for (const e of [-0.6, 0.6]) {
         const a = toWorld(pu + e * (flip ? -1 : 1), Y + 0.5, 0.47);
         const b = toWorld(pu + e * (flip ? -1 : 1), top + 1.6, 0.47);
-        k.led.bar(a, b, az, 0.08);
+        k.led.bar(a, b, az, 0.11);
       }
     }
     // flame units + fixtures on the ledge, anchors

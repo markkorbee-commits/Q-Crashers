@@ -17,7 +17,7 @@ export const TINT = {
 /** Paint bucket colours (sRGB -> linear via THREE.Color). */
 export const PAINT = {
   black: new THREE.Color('#141416'),
-  deckTop: new THREE.Color('#1e1e22'),
+  deckTop: new THREE.Color('#141417'),
   red: new THREE.Color('#5c0a19'),
   carpet: new THREE.Color('#3a0a12'),
   grey: new THREE.Color('#3a3a3e'),

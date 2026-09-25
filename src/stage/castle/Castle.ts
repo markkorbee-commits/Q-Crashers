@@ -286,12 +286,12 @@ export class CastleBuilder {
       const x = s * px;
       boxMinMax(k.stone, x - 0.32, L.terraceY, z, x + 0.32, b.top - 0.35, z + 0.34, TINT.trim);
       const st = k.led.newStrip();
-      k.led.bar(new THREE.Vector3(x, L.terraceY + 0.35, z + 0.34), new THREE.Vector3(x, b.top - 0.5, z + 0.34), OUT, 0.085, st);
+      k.led.bar(new THREE.Vector3(x, L.terraceY + 0.35, z + 0.34), new THREE.Vector3(x, b.top - 0.5, z + 0.34), OUT, 0.12, st, 0, LED_KIND.bar, 1);
       // crocketed pinnacle rising from the pilaster through the parapet
       this.pinnacle(x, b.top + 0.55, z - 0.05, 0.5, 2.0);
     }
     // LED line under the cornice
-    k.led.bar(new THREE.Vector3(xa, b.top - 0.4, z + 0.39), new THREE.Vector3(xb, b.top - 0.4, z + 0.39), OUT, 0.07);
+    k.led.bar(new THREE.Vector3(xa, b.top - 0.4, z + 0.39), new THREE.Vector3(xb, b.top - 0.4, z + 0.39), OUT, 0.1);
     // anchors: roofline gerbs + fixtures on the parapet
     const n = Math.max(1, Math.round((xb - xa) / 6));
     for (let i = 0; i < n; i++) {
@@ -351,7 +351,7 @@ export class CastleBuilder {
     for (const e of [-1, 1]) {
       const cx = x + e * (hw - 0.22);
       boxMinMax(k.stone, cx - 0.3, Y, zf - 0.2, cx + 0.3, t.body - 0.4, zf + 0.28, TINT.trim);
-      k.led.bar(new THREE.Vector3(cx, L.terraceY + 0.4, zf + 0.28), new THREE.Vector3(cx, t.body - 0.6, zf + 0.28), OUT, 0.08);
+      k.led.bar(new THREE.Vector3(cx, L.terraceY + 0.4, zf + 0.28), new THREE.Vector3(cx, t.body - 0.6, zf + 0.28), OUT, 0.11);
     }
     // string courses
     for (const y of inner ? [6.7, 9.95] : mid ? [6.4] : [6.4, 9.3]) boxMinMax(k.stone, x - hw - 0.08, y, zf - 0.1, x + hw + 0.08, y + 0.28, zf + 0.3, TINT.trim);
@@ -364,7 +364,7 @@ export class CastleBuilder {
     boxMinMax(k.stone, x + hw - 0.15, py, zb - 0.25, x + hw + 0.25, py + 0.6, zf + 0.3, TINT.wall);
     this.merlons(x - hw - 0.25, x + hw + 0.25, py + 0.6, zf + 0.3, 0.4, 0.75, 0.6, 0.5);
     boxMinMax(k.stone, x - hw, py - 0.05, zb, x + hw, py + 0.1, zf - 0.1, TINT.dark);
-    k.led.bar(new THREE.Vector3(x - hw - 0.3, py - 0.45, zf + 0.36), new THREE.Vector3(x + hw + 0.3, py - 0.45, zf + 0.36), OUT, 0.07);
+    k.led.bar(new THREE.Vector3(x - hw - 0.3, py - 0.45, zf + 0.36), new THREE.Vector3(x + hw + 0.3, py - 0.45, zf + 0.36), OUT, 0.1);
     // corner pinnacles
     const pinH = t.cap === 'battlement' ? t.capTop - py : 2.2;
     for (const e of [-1, 1])

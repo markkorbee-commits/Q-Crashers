@@ -143,13 +143,13 @@ export class StageMaterials {
 
     this.barrier = new THREE.MeshStandardMaterial({
       name: 'stage-barrier',
-      color: new THREE.Color('#7d838a'),
+      color: new THREE.Color('#5a6066'),
       map: grain.map,
       roughnessMap: grain.orm,
-      roughness: 0.55,
-      metalness: 0.85,
+      roughness: 0.62,
+      metalness: 0.8,
       envMap: this.env,
-      envMapIntensity: 0.7,
+      envMapIntensity: 0.6,
     });
     patchStageShading(this.barrier, this.u, { flood: 0.2 });
 

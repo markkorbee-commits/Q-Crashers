@@ -26,8 +26,8 @@ export class DeckBuilder {
     // aluminium lip
     boxMinMax(k.metal, -H, Y - 0.1, -0.08, H, Y + 0.02, 0.03, METAL.steel);
     // pixel LED line on the lip (split in two around the stairs)
-    k.led.bar(new THREE.Vector3(-H, Y - 0.2, 0.01), new THREE.Vector3(-2.9, Y - 0.2, 0.01), OUT, 0.07);
-    k.led.bar(new THREE.Vector3(2.9, Y - 0.2, 0.01), new THREE.Vector3(H, Y - 0.2, 0.01), OUT, 0.07);
+    k.led.bar(new THREE.Vector3(-H, Y - 0.2, 0.01), new THREE.Vector3(-2.9, Y - 0.2, 0.01), OUT, 0.1);
+    k.led.bar(new THREE.Vector3(2.9, Y - 0.2, 0.01), new THREE.Vector3(H, Y - 0.2, 0.01), OUT, 0.1);
     // lower LED dots along the skirt foot
     k.led.bar(new THREE.Vector3(-H, 0.12, 0.01), new THREE.Vector3(H, 0.12, 0.01), OUT, 0.08, k.led.newStrip(), 0, LED_KIND.dots);
 

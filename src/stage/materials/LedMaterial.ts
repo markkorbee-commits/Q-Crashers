@@ -42,6 +42,7 @@ export function createLedMaterial(): THREE.ShaderMaterial {
         uPattern: { value: 0 },
         uLed: { value: new THREE.Color(1, 0.1, 0.05) },
         uLed2: { value: new THREE.Color(0.1, 0.2, 1) },
+        uAccent: { value: new THREE.Color(1, 1, 1) },
         uWin: { value: new THREE.Color(1, 0.6, 0.2) },
         uWinMode: { value: 0 },
         uArcade: { value: new THREE.Color(0.2, 0.1, 0.6) },
@@ -79,6 +80,7 @@ export function createLedMaterial(): THREE.ShaderMaterial {
       uniform float uPattern;
       uniform vec3 uLed;
       uniform vec3 uLed2;
+      uniform vec3 uAccent;
       uniform vec3 uWin;
       uniform float uWinMode;
       uniform vec3 uArcade;
@@ -103,45 +105,47 @@ export function createLedMaterial(): THREE.ShaderMaterial {
       }
 
       // pattern value for one pixel: returns colour
-      vec3 ledPattern(float pid, float s, float strip, vec3 wp) {
+      vec3 ledPattern(float pid, float s, float strip, vec3 wp, float grp) {
+        vec3 cA = grp > 0.5 ? uAccent : uLed;
+        vec3 cB = grp > 0.5 ? uAccent * 0.6 : uLed2;
         float pat = uPattern;
-        vec3 c = uLed;
+        vec3 c = cA;
         if (pat < 0.5) {
-          c = uLed;
+          c = cA;
         } else if (pat < 1.5) {
           // chase: bands sweep across the whole set and up each batten
           float k = fract(wp.x / 26.0 - uPhase + s * 0.035);
           float band = smoothstep(0.0, 0.08, k) * (1.0 - smoothstep(0.1, 0.42, k));
-          c = mix(uLed2 * 0.25, uLed * 1.4, band);
+          c = mix(cB * 0.25, cA * 1.4, band);
         } else if (pat < 2.5) {
           float env = exp(-fract(uBeat) * 5.0);
-          c = uLed * (0.15 + 1.1 * env);
+          c = cA * (0.15 + 1.1 * env);
         } else if (pat < 3.5) {
           float tick = floor(uTime * 11.0);
           float r = h21(vec2(pid, tick));
           float r2 = h21(vec2(pid + 17.0, tick - 1.0));
           float on = step(0.86, r) + 0.45 * step(0.9, r2);
-          c = mix(uLed * 0.12, mix(uLed, vec3(1.0), 0.45) * 1.8, clamp(on, 0.0, 1.0));
+          c = mix(cA * 0.12, mix(cA, vec3(1.0), 0.45) * 1.8, clamp(on, 0.0, 1.0));
         } else if (pat < 4.5) {
           float swap = mod(floor(uBeat / 4.0), 2.0);
           float side = step(0.0, wp.x);
-          c = mix(uLed, uLed2, abs(side - swap));
+          c = mix(cA, cB, abs(side - swap));
         } else if (pat < 5.5) {
           // fire: flickering flames rising along each batten
           float n = vnoise(vec2(strip * 3.1, s * 1.6 - uTime * 4.0)) * 0.7 + vnoise(vec2(strip * 7.7, s * 4.0 - uTime * 9.0)) * 0.3;
           float hgt = clamp(wp.y / 11.0, 0.0, 1.0);
           float heat = clamp(n * 1.4 - hgt * 0.6, 0.0, 1.0);
-          c = mix(uLed2 * 0.2, mix(uLed, vec3(1.0, 0.85, 0.5), heat * heat), heat);
+          c = mix(cB * 0.2, mix(cA, vec3(1.0, 0.85, 0.5), heat * heat), heat);
           c *= 0.4 + 1.2 * heat;
         } else if (pat < 6.5) {
           // wave: vertical sine sweep
           float v = 0.5 + 0.5 * sin(wp.y * 0.9 - uPhase * 6.2832 * 2.0 + wp.x * 0.06);
-          c = mix(uLed2 * 0.2, uLed * 1.3, v * v);
+          c = mix(cB * 0.2, cA * 1.3, v * v);
         } else {
           // runes: blocky segments flip on the beat
           float seg = floor(s / 0.7);
           float on = step(0.5, h21(vec2(seg + strip * 13.0, floor(uBeat))));
-          c = mix(uLed * 0.06, uLed * 1.5, on);
+          c = mix(cA * 0.06, cA * 1.5, on);
         }
         return c;
       }
@@ -170,7 +174,7 @@ export function createLedMaterial(): THREE.ShaderMaterial {
             m = 1.0 - smoothstep(0.18, 0.36, length(d));
           }
           m = mix(m, 0.55, clamp(fw * 1.5 - 0.3, 0.0, 1.0));
-          col = ledPattern(pid, s, strip, vWP) * m * pulse;
+          col = ledPattern(pid, s, strip, vWP, rnd) * m * pulse;
         } else if (kind < 1.5) {
           // window pane: glow brightest low-centre, tracery bars, per-window variation / flicker
           float g = 0.7 + 0.45 * (1.0 - vUv.y) * (1.0 - abs(vUv.x - 0.5) * 1.2);

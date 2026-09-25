@@ -113,6 +113,8 @@ export class MainStageSystem implements System {
       mesh.name = name;
       mesh.matrixAutoUpdate = false;
       mesh.updateMatrix();
+      mesh.castShadow = mat !== m.led && mat !== m.decor;
+      mesh.receiveShadow = mat === m.stone || mat === m.paint;
       this.root.add(mesh);
       this.meshes.push(mesh);
       if (detail) this.detailMeshes.push(mesh);
@@ -252,9 +254,9 @@ export class MainStageSystem implements System {
     const u = this.mats.u;
     const wi = look.washIntensity;
     // virtual floods: set A follows the lighting wash, set B leans to the LED secondary colour
-    u.uFloodA.value.copy(look.wash).multiplyScalar(wi * 2.4 * (0.55 + 0.6 * look.energy));
-    u.uFloodB.value.copy(look.wash).lerp(look.led2, 0.55).multiplyScalar(wi * 2.1 * (0.55 + 0.6 * look.energy));
-    addScaled(u.uFront.value.copy(look.wash).multiplyScalar(wi * 0.3), look.pulseColor, 1.2);
+    u.uFloodA.value.copy(look.wash).multiplyScalar(wi * 3.2 * (0.55 + 0.6 * look.energy));
+    u.uFloodB.value.copy(look.wash).lerp(look.led2, 0.55).multiplyScalar(wi * 2.8 * (0.55 + 0.6 * look.energy));
+    addScaled(u.uFront.value.copy(look.wash).multiplyScalar(wi * 0.42), look.pulseColor, 1.2);
     u.uFront.value.r += look.strobe * 2.5;
     u.uFront.value.g += look.strobe * 2.5;
     u.uFront.value.b += look.strobe * 2.5;
@@ -270,9 +272,10 @@ export class MainStageSystem implements System {
     l.uKick.value = ctx.beat.kick;
     l.uPhase.value = look.ledPhase;
     l.uPattern.value = look.ledPatternX;
-    const ledGain = 7 * look.ledIntensity;
+    const ledGain = 9 * look.ledIntensity;
     (l.uLed.value as THREE.Color).copy(look.led).multiplyScalar(ledGain);
     (l.uLed2.value as THREE.Color).copy(look.led2).multiplyScalar(ledGain);
+    (l.uAccent.value as THREE.Color).copy(look.accent).multiplyScalar(ledGain * 0.75);
     (l.uWin.value as THREE.Color).copy(look.windowColor).multiplyScalar(2.3 * look.windows);
     l.uWinMode.value = look.windowMode;
     (l.uArcade.value as THREE.Color).copy(look.arcade).multiplyScalar(1.6 * (0.4 + 0.6 * look.windows));
