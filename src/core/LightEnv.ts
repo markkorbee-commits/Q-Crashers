@@ -16,6 +16,14 @@ export class LightEnv {
   /** colour + intensity of the light washing the stage set (castle/dragon/wings), written by LightingSystem, read by MainStage */
   stageWashColor = new THREE.Color(0.6, 0.05, 0.05);
   stageWashIntensity = 0.4;
+  /** lantern pillar lamps on the field (written by LightingSystem 'pillars' fx, rendered by Grounds) */
+  pillarLampColor = new THREE.Color('#4a86d8');
+  pillarLampIntensity = 1;
+  /** LED uplight on the pillar shafts */
+  pillarShaftColor = new THREE.Color('#c56e46');
+  pillarShaftIntensity = 0.8;
+  /** per-pillar intensity multipliers for chases (index = pillar index in anchors 'pillars_top'); empty = all 1 */
+  pillarChase: number[] = [];
   /** accumulated flash from pyro / fireworks / strobes */
   flashColor = new THREE.Color(0, 0, 0);
   /** weighted centre of the current flash sources */

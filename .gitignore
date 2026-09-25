@@ -6,3 +6,4 @@ dist/
 public/assets/audio/*
 !public/assets/audio/README.md
 .shots/
+.claude/
