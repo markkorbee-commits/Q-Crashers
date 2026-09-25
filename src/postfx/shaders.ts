@@ -245,6 +245,9 @@ export const COMPOSITE = /* glsl */ `${HEADER}${DEPTH}
 #ifndef MB_SAMPLES
 #define MB_SAMPLES 8
 #endif
+#ifndef AA
+#define AA 0
+#endif
 uniform sampler2D tScene;
 uniform sampler2D tDepth;
 uniform sampler2D tD1;
@@ -254,6 +257,9 @@ uniform sampler2D tBloom;
 uniform sampler2D tGlare;
 uniform sampler2D tAfter;
 uniform sampler2D tDof;
+uniform sampler2D tVeil;  // coarsest bloom mip: veiling glare
+uniform vec4 uView;      // altered side head motion: offset x, y (screen heights), roll (rad), 1/zoom
+uniform vec4 uBody;      // altered side: heat 0..1, heartbeat pulse 0..1, fade 0..1, veil
 uniform vec4 uRes;       // w, h, 1/w, 1/h
 uniform vec4 uD2Size;    // w, h, 1/w, 1/h
 uniform vec4 uD3Size;
@@ -267,7 +273,7 @@ uniform vec4 uA0, uA1, uA2, uA3;  // sober params
 uniform vec4 uB0, uB1, uB2, uB3;  // altered params
 uniform vec4 uThr;       // bloom threshold/knee: sober xy, altered zw
 uniform vec2 uBloom;     // strength, enabled
-uniform vec4 uLook;      // exposure, vignette, grain, unused
+uniform vec4 uLook;      // exposure, vignette, grain, head-motion view transform on
 uniform vec4 uFeat;      // glare gain, afterimage on, dof on, base motion blur
 uniform vec2 uMB;        // velocity scale (shutter / dt), max length (uv)
 uniform mat4 uInvViewProj;
@@ -312,6 +318,58 @@ vec3 fetch(vec2 uv, float chroma) {
   if (chroma < 0.001) return texture(tScene, uv).rgb;
   vec2 d = (uv - 0.5) * chroma * 0.018;
   return vec3(texture(tScene, uv + d).r, texture(tScene, uv).g, texture(tScene, uv - d).b);
+}
+
+#if AA
+/** perceptual luma of an HDR colour (tone-compressed like the display will show it) */
+float aaLuma(vec3 c) { float l = dot(c, LUMA) * uLook.x; return sqrt(l / (1.0 + l)); }
+/** Karis weight: bright samples must not dominate the edge blend (no halos around lasers / pyro) */
+float aaW(vec3 c) { return 1.0 / (1.0 + dot(c, LUMA) * uLook.x); }
+/**
+ * FXAA 3.11 (Lottes, console variant) for the MSAA-less quality levels: 4 half-pixel corner taps find the
+ * edge, 2 + 2 taps along it resolve it. Runs in HDR with tone-compressed luma and a Karis-weighted resolve.
+ */
+vec3 fxaa(vec2 uv) {
+  vec2 px = uRes.zw;
+  vec3 rgbM = texture(tScene, uv).rgb;
+  float lM = aaLuma(rgbM);
+  float lNW = aaLuma(texture(tScene, uv + vec2(-0.5, 0.5) * px).rgb);
+  float lNE = aaLuma(texture(tScene, uv + vec2(0.5, 0.5) * px).rgb) + 1.0 / 384.0;
+  float lSW = aaLuma(texture(tScene, uv + vec2(-0.5, -0.5) * px).rgb);
+  float lSE = aaLuma(texture(tScene, uv + vec2(0.5, -0.5) * px).rgb);
+  float lMax = max(max(lNE, lSE), max(lNW, lSW));
+  float lMin = min(min(lNE, lSE), min(lNW, lSW));
+  if (max(lMax, lM) - min(lMin, lM) < max(0.04, lMax * 0.125)) return rgbM;
+  float sw = lSW - lNE, se = lSE - lNW;
+  vec2 dir = vec2(sw + se, sw - se);
+  float dl = length(dir);
+  if (dl < 1e-5) return rgbM;
+  vec2 d1 = dir / dl;
+  vec2 d2 = clamp(d1 / (min(abs(d1.x), abs(d1.y)) * 8.0), -2.0, 2.0);
+  vec3 n1 = texture(tScene, uv - d1 * 0.5 * px).rgb, p1 = texture(tScene, uv + d1 * 0.5 * px).rgb;
+  vec3 n2 = texture(tScene, uv - d2 * 2.0 * px).rgb, p2 = texture(tScene, uv + d2 * 2.0 * px).rgb;
+  float wn1 = aaW(n1), wp1 = aaW(p1), wn2 = aaW(n2), wp2 = aaW(p2);
+  vec3 a = (n1 * wn1 + p1 * wp1) / (wn1 + wp1);
+  vec3 b = (n1 * wn1 + p1 * wp1 + n2 * wn2 + p2 * wp2) / (wn1 + wp1 + wn2 + wp2);
+  float lb = aaLuma(b);
+  return (lb < lMin || lb > lMax) ? a : b;
+}
+#endif
+
+/** the sharp scene image (anti-aliased when the level has no MSAA) */
+vec3 sharp(vec2 uv, float chroma) {
+#if AA
+  if (chroma < 0.001) return fxaa(uv);
+#endif
+  return fetch(uv, chroma);
+}
+
+/** head motion: rotate + shift the sampled view around the screen centre (zoomed so no edge shows) */
+vec2 viewUv(vec2 uv, float aspect) {
+  vec2 c = (uv - 0.5) * vec2(aspect, 1.0);
+  float s = sin(uView.z), co = cos(uView.z);
+  c = vec2(c.x * co - c.y * s, c.x * s + c.y * co) * uView.w - uView.xy;
+  return c / vec2(aspect, 1.0) + 0.5;
 }
 
 vec3 motionBlurred(vec2 uv, float amount, float chroma) {
@@ -428,14 +486,14 @@ void main() {
   vec2 cp = (uv - 0.5) * vec2(aspect, 1.0);
   float r = length(cp);
 
-  // ---- screen-space warps
-  vec2 suv = uv;
+  // ---- head motion (stumble lurch, nystagmus) + screen-space warps
+  vec2 suv = (uLook.w > 0.5 && side > 0.5) ? viewUv(uv, aspect) : uv;
   if (p0.w > 0.001) suv += wobbleOffset(uv, p0.w, aspect);
   if (p2.w > 0.001) suv += patternOffset(cp, r, p2.w, aspect);
 
   // ---- sharp image
   float mb = max(p3.y, uFeat.w);
-  vec3 col = mb > 0.001 ? motionBlurred(suv, mb, p0.z) : fetch(suv, p0.z);
+  vec3 col = mb > 0.001 ? motionBlurred(suv, mb, p0.z) : sharp(suv, p0.z);
 
   // ---- double vision: second image with slow vergence drift
   vec2 ghostOff = vec2(0.0);
@@ -469,9 +527,12 @@ void main() {
   if (uBloom.y > 0.5) {
     float bs = min(uBloom.x * (1.0 + p2.x), 1.0);
     vec2 tk = side > 0.5 ? uThr.zw : uThr.xy;
-    col = col * (1.0 - bs * brightShare(col, tk)) + texture(tBloom, suv).rgb * bs;
+    // B-spline upsample of the half-res glow: no blocky, stair-stepped halos
+    col = col * (1.0 - bs * brightShare(col, tk)) + bicubic(tBloom, suv, uBaseSize) * bs;
   }
   if (uFeat.x > 0.0 && p2.y > 0.001) col += texture(tGlare, suv).rgb * (uFeat.x * p2.y);
+  // ---- veiling glare: dilated pupils scatter every bright light over the whole picture (milky wash)
+  if (uBody.w > 0.001 && side > 0.5) col += (texture(tVeil, suv).rgb * 0.75 + texture(tVeil, vec2(0.5, 0.55)).rgb * 0.25) * uBody.w;
 
   // ---- afterimages: bleached regions no longer lit show the complementary colour
   if (uFeat.y > 0.5 && p2.z > 0.001) {
@@ -501,6 +562,15 @@ void main() {
     col = mix(lc, mix(vec3(0.18), col, p1.z), 0.2);
   }
   col = clamp(col, 0.0, 1.0);
+
+  // ---- body state (altered side): heat danger = blood-red periphery pulsing with the heartbeat; fade
+  if (side > 0.5) {
+    if (uBody.x > 0.001) {
+      float hm = clamp(uBody.x * smoothstep(0.16, 0.86, r) * (0.6 + 0.4 * uBody.y), 0.0, 1.0);
+      col = mix(col, col * vec3(0.85, 0.16, 0.1) + vec3(0.14, 0.0, 0.0) * (0.35 + 0.65 * uBody.y), hm);
+    }
+    col *= 1.0 - uBody.z;
+  }
 
   // ---- encode, film grain (luminance weighted), triangular dither against banding
   vec3 s = toSRGB(col);

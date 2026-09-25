@@ -8,19 +8,50 @@ type Uniforms = Record<string, THREE.IUniform>;
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
 /** afterimage (retinal bleaching) decay time constant, seconds */
 const AFTERIMAGE_TAU = 2.4;
+/** effective device pixel ratio above which MSAA is capped at 2x (4x at DPR 2 costs ~250 MB at 2880x1800) */
+const HIDPI_MSAA_ON = 1.75;
+const HIDPI_MSAA_OFF = 1.6;
+
+/**
+ * Body-state overlays written by the PerceptionSystem each frame. They are "you", not the optics of the
+ * scene, so they apply to the altered side of the compare split only and bypass the parameter smoothing.
+ */
+export interface BodyParams {
+  /**
+   * head lurch / nystagmus: shift of the picture in screen-height units (x right, y up). A head that dips
+   * makes the world move up (offY > 0); a leftward eye drift makes it move right (offX > 0).
+   */
+  offX: number;
+  offY: number;
+  /** head roll (radians, positive = picture turns clockwise) */
+  roll: number;
+  /** 0..1 heat danger: blood-red, heartbeat-pulsing periphery */
+  heat: number;
+  /** 0..1 current heartbeat pulse (drives `heat`) */
+  pulse: number;
+  /** 0..1 fade to black (memory gap, fainting, sitting down) */
+  fade: number;
+  /** 0..~1.5 veiling glare: dilated pupils scatter bright light over the whole picture (milky wash) */
+  veil: number;
+  /** multiplier on the star-streak glare (0 = halos only, 1 = full streaks) */
+  star: number;
+}
 
 /**
  * HDR render pipeline:
- *   scene -> half-float MSAA target (+ depth texture)
- *   -> [trails feedback] -> MRT prefilter (blurred scene | thresholded bright) at 1/2 res (1/4 mobile)
+ *   scene -> half-float MSAA target (+ depth texture, resolved only when DOF / motion blur read it)
+ *   -> [trails feedback] -> MRT prefilter (blurred scene | thresholded bright) at 1/2 res
  *   -> scene blur chain (1/4, 1/8) + COD-style bloom mip chain (13-tap down, tent up, energy normalised)
  *   -> [afterimage feedback] [star glare] [bokeh DOF gather]
- *   -> ONE composite pass (perception effects, energy-conserving bloom, hue-preserving Lottes tone
- *      map, vignette, grain, dither, compare split) -> sRGB canvas.
+ *   -> ONE composite pass (FXAA when there is no MSAA, perception + body effects, energy-conserving
+ *      bicubic-upsampled bloom, hue-preserving Lottes tone map, vignette, grain, dither, compare split)
+ *      -> sRGB canvas.
  * No per-frame allocations: every uniform object is created once and mutated.
  */
 export class PostFX {
   perception: PerceptionParams = PostFX.defaults();
+  /** body-state overlays (PerceptionSystem); identity = { 0, 0, 0, 0, 0, 0, 0, 1 } */
+  readonly body: BodyParams = PostFX.bodyDefaults();
   photo: PhotoParams = { enabled: false, focusDistance: 0, aperture: 0, exposure: 1, vignette: 0.25, grain: 0.04 };
   enabled = true;
   /** base exposure (scene-referred), tweakable in the debug menu */
@@ -32,8 +63,16 @@ export class PostFX {
   bloomKnee = 0.8;
   /** tent radius of the bloom upsample (texels) */
   bloomRadius = 1;
-  /** relative weight of each bloom mip (fine -> wide); normalised, so energy is conserved */
-  bloomWeights = [0.6, 0.8, 1, 1, 0.9, 0.8, 0.7, 0.6];
+  /**
+   * relative weight of each bloom mip (fine -> wide); normalised, so energy is conserved. The widest mips
+   * are kept modest: they turned distant pyro into one big soft blob instead of separate columns.
+   */
+  bloomWeights = [0.75, 0.9, 1, 0.92, 0.74, 0.58, 0.46, 0.38];
+  /**
+   * anti-firefly (Karis) weighting of the first bloom downsample: small, extremely bright sources (sparks,
+   * distant comets, thin laser cores) feed the glow less than large bright areas, so they stay crisp
+   */
+  bloomKaris = 0.6;
   vignette = 0.2;
   grain = 0.03;
   /** energy share of the bright pass spread into star streaks at lightSensitivity = 1 */
@@ -52,6 +91,9 @@ export class PostFX {
   private levels = 0;
   private baseDiv = 2;
   private mobile = false;
+  private aa = false;
+  private samples = 0;
+  private depthResolved = false;
   private passCount = 0;
   private frameNo = 0;
 
@@ -133,6 +175,9 @@ export class PostFX {
       tGlare: tex(),
       tAfter: tex(),
       tDof: tex(),
+      tVeil: tex(),
+      uView: v4(),
+      uBody: v4(),
       uRes: v4(),
       uD2Size: v4(),
       uD3Size: v4(),
@@ -187,38 +232,74 @@ export class PostFX {
     };
   }
 
+  static bodyDefaults(): BodyParams {
+    return { offX: 0, offY: 0, roll: 0, heat: 0, pulse: 0, fade: 0, veil: 0, star: 1 };
+  }
+
   /** drawing-buffer pixels */
   setSize(w: number, h: number): void {
     w = Math.max(2, Math.floor(w));
     h = Math.max(2, Math.floor(h));
-    if (w === this.width && h === this.height && this.hdr) return;
+    const samples = this.wantSamples();
+    if (w === this.width && h === this.height && this.hdr && samples === this.samples) return;
     this.width = w;
     this.height = h;
+    this.updateLodScale();
+    if (this.hdr && samples !== this.samples) {
+      this.hdr.depthTexture?.dispose();
+      this.hdr.dispose();
+      this.hdr = null;
+    }
     this.allocate();
   }
 
   setQuality(q: QualitySettings): void {
     this.quality = q;
     this.mobile = q.level === 'mobile';
-    const div = this.mobile ? 4 : 2;
-    const levels = clamp(Math.round(q.bloomLevels), 2, 8);
-    const samples = Math.min(q.msaa, this.renderer.capabilities.maxSamples);
-    const rebuild = !this.hdr || this.hdr.samples !== samples || div !== this.baseDiv || levels !== this.levels;
+    // every level starts the blur / bloom chains at 1/2 resolution: the old 1/4 mobile base produced
+    // blocky, stair-stepped halos. Mobile gets one extra (tiny) bloom level so the glow reaches as far.
+    const div = 2;
+    const levels = clamp(Math.round(q.bloomLevels) + (this.mobile ? 1 : 0), 2, 8);
+    const samples = this.wantSamples();
+    const rebuild = !this.hdr || this.samples !== samples || div !== this.baseDiv || levels !== this.levels;
     this.baseDiv = div;
     this.levels = levels;
+    // no MSAA (medium / mobile): FXAA in the composite
+    this.aa = samples === 0;
 
     const mbSamples = q.level === 'ultra' ? 12 : q.level === 'high' ? 8 : q.level === 'medium' ? 6 : 0;
-    setDefines(this.mComposite, { MB_SAMPLES: mbSamples });
+    setDefines(this.mComposite, { MB_SAMPLES: mbSamples, AA: this.aa ? 1 : 0 });
     setDefines(this.mDof, { SAMPLES: q.level === 'ultra' ? 96 : q.level === 'high' ? 64 : q.level === 'medium' ? 40 : 24 });
     setDefines(this.mGlare, this.mobile ? { AXES: 2, TAPS: 6 } : { AXES: 3, TAPS: q.level === 'medium' ? 8 : 11 });
     this.mPrefilter.uniforms.uSpread.value = div / 2;
-    this.mComposite.uniforms.uLodScale.value = div === 2 ? 1 : 0.62;
+    this.updateLodScale();
 
     if (rebuild) {
       this.disposeTargets();
       this.allocate();
     }
     this.precompile();
+  }
+
+  /**
+   * The blur pyramid is relative to the drawing buffer, so the same blur level covers more degrees of view
+   * on a small buffer (a phone at 0.7 render scale) than on a desktop. Scale the blur amount by the buffer
+   * height against a 720-line reference, so 1.6‰ looks the same on a phone as on a laptop.
+   */
+  private updateLodScale(): void {
+    this.mComposite.uniforms.uLodScale.value = clamp(this.height / 720, 0.5, 1.3);
+  }
+
+  /** MSAA samples for the HDR target: the preset, capped at 2x on high-DPI screens (memory + resolve bandwidth) */
+  private wantSamples(): number {
+    const q = this.quality;
+    let s = Math.min(q.msaa, this.renderer.capabilities.maxSamples);
+    if (s > 2) {
+      const dpr = this.renderer.getPixelRatio();
+      const hi = this.samples === 2 && this.hdr ? dpr >= HIDPI_MSAA_OFF : dpr >= HIDPI_MSAA_ON;
+      if (hi) s = 2;
+    }
+    return Math.max(0, s);
   }
 
   /** compile every pass program up front: no hitch when XTC / photo mode first enable a pass */
@@ -258,11 +339,16 @@ export class PostFX {
     const fx: string[] = [];
     if (p.trails > 0.003) fx.push('trails');
     if (p.afterimage > 0.003) fx.push('afterimage');
-    if (p.lightSensitivity > 0.003) fx.push('glare');
+    if (p.lightSensitivity > 0.003 && this.body.star > 0.003) fx.push('glare');
     if (p.blur > 0.001 || p.tunnel > 0.001) fx.push('blur');
     if (this.dofActive(this.last.camera)) fx.push('dof');
     if (this.motionBlurActive()) fx.push('motionblur');
     if (p.split >= 0) fx.push('split');
+    const b = this.body;
+    if (b.heat > 0.003) fx.push('heat');
+    if (b.fade > 0.003) fx.push('fade');
+    if (b.veil > 0.003) fx.push('veil');
+    if (Math.abs(b.roll) > 1e-4 || Math.abs(b.offX) > 1e-4 || Math.abs(b.offY) > 1e-4) fx.push('view');
     return {
       postfx: on ? 'on' : 'off',
       passes: this.passCount,
@@ -270,6 +356,8 @@ export class PostFX {
       target: `${this.width}x${this.height}`,
       base: `${this.levelW(0)}x${this.levelH(0)}`,
       msaa: this.hdr?.samples ?? 0,
+      aa: this.aa ? 'fxaa' : this.samples ? `msaa${this.samples}` : 'none',
+      depthResolve: this.depthResolved ? 'on' : 'off',
       hdr: this.hdrType === THREE.HalfFloatType ? 'half-float' : 'ldr-fallback',
       active: fx.join(',') || 'none',
     };
@@ -296,6 +384,9 @@ export class PostFX {
     const hdr = this.hdr;
     const base = this.base;
     this.passCount = 0;
+    // resolving multisampled depth costs a full-screen blit: only when DOF or motion blur read it
+    this.depthResolved = this.dofActive(camera) || this.motionBlurActive();
+    hdr.resolveDepthBuffer = this.depthResolved;
     r.autoClear = true;
     r.setRenderTarget(hdr);
     r.render(scene, camera);
@@ -342,6 +433,7 @@ export class PostFX {
       (u.uThreshold.value as THREE.Vector4).set(thA, knA, thB, knB);
       (u.uExposure.value as THREE.Vector2).set(baseEx * this.sober.exposure, baseEx * p.exposure);
       u.uSplit.value = split;
+      u.uKaris.value = this.bloomKaris;
       this.draw(this.mPrefilter, base);
     }
     const d1 = base.textures[0];
@@ -403,7 +495,9 @@ export class PostFX {
 
     // 6. star / anamorphic glare
     let glareTex: THREE.Texture | null = null;
-    if (ls > 0.003) {
+    const body = this.body;
+    const star = clamp(body.star, 0, 2);
+    if (ls > 0.003 && star > 0.003) {
       const g = (this.glare ??= this.target(this.levelW(0), this.levelH(0)));
       const u = this.mGlare.uniforms;
       u.tSrc.value = bright;
@@ -458,6 +552,22 @@ export class PostFX {
     u.tGlare.value = glareTex;
     u.tAfter.value = afterTex;
     u.tDof.value = dofOn ? this.dof!.texture : null;
+    const veil = bloomOn ? clamp(body.veil, 0, 2) : 0;
+    u.tVeil.value = veil > 0.001 ? this.bloomDown[n - 1].texture : null;
+    // head lurch / nystagmus: zoom in just enough that the rotated, shifted view never shows an edge
+    const aspect = this.width / this.height;
+    const roll = clamp(body.roll, -0.2, 0.2);
+    const ox = clamp(body.offX, -0.1, 0.1);
+    const oy = clamp(body.offY, -0.1, 0.1);
+    const viewOn = Math.abs(roll) > 1e-5 || Math.abs(ox) > 1e-6 || Math.abs(oy) > 1e-6;
+    if (viewOn) {
+      const cs = Math.cos(roll);
+      const sn = Math.abs(Math.sin(roll));
+      const zx = (0.5 * aspect * cs + 0.5 * sn) / Math.max(0.05, 0.5 * aspect - Math.abs(ox));
+      const zy = (0.5 * aspect * sn + 0.5 * cs) / Math.max(0.05, 0.5 - Math.abs(oy));
+      (u.uView.value as THREE.Vector4).set(ox, oy, roll, 1 / Math.max(1, zx, zy));
+    } else (u.uView.value as THREE.Vector4).set(0, 0, 0, 1);
+    (u.uBody.value as THREE.Vector4).set(clamp(body.heat, 0, 1), clamp(body.pulse, 0, 1), clamp(body.fade, 0, 1), veil);
     (u.uRes.value as THREE.Vector4).set(this.width, this.height, 1 / this.width, 1 / this.height);
     const w2 = this.levelW(1);
     const h2 = this.levelH(1);
@@ -478,8 +588,8 @@ export class PostFX {
     if (!mbAllowed) (u.uB3.value as THREE.Vector4).y = 0;
     (u.uThr.value as THREE.Vector4).set(thA, knA, thB, knB);
     (u.uBloom.value as THREE.Vector2).set(bloomOn ? this.bloomStrength : 0, bloomOn ? 1 : 0);
-    (u.uLook.value as THREE.Vector4).set(baseEx, photo ? this.photo.vignette : this.vignette, photo ? this.photo.grain : this.grain, 0);
-    (u.uFeat.value as THREE.Vector4).set(glareTex ? 1 : 0, afterTex ? 1 : 0, dofOn ? 1 : 0, mbAllowed && !cut ? this.motionBlurBase : 0);
+    (u.uLook.value as THREE.Vector4).set(baseEx, photo ? this.photo.vignette : this.vignette, photo ? this.photo.grain : this.grain, viewOn ? 1 : 0);
+    (u.uFeat.value as THREE.Vector4).set(glareTex ? star : 0, afterTex ? 1 : 0, dofOn ? 1 : 0, mbAllowed && !cut ? this.motionBlurBase : 0);
     if (cut) (u.uB3.value as THREE.Vector4).y = 0;
     (u.uMB.value as THREE.Vector2).set(1 / 60 / step, 0.05);
     (u.uInvViewProj.value as THREE.Matrix4).copy(this.invViewProj);
@@ -577,10 +687,12 @@ export class PostFX {
     const w = this.width;
     const h = this.height;
     if (!this.hdr) {
-      const depth = new THREE.DepthTexture(w, h, THREE.FloatType);
+      // 24-bit depth: plenty for DOF / motion-blur reprojection, and a cheaper MSAA resolve than 32F
+      const depth = new THREE.DepthTexture(w, h, THREE.UnsignedIntType);
       depth.minFilter = depth.magFilter = THREE.NearestFilter;
+      this.samples = this.wantSamples();
       this.hdr = this.target(w, h, {
-        samples: Math.min(this.quality.msaa, this.renderer.capabilities.maxSamples),
+        samples: this.samples,
         depthBuffer: true,
         depthTexture: depth,
       });
