@@ -48,7 +48,7 @@ const loadMs = Date.now() - t0;
 if (evalJs) await page.evaluate(evalJs).catch((e) => errors.push('eval: ' + e.message));
 await page.waitForTimeout(wait);
 fs.mkdirSync(path.dirname(out), { recursive: true });
-await page.screenshot({ path: out });
+await page.screenshot({ path: out, timeout: 240000 });
 const stats = await page.evaluate(() => {
   const a = window.__app;
   if (!a) return null;

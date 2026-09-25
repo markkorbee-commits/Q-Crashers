@@ -81,7 +81,7 @@ for (const i of frames) {
   );
   await page.waitForTimeout(settle);
   const shot = path.join(tmp, `r${String(i).padStart(3, '0')}.png`);
-  await page.screenshot({ path: shot });
+  await page.screenshot({ path: shot, timeout: 240000 });
   const ref = refdir ? fs.readdirSync(refdir).find((f) => f.startsWith(`f${String(i).padStart(3, '0')}_`)) : null;
   pairs.push({ i, t: Math.round(t), shot, ref: ref ? path.join(refdir, ref) : '' });
 }
