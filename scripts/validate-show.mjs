@@ -49,6 +49,8 @@ const ANCHORS = new Set([
 const FILTERS = new Set(['all', 'left', 'right', 'center']);
 const NAMED = new Set([...read('src/show/colors.ts').matchAll(/^\s*([a-z]+):\s*'#[0-9a-fA-F]{6}'/gm)].map((m) => m[1]));
 const PALETTE_REFS = new Set(['primary', 'secondary', 'accent']);
+/** viewing spots (src/player/spots.ts DEFAULT_SPOTS) — moments may recommend one */
+const SPOT_IDS = new Set([...read('src/player/spots.ts').matchAll(/spot\('([a-z_]+)'/g)].map((m) => m[1]));
 
 /** docs/show-format.md → { sys: { fx: { param: Set(values) } } } */
 function parseVocabulary(md) {
@@ -121,6 +123,9 @@ const noteExt = (k) => extUse.set(k, (extUse.get(k) ?? 0) + 1);
 const isNum = (x) => typeof x === 'number' && Number.isFinite(x);
 const isHex = (s) => typeof s === 'string' && /^#[0-9a-fA-F]{6}$/.test(s);
 const validColor = (s) => typeof s === 'string' && (PALETTE_REFS.has(s) || NAMED.has(s) || isHex(s));
+/** fireworks accept a colour list (array or comma list, cycled per shell/comet — docs "Implementation extensions") */
+const validColorList = (v) =>
+  Array.isArray(v) ? v.length > 0 && v.every(validColor) : typeof v === 'string' && v.split(',').every((x) => validColor(x.trim()));
 const fmtT = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(2).padStart(5, '0')}`;
 const cueRef = (c, i) => `cue #${i} (t=${c.t} ${c.sys}.${c.fx})`;
 
@@ -203,6 +208,9 @@ for (const [i, m] of moments.entries()) {
   if (!isNum(m.t) || m.t < 0 || m.t >= D) err(`moment ${i} t out of range`);
   if (m.t < prev) err(`moment ${i} not sorted`);
   if (typeof m.label !== 'string' || !m.label) err(`moment ${i} label`);
+  // optional viewing hints (UI: seek to t − lead and play; offer "watch from <spot>")
+  if (m.lead !== undefined && (!isNum(m.lead) || m.lead < 0 || m.lead > 10)) err(`moment ${i}: lead must be 0..10 s`);
+  if (m.spot !== undefined && !SPOT_IDS.has(m.spot)) err(`moment ${i}: spot "${m.spot}" is not a spot id (${[...SPOT_IDS].join('|')})`);
   prev = m.t;
 }
 
@@ -289,7 +297,8 @@ function checkParams(c, where) {
   for (const [k, v] of Object.entries(p)) {
     const key = `${c.sys}.${c.fx}.${k}`;
     if (COLOR_PARAMS.has(k)) {
-      if (!validColor(v)) err(`${where}: ${k} "${v}" is not a palette ref, named colour or #rrggbb`);
+      const ok = c.sys === 'fireworks' && k === 'color' ? validColorList(v) : validColor(v);
+      if (!ok) err(`${where}: ${k} "${v}" is not a palette ref, named colour or #rrggbb`);
     } else if (k === 'palette') {
       if (!Array.isArray(v) || !v.length || !v.every(validColor)) err(`${where}: palette must be a non-empty colour list`);
     } else if (k === 'at') {
@@ -455,6 +464,242 @@ for (const x of expanded) {
   if (Math.abs(b - Math.round(b)) * ((unit * 60) / seg.bpm) > 0.012) offGrid++;
 }
 if (offGrid) warn(`${offGrid} grid-repeated cues are more than 12 ms off the beat grid`);
+
+// ------------------------------------------------------------------------------ storyboard liveness
+/**
+ * The official video's storyboard frame fN shows the picture at ≈ 9.881·N + 3…5 s (show-analysis §0 review
+ * note: the effects in the frames are mature 1–5 s after their cue). Every frame whose analysis shows pyro or
+ * aerial fireworks (FACT/INFERENCE, curated from scratchpad frames_*.json) must therefore have a cue of that
+ * system at FULL strength over the whole window [9.881·N + 3, 9.881·N + 5] — otherwise a comparison at the
+ * frame's real time shows an effect that has already ended (QA round 1: 76.2 gerbs, 769 comets, 1074 volleys…).
+ * `sys`: 'pyro' | 'fireworks' | 'any' (either system; comet/fountain cakes read as both).
+ */
+const STORYBOARD = [
+  [6, 'pyro', 'red Bengal pots at the front-line corners'], [7, 'pyro', '7 gerbs on the capitals + deck'],
+  [8, 'pyro', '10–12 gerbs in fan + vertical clusters'], [9, 'any', 'V-layout gerb/comet fans'],
+  [10, 'pyro', 'two orange corner fireballs'], [22, 'any', 'gold comet fan from the crest'],
+  [23, 'fireworks', 'silver glitter comet fan'], [25, 'any', 'comet V-fans + white comet row'],
+  [26, 'any', 'fountain/comet walls at the stage ends'], [33, 'any', 'vertical comet/gerb columns, full width'],
+  [39, 'fireworks', 'red comet row'], [42, 'fireworks', '150° red comet fan'], [43, 'fireworks', 'gold comet line + red crossettes'],
+  [45, 'fireworks', 'serpent comet row'], [49, 'pyro', '2 gold gerbs on the deck'], [54, 'fireworks', 'red crackle canopy'],
+  [55, 'fireworks', 'red crackle canopy, two lobes'], [56, 'fireworks', 'gold brocade line'], [60, 'any', 'white gerb walls / flash mines'],
+  [72, 'pyro', 'burning wings'], [75, 'fireworks', 'silver glitter tails'], [77, 'fireworks', 'silver glitter streams'],
+  [78, 'fireworks', 'silver glitter comet barrage'], [79, 'fireworks', 'full-sky glitter curtain'],
+  [82, 'fireworks', 'red/white comet columns'], [85, 'fireworks', 'red-pink crackle low over the roof'],
+  [86, 'fireworks', 'orange X-fans at the arm ends'], [87, 'pyro', 'the flame ring'], [104, 'pyro', 'twin 15 m torches'],
+  [109, 'fireworks', 'crossing comet barrage'], [119, 'pyro', '18–20 fountains along the front line'],
+  [119, 'fireworks', 'row of ~17 comet heads'], [120, 'pyro', 'pink-white sprays along both arms'],
+  [120, 'fireworks', 'pink/white crackle band'], [129, 'fireworks', 'pink/white crackle above the stage'],
+  [130, 'pyro', '~6 fountains per arm'], [130, 'fireworks', '9 comets into a pink canopy'], [131, 'fireworks', 'huge red/pink canopy'],
+  [142, 'fireworks', 'green mines on the roofline'], [143, 'fireworks', 'gold/orange comet streaks'],
+  [144, 'pyro', 'silver gerb wall on the whole U'], [145, 'fireworks', 'gold comet trails'], [152, 'fireworks', 'low white/red roof bursts'],
+  [153, 'pyro', 'gold gerb wall on the whole U'], [153, 'fireworks', 'finale crackle/brocade band'], [154, 'fireworks', 'fading falling stars'],
+  [156, 'pyro', 'blue cold-fire plumes'], [157, 'pyro', 'blue cold-fire plumes'],
+];
+/** frames the check may not demand (reason recorded; keep this list short) */
+const STORYBOARD_EXCEPT = {
+  33: 'kick-2 columns are on the 330.28 downbeat (music first); f033 must be lagged ≥ 4.2 s',
+};
+const FRAME_DT = 9.881;
+const riseOf = (h) => 0.8 + 0.021 * Math.max(0, h - 4);
+const cometApex = (h) => 0.9 * Math.sqrt((2 * Math.max(3, h)) / 9.81);
+const STAR_LIFE = { willow: 5.5, kamuro: 5.5, brocade: 5, crackle: 4, strobe: 4.5, glitter: 4.5, palm: 4, chrysanthemum: 3.8 };
+const numOr = (v, d) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
+/** [start, end] during which an expanded cue's effect is at (near) full strength */
+function fullWindow(x) {
+  const p = x.p;
+  const stag = numOr(p.stagger, 0);
+  if (x.sys === 'pyro') {
+    const tail = { flame: 0.3, firewall: 0.4, dragon_breath: 0.3, jet: 0.8, gerb: 0.3, sparkular: 0.2, waterfall: 1.5, bengal: 0.5 }[x.fx] ?? 0.3;
+    if (x.fx === 'burst') return x.dur >= 2 ? [x.t, x.t + x.dur + 0.5] : [x.t, x.t + 0.6];
+    return [x.t, x.t + x.dur + tail + stag * 20];
+  }
+  if (x.sys === 'fireworks') {
+    const life = STAR_LIFE[p.type] ?? 3.2;
+    switch (x.fx) {
+      case 'shell':
+      case 'salvo': {
+        const rise = p.rise !== undefined ? numOr(p.rise, 0) : riseOf(numOr(p.height, 90) * 0.9);
+        return [x.t + Math.min(rise, 0.8), x.t + rise + life + stag * numOr(p.count, 1)];
+      }
+      case 'comet': {
+        const end = typeof p.end === 'string' && p.end !== 'none' ? (p.end === 'pearl' ? 0.8 : 3) : 0.3;
+        return [x.t, x.t + stag * numOr(p.count, 10) + cometApex(numOr(p.height, 40)) + end];
+      }
+      case 'cake':
+        return [x.t, x.t + x.dur + cometApex(numOr(p.height, 35)) + (p.type ? 3 : 0.3)];
+      case 'mine':
+        return [x.t, x.t + x.dur + 1.5];
+      case 'finale':
+        return [x.t, x.t + x.dur + riseOf(numOr(p.height, 62)) + 3];
+      default:
+        return [x.t, x.t + x.dur];
+    }
+  }
+  return [x.t, x.t + x.dur];
+}
+const liveBySys = { pyro: [], fireworks: [] };
+for (const x of expanded) if (x.sys === 'pyro' || x.sys === 'fireworks') liveBySys[x.sys].push(fullWindow(x));
+const storyGaps = [];
+for (const [n, sysReq, what] of STORYBOARD) {
+  if (STORYBOARD_EXCEPT[n]) continue;
+  const a = FRAME_DT * n + 3;
+  const b = FRAME_DT * n + 5;
+  const wins = (sysReq === 'any' ? [...liveBySys.pyro, ...liveBySys.fireworks] : liveBySys[sysReq])
+    .filter(([s, e]) => e > a && s < b)
+    .sort((u, v) => u[0] - v[0]);
+  // uncovered spans inside [a, b] (≤ 0.25 s slivers tolerated)
+  let cur = a;
+  const holes = [];
+  for (const [s, e] of wins) {
+    if (s > cur + 0.25) holes.push([cur, s]);
+    cur = Math.max(cur, e);
+  }
+  if (cur < b - 0.25) holes.push([cur, b]);
+  if (holes.length) storyGaps.push(`f${String(n).padStart(3, '0')} (${what}, ${sysReq}) not alive over ${a.toFixed(1)}–${b.toFixed(1)}: gap ${holes.map(([u, v]) => `${u.toFixed(1)}–${v.toFixed(1)}`).join(', ')}`);
+}
+for (const g of storyGaps) warn(`storyboard: ${g}`);
+
+// ------------------------------------------------------------------------------ camera sight lines
+/**
+ * Every camera.shot pose (start, middle and end of a move) is tested against the world build read from
+ * src/world/site.ts: the 8 lantern pillars (shaft + plinth), the FOH/press tower, the camera pen and the piano
+ * riser. Warns when a pose stands inside one, when the centre sight line to `look` is blocked, or when those
+ * structures cover more than 17 % of the frame (16×9 ray grid, 16:9) — pillars may frame a picture at its edges.
+ */
+{
+  const site = read('src/world/site.ts');
+  const num1 = (rx, d) => {
+    const m = site.match(rx);
+    return m ? Number(m[1]) : d;
+  };
+  const obj = (name) => {
+    const m = site.match(new RegExp(`export const ${name} = \\{([^}]*)\\}`));
+    const o = {};
+    if (m) for (const kv of m[1].matchAll(/([a-zA-Z0-9]+):\s*(-?[\d.]+)/g)) o[kv[1]] = Number(kv[2]);
+    return o;
+  };
+  const PX = num1(/export const PILLAR_X = ([\d.]+)/, 20);
+  const PZ = (site.match(/export const PILLAR_Z = \[([^\]]*)\]/)?.[1] ?? '36,69,102,135').split(',').map(Number);
+  const PIL = obj('PILLAR');
+  const FOHB = obj('FOH');
+  const PEN = obj('CAM_PEN');
+  const RIS = obj('RISER');
+  const shaft = (PIL.shaft ?? 3) / 2 + 0.1;
+  const plinth = (PIL.plinth ?? 5) / 2;
+  const boxes = [];
+  for (const z of PZ)
+    for (const sx of [-1, 1]) {
+      boxes.push({ n: `pillar ${sx < 0 ? 'L' : 'R'}@${z}`, a: [sx * PX - shaft, 0, z - shaft], b: [sx * PX + shaft, PIL.top ?? 12.8, z + shaft] });
+      boxes.push({ n: `plinth ${sx < 0 ? 'L' : 'R'}@${z}`, a: [sx * PX - plinth, 0, z - plinth], b: [sx * PX + plinth, 1.6, z + plinth] });
+    }
+  if (FOHB.x0 !== undefined) boxes.push({ n: 'FOH tower', a: [FOHB.x0, 0, FOHB.z0], b: [FOHB.x1, FOHB.roof ?? 9.6, FOHB.z1] });
+  if (PEN.w) boxes.push({ n: 'camera pen', a: [PEN.x - PEN.w / 2, 0, PEN.z - PEN.d / 2], b: [PEN.x + PEN.w / 2, 1.3, PEN.z + PEN.d / 2] });
+  if (RIS.w) boxes.push({ n: 'piano riser', a: [RIS.x - RIS.w / 2, 0, RIS.z - RIS.d / 2], b: [RIS.x + RIS.w / 2, RIS.h ?? 0.9, RIS.z + RIS.d / 2] });
+  const rayBox = (o, d, bx) => {
+    let t0 = 0;
+    let t1 = 1e9;
+    for (let k = 0; k < 3; k++) {
+      if (Math.abs(d[k]) < 1e-9) {
+        if (o[k] < bx.a[k] || o[k] > bx.b[k]) return null;
+        continue;
+      }
+      let u = (bx.a[k] - o[k]) / d[k];
+      let v = (bx.b[k] - o[k]) / d[k];
+      if (u > v) [u, v] = [v, u];
+      t0 = Math.max(t0, u);
+      t1 = Math.min(t1, v);
+      if (t0 > t1) return null;
+    }
+    return t0;
+  };
+  const nrm = (v) => {
+    const l = Math.hypot(...v) || 1;
+    return v.map((x) => x / l);
+  };
+  const crs = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const inside = (p, bx, m = 0.3) => [0, 1, 2].every((k) => p[k] >= bx.a[k] - m && p[k] <= bx.b[k] + m);
+  const camIssues = [];
+  const checkPose = (pos, look, fov) => {
+    const out = [];
+    for (const bx of boxes) if (inside(pos, bx)) out.push(`inside ${bx.n}`);
+    const f = nrm(look.map((v, k) => v - pos[k]));
+    const dist = Math.hypot(...look.map((v, k) => v - pos[k]));
+    const r = nrm(crs(f, [0, 1, 0]));
+    const u = crs(r, f);
+    const th = Math.tan((fov * Math.PI) / 360);
+    const tw = (th * 16) / 9;
+    let blocked = 0;
+    const hits = new Map();
+    for (let iy = 0; iy < 9; iy++)
+      for (let ix = 0; ix < 16; ix++) {
+        const sx = ((ix + 0.5) / 16) * 2 - 1;
+        const sy = ((iy + 0.5) / 9) * 2 - 1;
+        const d = nrm(f.map((v, k) => v + r[k] * sx * tw + u[k] * sy * th));
+        let best = null;
+        for (const bx of boxes) {
+          const t = rayBox(pos, d, bx);
+          if (t !== null && t > 0.2 && t < dist * 0.97 && (!best || t < best.t)) best = { t, n: bx.n };
+        }
+        if (best) {
+          blocked++;
+          hits.set(best.n, (hits.get(best.n) ?? 0) + 1);
+        }
+      }
+    for (const bx of boxes) {
+      const t = rayBox(pos, f, bx);
+      if (t !== null && t > 0.2 && t < dist * 0.97) out.push(`centre sight line blocked by ${bx.n}`);
+    }
+    if (blocked / 144 > 0.17) out.push(`${Math.round((blocked / 144) * 100)} % of the frame covered (${[...hits].sort((a, b) => b[1] - a[1]).slice(0, 2).map(([n, c]) => `${n} ${c}`).join(', ')})`);
+    return out;
+  };
+  /** shots whose subject IS the structure (the pianist on the riser, the K close-up of lantern L1, f113) */
+  const CAM_EXCEPT = new Set([926.7, 1116.4]);
+  for (const [i, c] of cues.entries()) {
+    if (c.sys !== 'camera' || c.fx !== 'shot' || !Array.isArray(c.p?.pos) || !Array.isArray(c.p?.look)) continue;
+    if (CAM_EXCEPT.has(c.t)) continue;
+    const p = c.p;
+    const fov = numOr(p.fov, 50);
+    const poses = [['start', p.pos, p.look]];
+    if (p.to || p.lookTo) {
+      const to = p.to ?? p.pos;
+      const lt = p.lookTo ?? p.look;
+      poses.push(['mid', p.pos.map((v, k) => (v + to[k]) / 2), p.look.map((v, k) => (v + lt[k]) / 2)], ['end', to, lt]);
+    }
+    for (const [tag, pos, look] of poses) {
+      const iss = checkPose(pos, look, fov);
+      if (iss.length) camIssues.push(`${cueRef(c, i)} ${tag} pos ${pos.join(',')}: ${iss.join('; ')}`);
+    }
+  }
+  for (const m of camIssues) warn(`camera: ${m}`);
+}
+
+// ------------------------------------------------------------------------------ blackouts are black
+/**
+ * Sections labelled as a blackout / darkness / gap / black (and 'silence' sections) must render with zero set
+ * emissives: a `dark` lights look, no wash, pixels off and the stage master down (stage.state `master` ≤ 0.1;
+ * 'silence' sections default to 0.03). FACT exceptions (the red shafts of the Discorecord gap, the bridge's red
+ * glints / laser streaks) live in lights.pillars / lasers, which this check does not look at.
+ */
+const BLACK_RX = /blackout|darkness|— black\b/i;
+/** documented FACT exceptions: section label → checks skipped */
+const BLACK_EXCEPT = { 'Domitor Draconis — blackout accent': ['pixels'] }; // faint teal outline on the pixels (f106)
+for (const s of show.sections ?? []) {
+  if (!BLACK_RX.test(s.label) && s.kind !== 'silence') continue;
+  const skip = new Set(BLACK_EXCEPT[s.label] ?? []);
+  const inSec = (c) => c.t >= s.start - 0.02 && c.t < s.end - 0.05;
+  const probs = [];
+  const st = cues.filter((c) => inSec(c) && c.sys === 'stage' && c.fx === 'state');
+  const m = st.length ? st[st.length - 1].p?.master : undefined;
+  if (!(typeof m === 'number' ? m <= 0.1 : s.kind === 'silence')) probs.push(`stage master ${m ?? '1 (unset)'}`);
+  const wash = cues.filter((c) => inSec(c) && c.sys === 'lights' && c.fx === 'wash');
+  if (wash.some((c) => numOr(c.p?.intensity, 1) > 0.05)) probs.push('wash > 0.05');
+  const scr = cues.filter((c) => inSec(c) && c.sys === 'screens' && c.fx === 'content');
+  if (!skip.has('pixels') && scr.some((c) => c.p?.mode !== 'off')) probs.push('pixels not off');
+  const lk = cues.filter((c) => inSec(c) && c.sys === 'lights' && c.fx === 'look' && !c.p?.groups);
+  if (lk.some((c) => c.p?.preset !== 'dark')) probs.push('lights look not dark');
+  if (probs.length) warn(`blackout "${s.label}" (${s.start}): ${probs.join(', ')}`);
+}
 
 // ------------------------------------------------------------------------------ report
 const bySys = new Map();
