@@ -231,3 +231,62 @@ void main() {
   gl_FragColor = vec4(vCol * v, 1.0);
 }
 `;
+
+// ------------------------------------------------------------------------------------ wash glow
+// The decor floods washing the set scatter in the stage haze: the whole set sits in a glow of the
+// wash colour (f002 blue, f008 red, f029 magenta, f041 cyan). Analytic line integral of a few
+// anisotropic gaussian haze blobs along the view ray (no ray marching, no depth texture).
+export const GLOW_VERT = /* glsl */ `
+varying vec3 vWorld;
+void main() {
+  vec4 wp = modelMatrix * vec4(position, 1.0);
+  vWorld = wp.xyz;
+  gl_Position = projectionMatrix * viewMatrix * wp;
+}
+`;
+
+export const GLOW_FRAG = /* glsl */ `
+uniform vec4 uBlobC[4];   // centre xyz, w = weight
+uniform vec3 uBlobS[4];   // sigma (m) per axis
+uniform vec3 uBlobCol[4]; // colour x intensity
+uniform vec3 uBoxMin;
+uniform vec3 uBoxMax;
+varying vec3 vWorld;
+
+float erfA(float x) {
+  // Abramowitz & Stegun 7.1.26
+  float s = sign(x);
+  x = abs(x);
+  float t = 1.0 / (1.0 + 0.3275911 * x);
+  float y = 1.0 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * exp(-x * x);
+  return s * y;
+}
+
+void main() {
+  vec3 ro = cameraPosition;
+  vec3 rd = normalize(vWorld - ro);
+  // ray / box
+  vec3 inv = 1.0 / rd;
+  vec3 ta = (uBoxMin - ro) * inv;
+  vec3 tb = (uBoxMax - ro) * inv;
+  vec3 tmin = min(ta, tb);
+  vec3 tmax = max(ta, tb);
+  float t0 = max(max(max(tmin.x, tmin.y), tmin.z), 0.0);
+  float t1 = min(min(tmax.x, tmax.y), tmax.z);
+  if (t1 <= t0) discard;
+  vec3 acc = vec3(0.0);
+  for (int i = 0; i < 4; i++) {
+    vec3 s = uBlobS[i];
+    vec3 o = (ro - uBlobC[i].xyz) / s;
+    vec3 d = rd / s;
+    float a = dot(d, d);
+    float b = dot(o, d);
+    float c = dot(o, o);
+    float sa = sqrt(a);
+    float m = b / a;
+    float I = exp(-(c - b * m)) * 0.8862269 / sa * (erfA(sa * (t1 + m)) - erfA(sa * (t0 + m)));
+    acc += uBlobCol[i] * (I * uBlobC[i].w);
+  }
+  gl_FragColor = vec4(acc, 1.0);
+}
+`;

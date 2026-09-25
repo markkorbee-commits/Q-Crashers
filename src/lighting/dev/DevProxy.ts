@@ -13,6 +13,7 @@ import { resolvePillars } from '../rig';
 export class DevProxy {
   private readonly group = new THREE.Group();
   private readonly setMat: THREE.MeshStandardMaterial;
+  private readonly wingMat = new THREE.MeshStandardMaterial({ color: 0x3a1c16, roughness: 0.8, side: THREE.DoubleSide, emissive: 0x000000 });
   private readonly lamps: THREE.MeshBasicMaterial[] = [];
   private readonly shafts: THREE.MeshStandardMaterial[] = [];
 
@@ -66,7 +67,7 @@ export class DevProxy {
       shape.lineTo(s * 44, 6.5);
       shape.lineTo(s * 20, 10);
       shape.closePath();
-      const wing = new THREE.Mesh(new THREE.ShapeGeometry(shape), new THREE.MeshStandardMaterial({ color: 0x3a1c16, roughness: 0.8, side: THREE.DoubleSide }));
+      const wing = new THREE.Mesh(new THREE.ShapeGeometry(shape), this.wingMat);
       wing.position.z = -13.4;
       this.group.add(wing);
     }
@@ -97,6 +98,7 @@ export class DevProxy {
     const ph = this.app.scene.getObjectByName('placeholder-stage');
     if (ph) ph.visible = false;
     this.setMat.emissive.copy(env.stageWashColor).multiplyScalar(env.stageWashIntensity * 0.12 + env.strobe * 0.6);
+    this.wingMat.emissive.copy(env.stageWashColor).multiplyScalar(env.stageWashIntensity * 0.35 + env.strobe * 0.6);
     for (let i = 0; i < this.lamps.length; i++) {
       const m = env.pillarChase.length ? (env.pillarChase[i] ?? 1) : 1;
       this.lamps[i].color.copy(env.pillarLampColor).multiplyScalar(env.pillarLampIntensity * m * 6);
@@ -130,6 +132,13 @@ export function injectTestShow(app: App): void {
   look(120, 40, 'fan', { color: 'magenta', color2: 'white' });
   look(160, 20, 'fan', { color: 'white', speed: 0.25 });
   look(180, 20, 'audience', { color: 'white' });
+  // reference moments of the 2026 Endshow (storyboard frames)
+  look(200, 10, 'fan', { color: 'white', groups: ['truss', 'floor'] }); // f080: red stage, white fans
+  look(210, 10, 'fan', { color: 'white', tilt: 72, spread: 22, groups: ['truss'] }); // f029: magenta, white sky fans
+  look(220, 10, 'ballyhoo', { color: 'ice', color2: 'white', speed: 1.5 }); // f124: ice-white beam storm
+  look(230, 10, 'sky', { color: 'blue', groups: ['truss', 'floor'] }); // f030: blue sky beams
+  look(240, 10, 'fan', { color: 'ice', color2: 'blue', groups: ['floor', 'truss'], spread: 44 }); // f126
+  cues.push({ t: 220, dur: 10, sys: 'strobe', fx: 'kick', target: ['deck', 'roof'] });
   // hits, chases, blinders, strobes
   cues.push({ t: 97.6, dur: 0.6, sys: 'lights', fx: 'hit', p: { color: 'white' }, repeat: { every: 'bar', until: 104 } });
   cues.push({ t: 96, dur: 8, sys: 'strobe', fx: 'kick', target: 'deck' });
@@ -147,6 +156,10 @@ export function injectTestShow(app: App): void {
   wash(80, 16, 'cyan', 0.6);
   wash(96, 24, 'red', 1);
   wash(120, 80, 'magenta', 0.8);
+  wash(200, 10, 'red', 1);
+  wash(210, 10, 'magenta', 1);
+  wash(220, 10, 'ice', 0.6);
+  wash(230, 20, 'blue', 0.7);
   // lantern pillars
   const pil = (t: number, dur: number, p: Record<string, unknown>) => cues.push({ t, dur, sys: 'lights', fx: 'pillars', p });
   pil(0, 40, { color: '#4a86d8', mode: 'steady' });
@@ -156,6 +169,9 @@ export function injectTestShow(app: App): void {
   pil(96, 8, { color: 'red', mode: 'pulse' });
   pil(104, 8, { mode: 'off' });
   pil(112, 88, { color: '#ff5a3a', shaft: 'green', shaftIntensity: 1, mode: 'steady' });
+  pil(200, 10, { color: 'amber', shaft: 'red', mode: 'flicker' });
+  pil(210, 10, { color: '#ffb040', shaft: 'purple', mode: 'flicker' });
+  pil(220, 30, { color: 'cyan', shaft: 'blue', mode: 'steady' });
 
   const file: ShowFile = {
     ...app.show.file,

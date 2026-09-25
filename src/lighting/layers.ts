@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { BEAM_FRAG, BEAM_VERT, POOL_FRAG, POOL_VERT, SPRITE_FRAG, SPRITE_VERT } from './shaders';
+import { BEAM_FRAG, BEAM_VERT, GLOW_FRAG, GLOW_VERT, POOL_FRAG, POOL_VERT, SPRITE_FRAG, SPRITE_VERT } from './shaders';
 
 /**
  * GPU layers of the lighting system. Each layer is ONE instanced draw call whose per-instance
@@ -479,5 +479,71 @@ export class FixtureBodies {
     this.boxGeo.dispose();
     this.mat.dispose();
     this.lensMat.dispose();
+  }
+}
+
+// ------------------------------------------------------------------------------------------ wash glow
+/**
+ * The set's decor floods scattering in the stage haze: an analytic glow volume around the stage
+ * in the wash colour. One draw call; drawn from outside with the box's front faces (depth tested,
+ * so the crowd / pillars in front occlude it) and from inside with its back faces.
+ */
+export class WashGlow {
+  readonly mesh: THREE.Mesh;
+  readonly material: THREE.ShaderMaterial;
+  private readonly min = new THREE.Vector3(-135, -1, -42);
+  private readonly max = new THREE.Vector3(135, 58, 64);
+  private readonly cols: THREE.Vector3[];
+
+  constructor() {
+    const C = (x: number, y: number, z: number, w: number) => new THREE.Vector4(x, y, z, w);
+    const S = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
+    this.cols = [S(0, 0, 0), S(0, 0, 0), S(0, 0, 0), S(0, 0, 0)];
+    this.material = new THREE.ShaderMaterial({
+      name: 'WashGlow',
+      vertexShader: GLOW_VERT,
+      fragmentShader: GLOW_FRAG,
+      uniforms: {
+        uBlobC: { value: [C(0, 14, -5, 1), C(-44, 13, -9, 0.75), C(44, 13, -9, 0.75), C(0, 4, 10, 0.1)] },
+        uBlobS: { value: [S(30, 15, 12), S(22, 13, 11), S(22, 13, 11), S(62, 4.5, 14)] },
+        uBlobCol: { value: this.cols },
+        uBoxMin: { value: this.min },
+        uBoxMax: { value: this.max },
+      },
+      transparent: true,
+      depthWrite: false,
+      depthTest: true,
+      blending: THREE.AdditiveBlending,
+      side: THREE.FrontSide,
+      fog: false,
+      toneMapped: false,
+    });
+    const size = new THREE.Vector3().subVectors(this.max, this.min);
+    const geo = new THREE.BoxGeometry(size.x, size.y, size.z).translate((this.min.x + this.max.x) / 2, (this.min.y + this.max.y) / 2, (this.min.z + this.max.z) / 2);
+    this.mesh = new THREE.Mesh(geo, this.material);
+    this.mesh.frustumCulled = false;
+    this.mesh.renderOrder = 8;
+    this.mesh.name = 'WashGlow';
+  }
+
+  /** colour (linear) x intensity per blob; `cam` decides front/back face rendering */
+  update(cam: THREE.Vector3, wash: THREE.Color, washI: number, floor: THREE.Color, floorI: number, gain: number): void {
+    const inside = cam.x > this.min.x && cam.x < this.max.x && cam.y > this.min.y && cam.y < this.max.y && cam.z > this.min.z && cam.z < this.max.z;
+    const side = inside ? THREE.BackSide : THREE.FrontSide;
+    if (this.material.side !== side) {
+      this.material.side = side;
+      this.material.depthTest = !inside;
+      this.material.needsUpdate = true;
+    }
+    const k = washI * gain;
+    for (let i = 0; i < 3; i++) this.cols[i].set(wash.r * k, wash.g * k, wash.b * k);
+    const kf = floorI * gain;
+    this.cols[3].set(floor.r * kf, floor.g * kf, floor.b * kf);
+    this.mesh.visible = k + kf > 1e-4;
+  }
+
+  dispose(): void {
+    this.mesh.geometry.dispose();
+    this.material.dispose();
   }
 }

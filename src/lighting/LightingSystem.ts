@@ -15,7 +15,7 @@ import {
   type LightCue,
   type StateBlend,
 } from './cues';
-import { BeamLayer, createNoise3D, FixtureBodies, PoolLayer, SPR_BLINDER, SPR_LENS, SPR_STROBE, SpriteLayer, type SharedUniforms } from './layers';
+import { BeamLayer, createNoise3D, FixtureBodies, PoolLayer, SPR_BLINDER, SPR_LENS, SPR_STROBE, SpriteLayer, WashGlow, type SharedUniforms } from './layers';
 import { evalLook, vnoise, type AimOut } from './looks';
 import { buildRig, GROUP_NAMES, isDefaultAnchor, matchTarget, RIG_SOURCES, type Rig } from './rig';
 
@@ -56,6 +56,8 @@ export class LightingSystem implements System {
   private pools!: PoolLayer;
   private sprites!: SpriteLayer;
   private bodies!: FixtureBodies;
+  private glow!: WashGlow;
+  private readonly floorGlow = new THREE.Color();
   private rig: Rig | null = null;
   private readonly idx = new LightCueIndex();
   /** anchors registered by this system (treated as "not registered by the geometry owner") */
@@ -104,7 +106,8 @@ export class LightingSystem implements System {
     this.pools = new PoolLayer(this.shared);
     this.sprites = new SpriteLayer(this.shared);
     this.bodies = new FixtureBodies();
-    this.root.add(this.bodies.group, this.pools.mesh, this.beams.mesh, this.sprites.mesh);
+    this.glow = new WashGlow();
+    this.root.add(this.bodies.group, this.glow.mesh, this.pools.mesh, this.beams.mesh, this.sprites.mesh);
     app.scene.add(this.root);
 
     // visual lifetimes: looks fade out, blinders glow down, strobe flashes decay
@@ -232,7 +235,7 @@ export class LightingSystem implements System {
     this.idx.chases.alive(t, this.chases);
     this.idx.blinders.alive(t, this.blinders);
     this.idx.strobes.alive(t, this.strobes);
-    for (let i = 0; i < this.hits.length; i++) this.resolveCueColors(this.hits[i], 'white');
+    for (let i = 0; i < this.hits.length; i++) this.resolveCueColors(this.hits[i], 'accent');
     for (let i = 0; i < this.chases.length; i++) this.resolveCueColors(this.chases[i]);
     for (let i = 0; i < this.blinders.length; i++) this.resolveCueColors(this.blinders[i], 'warm');
     for (let i = 0; i < this.strobes.length; i++) this.resolveCueColors(this.strobes[i], 'white');
@@ -491,6 +494,13 @@ export class LightingSystem implements System {
     this.writeWash(t, env);
     this.writePillars(t, beat, env);
 
+    // haze glow around the set: floods in the wash colour + the rig's own spill low in front
+    const hz = 0.25 + 0.75 * haze;
+    this.floorGlow.copy(env.stageColor);
+    const floorI = Math.min(1.5, (1.4 * sumDim) / nf) + strobe * 0.6 + blindMax * 0.8;
+    if (strobe > 0) this.floorGlow.lerp(this.cT.setRGB(1, 1, 1), Math.min(1, strobe));
+    this.glow.update(cam.position, env.stageWashColor, env.stageWashIntensity + strobe * 0.35, this.floorGlow, floorI, 0.022 * hz);
+
     this.dev?.update(ctx);
     this.cpuMs = this.cpuMs * 0.9 + (performance.now() - t0) * 0.1;
   }
@@ -638,7 +648,7 @@ export class LightingSystem implements System {
       beamBudget: this.q?.beamBudget ?? 0,
       pools: this.nPools,
       sprites: this.nSprites,
-      drawCalls: 6,
+      drawCalls: 7,
       cues: this.idx.count,
       looks,
       strobe: Number(this.strobeLevel.toFixed(2)),
@@ -652,6 +662,7 @@ export class LightingSystem implements System {
     this.pools.dispose();
     this.sprites.dispose();
     this.bodies.dispose();
+    this.glow.dispose();
     this.shared.tNoise.value?.dispose();
     this.root.removeFromParent();
   }
