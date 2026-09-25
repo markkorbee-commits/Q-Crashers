@@ -26,7 +26,7 @@ export interface ShellSpec {
   droop: number;
   intensity: number;
   color: string;
-  /** burst radius relative to the default (0.2 * height) */
+  /** burst radius relative to the default (0.33 * height, see defaultRadius in FireworkSystem) */
   radiusK: number;
   jitter: number;
   hz?: number;
@@ -42,11 +42,11 @@ export interface ShellSpec {
 
 export const SHELLS: Record<string, ShellSpec> = {
   peony: {
-    stars: 110, minStars: 30, dist: DIST.SPHERE, drag: 1.9, burn: [1.3, 1.9], trail: 0.11, glitter: 0, head: 0.34, tailW: 0.5,
+    stars: 140, minStars: 30, dist: DIST.SPHERE, drag: 1.9, burn: [1.3, 1.9], trail: 0.11, glitter: 0, head: 0.34, tailW: 0.5,
     flags: F.FLICKER, grav: -9.81, trailGain: 0.9, droop: 0, intensity: 22, color: 'red', radiusK: 1, jitter: 0.1, liftGain: 1, flash: 1,
   },
   chrysanthemum: {
-    stars: 120, minStars: 32, dist: DIST.SPHERE, drag: 1.7, burn: [1.6, 2.2], trail: 0.75, glitter: 0.45, head: 0.3, tailW: 0.35,
+    stars: 150, minStars: 32, dist: DIST.SPHERE, drag: 1.7, burn: [1.6, 2.2], trail: 0.75, glitter: 0.45, head: 0.3, tailW: 0.35,
     flags: F.COOL | F.FLICKER, grav: -9.81, trailGain: 0.9, droop: 2, intensity: 18, color: 'gold', radiusK: 1, jitter: 0.1, liftGain: 1, flash: 1,
   },
   dahlia: {
@@ -74,16 +74,16 @@ export const SHELLS: Record<string, ShellSpec> = {
     flags: F.STROBE, grav: -9.81, trailGain: 0, droop: 0, intensity: 30, color: 'white', radiusK: 0.95, jitter: 0.18, hz: 11, liftGain: 1, flash: 0.8,
   },
   crackle: {
-    stars: 80, minStars: 24, dist: DIST.SPHERE, drag: 1.9, burn: [0.9, 1.3], trail: 0.32, glitter: 0.4, head: 0.26, tailW: 0.45,
-    flags: F.COOL, grav: -9.81, trailGain: 0.9, droop: 1, intensity: 16, color: 'gold', radiusK: 0.9, jitter: 0.16, pops: 14, liftGain: 1, flash: 1,
+    stars: 120, minStars: 30, dist: DIST.SPHERE, drag: 1.9, burn: [1.15, 1.6], trail: 0.55, glitter: 0.4, head: 0.3, tailW: 0.45,
+    flags: F.COOL, grav: -9.81, trailGain: 1.1, droop: 1, intensity: 16, color: 'gold', radiusK: 1.2, jitter: 0.16, pops: 7, liftGain: 1, flash: 1,
   },
   brocade: {
-    stars: 100, minStars: 30, dist: DIST.SPHERE, drag: 1.8, burn: [2.1, 2.8], trail: 1.3, glitter: 1, head: 0.26, tailW: 0.5,
-    flags: F.COOL | F.FLICKER, grav: -9.81, trailGain: 1.05, droop: 2.5, intensity: 16, color: 'gold', radiusK: 1, jitter: 0.1, liftGain: 1, flash: 0.9,
+    stars: 130, minStars: 34, dist: DIST.SPHERE, drag: 1.8, burn: [2.3, 3.1], trail: 1.3, glitter: 1, head: 0.26, tailW: 0.5,
+    flags: F.COOL | F.FLICKER, grav: -9.81, trailGain: 1.05, droop: 2.5, intensity: 16, color: 'gold', radiusK: 1.15, jitter: 0.1, liftGain: 1, flash: 0.9,
   },
   kamuro: {
-    stars: 120, minStars: 34, dist: DIST.SPHERE, drag: 2.5, burn: [3.6, 5.0], trail: 2.4, glitter: 1, head: 0.22, tailW: 0.5,
-    flags: F.COOL | F.FLICKER, grav: -11, trailGain: 1.1, droop: 3, intensity: 11, color: 'gold', radiusK: 0.9, jitter: 0.1, liftGain: 1.2, flash: 0.7,
+    stars: 150, minStars: 40, dist: DIST.SPHERE, drag: 2.5, burn: [3.6, 5.0], trail: 2.4, glitter: 1, head: 0.22, tailW: 0.5,
+    flags: F.COOL | F.FLICKER, grav: -11, trailGain: 1.1, droop: 3, intensity: 11, color: 'gold', radiusK: 1.1, jitter: 0.1, liftGain: 1.2, flash: 0.7,
   },
   /** strobing "glitter willow": long-hanging stars that twinkle while they drift down (extra type) */
   glitter: {

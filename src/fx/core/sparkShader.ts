@@ -212,14 +212,33 @@ void main() {
     col = c1;
     if ((flags & F_COOL) != 0) {
       float cool = clamp(age / max(trail, 0.05), 0.0, 1.0);
-      // sparks: white-hot -> gold -> deep orange as they age along the trail and over life
+      // sparks: white-hot -> gold -> deep orange as they age along the trail and over life.
+      // Coloured stars (strontium red, pink, blue ...) keep their hue and only darken: a red comet's
+      // tail stays red instead of turning into a charcoal-orange one.
       float lifeCool = (dist == DIST_CONE || dist == DIST_LINE || dist == DIST_HEMI) ? smoothstep(0.1, 1.0, lf) : 0.0;
-      vec3 coolTo = r4.w < -0.5 ? r4.rgb : vec3(1.0, 0.3, 0.06);
+      vec3 coolTo;
+      if (r4.w < -0.5) coolTo = r4.rgb;
+      else {
+        vec3 hn = c1 / max(max(c1.r, max(c1.g, c1.b)), 1e-4);
+        float goldish = step(hn.b, hn.g + 0.02) * step(hn.g, hn.r + 0.02) * smoothstep(0.12, 0.3, hn.g);
+        coolTo = mix(hn * vec3(0.8, 0.5, 0.6), vec3(1.0, 0.3, 0.06), goldish);
+      }
       col = mix(c1, coolTo, clamp(cool * 0.85 + lifeCool * 0.8, 0.0, 1.0));
     }
     glit = r6.w * smoothstep(0.0, 0.3, sPar);
     hot = (1.0 - sPar) * (0.35 + pearl * 0.4);
   }
+  // saturated metal-salt stars (red, pink, blue, green): a small tinted core instead of a white-hot
+  // one and less peak, so the tone mapper's path to white does not bleach a red comet into pink or
+  // orange. Charcoal / titanium colours (gold, orange, white sparks) keep their full brightness.
+  float cmx = max(col.r, max(col.g, col.b));
+  vec3 chn = col / max(cmx, 1e-4);
+  float sat = 1.0 - min(chn.r, min(chn.g, chn.b));
+  float goldC = step(chn.b, chn.g + 0.02) * step(chn.g, chn.r + 0.02) * smoothstep(0.12, 0.3, chn.g);
+  float s2 = sat * sat * (1.0 - goldC);
+  hot *= mix(1.0, 0.3, s2);
+  I *= mix(1.0, 0.42, s2);
+  vec3 hotCol = mix(vec3(1.0, 0.94, 0.82), mix(chn, vec3(1.0), 0.45), s2);
 
   // sparks die on the ground (no spark ever tunnels through the field)
   I *= smoothstep(-0.3, 0.25, P.y);
@@ -246,7 +265,7 @@ void main() {
 
   float fog = fogT(depth);
   vCol = col * I * gain * fog;
-  vHot = vec3(1.0, 0.94, 0.82) * I * gain * fog * hot;
+  vHot = hotCol * I * gain * fog * hot;
   vUv = vec2(side, cap);
   vTS = tS;
   vGlit = glit;

@@ -39,6 +39,7 @@ export class FogSystem extends CueFxSystem {
   private stageSmoke = 0;
   private skySmoke = 0;
   private hazeLevel = DEFAULT_HAZE;
+  private crowdSys: { mode?: unknown } | null | undefined = undefined;
 
   protected override onInit(app: App): void {
     if (app.params.has('fxproxy')) installFxProxy(app);
@@ -97,20 +98,24 @@ export class FogSystem extends CueFxSystem {
     const size = num(p.size, 1, 0.2, 6);
     const tint = fxColor(p.color, this.palette, this.c1, 'white').clone();
     const dur = Math.max(0.4, Math.min(cue.dur, 4));
+    // a smoke cannon's plume grows sub-linearly with its size class, and many targets share the
+    // volume (12 wing heads must not stack into one opaque cloud that hides the fire it frames)
+    const sq = Math.sqrt(size);
+    const share = 1 / Math.sqrt(Math.max(1, pts.length / 4));
     pts.forEach((pos, i) => {
-      const n = Math.max(3, Math.round(10 * size * Math.min(1, this.quality.particleScale * 1.5)));
+      const n = Math.max(3, Math.round(9 * sq * share * Math.min(1, this.quality.particleScale * 1.5)));
       out.add(
         new Emitter(DIST.CONE, F.RAMP)
           .on(L_FOG)
           .originV(pos)
           .time(cue.t)
           .dir(0, 1, 0.25, 0.7)
-          .speed(3 * size, 9 * size)
+          .speed(2.5 * sq, 6.5 * sq)
           .physics(1.1, 0.25)
-          .color(tint, 0.34)
-          .life(12, 19)
+          .color(tint, 0.28)
+          .life(10, 16)
           .emit(n, dur)
-          .size(2 * size, 11 * size)
+          .size(1.5 + 1.2 * sq, 7.5 * sq)
           .trail(0.45, 0.28)
           .seed(this.sub(cue, i))
           .set(R.X1, 0.12)
@@ -257,13 +262,26 @@ export class FogSystem extends CueFxSystem {
     this.stageSmoke = 1 - Math.exp(-pyro);
     this.skySmoke = 1 - Math.exp(-sky);
     const env = this.app.env;
-    env.haze = Math.min(1, level + this.stageSmoke * 0.25);
+    // env.haze drives beam / laser / crowd-scatter visibility everywhere; pyro smoke hangs around
+    // the stage, it does not thicken the air over the whole field — so it only nudges the level
+    env.haze = Math.min(1, level + this.stageSmoke * 0.08);
     if (this.haze) {
-      const stage = 0.075 * level + 0.2 * this.stageSmoke;
-      const field = 0.028 * level + 0.03 * this.stageSmoke;
+      // pyro smoke thickens the stage cloud, but only moderately: a flame ring must not turn the
+      // stage into one glowing blob. The field layer is thinner with a crowd present (the bodies
+      // already break up the view; the veil in front of the stage belongs to the empty field).
+      const tribe = this.crowdMode() === 'tribe';
+      const stage = 0.062 * level + 0.1 * this.stageSmoke;
+      const field = (0.022 * level + 0.02 * this.stageSmoke) * (tribe ? 0.55 : 1);
       const skyD = 0.02 * level + 0.2 * this.skySmoke;
       this.haze.setDensity(stage, field, skyD);
     }
+  }
+
+  /** 'tribe' (crowd present) or 'filmed' (empty grounds), read duck-typed from the crowd system */
+  private crowdMode(): string {
+    if (this.crowdSys === undefined) this.crowdSys = (this.app.get('crowd') as unknown as { mode?: unknown } | undefined) ?? null;
+    const m = this.crowdSys?.mode;
+    return typeof m === 'string' ? m : 'filmed';
   }
 
   override stats(): Record<string, number | string> {

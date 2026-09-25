@@ -79,7 +79,13 @@ void main() {
   vec2 cs = vec2(cos(ang), sin(ang));
   vec2 corner = position.xy;
   vec2 rc = vec2(corner.x * cs.x - corner.y * cs.y, corner.x * cs.y + corner.y * cs.x);
-  if ((flags & F_FLAT) != 0) {
+  if (kind == 6) {
+    // light pool on the ground: a horizontal world-space quad (not a billboard), wound so its front
+    // face points up (the material culls back faces)
+    vp = viewMatrix * vec4(P + vec3(corner.x * rad, 0.0, -corner.y * rad * max(r11.y, 0.05)), 1.0);
+    depth = -vp.z;
+    rc = corner;
+  } else if ((flags & F_FLAT) != 0) {
     vp.xy += corner * rad * vec2(1.0, r11.y);
     rc = corner;
   } else if (r11.z > 0.0) {
@@ -96,7 +102,7 @@ void main() {
   gl_Position = projectionMatrix * vp;
   if (depth < 0.1) CULL();
   // world height of this corner (for the analytic floor fade of smoke / fog: no hard ground lines)
-  vFloor = vec2(P.y + dot(viewMatrix[1].xy, vp.xy - vp0), kind == 0 || kind == 3 || kind == 4 ? -1e4 : r10.y);
+  vFloor = vec2(P.y + dot(viewMatrix[1].xy, vp.xy - vp0), kind == 0 || kind >= 3 && kind != 5 ? -1e4 : r10.y);
 
   // fade when the camera is inside / very close to the puff (no depth texture: this is the cheap soft path)
   float nearF = smoothstep(rad * 0.2, rad * 1.2 + 0.5, depth);
@@ -115,9 +121,11 @@ void main() {
     vEmis = r3.rgb * r3.w * em * fog * nearF;
     vLit = (r4.rgb * envLight(P) * 1.4 + r3.rgb * r3.w * 0.004) * fog;
     vPar = vec4(smoothstep(0.0, 0.03, f) * em * nearF, temp, soot, 0.0);
-  } else if (kind == 3 || kind == 4) {
+  } else if (kind == 3 || kind == 4 || kind == 6) {
     float decay = max(r9.x, 0.01);
-    float g = kind == 3 ? exp(-tau / decay) : (0.75 + 0.5 * rnd(key, uint(floor(uTime * 30.0)) + 40u));
+    float g = kind == 3 ? exp(-tau / decay)
+            : kind == 4 ? (0.75 + 0.5 * rnd(key, uint(floor(uTime * 30.0)) + 40u))
+                        : (0.85 + 0.3 * rnd(key, uint(floor(uTime * 12.0)) + 40u));
     vEmis = r3.rgb * r3.w * g * em * fog * smoothstep(0.0, 0.02, tau) * (1.0 - smoothstep(0.7, 1.0, f)) * nearF;
     vPar = vec4(0.0, 0.0, 0.0, float(kind));
   } else {
@@ -152,12 +160,15 @@ vec3 flameRamp(vec3 base, float T, float warm) {
   float t = clamp(T, 0.0, 1.0);
   float I = max(base.r, max(base.g, base.b));
   vec3 c = base / max(I, 1e-4);
-  // coloured flames: saturate toward the base hue as they cool, whiten when hot
-  vec3 hue = pow(max(c, vec3(0.002)), vec3(mix(2.8, 0.2, t)));
+  // coloured flames (salt-doped / lit plumes): keep the hue saturated even in the hot core — only
+  // a slight lift toward white, and a capped luminance so the tone mapper never bleaches them
+  vec3 hue = pow(max(c, vec3(0.002)), vec3(mix(1.8, 0.7, t)));
   // hydrocarbon flames: soot-radiation ramp (red -> orange -> yellow -> white-yellow)
   vec3 bb = vec3(1.0, 0.95 * pow(t, 0.9), 0.6 * t * t * t);
   hue = mix(hue, bb * mix(vec3(1.0), c / max(vec3(1.0, 0.36, 0.08), vec3(0.05)), 0.15), warm);
-  float lum = (0.08 + 0.5 * t + 0.9 * t * t) * I;
+  // dark hues (deep blue, red) get a luminance lift so a blue plume reads as brightly as a warm one
+  float lumK = clamp(0.35 / max(dot(c, vec3(0.2126, 0.7152, 0.0722)), 0.05), 1.0, 2.2);
+  float lum = mix((0.12 + 0.55 * t + 0.45 * t * t) * lumK, 0.08 + 0.5 * t + 0.9 * t * t, warm) * I;
   return hue * lum;
 }
 
@@ -176,9 +187,10 @@ void main() {
     vec3 e = flameRamp(vEmis, T, vWarm) * shape;
     float soot = clamp(vPar.z * shape * (0.5 + nz2.b * 1.0), 0.0, 0.95);
     gl_FragColor = vec4((e * (1.0 - soot) + vLit * soot) * vPar.x, soot * vPar.x);
-  } else if (kind == 3 || kind == 4) {
-    float g = exp(-d2 * 5.0) * (0.8 + 0.4 * nz.r) + exp(-d2 * 28.0) * 0.9;
-    gl_FragColor = vec4(vEmis * g, 0.0);
+  } else if (kind == 3 || kind == 4 || kind == 6) {
+    float g = kind == 6 ? exp(-d2 * 3.2) * (0.65 + 0.7 * nz.r) - 0.04
+                        : exp(-d2 * 5.0) * (0.8 + 0.4 * nz.r) + exp(-d2 * 28.0) * 0.9;
+    gl_FragColor = vec4(vEmis * max(g, 0.0), 0.0);
   } else {
     float turb = (nz.r - 0.5) * 0.9 + (nz2.g - 0.5) * 0.45;
     float shape = smoothstep(1.0, 0.1, d + turb * vErode) * smoothstep(1.0, 0.72, d);

@@ -4,8 +4,8 @@ import type { QualitySettings } from '../core/types';
 import type { Cue } from '../show/ShowTypes';
 import { CueFxSystem, EmitterSet } from '../fx/core/CueFxSystem';
 import { DIST, Emitter, F, PUFF, R, apexTime, speedForHeight } from '../fx/core/Emitter';
-import { fxColor, num, str } from '../fx/core/fxColors';
-import { densify, patternSteps, tiltedUp } from '../fx/core/placement';
+import { bool, fxColor, num, str } from '../fx/core/fxColors';
+import { densify, patternSteps, tiltedUp, wingFire } from '../fx/core/placement';
 
 const L_SMOKE = 0;
 const L_FIRE = 1;
@@ -22,10 +22,15 @@ const FIRE = new THREE.Color(1.0, 0.36, 0.08);
  * (see src/fx/core). Every fx of docs/show-format.md "pyro" is supported; unknown params are ignored.
  *
  * Extra params understood (superset of the contract, all optional):
- *   flame/firewall: `angle` (deg, tilt away from the stage centre), `intensity`
+ *   flame/firewall: `angle` (deg, tilt away from the stage centre), `intensity`, `width` (x column
+ *     width), `fireball: true` (8–10 m fireball with a smoke cap, `size`); firewall on the wings
+ *     burns along the finger spars
  *   gerb/sparkular: `angle`, `spread` (deg)
  *   burst: dur >= 2 s turns it into a Bengal flare; `color`
  *   bengal (extra fx): coloured flare with thick self-lit smoke: `color`, `size`
+ *   all: `rows` (list, 1 = row nearest the stage) narrows multi-row targets such as pillars_top
+ * Chase patterns follow the unrolled front "U" (see placement.uCoord), so combined targets like
+ * ["deck_front","side_front","arm_posts"] chase as one ring.
  */
 export class PyroSystem extends CueFxSystem {
   readonly name = 'pyro';
@@ -177,113 +182,176 @@ export class PyroSystem extends CueFxSystem {
     );
   }
 
+  /** target positions (combined targets that share a unit, e.g. arm_posts + arm_ends, fire it once) */
   private points(cue: Cue, fallback: AnchorName): THREE.Vector3[] {
-    return this.app.anchors.resolve(cue.targets, fallback).map((p) => p.clone());
+    let out: THREE.Vector3[] = [];
+    for (const p of this.app.anchors.resolve(cue.targets, fallback)) {
+      let dup = false;
+      for (let i = 0; i < out.length && !dup; i++) dup = out[i].distanceToSquared(p) < 1.6;
+      if (!dup) out.push(p.clone());
+    }
+    // `rows`: keep only these rows counted from the stage (1 = nearest), e.g. pillar capitals
+    const rows = cue.p.rows;
+    if (Array.isArray(rows) && rows.length && out.length > 1) {
+      const zs: number[] = [];
+      for (const p of [...out].sort((a, b) => a.z - b.z)) if (!zs.length || p.z - zs[zs.length - 1] > 3) zs.push(p.z);
+      const keep = out.filter((p) => {
+        let r = 0;
+        while (r + 1 < zs.length && p.z - zs[r + 1] > -3) r++;
+        return rows.includes(r + 1);
+      });
+      if (keep.length) out = keep;
+    }
+    return out;
   }
 
   // ---------------------------------------------------------------- flames
 
+  /**
+   * Flame projectors. Every unit is a discrete column: a narrow, fast, velocity-stretched tongue
+   * (~1 m at the nozzle, ~3 m at the top for a 9 m flame) that rolls into a short fireball and a
+   * little soot — neighbouring 3 m-spaced units touch only at their tips, so a row reads as a line
+   * of jets with the set visible between them, not as a curtain.
+   *  - H >= 12 on a few stand-alone units ("power flames", e.g. the two 15 m tower torches): 3 m
+   *    wide at the base, 8–9 m fireball top, slower and fuller.
+   *  - `fireball: true`: a spherical 8–10 m fireball with a dark smoke cap (corner fireballs).
+   *  - firewall on `wing_left`/`wing_right`: the burning wings — fire runs up every finger spar
+   *    (1.7 m pitch), wide billowing flames, a roll-over fireball at each tip on every ignition.
+   *  - coloured (non-hydrocarbon) flames keep their hue: no white-hot core, less soot.
+   */
   private flames(cue: Cue, out: EmitterSet, wall: boolean): void {
     const p = cue.p;
-    let pts = this.points(cue, 'deck_front');
-    if (wall) pts = densify(pts, 3.2);
     const H = num(p.height, wall ? 6 : 8, 0.5, 30);
+    if (!wall && bool(p.fireball, false)) {
+      this.fireballs(cue, out, H);
+      return;
+    }
+    const wing = wall && cue.targets.length > 0 && cue.targets.every((t) => t === 'wing_left' || t === 'wing_right');
+    let pts = this.points(cue, 'deck_front');
+    let tops: THREE.Vector3[] = [];
+    if (wing) ({ points: pts, tops } = wingFire(pts, this.app.anchors.get('wing_tips'), 1.8));
+    else if (wall) pts = densify(pts, 3.2);
     const color = this.flameColor(p.color);
+    const warm = this.warm;
     const pattern = str(p.pattern, 'all');
     const stagger = num(p.stagger, pattern === 'all' ? 0 : 0.06, 0, 2);
     const angle = num(p.angle, 0, -80, 80);
     const inten = num(p.intensity, 1, 0, 3);
     const steps = patternSteps(pts, pattern, cue.seed, cue.step);
     const dur = Math.max(0.12, cue.dur);
-    const life = 0.55 + 0.05 * H;
-    const k = 2.4;
+    // power flames are stand-alone units (torches, towers); a tall cue on a long row stays a row of jets
+    const big = !wing && H >= 12 && pts.length <= 8;
+    // geometry of one column: start radius, radius growth (m) and width override
+    const wK = num(p.width, 1, 0.3, 4);
+    const r0 = (wing ? 0.8 : big ? 0.75 + 0.055 * H : 0.28 + 0.03 * H) * wK;
+    // coloured (cold-fire / lit-plume) columns billow a little wider than a hydrocarbon jet
+    const rG = (wing ? 0.65 * H : big ? 0.25 * H : 0.13 * H) * wK * (warm ? 1 : 1.35);
+    const life = (wing ? 0.75 : 0.5) + (big ? 0.055 : 0.05) * H;
+    const k = wing ? 2.0 : 2.4;
     const buoy = 7.5;
     const vT = buoy / k;
     const tr = life * 0.75;
-    const v0 = vT + ((0.95 * H - vT * tr) * k) / (1 - Math.exp(-k * tr));
-    const rate = wall ? 30 : 40;
+    const v0 = vT + (((wing ? 0.7 : 0.93) * H - vT * tr) * k) / (1 - Math.exp(-k * tr));
+    const rate = wing ? 24 : big ? 52 : 38;
     const count = this.pc(rate * life, 8);
+    // hydrocarbon flames end in soot; coloured (additive-salt / lit CO2) plumes barely smoke
+    // (the soot takes over late: at night the fireball stays bright to its top, black smoke is only a cap)
+    const soot = warm ? (wing ? 0.7 : big ? 0.5 : 0.55) : 0.08;
+    const sootStart = wing ? 0.45 : big ? 0.62 : 0.58;
     let maxDelay = 0;
     let n = 0;
     const cx = new THREE.Vector3();
     for (let u = 0; u < pts.length; u++) {
       if (steps[u] < 0) continue;
       const pos = pts[u];
-      const hj = wall ? 0.85 + 0.3 * hashF(cue.seed, u, 3) : 1;
+      const hj = wall ? 0.85 + 0.3 * hashF(cue.seed, u, 3) : 0.94 + 0.12 * hashF(cue.seed, u, 3);
       const t0 = cue.t + steps[u] * stagger;
       maxDelay = Math.max(maxDelay, steps[u] * stagger);
       const d = tiltedUp(pos.x, angle, this.v1);
       const seed = this.sub(cue, u * 8);
-      // fireball column
+      // the column: fast narrow tongue near the nozzle (stretched along its velocity), fireball on top
       out.add(
         new Emitter(DIST.CONE, F.RAMP)
           .on(L_FIRE)
           .originV(pos)
           .time(t0)
-          .dirV(d, 0.13)
-          .speed(v0 * hj * 0.85, v0 * hj * 1.08)
+          .dirV(d, wing ? 0.42 : big ? 0.38 : 0.075)
+          .speed(v0 * hj * 0.86, v0 * hj * 1.06)
           .physics(k, buoy)
-          .color(color, 8 * inten)
-          .color2(SOOT, this.warm)
+          // (the wing units overlap ~4x along the spars: less each, so the mass stays orange-yellow)
+          .color(color, (warm ? (wing ? 5 : 8) : 6) * inten)
+          .color2(SOOT, warm)
           .life(life * 0.8, life * 1.05)
           .emit(count, dur)
-          .size(0.6 + 0.06 * H, 0.38 * H * hj)
-          .trail(0.75, 0.55 + 0.02 * H) // TRAIL = size exponent, GLITTER = noise scale
+          .size(r0, rG * hj)
+          .trail(wing ? 0.7 : 0.9, 0.55 + 0.02 * H) // TRAIL = size exponent, GLITTER = noise scale
           .seed(seed)
           .set(R.X1, 1.5)
           .set(R.X2, 0.95)
           .set(R.X3, 0.06)
-          .set(R.Y0, 0.85)
-          .set(R.Y1, 0.45)
+          .set(R.Y0, soot)
+          .set(R.Y1, sootStart)
           .set(R.Y3, 0.6)
-          .set(R.Z2, 0.07)
+          .set(R.Z2, wing ? 0.02 : big ? 0.04 : 0.075)
           .set(R.Z3, PUFF.FLAME)
           .window(t0, t0 + dur + life * 1.1),
       );
-      // white-hot nozzle glow while firing
-      out.add(
-        new Emitter(DIST.SINGLE, 0)
-          .on(L_FIRE)
-          .origin(pos.x + d.x * 0.6, pos.y + d.y * 0.6, pos.z)
-          .time(t0)
-          .dirV(d)
-          .speed(0.5)
-          .physics(1, 0)
-          .color(this.c2.copy(color).lerp(WHITE, 0.5), 3.5 * inten)
-          .life(0.1, 0.14)
-          .emit(3, dur)
-          .size(0.35 + 0.05 * H, 0.4)
-          .trail(1, 1)
-          .seed(seed ^ 0x55)
-          .set(R.X0, 0.2)
-          .set(R.Z3, PUFF.GLOW)
-          .window(t0, t0 + dur + 0.15),
-      );
-      // scattered light of the fire in the haze around it (reads as heat + volume from afar)
-      out.add(
-        new Emitter(DIST.SINGLE, F.RAMP)
-          .on(L_FIRE)
-          .origin(pos.x + d.x * H * 0.5, pos.y + d.y * H * 0.5, pos.z)
-          .time(t0)
-          .dirV(d)
-          .speed(0.4)
-          .physics(1, 0)
-          .color(color, 0.25 * inten)
-          .life(0.35, 0.45)
-          .emit(2, dur)
-          .size(0.5 * H + 1, 0.25 * H)
-          .trail(1, 1)
-          .seed(seed ^ 0x66)
-          .set(R.X3, 0.12)
-          .set(R.Z3, PUFF.GLOW)
-          .window(t0, t0 + dur + 0.5),
-      );
+      // white-hot nozzle glow while firing (not on the wings: those burn along the structure)
+      if (!wing)
+        out.add(
+          new Emitter(DIST.SINGLE, 0)
+            .on(L_FIRE)
+            .origin(pos.x + d.x * 0.6, pos.y + d.y * 0.6, pos.z)
+            .time(t0)
+            .dirV(d)
+            .speed(0.5)
+            .physics(1, 0)
+            .color(this.c2.copy(color).lerp(WHITE, warm ? 0.5 : 0.15), (warm ? 3.5 : 2) * inten)
+            .life(0.1, 0.14)
+            .emit(3, dur)
+            .size(r0 * 0.9, 0.3)
+            .trail(1, 1)
+            .seed(seed ^ 0x55)
+            .set(R.X0, 0.2)
+            .set(R.Z3, PUFF.GLOW)
+            .window(t0, t0 + dur + 0.15),
+        );
+      // light of the fire scattered in the haze around it (heat + volume from afar); every
+      // second unit only on tight rows, so the glow does not fuse a row into one band
+      if (wing ? u % 3 === 0 : pts.length < 10 || u % 2 === 0)
+        out.add(
+          new Emitter(DIST.SINGLE, F.RAMP)
+            .on(L_FIRE)
+            .origin(pos.x + d.x * H * 0.55, pos.y + d.y * H * 0.55, pos.z)
+            .time(t0)
+            .dirV(d)
+            .speed(0.4)
+            .physics(1, 0)
+            .color(color, (wing ? 0.3 : 0.24) * inten)
+            .life(0.35, 0.45)
+            .emit(2, dur)
+            .size(0.32 * H + 1 + rG * 0.3, 0.15 * H)
+            .trail(1, 1)
+            .seed(seed ^ 0x66)
+            .set(R.X3, 0.12)
+            .set(R.Z3, PUFF.GLOW)
+            .window(t0, t0 + dur + 0.5),
+        );
+      // the fire lights the ground in front of it (the orange field of the drone shots)
+      if (!wing && (pts.length < 10 || u % 2 === 0)) this.groundPool(out, seed ^ 0x77, pos, t0, dur, color, (pts.length < 10 ? 0.16 : 0.24) * inten, 0.9 * H + 3);
       cx.add(pos);
       n++;
     }
     if (n > 0) {
-      // sooty smoke of the whole row: one emitter spread over the units' bounding box
-      this.rowSmoke(out, cue, pts, steps, H * 0.75, H, color, 2.2, 0.2 * inten, (1.5 + dur * 1.5) * n, cue.t + 0.25, dur + maxDelay, 4.5, 6.5, 0.4);
+      // roll-over fireballs where the fire reaches the wing tips
+      if (wing) tops.forEach((tp, i) => this.fireball(out, this.sub(cue, 7000 + i), tp.x + Math.sign(tp.x) * 1.5, tp.y + H * 0.7, tp.z, cue.t + 0.12 + 0.05 * i, 0.5 * H, color, 1, 0.2));
+      // a big power flame rolls into a fireball at its top when it cuts
+      if (big) {
+        for (let u = 0; u < pts.length; u++)
+          if (steps[u] >= 0) this.fireball(out, this.sub(cue, u * 8 + 3), pts[u].x, pts[u].y + H * 0.9, pts[u].z, cue.t + steps[u] * stagger + dur - 0.1, 0.2 * H * wK, color, inten * 0.8, 0.3);
+      }
+      // smoke of the whole row: one emitter over the units' bounding box, thin and quick to clear
+      if (warm) this.rowSmoke(out, cue, pts, steps, H * 0.8, H, color, 2.0, (wing ? 0.16 : 0.1) * inten, (1 + dur) * Math.min(n, 30), cue.t + 0.25, dur + maxDelay, 3.2, 5, 0.35);
       cx.multiplyScalar(1 / n);
       cx.y += H * 0.5;
       out.flashes.push({
@@ -291,11 +359,166 @@ export class PyroSystem extends CueFxSystem {
         t0: cue.t,
         t1: cue.t + maxDelay + dur + 0.35,
         color: color.clone(),
-        peak: Math.min(2.2, 0.05 * n * (H / 8) + 0.25) * inten,
+        peak: Math.min(2.2, 0.05 * n * (H / 8) + 0.25) * inten * (warm ? 1 : 0.7),
         decay: 0.35,
         pos: cx,
         strobe: 0,
       });
+    }
+  }
+
+  /**
+   * A flickering pool of the effect's light on the ground next to a unit on (or near) the ground:
+   * offset a few metres toward the field centre, so the deck edge / arm walls throw their light onto
+   * the field. Units high up (pillar capitals, roof, wings) light nothing on the ground.
+   */
+  private groundPool(out: EmitterSet, seed: number, pos: THREE.Vector3, t0: number, dur: number, color: THREE.Color, inten: number, radius: number): void {
+    if (pos.y > 7) return;
+    const gx = -pos.x,
+      gz = 60 - pos.z;
+    const gl = Math.hypot(gx, gz) || 1;
+    const off = 0.3 * radius;
+    out.add(
+      new Emitter(DIST.SINGLE, F.RAMP)
+        .on(L_FIRE)
+        .origin(pos.x + (gx / gl) * off, 0.3, pos.z + (gz / gl) * off)
+        .time(t0)
+        .dir(0, 1, 0)
+        .speed(0)
+        .physics(1, 0)
+        .color(color, inten)
+        .life(0.3, 0.4)
+        .emit(2, dur)
+        .size(radius, 0)
+        .trail(1, 1)
+        .seed(seed)
+        .set(R.X3, 0.1)
+        .set(R.Z1, 1)
+        .set(R.Z3, PUFF.GROUND)
+        .window(t0, t0 + dur + 0.45),
+    );
+  }
+
+  /**
+   * One rolling fireball: a cloud of flame puffs born over ~0.3 s around (x,y,z) that expand to
+   * `R` metres, rise on their own heat and roll into a dark soot cap.
+   */
+  private fireball(out: EmitterSet, seed: number, x: number, y: number, z: number, t0: number, R0: number, color: THREE.Color, inten: number, soot: number): void {
+    const life = 1.1 + 0.06 * R0;
+    const n = this.pc(10 + 3 * R0, 8);
+    out.add(
+      new Emitter(DIST.SPHERE, 0)
+        .on(L_FIRE)
+        .origin(x, y, z)
+        .time(t0)
+        .speed(R0 * 1.1, R0 * 2.2)
+        .physics(2.6, 6)
+        .color(color, 7 * inten)
+        .color2(SOOT, this.warm)
+        .life(life * 0.75, life)
+        .emit(n, 0, 0.3 / n)
+        .size(R0 * 0.3, R0 * 0.55)
+        .trail(0.6, 0.5)
+        .seed(seed)
+        .set(R.X1, 1.2)
+        .set(R.X2, 0.9)
+        .set(R.Y0, this.warm ? 0.9 : 0.1)
+        .set(R.Y1, 0.3 + soot)
+        .set(R.Y3, 0.6)
+        .set(R.Z3, PUFF.FLAME)
+        .window(t0, t0 + 0.3 + life),
+    );
+    if (this.warm) {
+      // the dark cap it leaves behind
+      out.add(
+        new Emitter(DIST.SPHERE, F.SELFLIT)
+          .on(L_SMOKE)
+          .origin(x, y + R0 * 0.6, z)
+          .time(t0 + life * 0.5)
+          .speed(0.5, 1.5)
+          .physics(0.8, 1.6)
+          .color(this.c2.setRGB(0.14, 0.12, 0.11), 0.42)
+          .color2(this.c2.copy(color).multiplyScalar(1.5), 0)
+          .life(3.5, 5)
+          .emit(Math.max(2, Math.round(5 * Math.min(1, this.quality.particleScale * 1.6))), 0, 0.06)
+          .size(R0 * 0.45, R0 * 0.8)
+          .trail(0.5, 0.3)
+          .seed(seed ^ 0x99)
+          .set(R.X0, 0.5)
+          .set(R.X1, 0.25)
+          .set(R.X2, 0.8)
+          .set(R.Y0, 0.25)
+          .set(R.Y2, 0.1)
+          .set(R.Y3, 1)
+          .set(R.Z0, 0.6)
+          .set(R.Z3, PUFF.SMOKE)
+          .window(t0 + life * 0.5, t0 + life * 0.5 + 5.5),
+      );
+    }
+    out.add(
+      new Emitter(DIST.SINGLE, 0)
+        .on(L_FIRE)
+        .origin(x, y, z)
+        .time(t0)
+        .dir(0, 1, 0)
+        .speed(1)
+        .physics(1, 0)
+        .color(color, 0.9 * inten)
+        .life(0.7)
+        .emit(1)
+        .size(R0 * 1.6, R0 * 0.6)
+        .trail(0.6, 1)
+        .seed(seed ^ 0x77)
+        .set(R.X0, 0.35)
+        .set(R.Z3, PUFF.FLASH)
+        .window(t0, t0 + 0.75),
+    );
+  }
+
+  /** `fireball: true` flames: a short lift jet, then an 8–10 m fireball with a dark smoke cap */
+  private fireballs(cue: Cue, out: EmitterSet, H: number): void {
+    const p = cue.p;
+    const pts = this.points(cue, 'corner_fireballs');
+    const color = this.flameColor(p.color);
+    const inten = num(p.intensity, 1, 0, 3);
+    const size = num(p.size, 1, 0.3, 3);
+    // visual ball radius ~1.4 x R0: 8 m flame -> ~9–10 m fireball
+    const R0 = (2.2 + 0.14 * H) * size;
+    const cx = new THREE.Vector3();
+    pts.forEach((pos, u) => {
+      const seed = this.sub(cue, u * 8);
+      // lift: the fuel shot that ignites into the ball
+      out.add(
+        new Emitter(DIST.CONE, F.RAMP)
+          .on(L_FIRE)
+          .originV(pos)
+          .time(cue.t)
+          .dir(0, 1, 0, 0.12)
+          .speed(H * 2.6, H * 3.1)
+          .physics(3, 6)
+          .color(color, 8 * inten)
+          .color2(SOOT, this.warm)
+          .life(0.3, 0.42)
+          .emit(this.pc(22, 6), 0.28)
+          .size(0.6, R0 * 0.25)
+          .trail(0.9, 0.6)
+          .seed(seed)
+          .set(R.X1, 1.5)
+          .set(R.X2, 0.9)
+          .set(R.X3, 0.05)
+          .set(R.Y0, 0.3)
+          .set(R.Y1, 0.7)
+          .set(R.Z2, 0.08)
+          .set(R.Z3, PUFF.FLAME)
+          .window(cue.t, cue.t + 0.8),
+      );
+      this.fireball(out, seed ^ 0x3c3c, pos.x, pos.y + H * 0.75, pos.z, cue.t + 0.18, R0, color, inten, 0.15);
+      cx.add(pos);
+    });
+    if (pts.length) {
+      cx.multiplyScalar(1 / pts.length);
+      cx.y += H;
+      out.flashes.push({ kind: 1, t0: cue.t, t1: cue.t + 1.6, color: color.clone(), peak: Math.min(2.2, 0.9 * pts.length * size) * inten, decay: 0.8, pos: cx, strobe: 0 });
     }
   }
 
@@ -439,7 +662,8 @@ export class PyroSystem extends CueFxSystem {
     const pattern = str(p.pattern, 'all');
     const stagger = num(p.stagger, pattern === 'all' ? 0 : 0.05, 0, 2);
     const angle = num(p.angle, 0, -80, 80);
-    const spread = (num(p.spread, cold ? 7 : 5, 0, 60) * Math.PI) / 180;
+    // big gerbs (15–20 m wall units) throw a wider, fuller plume than a small stage gerb
+    const spread = (num(p.spread, cold ? 7 : Math.min(10, 4 + 0.28 * H), 0, 60) * Math.PI) / 180;
     const steps = patternSteps(pts, pattern, cue.seed, cue.step);
     const dur = Math.max(0.3, cue.dur);
     const k = cold ? 1.9 : 1.05;
@@ -447,7 +671,11 @@ export class PyroSystem extends CueFxSystem {
     const tA = apexTime(v0, k);
     const lifeMax = cold ? tA * 1.5 : tA * 1.75;
     const rate = cold ? 320 : 280 + 14 * H;
-    const count = this.pc(rate * lifeMax, 40);
+    // long walls (the finale U: ~60 fountains) thin out per unit so the wall stays inside the spark
+    // budget without the layer scaling every other fountain down
+    let nFire = 0;
+    for (let u = 0; u < steps.length; u++) if (steps[u] >= 0) nFire++;
+    const count = this.pc(rate * lifeMax * Math.min(1, Math.sqrt(28 / Math.max(1, nFire))), 40);
     const inten = num(p.intensity, 1, 0, 3) * (cold ? 11 : 17);
     // what the sparks cool to: gold -> deep orange, white/silver (titanium) -> pale gold
     const white = color.b > 0.6 && color.g > 0.6;
@@ -522,6 +750,7 @@ export class PyroSystem extends CueFxSystem {
           .set(R.Z3, PUFF.GLOW)
           .window(t0, t0 + dur + 0.35),
       );
+      if (!cold && (pts.length < 10 || u % 2 === 0)) this.groundPool(out, seed ^ 0x78, pos, t0, dur, color, 0.1 * num(p.intensity, 1, 0, 3) * (pts.length < 10 ? 1 : 1.6), 0.45 * H + 4);
       cx.add(pos);
       n++;
     }
