@@ -60,7 +60,9 @@ export class FireworkSystem extends CueFxSystem {
 
   protected buildLayers(q: QualitySettings): void {
     const ps = q.particleScale;
-    const smoke = this.shared.puffLayer('fw-smoke', Math.round(5000 * Math.max(0.3, ps)), 1024, 11);
+    // shell smoke emitters are many and tiny (1–5 puffs living ~20 s): budget one 8-particle slot per
+    // emitter row so a finale's smoke is not thinned out by slot scaling
+    const smoke = this.shared.puffLayer('fw-smoke', Math.round(8192 * Math.max(0.35, ps)), 1024, 11);
     const flash = this.shared.puffLayer('fw-flash', 2048, 1024, 13);
     const stars = this.shared.sparkLayer('fw-stars', q, Math.round(90000 * Math.max(0.15, ps)), 2048, 15);
     this.layers = [smoke, flash, stars];
@@ -176,7 +178,10 @@ export class FireworkSystem extends CueFxSystem {
     const crossette = (spec.flags & F.CROSSETTE) !== 0;
     const nStars = this.pc(spec.stars, spec.minStars);
     let flags = spec.flags;
-    if (opts.col2) {
+    // crackle: `color2` is the colour of the crackle (red stars that crackle white), not a star
+    // colour change — so a red/white crackle canopy stays red with white micro-flashes
+    const popCol2 = spec.pops ? opts.col2 : null;
+    if (opts.col2 && !popCol2) {
       if (spec === SHELLS.chrysanthemum || spec === SHELLS.brocade || spec === SHELLS.peony) flags |= F.PISTIL;
       else flags |= F.COLORCHANGE;
     }
@@ -200,7 +205,7 @@ export class FireworkSystem extends CueFxSystem {
       .set(R.Z0, 0.03)
       .set(R.Z2, spec.jitter)
       .window(tb, tEnd);
-    if (opts.col2) stars.color2(opts.col2, 0.55);
+    if (opts.col2 && !popCol2) stars.color2(opts.col2, 0.55);
     if (crossette) stars.set(R.X0, spec.split ?? 0.75).set(R.X1, v * 0.42);
     if (spec.dist === DIST.RING) {
       const a = (hf(seed ^ 3) - 0.5) * 1.3;
@@ -214,7 +219,8 @@ export class FireworkSystem extends CueFxSystem {
       popE.f[R.FLAGS] = (spec.flags & ~F.FLICKER) | F.POPS;
       popE
         .on(L_STARS)
-        .color(this.c2.copy(col).lerp(WHITE, 0.65), 34 * gain)
+        // micro-flashes: the crackle colour, a touch of the star colour; not brighter than the stars' streaks
+        .color(popCol2 ? this.c2.copy(popCol2).lerp(col, 0.2) : this.c2.copy(col).lerp(WHITE, 0.65), 24 * gain)
         .emit(nStars * pops)
         .size(0.3, 1)
         .set(R.X1, pops)
@@ -233,9 +239,10 @@ export class FireworkSystem extends CueFxSystem {
         .speed(0.1)
         .physics(1, 0)
         .color(this.c2.copy(col).lerp(WHITE, 0.45), 9 * gain * spec.flash)
-        .life(0.32)
+        .life(0.28)
         .emit(1)
-        .size(radius * 0.45, radius * 0.3)
+        // a short, compact flash: a big lingering glow ball per break reads as a "dandelion"
+        .size(radius * 0.28, radius * 0.18)
         .trail(0.5, 1)
         .seed(seed ^ 0x21)
         .set(R.X0, 0.055)
@@ -252,7 +259,7 @@ export class FireworkSystem extends CueFxSystem {
           .speed(radius * 0.55, radius * 1.15)
           .physics(3, 0.15)
           .color(GREY, 0.1)
-          .color2(this.c2.copy(col).multiplyScalar(1.3 * gain), 0)
+          .color2(this.c2.copy(col).multiplyScalar(0.8 * gain), 0)
           .life(16, 24)
           .emit(opts.smoke)
           .size(radius * 0.2, radius * 0.5)
@@ -289,7 +296,7 @@ export class FireworkSystem extends CueFxSystem {
   private shellParams(cue: Cue, H: number) {
     const p = cue.p;
     const spec = shellSpec(p.type);
-    const radius = num(p.size, clamp(0.2 * H, 9, 45) * spec.radiusK, 2, 150);
+    const radius = num(p.size, defaultRadius(H) * spec.radiusK, 2, 150);
     return { spec, radius };
   }
 
@@ -322,6 +329,9 @@ export class FireworkSystem extends CueFxSystem {
     const p = cue.p;
     const src = this.points(cue, 'fireworks_back');
     const c = centroid(src, new THREE.Vector3());
+    // `x` / `z` move the centre of the line (e.g. alternating left / right salvos build a canopy)
+    c.x = num(p.x, c.x, -400, 400);
+    c.z = num(p.z, c.z, -400, 400);
     const count = Math.round(num(p.count, Math.max(3, Math.min(src.length, 12)), 1, 80));
     const spread = num(p.spread, 120, 0, 600);
     const H0 = num(p.height, 90, 15, 400);
@@ -386,10 +396,11 @@ export class FireworkSystem extends CueFxSystem {
         .on(L_STARS)
         .physics(k, -G)
         .color(col, 20 * gain)
-        .size(0.42, 0.32)
-        .trail(serpent ? 0.9 : 1.1, 0.8)
+        // a display comet is a fat, bright head with a long burning tail: it must read from the FOH
+        .size(0.55, 0.3)
+        .trail(serpent ? 1.1 : 1.3, 0.8)
         .set(R.X0, 0.07)
-        .set(R.Y0, 1.25)
+        .set(R.Y0, 1.4)
         .set(R.Y1, 1.4)
         .set(R.Y2, 1.2)
         .set(R.Y3, 0.6)
@@ -406,7 +417,7 @@ export class FireworkSystem extends CueFxSystem {
         .emit(n, 0, stagger)
         .seed(seed)
         .set(R.Z2, n > 1 ? Math.min(0.08, (halfAngle * 2) / n) : 0.04)
-        .window(t0, t0 + stagger * n + tA + 1.2);
+        .window(t0, t0 + stagger * n + tA + 1.5);
       if (n === 1) e.speed(v0 * (0.96 + 0.05 * hf(seed ^ 5)));
       out.add(e);
       if (end === 'crackle') {
@@ -443,10 +454,10 @@ export class FireworkSystem extends CueFxSystem {
           .life(life)
           .emit(1)
           .seed(sd & 0xffffff)
-          .window(tc, tc + life + 1),
+          .window(tc, tc + life + 1.3),
       );
       const B = ballistic(new THREE.Vector3(), o, d.multiplyScalar(sp), k, acc, life);
-      const r = clamp(rise * 0.28, 6, 16);
+      const r = clamp(rise * 0.4, 7, 22);
       this.addShell(out, sd & 0xffffff, breakSpec, o, B, col, gain, { tL: tc + life, tb: tc + life, radius: r, smoke: n > 6 ? 1 : 2, lift: false, flashK: 0.45, col2: null });
     }
   }
@@ -682,7 +693,7 @@ export class FireworkSystem extends CueFxSystem {
       const B = new THREE.Vector3(o.x + (hf(seed ^ 1) - 0.5) * 16, H, o.z + (hf(seed ^ 2) - 0.5) * 0.15 * H);
       const cname = palette[Math.floor(hf(seed ^ 0x29) * palette.length) % palette.length];
       const gain = starColor(cname, this.palette, this.c1, 'gold');
-      const radius = clamp(0.2 * H, 9, 40) * spec.radiusK * (0.85 + 0.3 * hf(seed ^ 3));
+      const radius = clamp(0.3 * H, 9, 50) * spec.radiusK * (0.85 + 0.3 * hf(seed ^ 3));
       this.addShell(out, seed, spec, o, B, this.c1.clone(), gain, { tL: tl, tb: tl + rise, radius, smoke, lift: true, flashK: 0.55, col2: null });
     }
     // roof comet fans woven through the barrage
@@ -705,6 +716,15 @@ export class FireworkSystem extends CueFxSystem {
 
 function clamp(v: number, a: number, b: number): number {
   return v < a ? a : v > b ? b : v;
+}
+
+/**
+ * Default burst radius for a break at `H` m. Display shells open to roughly 0.6–0.8 x their break
+ * height in diameter (a 3" shell breaking at ~100 m is 60–80 m across), i.e. radius ~ 0.33 x H;
+ * crackle / brocade / kamuro recipes scale that up to ~0.4 x H via their radiusK.
+ */
+function defaultRadius(H: number): number {
+  return clamp(0.33 * H, 10, 70);
 }
 
 /** lift time for a break `rise` metres above the mortar */

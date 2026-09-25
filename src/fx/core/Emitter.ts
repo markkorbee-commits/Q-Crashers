@@ -107,6 +107,8 @@ export const PUFF = {
   FLASH: 3,
   GLOW: 4,
   FOG: 5,
+  /** additive pool of light lying flat on the ground (world-space XZ quad; Z1 = z/x aspect) */
+  GROUND: 6,
 } as const;
 
 let seedCounter = 1;

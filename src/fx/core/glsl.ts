@@ -114,13 +114,19 @@ float fogT(float dist) {
   return exp(-d * d);
 }
 
-/** light arriving at a point from the show (stage rig + pyro/firework flashes) */
+/**
+ * Light arriving at a point from the show (stage rig + pyro/firework flashes), used to light smoke.
+ * Soft-clamped: smoke glows in the show's colour but stays well below the sources, so drops keep
+ * their contrast instead of turning into one uniformly lit fog.
+ */
 vec3 envLight(vec3 p) {
   vec3 q = (p - vec3(0.0, 12.0, -10.0)) * vec3(0.011, 0.028, 0.02);
   float stageF = 1.0 / (1.0 + dot(q, q) * 1.5);
   vec3 df = p - uFlashPos;
   float flashF = 1.0 / (1.0 + dot(df, df) * (1.0 / 4900.0));
-  return uAmbient + (uStageLight * 0.8 + uStageWash * 0.6) * stageF + uFlashCol * flashF * 0.55;
+  vec3 L = uAmbient + (uStageLight * 0.6 + uStageWash * 0.35) * stageF + uFlashCol * flashF * 0.45;
+  float m = max(L.r, max(L.g, L.b));
+  return m > 0.6 ? L * ((0.6 + (m - 0.6) * 0.35) / m) : L;
 }
 
 #define CULL() { gl_Position = vec4(0.0, 0.0, 2.0, 1.0); return; }

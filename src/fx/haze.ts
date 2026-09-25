@@ -56,15 +56,27 @@ void main() {
   vp.xy += off;
   vWorldY = c.y + dot(viewMatrix[1].xy, off);
   gl_Position = projectionMatrix * vp;
-  float nearF = smoothstep(size * 0.15, size * 0.9, depth);
+  // distance weighting: haze is only visible as haze over tens of metres. Sprites around the viewer
+  // (a spectator inside the field layer) fade out completely within ~10 m and build up slowly, so
+  // the air in front of your face stays clear and the veil only sits over the distant stage.
+  float nearF = zone == 1 ? smoothstep(max(size * 0.35, 9.0), size * 1.2 + 14.0, depth)
+                          : smoothstep(size * 0.2, size * 0.9 + 6.0, depth);
   float dens = zone == 0 ? uDensity.x : (zone == 1 ? uDensity.y : uDensity.z);
   vAlpha = dens * edge * nearF * (0.7 + 0.6 * fract(aPar.w * 91.7));
-  vec3 light = envLight(c);
-  // the low field layer sits right next to the flame units: tame the flash term there
+  // light scattered by the haze: ambient + a damped share of the stage rig / wash / flashes
+  vec3 q = (c - vec3(0.0, 12.0, -10.0)) * vec3(0.011, 0.028, 0.02);
+  float stageF = 1.0 / (1.0 + dot(q, q) * 1.5);
   vec3 df = c - uFlashPos;
   float flashF = 1.0 / (1.0 + dot(df, df) * (1.0 / 4900.0));
-  if (zone == 1) light -= uFlashCol * flashF * 0.55 * 0.6;
-  if (zone == 0) light += (min(uStageLight, vec3(2.0)) * 0.5 + uStageWash * 0.7) * uStageBoost;
+  vec3 light = uAmbient + (uStageLight * 0.4 + uStageWash * 0.3) * stageF;
+  // the low field layer sits right next to the flame units: only a trace of the flash term there
+  light += uFlashCol * flashF * (zone == 1 ? 0.1 : 0.28);
+  if (zone == 0) light += (min(uStageLight, vec3(2.0)) * 0.25 + uStageWash * 0.3) * uStageBoost;
+  // brightness clamp (soft knee): haze may glow, but never brighter than a dim fraction of the
+  // sources it scatters — so the set and the beams stay the brightest things in the frame
+  float Lm = max(light.r, max(light.g, light.b));
+  float knee = zone == 2 ? 0.35 : 0.22;
+  if (Lm > knee) light *= (knee + (Lm - knee) * 0.25) / Lm;
   vLit = light * fogT(depth * 0.7);
   vOcc = zone == 0 ? uZoneOcclusion.x : (zone == 1 ? uZoneOcclusion.y : uZoneOcclusion.z);
   vUv = position.xy;
@@ -137,7 +149,8 @@ export class HazeField {
       uZoneMin: { value: zmin },
       uZoneSize: { value: zsz },
       uZoneAspect: { value: new THREE.Vector3(zones[0]?.aspect ?? 1, zones[1]?.aspect ?? 1, zones[2]?.aspect ?? 1) },
-      uZoneOcclusion: { value: new THREE.Vector3(0.55, 0.2, 0.6) },
+      // how much each zone dims what lies behind it (the stage haze must not grey the set out)
+      uZoneOcclusion: { value: new THREE.Vector3(0.35, 0.15, 0.55) },
       uStageBoost: { value: 1 },
     };
     const mat = new THREE.ShaderMaterial({
