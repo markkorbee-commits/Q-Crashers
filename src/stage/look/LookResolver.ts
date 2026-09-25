@@ -23,6 +23,10 @@ interface StateVals {
   windowColor: THREE.Color;
   /** 0..1 master level of every set emitter (blackouts) */
   master: number;
+  /** 0..1 how much of the set's practicals are on (dormant: follows windows / wings; else 1) */
+  presence: number;
+  /** 0..1 ember mask (only the dragon + inner wings lit) */
+  ember: number;
 }
 
 const newVals = (): StateVals => ({
@@ -35,15 +39,56 @@ const newVals = (): StateVals => ({
   windows: 0,
   windowColor: new THREE.Color(),
   master: 1,
+  presence: 1,
+  ember: 0,
 });
+
+/**
+ * Dormant = the "sleeping" set: its practicals follow the state's window / wing levels, so
+ * {mode:'dormant', windows:0, wings:0} is a TRUE blackout (show-analysis §10: crystals off, only moon
+ * and sky), windows 0.12 reads as the ~30 % lamp row of the opening, windows >= 0.3 is fully present.
+ */
+function presenceOf(v: StateVals): number {
+  return v.mode === 'dormant' ? smoothstep(0.02, 0.3, Math.max(v.windows, v.wings)) : 1;
+}
+
+/** what one 'screens.content' cue asks of the set (LED pattern / level / colours / panel content) */
+interface ContentTarget {
+  mode: number;
+  pat: number;
+  ledI: number;
+  led: THREE.Color;
+  led2: THREE.Color;
+  col: THREE.Color;
+  banner: number;
+  skull: number;
+  emblem: number;
+}
+const newTarget = (): ContentTarget => ({
+  mode: 0,
+  pat: 0,
+  ledI: 0,
+  led: new THREE.Color(),
+  led2: new THREE.Color(),
+  col: new THREE.Color(),
+  banner: 0,
+  skull: 0,
+  emblem: 0,
+});
+
+/** 'screens.content' pattern names -> extended castle LED pattern (see StageLookEx.ledPatternX) */
+const CONTENT_PATTERN: Record<string, number> = { solid: 0, chase: 1, pulse: 2, dots: 3, sparkle: 3, split: 4, fire: 5, stripes: 6, wave: 6, dashes: 7, runes: 7 };
 
 const AMBER = new THREE.Color('#ffae42');
 const FIRE = new THREE.Color('#ff5a12');
 const ICE = new THREE.Color('#a8dcff');
 const DEEP_RED = new THREE.Color('#b00008');
+/** design bible §5.6: 'ember' = only head + inner wings, red #982D3E */
+const EMBER = new THREE.Color('#c8304e');
 const WHITE = new THREE.Color(1, 1, 1);
 const COLD_BLUE = new THREE.Color('#1e3cff');
 const VIOLET = new THREE.Color('#8a2bff');
+const RUNE_GOLD = new THREE.Color('#ffb640');
 const _c = new THREE.Color();
 const _c2 = new THREE.Color();
 
@@ -52,19 +97,26 @@ const _c2 = new THREE.Color();
  * palette, env) — no state is accumulated between frames, so seek / pause / restart are exact.
  *
  * Layers (later wins): section defaults -> persistent 'stage.state' (cross-faded over `fade`) ->
- * 'screens.content' (LED content while alive) -> transient 'stage.eyes_flash' / 'roar' / 'pulse' ->
- * app.env wash / flash / strobe.
+ * 'screens.content' (LED content while alive, faded in over its own `fade`, or the `fade` of a
+ * stage.state cue starting at the same time, cross-faded from an adjacent content cue) ->
+ * transient 'stage.eyes_flash' / 'roar' / 'pulse' -> app.env wash / flash / strobe.
  */
 export class LookResolver {
   private states: Cue[] = [];
   /** cumulative rosette angle at the start of each state cue */
   private stateAngle: number[] = [];
   private stateRpm: number[] = [];
+  /** 'screens.content' cues (sorted) + per cue: fade-in (s), adjacent previous cue (-1 none), adjacent next cue continues */
+  private contents: Cue[] = [];
+  private cFade: number[] = [];
+  private cPrev: number[] = [];
+  private cNext: boolean[] = [];
   private revision = -1;
   private cur = newVals();
   private prev = newVals();
   private active: Cue[] = [];
-  private screens: Cue[] = [];
+  private tA = newTarget();
+  private tB = newTarget();
   private static readonly DEFAULT_RPM = 1.2;
 
   constructor(private show: ShowEngine) {}
@@ -85,22 +137,123 @@ export class LookResolver {
       lastT = c.t;
       lastRpm = rpm;
     }
+    // screens content: fades + adjacency (a content cue that directly follows a lit one cross-fades)
+    const cs = this.show.all('screens').filter((c) => c.fx === 'content');
+    this.contents = cs;
+    this.cFade = cs.map((c) => {
+      if (typeof c.p.fade === 'number') return Math.max(0, c.p.fade);
+      // inherit the fade of a stage.state cue starting at the same moment (e.g. the 5.5 s reveal at 14.0)
+      const st = this.states.find((s) => Math.abs(s.t - c.t) < 0.02);
+      if (st && typeof st.p.fade === 'number') return Math.max(0, st.p.fade);
+      return 0.6;
+    });
+    const isOn = (c: Cue) => (typeof c.p.mode === 'string' ? c.p.mode : 'color') !== 'off';
+    this.cPrev = cs.map((c, i) => {
+      for (let j = i - 1; j >= 0 && j >= i - 3; j--) {
+        const p = cs[j];
+        if (p.t + p.dur >= c.t - 0.05 && p.t < c.t) return isOn(p) ? j : -1;
+      }
+      return -1;
+    });
+    this.cNext = cs.map((c, i) => {
+      const n = cs[i + 1];
+      return !!n && n.t <= c.t + c.dur + 0.05 && isOn(n);
+    });
   }
 
   /** index of the latest state cue with t <= time (-1 when none) */
   private stateIndex(t: number): number {
-    const s = this.states;
-    let lo = 0,
-      hi = s.length - 1,
-      best = -1;
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      if (s[mid].t <= t) {
-        best = mid;
-        lo = mid + 1;
-      } else hi = mid - 1;
+    return latestIndex(this.states, t);
+  }
+
+  /** index of the latest content cue alive at t (-1 when none) */
+  private contentIndex(t: number): number {
+    const cs = this.contents;
+    const last = latestIndex(cs, t);
+    for (let i = last; i >= 0 && i >= last - 3; i--) if (t < cs[i].end) return i;
+    return -1;
+  }
+
+  /** targets of one content cue on top of the section/state LED look (ledI / pat / led / led2 as resolved so far) */
+  private contentTarget(c: Cue, pal: ResolvedPalette, ledI: number, pat: number, led: THREE.Color, led2: THREE.Color, energy: number, o: ContentTarget): ContentTarget {
+    const mode = typeof c.p.mode === 'string' ? c.p.mode : 'color';
+    const col = resolveColor(c.p.color, pal, _c, 'primary');
+    o.mode = CONTENT_MODE[mode] ?? 1;
+    o.col.copy(col);
+    if (!c.p.color) {
+      if (mode === 'eye' || mode === 'fire' || mode === 'embers') o.col.copy(FIRE);
+      else if (mode === 'ice') o.col.copy(ICE);
+      else if (mode === 'runes') o.col.copy(RUNE_GOLD);
     }
-    return best;
+    o.pat = pat;
+    o.ledI = ledI;
+    o.led.copy(led);
+    o.led2.copy(led2);
+    o.banner = 0.55 + 0.45 * energy;
+    o.skull = 0.6 + 0.6 * energy;
+    o.emblem = 0.7 + 0.5 * energy;
+    switch (mode) {
+      case 'off':
+        o.ledI = 0;
+        break;
+      case 'color':
+        o.pat = 0;
+        o.led.copy(col);
+        o.ledI = Math.max(ledI, 0.8);
+        break;
+      case 'fire':
+        o.pat = 5;
+        o.led.copy(c.p.color ? col : FIRE);
+        o.led2.copy(DEEP_RED);
+        o.ledI = Math.max(ledI, 0.9);
+        break;
+      case 'ice':
+        o.pat = 3;
+        o.led.copy(c.p.color ? col : ICE);
+        o.led2.copy(COLD_BLUE);
+        o.ledI = Math.max(ledI, 0.8);
+        break;
+      case 'runes':
+        o.pat = 7;
+        o.led.copy(c.p.color ? col : RUNE_GOLD);
+        o.ledI = Math.max(ledI, 0.85);
+        break;
+      case 'logo':
+        o.pat = 4;
+        o.led.copy(col);
+        o.emblem = 4;
+        o.ledI = Math.max(ledI, 0.8);
+        break;
+      case 'title':
+        o.pat = 1;
+        o.led.copy(c.p.color ? col : WHITE);
+        o.ledI = Math.max(ledI, 0.9);
+        break;
+      case 'eye':
+        o.pat = 2;
+        o.led.copy(c.p.color ? col : DEEP_RED);
+        o.banner = 3.5;
+        o.skull = 4;
+        o.ledI = Math.max(ledI, 0.8);
+        break;
+      case 'embers':
+        o.pat = 3;
+        o.led.copy(c.p.color ? col : FIRE);
+        o.led2.copy(DEEP_RED);
+        o.ledI = Math.max(ledI * 0.6, 0.5);
+        break;
+      case 'pulse':
+        o.pat = 2;
+        o.led.copy(col);
+        o.ledI = Math.max(ledI, 0.9);
+        break;
+    }
+    // optional second colour + pixel pattern of a 'color' look (stripes / chase / dashes / split / dots)
+    if (mode !== 'off') {
+      if (typeof c.p.color2 === 'string') resolveColor(c.p.color2, pal, o.led2, 'secondary');
+      if (typeof c.p.pattern === 'string' && CONTENT_PATTERN[c.p.pattern] !== undefined) o.pat = CONTENT_PATTERN[c.p.pattern];
+    }
+    return o;
   }
 
   resolve(t: number, beat: BeatInfo, pal: ResolvedPalette, env: LightEnv, out: StageLookEx): StageLookEx {
@@ -122,6 +275,8 @@ export class LookResolver {
     base.windows = 0.55 + 0.3 * energy;
     base.windowColor.copy(AMBER);
     base.master = kind === 'silence' ? 0.03 : 1;
+    base.presence = presenceOf(base);
+    base.ember = 0;
 
     // ---- 2. persistent state cue with cross-fade ---------------------------------------------------
     const si = this.stateIndex(t);
@@ -153,6 +308,8 @@ export class LookResolver {
     out.windows = cur.windows;
     out.windowColor.copy(cur.windowColor);
     out.master = cur.master;
+    out.ember = cur.ember;
+    out.emit = cur.master * cur.presence;
 
     // ---- LED defaults from the section + mode ------------------------------------------------------
     out.led.copy(pal.primary);
@@ -201,95 +358,52 @@ export class LookResolver {
         winMode = 3;
         pat = 5;
         ledI *= 0.45;
-        out.led.copy(DEEP_RED);
-        out.led2.copy(FIRE).multiplyScalar(0.4);
+        out.led.copy(EMBER);
+        out.led2.copy(DEEP_RED).multiplyScalar(0.5);
         break;
     }
 
-    // ---- 3. screens content (alive cues only; latest wins) -----------------------------------------
+    // ---- 3. screens content (alive cues only; latest wins, faded / cross-faded) --------------------
     out.bannerGlow = 0.55 + 0.45 * energy;
     out.skullGlow = 0.6 + 0.6 * energy;
     out.emblemGlow = 0.7 + 0.5 * energy;
     out.content = 0;
     out.contentMix = 0;
-    const scr = show.active('screens', t, this.screens);
-    for (let i = scr.length - 1; i >= 0; i--) {
-      const c = scr[i];
-      if (c.fx !== 'content') continue;
-      const env01 = smoothstep(0, 0.3, t - c.t) * (1 - smoothstep(c.dur - 0.5, c.dur, t - c.t));
-      const mode = typeof c.p.mode === 'string' ? c.p.mode : 'color';
-      const col = resolveColor(c.p.color, pal, _c, 'primary');
-      out.content = CONTENT_MODE[mode] ?? 1;
-      // panels dissolve in over ~0.6 s and out over the last 0.6 s
-      out.contentMix = smoothstep(0, 0.6, t - c.t) * (1 - smoothstep(c.dur - 0.6, c.dur, t - c.t));
-      out.contentColor.copy(col);
-      if (!c.p.color) {
-        if (mode === 'eye' || mode === 'fire' || mode === 'embers') out.contentColor.copy(FIRE);
-        else if (mode === 'ice') out.contentColor.copy(ICE);
-        else if (mode === 'runes') out.contentColor.set('#ffb640');
+    const ci = this.contentIndex(t);
+    if (ci >= 0) {
+      const c = this.contents[ci];
+      const lt = t - c.t;
+      const fade = this.cFade[ci];
+      const k = fade <= 0 ? 1 : smoothstep(0, fade, lt);
+      const tail = this.cNext[ci] ? 1 : 1 - smoothstep(c.dur - 0.6, c.dur, lt);
+      const A = this.contentTarget(c, pal, ledI, pat, out.led, out.led2, energy, this.tA);
+      const pi = this.cPrev[ci];
+      let w: number; // weight of the content look over the section/state look
+      let mixA: number;
+      if (pi >= 0) {
+        // cross-fade from the previous (lit) content cue: the panels stay on, colours blend
+        const B = this.contentTarget(this.contents[pi], pal, ledI, pat, out.led, out.led2, energy, this.tB);
+        blendTarget(B, A, k, A);
+        w = tail;
+        mixA = A.mode === 0 ? (1 - k) * tail : tail;
+        if (A.mode === 0) A.mode = B.mode;
+      } else {
+        w = k * tail;
+        mixA = A.mode === 0 ? 0 : k * tail;
       }
-      let cPat = pat;
-      let cI = ledI;
-      switch (mode) {
-        case 'off':
-          cI = 0;
-          break;
-        case 'color':
-          cPat = 0;
-          out.led.copy(col);
-          cI = Math.max(ledI, 0.8);
-          break;
-        case 'fire':
-          cPat = 5;
-          out.led.copy(c.p.color ? col : FIRE);
-          out.led2.copy(DEEP_RED);
-          cI = Math.max(ledI, 0.9);
-          break;
-        case 'ice':
-          cPat = 3;
-          out.led.copy(c.p.color ? col : ICE);
-          out.led2.copy(COLD_BLUE);
-          cI = Math.max(ledI, 0.8);
-          break;
-        case 'runes':
-          cPat = 7;
-          out.led.copy(c.p.color ? col : _c2.set('#ffb640'));
-          cI = Math.max(ledI, 0.85);
-          break;
-        case 'logo':
-          cPat = 4;
-          out.led.copy(col);
-          out.emblemGlow = 1 + 3 * env01;
-          cI = Math.max(ledI, 0.8);
-          break;
-        case 'title':
-          cPat = 1;
-          out.led.copy(c.p.color ? col : WHITE);
-          cI = Math.max(ledI, 0.9);
-          break;
-        case 'eye':
-          cPat = 2;
-          out.led.copy(c.p.color ? col : DEEP_RED);
-          out.bannerGlow = 1 + 2.5 * env01;
-          out.skullGlow = 1 + 3 * env01;
-          cI = Math.max(ledI, 0.8);
-          break;
-        case 'embers':
-          cPat = 3;
-          out.led.copy(c.p.color ? col : FIRE);
-          out.led2.copy(DEEP_RED);
-          cI = Math.max(ledI * 0.6, 0.5);
-          break;
-        case 'pulse':
-          cPat = 2;
-          out.led.copy(col);
-          cI = Math.max(ledI, 0.9);
-          break;
-      }
-      pat = env01 > 0.5 ? cPat : pat;
-      ledI = ledI + (cI - ledI) * env01;
-      break;
+      out.content = A.mode;
+      out.contentMix = mixA;
+      out.contentColor.copy(A.col);
+      out.led.lerp(A.led, w);
+      out.led2.lerp(A.led2, w);
+      out.bannerGlow += (A.banner - out.bannerGlow) * w;
+      out.skullGlow += (A.skull - out.skullGlow) * w;
+      out.emblemGlow += (A.emblem - out.emblemGlow) * w;
+      pat = w > 0.5 ? A.pat : pat;
+      ledI = ledI + (A.ledI - ledI) * w;
     }
+    // ember: the dragon + inner wings glow on their own even when the pixel content is off
+    if (cur.ember > 0) ledI += (Math.max(ledI, 0.35 + 0.65 * cur.wings) - ledI) * cur.ember;
     // fire looks: the backlit banners flicker (deterministic in t)
     if (out.mode === 'rage' || pat === 5) out.bannerGlow *= 0.8 + 0.25 * Math.sin(t * 7.3) * Math.sin(t * 3.1 + 1) + 0.1 * Math.sin(t * 17.9);
     out.ledPatternX = pat;
@@ -307,7 +421,7 @@ export class LookResolver {
       const e = smoothstep(0, 0.08, lt) * (1 - smoothstep(c.dur * 0.4, c.dur, lt));
       if (c.fx === 'eyes_flash') {
         out.eyesIntensity += 3 * e;
-        if (c.p.color) out.eyes.lerp(resolveColor(c.p.color, pal, _c), e);
+        if (c.p.color) out.eyes.lerp(resolveColor(c.p.color, pal, _c2), e);
       } else if (c.fx === 'roar') {
         out.mouth = Math.max(out.mouth, e);
         out.jaw = Math.max(out.jaw, 0.6 + 0.4 * e);
@@ -316,8 +430,8 @@ export class LookResolver {
       } else if (c.fx === 'pulse') {
         const k = (beat.hasKick ? beat.kick : Math.exp(-beat.phase * 5)) * smoothstep(0, 0.05, lt) * (1 - smoothstep(c.dur - 0.2, c.dur, lt));
         pulse = Math.max(pulse, k);
-        resolveColor(c.p.color, pal, _c, 'accent');
-        out.pulseColor.copy(_c).multiplyScalar(k);
+        resolveColor(c.p.color, pal, _c2, 'accent');
+        out.pulseColor.copy(_c2).multiplyScalar(k);
       }
     }
     // energetic sections pump the LEDs on the kick
@@ -325,7 +439,12 @@ export class LookResolver {
     out.pulse = pulse;
 
     // ---- colours of the castle-only emitters --------------------------------------------------------
-    out.lantern.copy(out.mode === 'frozen' ? ICE : out.mode === 'rage' || out.mode === 'ember' ? FIRE : VIOLET).lerp(out.rosettes, 0.35);
+    // crystal lanterns on the ramparts / arm posts: the "side sections" colour of the look (the show's
+    // windowColor: blue-white in Winter, cyan-white in Sacred Flame ...), tinted by the mode
+    out.lantern.copy(out.windowColor);
+    if (out.mode === 'frozen') out.lantern.lerp(ICE, 0.6);
+    else if (out.mode === 'rage') out.lantern.lerp(FIRE, 0.4);
+    else out.lantern.lerp(out.rosettes, 0.15);
     switch (out.mode) {
       case 'rage':
         out.arcade.copy(FIRE).lerp(pal.primary, 0.3);
@@ -343,7 +462,8 @@ export class LookResolver {
         out.arcade.copy(pal.secondary).lerp(COLD_BLUE, 0.35).lerp(out.led2, 0.3);
     }
     out.portal.copy(pal.primary).lerp(out.eyes, 0.35);
-    out.lamp.copy(WHITE).lerp(out.led, 0.25);
+    // front-line fixture lenses: white-ish, leaning to the side-section colour (blue-white in Winter)
+    out.lamp.copy(WHITE).lerp(out.windowColor, 0.3).lerp(out.led, 0.15);
     switch (out.mode) {
       case 'rage':
       case 'ember':
@@ -364,15 +484,16 @@ export class LookResolver {
     if (fi > 3) out.flash.multiplyScalar(3 / fi);
     out.strobe = clamp(env.strobe, 0, 1);
     out.pulse = Math.max(out.pulse, out.strobe * 0.6);
-    // master level (blackouts) scales the shared fields the crown reads as well
+    // master level (blackouts) scales the shared fields the crown reads as well; the pixel LEDs also
+    // follow the dormant presence (a dormant state with windows / wings at 0 is black)
     const M = out.master;
     if (M < 1) {
       out.eyesIntensity *= M;
       out.mouth *= M;
       out.wings *= M;
-      out.ledIntensity *= M;
       out.windows *= M;
     }
+    out.ledIntensity *= out.emit;
     return out;
   }
 
@@ -413,6 +534,7 @@ export class LookResolver {
         v.wings = 0.3;
         v.windows = 0.35;
         v.windowColor.copy(DEEP_RED);
+        v.rosettes.copy(EMBER);
         break;
       default:
         break;
@@ -426,10 +548,42 @@ export class LookResolver {
     if (p.windowColor !== undefined) resolveColor(p.windowColor, pal, v.windowColor, 'secondary');
     // extension: 'master' (0..1) dims every set emitter, e.g. for blackouts
     if (typeof p.master === 'number') v.master = Math.max(0, Math.min(1, p.master));
+    v.presence = presenceOf(v);
+    v.ember = v.mode === 'ember' ? 1 : 0;
   }
 }
 
 const newScratch = newVals();
+
+/** index of the latest cue with c.t <= t in a start-sorted list (-1 when none) */
+function latestIndex(s: Cue[], t: number): number {
+  let lo = 0,
+    hi = s.length - 1,
+    best = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (s[mid].t <= t) {
+      best = mid;
+      lo = mid + 1;
+    } else hi = mid - 1;
+  }
+  return best;
+}
+
+/** out = a -> b by k (pattern / content mode switch half-way); out may alias b */
+function blendTarget(a: ContentTarget, b: ContentTarget, k: number, out: ContentTarget): void {
+  out.mode = k < 0.5 && a.mode !== 0 ? a.mode : b.mode;
+  out.pat = k < 0.5 ? a.pat : b.pat;
+  out.ledI = a.ledI + (b.ledI - a.ledI) * k;
+  out.led.lerpColors(a.led, b.led, k);
+  out.led2.lerpColors(a.led2, b.led2, k);
+  // fading out to 'off': the panels keep showing the outgoing content colour while they dissolve
+  if (b.mode === 0) out.col.copy(a.col);
+  else out.col.lerpColors(a.col, b.col, k);
+  out.banner = a.banner + (b.banner - a.banner) * k;
+  out.skull = a.skull + (b.skull - a.skull) * k;
+  out.emblem = a.emblem + (b.emblem - a.emblem) * k;
+}
 
 function copyVals(dst: StateVals, src: StateVals): void {
   dst.mode = src.mode;
@@ -441,6 +595,8 @@ function copyVals(dst: StateVals, src: StateVals): void {
   dst.windows = src.windows;
   dst.windowColor.copy(src.windowColor);
   dst.master = src.master;
+  dst.presence = src.presence;
+  dst.ember = src.ember;
 }
 
 function lerpVals(a: StateVals, b: StateVals, k: number, out: StateVals): void {
@@ -453,4 +609,6 @@ function lerpVals(a: StateVals, b: StateVals, k: number, out: StateVals): void {
   out.windows = a.windows + (b.windows - a.windows) * k;
   out.windowColor.copy(a.windowColor).lerp(b.windowColor, k);
   out.master = a.master + (b.master - a.master) * k;
+  out.presence = a.presence + (b.presence - a.presence) * k;
+  out.ember = a.ember + (b.ember - a.ember) * k;
 }

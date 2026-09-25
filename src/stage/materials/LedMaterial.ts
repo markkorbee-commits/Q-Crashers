@@ -47,6 +47,7 @@ export const CONTENT_MODE: Record<string, number> = {
  */
 export function createLedMaterial(): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
+    name: 'stage-led',
     fog: true,
     uniforms: THREE.UniformsUtils.merge([
       THREE.UniformsLib.fog,
@@ -71,14 +72,29 @@ export function createLedMaterial(): THREE.ShaderMaterial {
         uContent: { value: 0 },
         uContentCol: { value: new THREE.Color(1, 0.3, 0.1) },
         uContentMix: { value: 0 },
+        uContentGain: { value: 1 },
       },
     ]),
-    vertexShader: /* glsl */ `
+    vertexShader: LED_VERT,
+    fragmentShader: LED_FRAG,
+  });
+}
+
+const LED_VERT = /* glsl */ `
       attribute vec4 aLed;
       varying vec4 vLed;
       varying vec2 vUv;
       varying vec3 vWP;
       varying vec3 vN;
+      #ifdef LED_OVERLAY
+      attribute vec4 aAux;
+      uniform float uPixel;
+      uniform float uMinPx;
+      uniform float uOverNear;
+      uniform float uOverFloor;
+      varying float vOverlay;
+      varying float vFarO;
+      #endif
       #include <common>
       #include <fog_pars_vertex>
       void main() {
@@ -88,10 +104,43 @@ export function createLedMaterial(): THREE.ShaderMaterial {
         vWP = wp.xyz;
         vN = normalize(mat3(modelMatrix) * normal);
         vec4 mvPosition = viewMatrix * wp;
+        #ifdef LED_OVERLAY
+        {
+          // far-field pass: battens / pixel dots / lenses never get thinner than uMinPx on screen
+          // (camera-facing widening, pulled towards the camera so the wall does not bury them)
+          float kind = aLed.z;
+          float px = max(-mvPosition.z, 0.1) * uPixel;
+          vec3 toCam = normalize(-mvPosition.xyz);
+          vec3 nV = normalize(mat3(viewMatrix) * vN);
+          float facing = dot(nV, toCam);
+          float ratio = 1.0;
+          if (kind < 0.5 || (kind > 6.5 && kind < 7.5)) {
+            float hw = max(aAux.w, 1e-3);
+            float extra = max(0.5 * uMinPx * px - hw, 0.0);
+            vec3 dirV = normalize(mat3(viewMatrix) * aAux.xyz);
+            vec3 side = cross(dirV, toCam);
+            float sl = length(side);
+            side = sl > 1e-4 ? side / sl : vec3(0.0, 1.0, 0.0);
+            float sg = dot(side, cross(nV, dirV)) < 0.0 ? -1.0 : 1.0;
+            mvPosition.xyz += side * (sg * (uv.y * 2.0 - 1.0) * extra) + toCam * (extra * 2.0);
+            ratio = hw / (hw + extra);
+          } else if (kind > 1.5 && kind < 2.5) {
+            float hs = max(aAux.w, 1e-3);
+            float extra = max(0.6 * uMinPx * px - hs, 0.0);
+            mvPosition.xy += (uv * 2.0 - 1.0) * extra;
+            mvPosition.xyz += toCam * (extra * 2.0);
+            ratio = hs / (hs + extra);
+          }
+          // near: a faint extra glow above the haze; far: the minimum-width line carries the element
+          vOverlay = mix(uOverNear, 1.0, 1.0 - ratio) * max(sqrt(ratio), uOverFloor) * step(-0.15, facing);
+          vFarO = smoothstep(0.1, 0.7, 1.0 - ratio);
+        }
+        #endif
         gl_Position = projectionMatrix * mvPosition;
         #include <fog_vertex>
-      }`,
-    fragmentShader: /* glsl */ `
+      }`;
+
+const LED_FRAG = /* glsl */ `
       uniform float uTime;
       uniform float uBeat;
       uniform float uKick;
@@ -112,10 +161,15 @@ export function createLedMaterial(): THREE.ShaderMaterial {
       uniform float uContent;
       uniform vec3 uContentCol;
       uniform float uContentMix;
+      uniform float uContentGain;
       varying vec4 vLed;
       varying vec2 vUv;
       varying vec3 vWP;
       varying vec3 vN;
+      #ifdef LED_OVERLAY
+      varying float vOverlay;
+      varying float vFarO;
+      #endif
       #include <common>
       #include <fog_pars_fragment>
 
@@ -147,7 +201,8 @@ export function createLedMaterial(): THREE.ShaderMaterial {
           float r = h21(vec2(pid, tick));
           float r2 = h21(vec2(pid + 17.0, tick - 1.0));
           float on = step(0.86, r) + 0.45 * step(0.9, r2);
-          c = mix(cA * 0.12, mix(cA, vec3(1.0), 0.45) * 1.8, clamp(on, 0.0, 1.0));
+          // sparkle pixels flash towards white at the batten's own level (dark battens stay dark)
+          c = mix(cA * 0.12, mix(cA, vec3(max(cA.r, max(cA.g, cA.b))), 0.45) * 1.8, clamp(on, 0.0, 1.0));
         } else if (pat < 4.5) {
           float swap = mod(floor(uBeat / 4.0), 2.0);
           float side = step(0.0, wp.x);
@@ -157,7 +212,7 @@ export function createLedMaterial(): THREE.ShaderMaterial {
           float n = vnoise(vec2(strip * 3.1, s * 1.6 - uTime * 4.0)) * 0.7 + vnoise(vec2(strip * 7.7, s * 4.0 - uTime * 9.0)) * 0.3;
           float hgt = clamp(wp.y / 11.0, 0.0, 1.0);
           float heat = clamp(n * 1.4 - hgt * 0.6, 0.0, 1.0);
-          c = mix(cB * 0.2, mix(cA, vec3(1.0, 0.85, 0.5), heat * heat), heat);
+          c = mix(cB * 0.2, mix(cA, vec3(1.0, 0.85, 0.5) * max(cA.r, max(cA.g, cA.b)), heat * heat), heat);
           c *= 0.4 + 1.2 * heat;
         } else if (pat < 6.5) {
           // wave: vertical sine sweep
@@ -267,6 +322,10 @@ export function createLedMaterial(): THREE.ShaderMaterial {
           }
           m = mix(m, 0.55, clamp(fw * 1.5 - 0.3, 0.0, 1.0));
           col = ledPattern(pid, s, strip, vWP, rnd) * m * pulse;
+          #ifdef LED_OVERLAY
+          // far away a chase / sparkle averages over many pixels: keep a steady outline level
+          col = max(col, (rnd > 0.5 ? uAccent : uLed) * 0.45 * m * vFarO);
+          #endif
         } else if (kind < 1.5) {
           // window pane: glow brightest low-centre, tracery bars, per-window variation / flicker
           float g = 0.7 + 0.45 * (1.0 - vUv.y) * (1.0 - abs(vUv.x - 0.5) * 1.2);
@@ -347,11 +406,52 @@ export function createLedMaterial(): THREE.ShaderMaterial {
           vec2 f = fract(p / 0.05);
           float grid = smoothstep(0.0, 0.2, f.x) * smoothstep(1.0, 0.8, f.x) * smoothstep(0.0, 0.2, f.y) * smoothstep(1.0, 0.8, f.y);
           grid = mix(grid, 0.6, clamp(fwidth(p.x / 0.05) - 0.4, 0.0, 1.0));
-          col = panelContent(p, size) * (0.35 + 0.65 * grid) * pulse;
+          col = panelContent(p, size) * (0.35 + 0.65 * grid) * pulse * uContentGain;
         }
         col += vec3(uStrobe) * 3.0 * step(kind, 0.5);
+        #ifdef LED_OVERLAY
+        col *= vOverlay;
+        if (max(col.r, max(col.g, col.b)) < 1e-4) discard;
         gl_FragColor = vec4(col, 1.0);
         #include <fog_fragment>
-      }`,
+        #ifdef USE_FOG
+        // additive pass: fog only attenuates (no in-scatter added twice)
+        gl_FragColor.rgb = col * (1.0 - fogFactor);
+        #endif
+        #else
+        gl_FragColor = vec4(col, 1.0);
+        #include <fog_fragment>
+        #endif
+      }`;
+
+/**
+ * Far-field / above-the-haze pass of the point and line emitters (LED battens, pixel dots, fixture
+ * lenses, crystal lanterns): drawn additively AFTER the haze sprites (renderOrder 12 > haze 10), with
+ * a minimum on-screen width, so the U of lamp rows, battens and lanterns reads from the back of the
+ * field and from the drone instead of dissolving into sub-pixel aliasing and haze. Shares the uniform
+ * objects of the main LED material (one resolve per frame drives both).
+ */
+export function createLedOverlayMaterial(main: THREE.ShaderMaterial): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    name: 'stage-led-overlay',
+    fog: true,
+    defines: { LED_OVERLAY: '' },
+    uniforms: {
+      ...main.uniforms,
+      uPixel: { value: 0.002 },
+      uMinPx: { value: 2 },
+      uOverNear: { value: 0.3 },
+      uOverFloor: { value: 0.5 },
+    },
+    vertexShader: LED_VERT,
+    fragmentShader: LED_FRAG,
+    transparent: true,
+    depthWrite: false,
+    depthTest: true,
+    side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -2,
   });
 }

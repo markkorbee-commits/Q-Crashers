@@ -5,16 +5,25 @@ const _d = new THREE.Vector3();
 const _w = new THREE.Vector3();
 const _p = new THREE.Vector3();
 const _n = new THREE.Vector3();
+const _zero = new THREE.Vector4();
+const _aux = new THREE.Vector4();
+
+/** element kinds that also get the far-field overlay pass (see createLedOverlayMaterial) */
+const OVERLAY_KINDS: number[] = [LED_KIND.bar, LED_KIND.dots, LED_KIND.lamp, LED_KIND.lantern];
 
 /**
  * Builds the single merged geometry of all emissive set elements (LED battens, windows, lamps,
  * lanterns, candles, arcade backlights). Attributes: position, normal, uv, aLed = (s, strip, kind, rnd).
+ * The overlay geometry (buildOverlay) holds only the point / line emitters (battens, pixel dots,
+ * fixture lenses, crystal lanterns) plus aAux = (batten direction, half width | half size).
  */
 export class LedBuilder {
   private pos: number[] = [];
   private nrm: number[] = [];
   private uv: number[] = [];
   private led: number[] = [];
+  private aux: number[] = [];
+  private cur: THREE.Vector4 = _zero;
   private strips = 0;
   /** metres of LED batten */
   metres = 0;
@@ -29,6 +38,7 @@ export class LedBuilder {
     this.nrm.push(n.x, n.y, n.z);
     this.uv.push(u, v);
     this.led.push(s, strip, kind, rnd);
+    this.aux.push(this.cur.x, this.cur.y, this.cur.z, this.cur.w);
   }
 
   /** quad from 4 corners (counter-clockwise seen from the front) */
@@ -56,7 +66,9 @@ export class LedBuilder {
     const C = b.clone().add(lift).add(_w);
     const D = a.clone().add(lift).add(_w);
     const n = out.clone().normalize();
+    this.cur = _aux.set(_d.x, _d.y, _d.z, width / 2);
     this.quad4(A, B, C, D, n, [0, 0, 1, 0, 1, 1, 0, 1], [s0, s0 + len, s0 + len, s0], strip, kind, rnd);
+    this.cur = _zero;
     this.metres += len;
     this.count.bars++;
     return s0 + len;
@@ -81,7 +93,9 @@ export class LedBuilder {
     const B = c.clone().add(rx).sub(uy);
     const C = c.clone().add(rx).add(uy);
     const D = c.clone().sub(rx).add(uy);
+    this.cur = _aux.set(0, 0, 0, Math.max(w, h) / 2);
     this.quad4(A, B, C, D, n, [0, 0, 1, 0, 1, 1, 0, 1], [0, w, w, 0], strip, kind, rnd);
+    this.cur = _zero;
     this.tally(kind);
   }
 
@@ -131,6 +145,38 @@ export class LedBuilder {
     g.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
     g.setAttribute('aLed', new THREE.Float32BufferAttribute(this.led, 4));
     g.computeBoundingSphere();
+    return g;
+  }
+
+  /** the point / line emitters only (battens, pixel dots, lenses, lanterns) with aAux, for the overlay pass */
+  buildOverlay(): THREE.BufferGeometry {
+    const P: number[] = [];
+    const N: number[] = [];
+    const U: number[] = [];
+    const Ld: number[] = [];
+    const X: number[] = [];
+    const nv = this.pos.length / 3;
+    for (let t = 0; t + 2 < nv; t += 3) {
+      if (!OVERLAY_KINDS.includes(this.led[t * 4 + 2])) continue;
+      for (let v = t; v < t + 3; v++) {
+        P.push(this.pos[v * 3], this.pos[v * 3 + 1], this.pos[v * 3 + 2]);
+        N.push(this.nrm[v * 3], this.nrm[v * 3 + 1], this.nrm[v * 3 + 2]);
+        U.push(this.uv[v * 2], this.uv[v * 2 + 1]);
+        for (let k = 0; k < 4; k++) {
+          Ld.push(this.led[v * 4 + k]);
+          X.push(this.aux[v * 4 + k]);
+        }
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(U, 2));
+    g.setAttribute('aLed', new THREE.Float32BufferAttribute(Ld, 4));
+    g.setAttribute('aAux', new THREE.Float32BufferAttribute(X, 4));
+    g.computeBoundingSphere();
+    // widened far-field lines reach a little beyond the geometry
+    if (g.boundingSphere) g.boundingSphere.radius += 4;
     return g;
   }
 }

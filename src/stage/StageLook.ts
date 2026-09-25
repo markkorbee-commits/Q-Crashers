@@ -36,6 +36,14 @@ export interface StageLook {
   pulse: number;
   /** 0..1 flash light from pyro/fireworks near the set (from app.env) */
   flash: THREE.Color;
+  /**
+   * 0..1 level of every set PRACTICAL (LED battens, pixel dots, lamps, lanterns, rosettes, bulbs,
+   * decor backlights): master x dormant presence. A 'dormant' state with windows / wings at 0 is a
+   * true blackout (0); show-driven light (wash, flash, strobe, pulse) is not affected.
+   */
+  emit: number;
+  /** 0..1 'ember' mask: only the dragon and the inner wings stay lit, the castle goes dark */
+  ember: number;
 }
 
 export function createStageLook(): StageLook {
@@ -59,6 +67,8 @@ export function createStageLook(): StageLook {
     washIntensity: 0.4,
     pulse: 0,
     flash: new THREE.Color(0, 0, 0),
+    emit: 1,
+    ember: 0,
   };
 }
 
