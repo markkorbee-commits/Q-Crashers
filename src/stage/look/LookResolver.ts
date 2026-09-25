@@ -273,6 +273,8 @@ export class LookResolver {
       ledI = ledI + (cI - ledI) * env01;
       break;
     }
+    // fire looks: the backlit banners flicker (deterministic in t)
+    if (out.mode === 'rage' || pat === 5) out.bannerGlow *= 0.8 + 0.25 * Math.sin(t * 7.3) * Math.sin(t * 3.1 + 1) + 0.1 * Math.sin(t * 17.9);
     out.ledPatternX = pat;
     out.ledPattern = pat <= 4 ? pat : pat === 5 ? 3 : pat === 6 ? 1 : 2;
     out.ledIntensity = ledI;

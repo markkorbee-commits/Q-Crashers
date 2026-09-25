@@ -251,7 +251,7 @@ export class SidesBuilder {
     lbox(k.stone, u0, top, -wallT, u1, top + 0.45, 0.05, TINT.warm);
     for (let u = u0 + 0.5; u < u1 - 0.8; u += 1.35) lbox(k.stone, u, top + 0.45, -0.55, u + 0.75, top + 1.2, 0.05, TINT.trim);
     lbox(k.stone, u0, Y - 0.05, 0, u1, Y + 0.35, 0.2, TINT.trim);
-    lbox(k.stone, u0, top - 0.3, -wallT - 5, u1, top - 0.05, -wallT, TINT.dark);
+    lbox(k.stone, u0, top - 0.3, -wallT - 2.2, u1, top - 0.05, -wallT, TINT.dark);
     // LED lines: under the cornice and along the ledge lip
     const sTop = k.led.newStrip();
     const sLip = k.led.newStrip();

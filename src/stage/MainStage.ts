@@ -47,7 +47,6 @@ export class MainStageSystem implements System {
   private resolver!: LookResolver;
   private meshes: THREE.Mesh[] = [];
   private barrier: THREE.InstancedMesh | null = null;
-  private detailMeshes: THREE.Object3D[] = [];
   private kitStats = { tris: 0, ledMetres: 0, windows: 0, lamps: 0, lanterns: 0, barrier: 0 };
   private buildMs = 0;
   private timing = { materials: 0, geometry: 0, crown: 0 };
@@ -107,7 +106,7 @@ export class MainStageSystem implements System {
 
   private buildMeshes(kit: StageKit): void {
     const m = this.mats;
-    const add = (geo: THREE.BufferGeometry | null, mat: THREE.Material, name: string, detail = false) => {
+    const add = (geo: THREE.BufferGeometry | null, mat: THREE.Material, name: string) => {
       if (!geo) return;
       const mesh = new THREE.Mesh(geo, mat);
       mesh.name = name;
@@ -117,7 +116,6 @@ export class MainStageSystem implements System {
       mesh.receiveShadow = mat === m.stone || mat === m.paint;
       this.root.add(mesh);
       this.meshes.push(mesh);
-      if (detail) this.detailMeshes.push(mesh);
       this.kitStats.tris += (geo.attributes.position.count / 3) | 0;
     };
     add(kit.stone.build(), m.stone, 'stage-stone');
@@ -154,7 +152,18 @@ export class MainStageSystem implements System {
     set('laser_stage', byX(P.laserStage));
     set('fixtures_truss', byX(P.fixturesTruss));
     set('fixtures_floor', byX(P.fixturesFloor));
-    const c = this.crown.anchors();
+    let c: ReturnType<DragonCrown['anchors']> | null = null;
+    try {
+      c = this.crown.anchors();
+    } catch (e) {
+      console.error('[stage] crown anchors failed', e);
+    }
+    if (!c) {
+      set('roof', byX(P.roof));
+      return;
+    }
+    // the wing spars carry rows of moving heads: they are part of the stage structure fixtures
+    set('fixtures_truss', byX([...P.fixturesTruss, ...c.wingLeft, ...c.wingRight]));
     set('dragon_mouth', [c.dragonMouth]);
     set('dragon_eyes', [c.dragonEyes[0], c.dragonEyes[1]]);
     set('dragon_head', [c.dragonHead]);
@@ -289,8 +298,6 @@ export class MainStageSystem implements System {
 
   setQuality(q: QualitySettings): void {
     this.lights.setQuality(q);
-    const r = RANK[q.level];
-    for (const m of this.detailMeshes) m.visible = r >= 1;
     try {
       this.crown.setQuality(q);
     } catch (e) {
@@ -346,6 +353,7 @@ export class MainStageSystem implements System {
   }
 
   dispose(): void {
+    this.hooked = false;
     this.app.scene.remove(this.root);
     for (const m of this.meshes) m.geometry.dispose();
     this.barrier?.geometry.dispose();

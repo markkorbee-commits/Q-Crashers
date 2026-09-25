@@ -195,7 +195,21 @@ export function createLedMaterial(): THREE.ShaderMaterial {
             // embers: slow breathing, some windows dark
             var *= step(0.35, rnd) * (0.4 + 0.6 * (0.5 + 0.5 * sin(uTime * 1.3 + rnd * 20.0)));
           }
-          col = uWin * g * mix(0.25, 1.0, bars) * var * pulse;
+          // windows act as big pixels of the facade mapping
+          float wp = 1.0;
+          float pat = uPattern;
+          if (pat > 0.5 && pat < 1.5) {
+            float k = fract(vWP.x / 26.0 - uPhase);
+            wp = 0.55 + 0.75 * smoothstep(0.0, 0.1, k) * (1.0 - smoothstep(0.12, 0.45, k));
+          } else if (pat > 1.5 && pat < 2.5) {
+            wp = 0.65 + 0.5 * exp(-fract(uBeat) * 4.0);
+          } else if (pat > 2.5 && pat < 3.5) {
+            wp = 0.6 + 0.9 * step(0.82, h21(vec2(rnd * 131.0, floor(uTime * 4.0))));
+          } else if (pat > 3.5 && pat < 4.5) {
+            float swap = mod(floor(uBeat / 4.0), 2.0);
+            wp = mix(1.15, 0.45, abs(step(0.0, vWP.x) - swap));
+          }
+          col = uWin * g * mix(0.25, 1.0, bars) * var * wp * pulse;
         } else if (kind < 2.5) {
           float r = length(vUv - 0.5) * 2.0;
           float core = 1.0 - smoothstep(0.35, 1.0, r);
