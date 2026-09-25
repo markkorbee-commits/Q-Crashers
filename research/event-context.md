@@ -363,7 +363,7 @@ These are derived parameters, to be cross-checked by the stage and show-systems 
 - [S59] SGXL, "Defqon.1 verrast fans compleet…" (4 Jul 2026): https://sgxl.nl/defqon-1-verrast-fans-deelt-spectaculaire-beelden-the-endshow-2026/
 - [S60] YouTube reaction video example: https://www.youtube.com/watch?v=NW8hnRApjrk
 - [S61] YourEDM, "Defqon.1 Releases 2026 Endshow Following Festival Cancellation" (6 Jul 2026): https://www.youredm.com/2026/07/06/defqon-1-releases-2026-endshow-following-festival-cancellation/
-- [S62] DJ Mag (as S11b), per search-indexed text describing the Vivaldi opening and the Frontliner transition
+- [S62] Search-indexed article text (search result attributed it among the DJ Mag / We Rave You / YourEDM coverage; exact page not confirmed): "The Endshow opens with the unmistakable strains of Vivaldi's 'The Four Seasons', accompanied by a breathtaking display of flames erupting in perfect sync with the orchestral score. From there, the production shifts into 'Discorecord (Galactixx Remix)' by Frontliner". YourEDM [S61] states the same in its own words.
 - [S63] Q-dance Music SoundCloud, Akimbo & Missy, L.P.A.: https://soundcloud.com/q-dancemusic/akimbo-missy-l-p-a ; Hard News "'Losse Polsjes' has become the festival hype of 2026": https://hardnews.nl/en/losse-polsjes-has-become-the-festival-hype-of-2026/
 - [S64] Hardstyle.com track page, Sacred Flame (Extended Mix, 4:36, 17.07.2026): https://hardstyle.com/en/tracks/10372fea-cb78-4a33-b75e-b3467284db76/sacred-flame
 - [S65] Q-dance YouTube Short "D-Block & S-te-Fan's 'Embers' lit up the Defqon.1 2026 Endshow!": https://www.youtube.com/shorts/F4Z8TpRStuU
