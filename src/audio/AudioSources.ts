@@ -64,7 +64,15 @@ export class AudioSources {
     await this.app.setAudioTrack(track);
     this.kind = 'file';
     this.label = label;
-    if (!this.shipped) this.autoAnalyze();
+    // the project's own file: a tempo map measured offline from this very audio (scripts/retime-show.py,
+    // public/show/audio-map.json) beats the in-browser estimate — only ?analyze=force re-runs it
+    if (!this.shipped && !(this.tempoMeasured() && this.app.params.get('analyze') !== 'force')) this.autoAnalyze();
+  }
+
+  /** true when every tempo segment of the show was measured from the real audio (source 'analyzed') */
+  tempoMeasured(): boolean {
+    const segs = this.app.show.file.tempo;
+    return segs.length > 0 && segs.every((s) => s.source === 'analyzed');
   }
 
   /** A file picked / dropped by the user (analysed automatically on desktop). */
