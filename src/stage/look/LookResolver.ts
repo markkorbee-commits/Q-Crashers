@@ -21,6 +21,8 @@ interface StateVals {
   rosettes: THREE.Color;
   windows: number;
   windowColor: THREE.Color;
+  /** 0..1 master level of every set emitter (blackouts) */
+  master: number;
 }
 
 const newVals = (): StateVals => ({
@@ -32,6 +34,7 @@ const newVals = (): StateVals => ({
   rosettes: new THREE.Color(),
   windows: 0,
   windowColor: new THREE.Color(),
+  master: 1,
 });
 
 const AMBER = new THREE.Color('#ffae42');
@@ -118,6 +121,7 @@ export class LookResolver {
     base.rosettes.copy(pal.accent).lerp(VIOLET, 0.55);
     base.windows = 0.55 + 0.3 * energy;
     base.windowColor.copy(AMBER);
+    base.master = kind === 'silence' ? 0.03 : 1;
 
     // ---- 2. persistent state cue with cross-fade ---------------------------------------------------
     const si = this.stateIndex(t);
@@ -148,6 +152,7 @@ export class LookResolver {
     out.rosetteAngle = angle % (Math.PI * 2);
     out.windows = cur.windows;
     out.windowColor.copy(cur.windowColor);
+    out.master = cur.master;
 
     // ---- LED defaults from the section + mode ------------------------------------------------------
     out.led.copy(pal.primary);
@@ -359,6 +364,15 @@ export class LookResolver {
     if (fi > 3) out.flash.multiplyScalar(3 / fi);
     out.strobe = clamp(env.strobe, 0, 1);
     out.pulse = Math.max(out.pulse, out.strobe * 0.6);
+    // master level (blackouts) scales the shared fields the crown reads as well
+    const M = out.master;
+    if (M < 1) {
+      out.eyesIntensity *= M;
+      out.mouth *= M;
+      out.wings *= M;
+      out.ledIntensity *= M;
+      out.windows *= M;
+    }
     return out;
   }
 
@@ -410,6 +424,8 @@ export class LookResolver {
     if (p.rosettes !== undefined) resolveColor(p.rosettes, pal, v.rosettes, 'accent');
     if (typeof p.windows === 'number') v.windows = p.windows;
     if (p.windowColor !== undefined) resolveColor(p.windowColor, pal, v.windowColor, 'secondary');
+    // extension: 'master' (0..1) dims every set emitter, e.g. for blackouts
+    if (typeof p.master === 'number') v.master = Math.max(0, Math.min(1, p.master));
   }
 }
 
@@ -424,6 +440,7 @@ function copyVals(dst: StateVals, src: StateVals): void {
   dst.rosettes.copy(src.rosettes);
   dst.windows = src.windows;
   dst.windowColor.copy(src.windowColor);
+  dst.master = src.master;
 }
 
 function lerpVals(a: StateVals, b: StateVals, k: number, out: StateVals): void {
@@ -435,4 +452,5 @@ function lerpVals(a: StateVals, b: StateVals, k: number, out: StateVals): void {
   out.rosettes.copy(a.rosettes).lerp(b.rosettes, k);
   out.windows = a.windows + (b.windows - a.windows) * k;
   out.windowColor.copy(a.windowColor).lerp(b.windowColor, k);
+  out.master = a.master + (b.master - a.master) * k;
 }

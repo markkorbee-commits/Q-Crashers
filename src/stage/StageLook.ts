@@ -95,6 +95,8 @@ export interface StageLookEx extends StageLook {
   contentColor: THREE.Color;
   /** 0..1 dissolve of the panels */
   contentMix: number;
+  /** 0..1 master level of all castle emitters (blackouts: section 'silence' or state param 'master') */
+  master: number;
 }
 
 export function createStageLookEx(): StageLookEx {
@@ -116,5 +118,6 @@ export function createStageLookEx(): StageLookEx {
     content: 0,
     contentColor: new THREE.Color('#ff5a12'),
     contentMix: 0,
+    master: 1,
   };
 }

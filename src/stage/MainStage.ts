@@ -18,6 +18,8 @@ import { createStageLookEx, type StageLookEx } from './StageLook';
 
 const RANK: Record<QualitySettings['level'], number> = { mobile: 0, medium: 1, high: 2, ultra: 3 };
 
+const CANDLE = new THREE.Color('#ffb45a');
+
 /** c += src * k (THREE.Color has no addScaled) */
 function addScaled(c: THREE.Color, src: THREE.Color, k: number): THREE.Color {
   c.r += src.r * k;
@@ -261,7 +263,8 @@ export class MainStageSystem implements System {
 
   private applyUniforms(ctx: FrameContext, look: StageLookEx): void {
     const u = this.mats.u;
-    const wi = look.washIntensity;
+    // soft-limited: env wash intensities above ~1 compress instead of blowing out the set
+    const wi = 1.5 * (1 - Math.exp(-Math.max(0, look.washIntensity) / 1.1));
     // virtual floods: set A follows the lighting wash, set B leans to the LED secondary colour
     u.uFloodA.value.copy(look.wash).multiplyScalar(wi * 3.2 * (0.55 + 0.6 * look.energy));
     u.uFloodB.value.copy(look.wash).lerp(look.led2, 0.55).multiplyScalar(wi * 2.8 * (0.55 + 0.6 * look.energy));
@@ -276,6 +279,8 @@ export class MainStageSystem implements System {
     u.uGlow.value.set(look.bannerGlow, look.skullGlow * (0.6 + look.eyesIntensity * 0.5), look.emblemGlow, 1);
 
     const l = this.mats.led.uniforms;
+    const M = look.master;
+    const dorm = look.mode === 'dormant' ? 0.45 : 1;
     l.uTime.value = ctx.showTime;
     l.uBeat.value = ctx.beat.beat;
     l.uKick.value = ctx.beat.kick;
@@ -287,16 +292,17 @@ export class MainStageSystem implements System {
     (l.uAccent.value as THREE.Color).copy(look.accent).multiplyScalar(ledGain * 0.75);
     (l.uWin.value as THREE.Color).copy(look.windowColor).multiplyScalar(2.3 * look.windows);
     l.uWinMode.value = look.windowMode;
-    (l.uArcade.value as THREE.Color).copy(look.arcade).multiplyScalar(1.6 * (0.4 + 0.6 * look.windows));
-    (l.uLamp.value as THREE.Color).copy(look.lamp).multiplyScalar(2 + 10 * look.ledIntensity);
-    (l.uLantern.value as THREE.Color).copy(look.lantern).multiplyScalar(3.5 + 3 * look.energy);
-    (l.uCandle.value as THREE.Color).set('#ffb45a').multiplyScalar(1.4);
-    (l.uPortal.value as THREE.Color).copy(look.portal).multiplyScalar(1.2 + 1.5 * look.mouth);
+    (l.uArcade.value as THREE.Color).copy(look.arcade).multiplyScalar(1.6 * (0.25 + 0.75 * look.windows) * M);
+    (l.uLamp.value as THREE.Color).copy(look.lamp).multiplyScalar((2 + 10 * look.ledIntensity) * M * dorm);
+    (l.uLantern.value as THREE.Color).copy(look.lantern).multiplyScalar((3.5 + 3 * look.energy) * M * dorm);
+    (l.uCandle.value as THREE.Color).copy(CANDLE).multiplyScalar(1.4 * Math.max(M, 0.15));
+    (l.uPortal.value as THREE.Color).copy(look.portal).multiplyScalar((0.5 + 0.8 * look.mouth) * M);
     l.uPulse.value = look.pulse;
     l.uStrobe.value = look.strobe;
     l.uContent.value = look.content;
     l.uContentMix.value = look.contentMix;
-    (l.uContentCol.value as THREE.Color).copy(look.contentColor).multiplyScalar(2.2);
+    (l.uContentCol.value as THREE.Color).copy(look.contentColor).multiplyScalar(2.2 * M);
+    u.uGlow.value.multiplyScalar(M);
   }
 
   setQuality(q: QualitySettings): void {

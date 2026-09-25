@@ -64,7 +64,8 @@ export class StageLights {
 
   update(look: StageLookEx, flashPos: THREE.Vector3, flashI: number): void {
     const wash = look.wash;
-    const wi = look.washIntensity;
+    // soft-limited: env wash intensities above ~1 compress instead of blowing out the set
+    const wi = 1.5 * (1 - Math.exp(-Math.max(0, look.washIntensity) / 1.1));
     for (const rig of this.rigs) {
       const l = rig.light;
       if (!l.visible) continue;
