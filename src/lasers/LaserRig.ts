@@ -2,22 +2,26 @@ import * as THREE from 'three';
 import { Anchors, type AnchorName } from '../core/Anchors';
 
 /**
- * Laser projector layout (research/production-analysis.md §5.2 + stage-canonical.md).
+ * Laser projector layout — research/design-bible.md §7.4 and research/terrain-layout.json "lasers"
+ * (≈ 45 RGB projectors, 20–60 W class) plus the plinth units of the ground-level web (show-analysis 2.2).
  *
  * Stage (origin 'stage'):
- *   deck   — 12 projectors on the deck front (y ≈ 2.1), sheets / zig-zag / waves / audience fans
- *   tower  — castle tower tops (13–16 m), cross beams / cones
- *   high   — wing spar tips / roof line (≈ 24–26 m, "the 2026 RED is wide but LOW"), sky fans / X
- *   arm    — ends of the forward side arms (±86, 8, +22): side positions (radial bursts, crossfire)
+ *   deck    12 × deck front, X −33…+33 (6 m pitch), Y 2.2, Z −0.5 — sheets, zig-zag, sunbursts, chevron, tunnels
+ *   tower    8 × castle roof: X ±14, ±24 @ Y 16, Z −13 and X ±7, ±32 @ Y 10, Z −12 — cage, X beams, sky fans
+ *   dragon   2 × dragon flanks (±7, 15, −10) — the crossing cyan X over the head (Embers)
+ *   high     4 × wing finger bases (±20, 20, −19), (±34, 19, −19) — sky fans, down-fans
+ *   corner   4 × corner towers (±92, 14, −4) — sideways fans, beam-ends
  * Field (origin 'field'):
- *   pillar — lantern heads of the 8 delay-tower obelisks (beam bounces between the pillars, f091)
- *   base   — pillar plinths (≈ 1.5 m): the low white web over the empty field (f014)
- *   foh    — FOH roof: reverse fans / sheets toward the stage, radial bursts
+ *   turret   6 × arm-end turrets (±94, 12, 58) — radial bursts, cross-field fans / sheets
+ *   pillar   8 × obelisk capitals (±20, 9.7, 36/69/102/135) — pillar-to-pillar beams, sky beams
+ *   base     8 × plinth corners (Y ≈ 1.5) — the white web criss-crossing the empty field 1–3 m high
+ *   piano    1 × white light tube on the grand piano (0, 1.8, 59) — the Domitor Draconis mirror bounce
+ * Mirrors: the row-1 and row-2 crystals (±20, 11.2, 36/69) reflect the piano laser.
  *
- * Positions come from the anchors other systems register (stage towers / roof, pillars, FOH) when
- * they are available and fall back to the canonical dimensions otherwise.
+ * Other systems may override positions: a custom 'laser_stage' anchor (the stage engineer's housings) or
+ * custom 'pillars_top' (the grounds engineer's obelisks, X/Z taken from it).
  */
-export type EmitterGroup = 'deck' | 'tower' | 'high' | 'arm' | 'pillar' | 'base' | 'foh';
+export type EmitterGroup = 'deck' | 'tower' | 'dragon' | 'high' | 'corner' | 'turret' | 'pillar' | 'base' | 'piano';
 export type Origin = 'stage' | 'field';
 
 export interface Emitter {
@@ -26,31 +30,37 @@ export interface Emitter {
   origin: Origin;
   /** aperture position (world) */
   pos: THREE.Vector3;
-  /** base aim (unit, horizontal): stage → audience (+Z), field → stage-ish */
+  /** base aim (unit, horizontal): stage → audience (+Z), field → stage-ish / across the aisle */
   fwd: THREE.Vector3;
   /** lateral axis = cross(up, fwd), unit */
   lat: THREE.Vector3;
-  /** -1 spectator-left (x<0), +1 right, and for centre units a stable ±1 by index */
+  /** -1 spectator-left (x<0), +1 right; centre units get a stable ±1 by index */
   side: number;
   /** 0..1 position across its group (left → right), for chases */
   rank: number;
+  /** 0-based position within its group sorted left → right */
+  order: number;
   /** pillar row (0 = nearest to the stage), -1 otherwise */
   row: number;
   /** index of the emitter used as a crossfire target (pillars), -1 = none */
   partner: number;
   /** relative optical power (big roof projectors vs small plinth units) */
   power: number;
-  /** draw a housing box (false for positions where the host geometry is unknown) */
+  /** draw a housing box */
   housing: boolean;
 }
 
 const UP = new THREE.Vector3(0, 1, 0);
 const DEFAULTS = new Anchors();
+/** anchors the layout depends on */
+const DEPENDS: readonly AnchorName[] = ['laser_stage', 'laser_field', 'pillars_top'];
 
-/** canonical fallbacks (stage-canonical.md / terrain-analysis.md) */
-const PILLAR_X = 22;
-const PILLAR_Z = [46.5, 73.5, 100.7, 127.7];
-const PILLAR_TOP_Y = 14.5;
+/** canonical obelisk layout (terrain-layout.json "pillars") */
+const PILLARS: readonly [number, number][] = [
+  [-20, 36], [20, 36], [-20, 69], [20, 69], [-20, 102], [20, 102], [-20, 135], [20, 135],
+];
+const CAPITAL_Y = 9.7;
+const CRYSTAL_MID_Y = 11.2;
 
 function sameAsDefault(name: AnchorName, pts: THREE.Vector3[]): boolean {
   const d = DEFAULTS.get(name);
@@ -67,17 +77,16 @@ function signature(pts: THREE.Vector3[]): number {
 
 export class LaserRig {
   readonly emitters: Emitter[] = [];
-  readonly stage: Emitter[] = [];
-  readonly field: Emitter[] = [];
-  readonly byGroup: Record<EmitterGroup, Emitter[]> = { deck: [], tower: [], high: [], arm: [], pillar: [], base: [], foh: [] };
+  readonly byGroup: Record<EmitterGroup, Emitter[]> = { deck: [], tower: [], dragon: [], high: [], corner: [], turret: [], pillar: [], base: [], piano: [] };
+  /** crystal mirror centres keyed by pillar id L1, R1, L2, R2 … (row-major, left first) */
+  readonly mirrors: THREE.Vector3[] = [];
   /** anchors this rig registered itself (so a later rebuild can tell "customised by others" apart) */
   private mine = new Map<string, number>();
   private sig = 0;
 
-  /** signature of every anchor the layout depends on (cheap change detection) */
   anchorSignature(a: Anchors): number {
     let s = 0;
-    for (const n of ['laser_stage', 'laser_field', 'towers_top', 'roof', 'pillars_top', 'pillars_base', 'foh'] as AnchorName[]) s += signature(a.get(n)) * (s % 13 + 1);
+    for (let i = 0; i < DEPENDS.length; i++) s = s * 1.0001 + signature(a.get(DEPENDS[i])) * (i + 1);
     return s;
   }
 
@@ -97,12 +106,12 @@ export class LaserRig {
 
   build(a: Anchors): void {
     this.emitters.length = 0;
-    this.stage.length = 0;
-    this.field.length = 0;
+    this.mirrors.length = 0;
     for (const k of Object.keys(this.byGroup) as EmitterGroup[]) this.byGroup[k].length = 0;
+    const v = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
 
-    const add = (group: EmitterGroup, pos: THREE.Vector3, fwd: THREE.Vector3, power: number, housing: boolean): Emitter => {
-      const origin: Origin = group === 'pillar' || group === 'base' || group === 'foh' ? 'field' : 'stage';
+    const add = (group: EmitterGroup, pos: THREE.Vector3, fwd: THREE.Vector3, power: number, housing = true): Emitter => {
+      const origin: Origin = group === 'pillar' || group === 'base' || group === 'turret' || group === 'piano' ? 'field' : 'stage';
       const f = fwd.clone().setY(0).normalize();
       const e: Emitter = {
         index: this.emitters.length,
@@ -113,111 +122,78 @@ export class LaserRig {
         lat: new THREE.Vector3().crossVectors(UP, f).normalize(),
         side: Math.abs(pos.x) < 0.5 ? (this.emitters.length % 2 ? 1 : -1) : Math.sign(pos.x),
         rank: 0.5,
+        order: 0,
         row: -1,
         partner: -1,
         power,
         housing,
       };
       this.emitters.push(e);
-      (origin === 'stage' ? this.stage : this.field).push(e);
       this.byGroup[group].push(e);
       return e;
     };
-    const v = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
-    const toAudience = v(0, 0, 1);
+    const aud = v(0, 0, 1);
 
     // ---------------- stage ----------------
     const customStage = this.custom(a, 'laser_stage');
     if (customStage) {
+      // the stage engineer modelled housings: classify by height / position
       for (const p of customStage) {
-        const g: EmitterGroup = p.y < 6 ? 'deck' : Math.abs(p.x) > 62 ? 'arm' : p.y < 18 ? 'tower' : 'high';
-        add(g, p, g === 'arm' ? v(-Math.sign(p.x) * 0.55, 0, 1) : toAudience, g === 'high' ? 1.25 : 1, g === 'deck' || g === 'arm');
+        const ax = Math.abs(p.x);
+        const g: EmitterGroup = p.y < 5 ? 'deck' : ax > 80 ? 'corner' : ax < 9 && p.y > 12 ? 'dragon' : p.y >= 18 ? 'high' : 'tower';
+        add(g, p, g === 'corner' ? v(-Math.sign(p.x) * 0.5, 0, 1) : aud, g === 'high' ? 1.25 : 1, g === 'deck');
       }
     }
-    if (!this.byGroup.deck.length) {
-      // deck front row, between the flame units (flames sit on z = -0.4)
-      for (const x of [-44, -36, -28, -20, -12, -4, 4, 12, 20, 28, 36, 44]) add('deck', v(x, 2.12, -1.1), toAudience, 1, true);
-    }
+    if (!this.byGroup.deck.length) for (let i = 0; i < 12; i++) add('deck', v(-33 + i * 6, 2.2, -0.5), aud, 1);
     if (!customStage) {
-      const towers = this.custom(a, 'towers_top');
-      if (towers) {
-        const pts = [...towers].filter((p) => Math.abs(p.x) < 62).sort((p, q) => Math.abs(p.x) - Math.abs(q.x)).slice(0, 6);
-        for (const p of pts) add('tower', v(p.x, p.y + 0.25, p.z + 0.6), toAudience, 1.1, false);
-      } else {
-        for (const x of [-34, -20, 20, 34]) add('tower', v(x, Math.abs(x) < 25 ? 15.8 : 14.4, -5.4), toAudience, 1.1, true);
-      }
-      const roof = this.custom(a, 'roof');
-      const roofPts = roof ? roof.filter((p) => p.y > 12 && Math.abs(p.x) < 70) : [];
-      if (roofPts.length >= 2) {
-        const sorted = [...roofPts].sort((p, q) => p.x - q.x);
-        const n = Math.min(8, sorted.length);
-        for (let i = 0; i < n; i++) {
-          const p = sorted[Math.round((i * (sorted.length - 1)) / Math.max(1, n - 1))];
-          add('high', v(p.x, p.y + 0.3, p.z + 0.4), toAudience, 1.25, false);
-        }
-      } else {
-        // wing spar tips (x ±14, ±28, ±39, y 24–26) + dragon crest
-        for (const [x, y] of [
-          [-39, 24.6],
-          [-28, 26.0],
-          [-14, 24.8],
-          [14, 24.8],
-          [28, 26.0],
-          [39, 24.6],
-        ])
-          add('high', v(x, y, -8.2), toAudience, 1.25, true);
-      }
-      // forward side arms: (±60,0) → (±88,+24), 6–8 m high
+      for (const [x, y, z] of [
+        [-24, 16, -13], [-14, 16, -13], [14, 16, -13], [24, 16, -13],
+        [-32, 10, -12], [-7, 10, -12], [7, 10, -12], [32, 10, -12],
+      ])
+        add('tower', v(x, y, z), aud, 1.1);
+      add('dragon', v(-7, 15, -10), aud, 1.3);
+      add('dragon', v(7, 15, -10), aud, 1.3);
+      for (const [x, y] of [[-34, 19], [-20, 20], [20, 20], [34, 19]]) add('high', v(x, y, -19), aud, 1.25);
       for (const s of [-1, 1]) {
-        add('arm', v(s * 86.5, 8.4, 22.5), v(-s * 0.62, 0, 1), 1.1, true);
-        add('arm', v(s * 73, 7.9, 11.4), v(-s * 0.5, 0, 1), 1, true);
+        add('corner', v(s * 92, 14, -4.5), v(-s * 0.35, 0, 1), 1.1);
+        add('corner', v(s * 92, 14, -3.5), v(-s * 0.9, 0, 1), 1.1);
       }
     }
 
     // ---------------- field ----------------
-    let tops = this.custom(a, 'pillars_top');
-    if (!tops) {
-      tops = [];
-      for (const z of PILLAR_Z) for (const s of [-1, 1]) tops.push(v(s * PILLAR_X, PILLAR_TOP_Y, z));
+    // obelisks: custom 'pillars_top' (x/z) from the grounds engineer, else the canonical layout
+    const tops = this.custom(a, 'pillars_top');
+    const pil: [number, number][] = tops ? tops.map((p) => [p.x, p.z]) : PILLARS.map((p) => [p[0], p[1]]);
+    pil.sort((p, q) => p[1] - q[1] || p[0] - q[0]);
+    for (const [x, z] of pil) {
+      const s = Math.sign(x) || 1;
+      // capital ledge on the aisle side (the crystal occupies the centre of the capital)
+      add('pillar', v(x - s * 1.45, CAPITAL_Y + 0.15, z), v(-s * 0.3, 0, -1), 0.85);
+      this.mirrors.push(v(x, CRYSTAL_MID_Y, z));
     }
-    let bases = this.custom(a, 'pillars_base');
-    if (!bases) bases = tops.map((p) => v(p.x, 0, p.z));
-    const customField = this.custom(a, 'laser_field');
-    // lantern-head units: on the aisle-facing side of the lantern, facing the stage
-    const pillars: Emitter[] = [];
-    for (const p of tops) {
-      const s = Math.sign(p.x) || 1;
-      pillars.push(add('pillar', v(p.x - s * 1.75, p.y - 1.1, p.z), v(-s * 0.22, 0, -1), 0.85, true));
+    for (const [x, z] of pil) {
+      const s = Math.sign(x) || 1;
+      // stage-side aisle corner post of the 8.5 m plinth
+      add('base', v(x - s * 4.0, 1.5, z - 4.0), v(-s, 0, -0.25), 0.55);
     }
-    for (const p of bases) {
-      const s = Math.sign(p.x) || 1;
-      add('base', v(p.x - s * 2.7, 1.45, p.z - 1.2), v(-s, 0, 0), 0.55, true);
-    }
-    if (customField) {
-      // other units the grounds engineer placed (towers/FOH/cranes): everything not on a pillar
-      for (const p of customField) {
-        const nearPillar = tops.some((q) => Math.hypot(q.x - p.x, q.z - p.z) < 4);
-        if (!nearPillar) add('foh', p, v(-p.x * 0.01, 0, -1), 1.1, false);
-      }
-    }
-    if (!this.byGroup.foh.length) {
-      const foh = this.custom(a, 'foh');
-      const f = foh ? foh[0] : v(0, 8.0, 63);
-      add('foh', v(f.x - 2.4, f.y + 0.45, f.z - 3.2), v(0, 0, -1), 1.1, true);
-      add('foh', v(f.x + 2.4, f.y + 0.45, f.z - 3.2), v(0, 0, -1), 1.1, true);
-    }
+    for (const s of [-1, 1]) for (const dz of [-0.5, 0, 0.5]) add('turret', v(s * 94, 12, 58 + dz), v(-s, 0, -0.18 + dz * 0.4), 1.1);
+    add('piano', v(0, 1.8, 59), v(0, 0, -1), 1.2, false);
 
-    // ranks (left → right within each group), pillar rows and bounce partners
+    // ranks (left → right within each group), pillar rows and pillar partners
     for (const g of Object.keys(this.byGroup) as EmitterGroup[]) {
       const arr = this.byGroup[g];
       const sorted = [...arr].sort((p, q) => p.pos.x - q.pos.x || p.pos.z - q.pos.z);
-      sorted.forEach((e, i) => (e.rank = sorted.length > 1 ? i / (sorted.length - 1) : 0.5));
+      sorted.forEach((e, i) => {
+        e.rank = sorted.length > 1 ? i / (sorted.length - 1) : 0.5;
+        e.order = i;
+      });
     }
+    const pillars = this.byGroup.pillar;
     const rowsZ = [...new Set(pillars.map((e) => Math.round(e.pos.z)))].sort((p, q) => p - q);
     for (const e of pillars) e.row = rowsZ.indexOf(Math.round(e.pos.z));
-    for (const e of this.byGroup.base) e.row = rowsZ.findIndex((z) => Math.abs(z - e.pos.z) < 4);
+    for (const e of this.byGroup.base) e.row = rowsZ.findIndex((z) => Math.abs(z - (e.pos.z + 4)) < 3);
     for (const e of pillars) {
-      // bounce partner: opposite side, one row closer to the stage (row 0 → none: aims at the stage)
+      // partner: opposite side, one row closer to the stage (row 0 → none)
       let best = -1;
       let bd = Infinity;
       for (const o of pillars) {
@@ -233,12 +209,16 @@ export class LaserRig {
     this.sig = this.anchorSignature(a);
   }
 
+  /** crystal mirror of pillar row r (0-based) on side s (−1 left, +1 right) */
+  mirror(row: number, s: number): THREE.Vector3 | null {
+    const i = row * 2 + (s < 0 ? 0 : 1);
+    return this.mirrors[i] ?? null;
+  }
+
   /** register our final positions so other systems (camera, debug) see the real layout */
   register(a: Anchors): void {
-    const st = this.stage.map((e) => e.pos);
-    const fi = this.field.filter((e) => e.group !== 'base').map((e) => e.pos);
-    a.set('laser_stage', st);
-    a.set('laser_field', fi);
+    a.set('laser_stage', this.emitters.filter((e) => e.origin === 'stage').map((e) => e.pos));
+    a.set('laser_field', this.emitters.filter((e) => e.origin === 'field' && e.group !== 'base').map((e) => e.pos));
     this.mine.set('laser_stage', signature(a.get('laser_stage')));
     this.mine.set('laser_field', signature(a.get('laser_field')));
     this.sig = this.anchorSignature(a);

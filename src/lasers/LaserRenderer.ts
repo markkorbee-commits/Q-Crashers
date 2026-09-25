@@ -80,6 +80,7 @@ export class LaserRenderer {
       uPixAng: { value: 0.002 },
       uTime: { value: 0 },
       uFlow: { value: 0 },
+      uExt: { value: 0.004 },
     };
     const common = {
       transparent: true,

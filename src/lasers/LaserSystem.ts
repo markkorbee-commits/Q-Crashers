@@ -12,26 +12,37 @@ import { type Emitter, type EmitterGroup, LaserRig } from './LaserRig';
  * LaserSystem ('lasers') — show lasers of the 2026 RED Endshow.
  *
  * Cue contract (docs/show-format.md):
- *   look  preset fan|sheet|tunnel|sweep|crossfire|sky|wave|cone|grid|burst; color, color2, count,
- *         speed (cycles/bar), spread (deg), tilt (deg), origin stage|field|all, height (sheet),
- *         intensity, kick, fade (s, optional crossfade from the look it replaces)
+ *   look  preset fan|sheet|tunnel|sweep|crossfire|sky|wave|cone|grid|burst (+ extension: chevron);
+ *         color, color2, count, speed (cycles/bar), spread (deg), tilt (deg), origin stage|field|all,
+ *         height (sheet / web / chevron, m), intensity, kick;
+ *         extensions (optional): fade (s crossfade from the look it replaces), aim [x,y,z] (world point the
+ *         figure centres on), distance (chevron convergence Z), segments (piano bounce: segments lit)
  *   hit   short full-rig burst: color, pattern fan|star
  *   off   all lasers off for dur
  *
  * Semantics: every projector runs the latest-started active `look` that selects it (target groups /
- * origin / left|right|center filters, or the preset's natural projector set), so a deck sheet and
- * a roof crossfire can run together. Everything is a pure function of show time (+ the tempo map):
- * pause / seek / restart give the identical picture.
+ * origin / left|right|center filters, or the preset's natural projector set). Sheets live on their own
+ * layer, so a deck sheet and a beam figure can run on the same projectors (as a laser console layers
+ * cues). Everything is a pure function of show time (+ the tempo map): pause / seek / restart give the
+ * identical picture.
  *
- * Rendering (LaserRenderer): instanced camera-facing ribbons with a physical single-scattering
- * haze model, instanced ruled surfaces for sheets and tunnels, instanced aperture flares + hit spots.
+ * Audience mode (design-bible §7.4): "As filmed" (empty field) lets sheets / tunnels / the web skim 1–3 m
+ * over the floor; "Tribe" mode (crowd present) clamps audience-level sheets, tunnels, the web and the
+ * chevron to >= 4.5 m above the head plane.
+ *
+ * Rendering (LaserRenderer): instanced camera-facing ribbons with a physical single-scattering haze
+ * model and shutter motion smear, instanced ruled surfaces for sheets and tunnels, instanced aperture
+ * flares + hit spots, instanced projector housings.
  */
 
-type Preset = 'fan' | 'sheet' | 'tunnel' | 'sweep' | 'crossfire' | 'sky' | 'wave' | 'cone' | 'grid' | 'burst';
+type Preset = 'fan' | 'sheet' | 'tunnel' | 'sweep' | 'crossfire' | 'sky' | 'wave' | 'cone' | 'grid' | 'burst' | 'chevron';
 
-const G: Record<EmitterGroup, number> = { deck: 1, tower: 2, high: 4, arm: 8, pillar: 16, base: 32, foh: 64 };
-const STAGE_MASK = G.deck | G.tower | G.high | G.arm;
-const FIELD_MASK = G.pillar | G.base | G.foh;
+const G: Record<EmitterGroup, number> = { deck: 1, tower: 2, high: 4, corner: 8, pillar: 16, base: 32, turret: 64, dragon: 128, piano: 256 };
+const STAGE_MASK = G.deck | G.tower | G.high | G.corner | G.dragon;
+const FIELD_MASK = G.pillar | G.base | G.turret | G.piano;
+/** head plane of a standing crowd (m) and the audience-scanning clearance above it (design-bible §7.4) */
+const HEAD_PLANE = 1.8;
+const TRIBE_MIN_H = HEAD_PLANE + 4.5;
 
 interface PresetDef {
   count: number;
@@ -44,22 +55,39 @@ interface PresetDef {
   field: number;
   /** extra per-emitter selection rule for the preset's natural set (only when no explicit target group) */
   pick?: (e: Emitter) => boolean;
+  /** Tribe mode (crowd present): projectors that keep the figure above the heads (replaces stage / field) */
+  tribeStage?: number;
+  tribeField?: number;
+  tribePick?: (e: Emitter) => boolean;
 }
 
 const PRESETS: Record<Preset, PresetDef> = {
-  fan: { count: 12, spread: 84, tilt: 7, speed: 0.25, stage: G.deck | G.high, field: G.pillar | G.foh },
-  sheet: { count: 0, spread: 104, tilt: NaN, speed: 0.12, stage: G.deck, field: G.foh },
+  fan: { count: 12, spread: 84, tilt: 7, speed: 0.25, stage: G.deck | G.high, field: G.pillar | G.turret },
+  sheet: {
+    count: 0,
+    spread: 104,
+    tilt: NaN,
+    speed: 0.12,
+    stage: G.deck,
+    field: G.turret,
+    // over a crowd the liquid sky comes from the lower castle-roof units (Y 10) as a ceiling
+    tribeStage: G.tower,
+    tribePick: (e) => e.group !== 'tower' || e.pos.y < 12,
+  },
   tunnel: {
     count: 8,
     spread: 22,
     tilt: 1.5,
     speed: 0.5,
     stage: G.deck,
-    field: G.foh,
-    pick: (e) => (e.group === 'deck' ? Math.abs(e.pos.x) < 6 : true),
+    field: G.pillar,
+    // the centre deck pair down the aisle; from the field the last pillar pair back at the stage
+    pick: (e) => (e.group === 'deck' ? Math.abs(e.pos.x) < 5 : e.group === 'pillar' ? e.row === 3 : true),
+    tribeStage: G.tower,
+    tribePick: (e) => e.group !== 'tower' || (e.pos.y > 12 && Math.abs(e.pos.x) < 20),
   },
   sweep: { count: 2, spread: 76, tilt: 5, speed: 0.5, stage: G.deck | G.tower, field: G.pillar },
-  crossfire: { count: 3, spread: 5, tilt: 30, speed: 0.125, stage: G.tower | G.high | G.arm, field: G.pillar },
+  crossfire: { count: 3, spread: 5, tilt: 30, speed: 0.125, stage: G.dragon | G.tower, field: G.piano },
   sky: { count: 3, spread: 26, tilt: 81, speed: 0.12, stage: G.high | G.tower, field: G.pillar },
   wave: { count: 10, spread: 96, tilt: 3, speed: 0.5, stage: G.deck, field: G.pillar },
   cone: {
@@ -69,17 +97,30 @@ const PRESETS: Record<Preset, PresetDef> = {
     speed: 0.25,
     stage: G.deck,
     field: G.pillar,
-    pick: (e) => e.group !== 'deck' || Math.round(e.rank * 11) % 2 === 0,
+    pick: (e) => e.group !== 'deck' || e.order % 2 === 0,
   },
-  grid: { count: 10, spread: 60, tilt: 50, speed: 0.1, stage: G.high | G.deck, field: G.base },
+  grid: { count: 10, spread: 60, tilt: 50, speed: 0.1, stage: G.deck | G.high, field: G.base, tribeField: G.pillar },
   burst: {
     count: 36,
     spread: 124,
     tilt: 12,
     speed: 0.12,
-    stage: G.arm | G.deck,
-    field: G.foh,
-    pick: (e) => (e.group === 'arm' ? Math.abs(e.pos.x) > 80 : e.group === 'deck' ? Math.abs(e.pos.x) < 6 : true),
+    stage: G.corner | G.deck,
+    field: G.turret,
+    // side positions: the corner towers + the centre deck pair; in the field the arm-end turrets
+    pick: (e) => (e.group === 'deck' ? Math.abs(e.pos.x) < 5 : e.group === 'turret' ? e.order % 3 === 1 : true),
+  },
+  // gold chevron (In The Cold, show-analysis 8.1): 5 + 5 deck units, centre pair dark
+  chevron: {
+    count: 12,
+    spread: 16,
+    tilt: -1.5,
+    speed: 0.06,
+    stage: G.deck,
+    field: G.deck,
+    pick: (e) => Math.abs(e.pos.x) > 5,
+    tribeStage: G.tower,
+    tribeField: G.tower,
   },
 };
 
@@ -87,7 +128,7 @@ const PRESETS: Record<Preset, PresetDef> = {
 const TOKENS: Record<string, [number, number]> = {
   laser_stage: [STAGE_MASK, 0],
   stage: [STAGE_MASK, 0],
-  laser_field: [G.pillar | G.foh, 0],
+  laser_field: [G.pillar | G.turret | G.piano, 0],
   field: [FIELD_MASK, 0],
   deck_front: [G.deck, 0],
   deck: [G.deck, 0],
@@ -96,28 +137,48 @@ const TOKENS: Record<string, [number, number]> = {
   dj_booth: [G.deck, 0],
   towers_top: [G.tower, 0],
   towers: [G.tower, 0],
-  roof: [G.high, 0],
+  castle: [G.tower, 0],
+  roof: [G.tower | G.high, 0],
   wings: [G.high, 0],
   wing_tips: [G.high, 0],
   fixtures_truss: [G.high | G.tower, 0],
   wing_left: [G.high, -1],
   wing_right: [G.high, 1],
-  dragon_head: [G.high, 0],
-  arms: [G.arm, 0],
-  sides: [G.arm, 0],
-  fireworks_sides: [G.arm, 0],
+  dragon: [G.dragon, 0],
+  dragon_head: [G.dragon, 0],
+  dragon_mouth: [G.dragon, 0],
+  dragon_eyes: [G.dragon, 0],
+  corners: [G.corner, 0],
+  arms: [G.corner | G.turret, 0],
+  sides: [G.corner | G.turret, 0],
+  fireworks_sides: [G.corner | G.turret, 0],
+  turrets: [G.turret, 0],
   pillars_top: [G.pillar, 0],
   pillars: [G.pillar, 0],
   delay_towers: [G.pillar, 0],
   pillars_base: [G.base, 0],
-  foh: [G.foh, 0],
+  plinths: [G.base, 0],
+  piano: [G.piano, 0],
+  foh: [G.piano, 0],
 };
 
-/** crude solid volumes of the stage set: beams from the field stop on them */
+/** crude solid volumes of the stage set (design-bible §5): beams from the field stop on them */
 const STAGE_BOXES: readonly (readonly number[])[] = [
-  [-62, 0, -40, 62, 1.9, 0.2], // deck
-  [-60, 0, -40, 60, 9.5, -4], // castle wall
-  [-44, 0, -40, 44, 21, -5], // dragon + inner wings
+  [-37, 0, -14, 37, 1.9, 0.3], // central deck
+  [-92, 0, -40, 92, 9.5, -4], // castle wall + side sections
+  [-42, 0, -40, 42, 24, -6], // dragon, crest and inner wings
+];
+
+/** piano bounce path: [fromRow, fromSide, toRow, toSide]; fromRow -1 = the piano light tube */
+const BOUNCE: readonly (readonly [number, number, number, number])[] = [
+  [-1, 0, 0, 1], // piano -> R1 (889: a single beam up-right)
+  [-1, 0, 0, -1], // piano -> L1 (899: the "A" roof between the row-1 crystals)
+  [0, -1, 1, -1], // L1 -> L2 (909: zig-zag piano -> L1 -> L2)
+  [0, 1, 1, 1], // R1 -> R2 (918: the symmetric V)
+  [1, -1, 2, 1], // extensions: the bounce keeps zig-zagging down the aisle
+  [1, 1, 2, -1],
+  [2, 1, 3, -1],
+  [2, -1, 3, 1],
 ];
 
 const TAU = Math.PI * 2;
@@ -126,6 +187,9 @@ const MAX_SLOTS = 24;
 /** exposure time of the virtual camera / eye used for beam motion smear (s) */
 const SHUTTER = 1 / 45;
 const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x);
+/** numeric cue parameter with default + range (unknown / NaN values fall back to the default) */
+const num = (v: unknown, def: number, lo: number, hi: number): number =>
+  typeof v === 'number' && Number.isFinite(v) ? (v < lo ? lo : v > hi ? hi : v) : def;
 
 class LookSlot {
   cue: Cue | null = null;
@@ -194,6 +258,16 @@ export class LaserSystem implements System {
   private dx = 0;
   private dy = 0;
   private dz = 0;
+  // origin override for mirror-bounce segments
+  private oOverride = false;
+  private ox = 0;
+  private oy = 0;
+  private oz = 0;
+  /** audience present (Tribe mode): audience-level sheets / tunnels / web are clamped above the heads */
+  private tribe = false;
+  /** 'auto' follows the crowd system / URL; 'tribe' | 'filmed' force the mode */
+  audienceMode: 'auto' | 'tribe' | 'filmed' = 'auto';
+  private crowdSys: { mode?: unknown; count?: unknown } | null | undefined = undefined;
   private bx = new Float32Array(9); // basis F, R, N
   private offGate = 1;
   private beatGate = 1;
@@ -269,7 +343,7 @@ export class LaserSystem implements System {
       let x = this.camPos.x - e.pos.x;
       let y = this.camPos.y - e.pos.y;
       let z = this.camPos.z - e.pos.z;
-      const l = Math.hypot(x, y, z) || 1;
+      const l = Math.sqrt(x * x + y * y + z * z) || 1;
       x /= l;
       y /= l;
       z /= l;
@@ -282,6 +356,8 @@ export class LaserSystem implements System {
     this.flare.fill(0);
     this.envR = this.envG = this.envB = this.envPow = 0;
     this.audienceWash = 0;
+
+    this.tribe = this.detectTribe();
 
     // beat gates (deterministic: derived from show time through the tempo map)
     const beat = ctx.beat;
@@ -415,6 +491,30 @@ export class LaserSystem implements System {
     }
   }
 
+  /**
+   * Is there an audience on the field? ("Tribe" mode, design-bible §2 — the default) versus the empty
+   * grounds "As filmed". Order: explicit audienceMode, URL ?mode=filmed|tribe, the crowd system.
+   */
+  private detectTribe(): boolean {
+    if (this.audienceMode !== 'auto') return this.audienceMode === 'tribe';
+    const app = this.app;
+    const m = app.params.get('mode') ?? app.params.get('lasermode');
+    if (m === 'filmed' || m === 'asfilmed' || m === 'empty') return false;
+    if (m === 'tribe') return true;
+    if (!app.isSystemEnabled('crowd')) return false;
+    if (this.crowdSys === undefined) this.crowdSys = (app.get('crowd') as unknown as { mode?: unknown; count?: unknown } | undefined) ?? null;
+    const crowd = this.crowdSys;
+    if (!crowd) return false;
+    if (crowd.mode === 'filmed' || crowd.mode === 'empty' || crowd.mode === 'asfilmed') return false;
+    if (typeof crowd.count === 'number' && crowd.count <= 0) return false;
+    return app.quality.crowdCount > 0;
+  }
+
+  /** force the audience mode ('auto' follows the crowd system) */
+  setAudienceMode(mode: 'auto' | 'tribe' | 'filmed'): void {
+    this.audienceMode = mode;
+  }
+
   private updateUniforms(ctx: FrameContext): void {
     const app = this.app;
     const u = this.gfx.shared;
@@ -423,6 +523,8 @@ export class LaserSystem implements System {
     u.uPixAng.value = (2 * Math.tan((cam.fov * DEG) / 2)) / Math.max(1, this.v2.y / Math.max(0.001, cam.zoom));
     const haze = app.env.haze;
     u.uHaze.value = 0.22 + 0.9 * haze;
+    // extinction of the beam power in the haze (visibility of a few hundred metres in show haze)
+    u.uExt.value = 0.0012 + 0.0045 * haze;
     // low fog layer: from fog.lowfog cues (ground haze over the field carries the laser sheets)
     let low = 0;
     const fogs = app.show.active('fog', ctx.showTime, this.act);
@@ -468,12 +570,12 @@ export class LaserSystem implements System {
       resolveColor(p.color, palette, this.tmpColor, 'accent');
       laserize(this.tmpColor, s.color);
       s.hasColor2 = false;
-      s.count = typeof p.count === 'number' ? p.count : 14;
-      s.spread = (typeof p.spread === 'number' ? p.spread : s.starHit ? 120 : 140) * DEG;
-      s.tilt = (typeof p.tilt === 'number' ? p.tilt : 12) * DEG;
+      s.count = Math.round(num(p.count, 14, 1, 64));
+      s.spread = num(p.spread, s.starHit ? 120 : 140, 0, 340) * DEG;
+      s.tilt = num(p.tilt, 12, -45, 90) * DEG;
       s.tiltGiven = true;
       s.speed = 0;
-      s.intensity = typeof p.intensity === 'number' ? clamp01(p.intensity) : 1;
+      s.intensity = num(p.intensity, 1, 0, 1);
       s.kick = false;
       s.fade = 0;
       const hitDur = Math.min(c.dur, 2);
@@ -493,15 +595,15 @@ export class LaserSystem implements System {
         resolveColor(p.color2, palette, this.tmpColor2, 'secondary');
         laserize(this.tmpColor2, s.color2);
       }
-      s.count = typeof p.count === 'number' ? Math.max(1, Math.min(64, Math.round(p.count))) : def.count;
-      s.spread = (typeof p.spread === 'number' ? Math.max(0, Math.min(340, p.spread)) : def.spread) * DEG;
-      s.tiltGiven = typeof p.tilt === 'number';
-      s.tilt = (s.tiltGiven ? Math.max(-45, Math.min(90, p.tilt as number)) : def.tilt) * DEG;
-      s.speed = typeof p.speed === 'number' ? p.speed : def.speed;
-      s.height = typeof p.height === 'number' ? Math.max(0.6, Math.min(40, p.height)) : 4;
-      s.intensity = typeof p.intensity === 'number' ? clamp01(p.intensity) : 1;
+      s.count = Math.round(num(p.count, def.count, 1, 64));
+      s.spread = num(p.spread, def.spread, 0, 340) * DEG;
+      s.tiltGiven = typeof p.tilt === 'number' && Number.isFinite(p.tilt);
+      s.tilt = num(p.tilt, def.tilt, -45, 90) * DEG;
+      s.speed = num(p.speed, def.speed, -8, 8);
+      s.height = num(p.height, 4, 0.6, 40);
+      s.intensity = num(p.intensity, 1, 0, 1);
       s.kick = p.kick === true;
-      s.fade = typeof p.fade === 'number' ? Math.max(0, Math.min(8, p.fade)) : 0;
+      s.fade = num(p.fade, 0, 0, 8);
       const aim = p.aim;
       s.hasAim = Array.isArray(aim) && aim.length === 3 && Number.isFinite(aim[0]) && Number.isFinite(aim[1]) && Number.isFinite(aim[2]);
       if (s.hasAim) s.aim.set(aim[0], aim[1], aim[2]);
@@ -531,7 +633,7 @@ export class LaserSystem implements System {
       }
     }
     if (s.hit && !s.hasGroupToken) {
-      s.groupMask = (s.origin & 1 ? STAGE_MASK : 0) | (s.origin & 2 ? G.pillar | G.foh : 0);
+      s.groupMask = (s.origin & 1 ? STAGE_MASK : 0) | (s.origin & 2 ? G.pillar | G.turret : 0);
       s.hasGroupToken = true;
     }
     // musical clock of this cue: bars since its start, phase-locked to the bar grid
@@ -557,9 +659,13 @@ export class LaserSystem implements System {
       return true;
     }
     const def = PRESETS[s.preset];
-    const mask = (s.origin & 1 ? def.stage : 0) | (s.origin & 2 ? def.field : 0);
+    const tr = this.tribe;
+    const stageMask = tr && def.tribeStage !== undefined ? def.tribeStage : def.stage;
+    const fieldMask = tr && def.tribeField !== undefined ? def.tribeField : def.field;
+    const mask = (s.origin & 1 ? stageMask : 0) | (s.origin & 2 ? fieldMask : 0);
     if (!(mask & bit)) return false;
-    return def.pick ? def.pick(e) : true;
+    const pick = tr && def.tribePick ? def.tribePick : def.pick;
+    return pick ? pick(e) : true;
   }
 
   private beamsPerEmitter(s: LookSlot): number {
@@ -631,6 +737,9 @@ export class LaserSystem implements System {
           break;
         case 'burst':
           this.genBurst(s, e, I);
+          break;
+        case 'chevron':
+          this.genChevron(s, e, I);
           break;
         case 'sheet':
           if (surf) this.genSheet(s, e, I);
@@ -718,21 +827,24 @@ export class LaserSystem implements System {
     const ph = TAU * s.speed * s.bars;
     const pb = I * this.perBeam(n);
     const col = s.hasColor2 && e.side > 0 ? s.color2 : s.color;
+    if (e.group === 'piano') {
+      this.genBounce(s, e, I);
+      return;
+    }
     if (e.group === 'pillar') {
-      // beam bounces over the aisle: to the opposite lantern one row closer, front row → stage centre
+      // pillar-to-pillar: to the opposite capital one row closer, front row -> the piano riser
       const tgt = e.partner >= 0 ? this.rig.emitters[e.partner].pos : null;
       const tx = tgt ? tgt.x : 0;
-      const ty = tgt ? tgt.y : 2.6;
-      const tz = tgt ? tgt.z : -1.5;
+      const ty = tgt ? tgt.y : 2.0;
+      const tz = tgt ? tgt.z : 59;
       for (let i = 0; i < n; i++) {
         let x = tx;
         let y = ty;
         let z = tz;
         if (i > 0) {
-          // extra beams: straight across the aisle, then to rows further back
-          const k = i;
-          x = -e.pos.x + e.side * 1.75 * 2;
-          z = e.pos.z + (k === 1 ? 0 : (k - 1) * 27 * (k % 2 ? 1 : -1));
+          // extra beams: straight across the aisle, then to rows further back / forward
+          x = -e.pos.x;
+          z = e.pos.z + (i === 1 ? 0 : (i - 1) * 33 * (i % 2 ? 1 : -1));
           y = e.pos.y;
         }
         const len = this.setDir(x - e.pos.x, y - e.pos.y, z - e.pos.z);
@@ -747,7 +859,7 @@ export class LaserSystem implements System {
     const rise = Math.tan(s.tilt) * dist + 10 * Math.sin(ph * 0.5 + 1);
     const tx = -side * X;
     const ty = e.pos.y + rise;
-    const tz = e.origin === 'stage' ? dist : -dist * 0.5;
+    const tz = e.origin === 'stage' ? dist : e.pos.z - dist;
     this.setDir(tx - e.pos.x, ty - e.pos.y, tz - e.pos.z);
     const yaw0 = Math.atan2(this.dx * e.lat.x + this.dz * e.lat.z, this.dx * e.fwd.x + this.dz * e.fwd.z);
     const pitch0 = Math.asin(Math.max(-1, Math.min(1, this.dy)));
@@ -755,6 +867,28 @@ export class LaserSystem implements System {
       const off = n > 1 ? (i / (n - 1) - 0.5) * s.spread : 0;
       this.dirYP(e, yaw0 + off, pitch0 + off * 0.35);
       this.beam(e, col, pb, 0);
+    }
+  }
+
+  /**
+   * Domitor Draconis mirror bounce (show-analysis 6.1): one white laser from the light tube on the piano,
+   * reflected by the crystal lanterns. `segments` (default 4 = the symmetric V of f093) lights the path
+   * segment by segment — author one cue per piano hit with segments 1, 2, 3, 4 to build it up.
+   */
+  private genBounce(s: LookSlot, e: Emitter, I: number): void {
+    const segs = Math.round(num(s.cue?.p.segments, 4, 1, BOUNCE.length));
+    const col = s.color;
+    for (let k = 0; k < segs; k++) {
+      const [fr, fs, tr, ts] = BOUNCE[k];
+      const a = fr < 0 ? e.pos : this.rig.mirror(fr, fs);
+      const b = this.rig.mirror(tr, ts);
+      if (!a || !b) continue;
+      const depth = fr < 0 ? 0 : fr + 1;
+      const pw = I * 1.5 * Math.pow(0.86, depth);
+      const len = this.setDir(b.x - a.x, b.y - a.y, b.z - a.z);
+      this.beamFrom(e, a.x, a.y, a.z, col, pw, len);
+      // the crystal lights up where the beam lands (mirror glint)
+      if (!this.recording) this.gfx.pushSprite(b.x, b.y, b.z, 0.5, col.r * pw * 9, col.g * pw * 9, col.b * pw * 9, 0);
     }
   }
 
@@ -770,12 +904,14 @@ export class LaserSystem implements System {
       if (e.origin === 'stage') {
         tx = e.pos.x * 0.3;
         tz = 96;
-        ty = 1.2 + Math.tan(s.tilt) * 96 + (e.group === 'high' ? -2 : 0);
+        ty = 1.2 + Math.tan(s.tilt) * 96;
       } else {
         tx = e.pos.x * 0.2;
         tz = -2;
         ty = 6 + Math.tan(s.tilt) * 60;
       }
+      // Tribe mode: the lower edge of the cone stays >= 4.5 m above the heads over the audience
+      if (this.tribe && e.origin === 'stage') ty = Math.max(ty, TRIBE_MIN_H + Math.tan(0.5 * s.spread) * 96);
       this.setDir(tx - e.pos.x, ty - e.pos.y, tz - e.pos.z);
     } else {
       if (this.aimYP(s, e)) this.dirYP(e, this.aimYaw, this.aimPitch);
@@ -814,10 +950,10 @@ export class LaserSystem implements System {
     const n = s.nEff;
     const ph = TAU * s.speed * s.bars;
     const pb = I * this.perBeam(n);
-    if (e.group === 'base' || (e.origin === 'field' && e.group !== 'pillar' && e.group !== 'foh')) {
-      // low web over the field: horizontal fans across the aisle at `height`
-      const h = s.height > 0 ? Math.min(s.height, 6) : 2;
-      const pitch = Math.atan2(h - e.pos.y, 44);
+    if (e.group === 'base' || e.group === 'pillar' || e.group === 'turret') {
+      // the web over the field: flat fans across the aisle at `height` (show-analysis 2.2)
+      const h = this.tribe ? Math.max(s.height, TRIBE_MIN_H) : Math.min(s.height, 6);
+      const pitch = Math.atan2(h - e.pos.y, 40);
       const sway = 0.08 * Math.sin(ph + (e.row + 1) * 1.3);
       for (let i = 0; i < n; i++) {
         const u = n > 1 ? i / (n - 1) : 0.5;
@@ -845,7 +981,7 @@ export class LaserSystem implements System {
   private genBurst(s: LookSlot, e: Emitter, I: number): void {
     const n = s.nEff;
     const ph = TAU * s.speed * s.bars;
-    const inward = e.group === 'arm' ? -e.side * 0.3 : 0;
+    const inward = e.group === 'corner' ? -e.side * 0.3 : 0;
     if (this.aimYP(s, e)) this.dirYP(e, this.aimYaw, this.aimPitch);
     else this.dirYP(e, inward, s.tilt);
     this.basis(this.dx, this.dy, this.dz);
@@ -864,11 +1000,42 @@ export class LaserSystem implements System {
     }
   }
 
+  /**
+   * Gold chevron (In The Cold, show-analysis 8.1): each unit fires a narrow fan down-forward at a shallow
+   * angle; all fans converge on the axis at Z = `distance` (70), so seen from above the two groups draw a
+   * V on the haze, and at head height they form a golden tunnel between the pillars.
+   */
+  private genChevron(s: LookSlot, e: Emitter, I: number): void {
+    const n = s.nEff;
+    const ph = TAU * s.speed * s.bars;
+    const zc = num(s.cue?.p.distance, 70, 20, 200);
+    // as filmed the fans land on the floor at the convergence point (the tips of the V meet there);
+    // over a crowd they converge in the air above the heads
+    let yc = this.tribe ? TRIBE_MIN_H + 1.5 : 0;
+    if (s.hasAim) yc = s.aim.y;
+    const ax = s.hasAim ? s.aim.x : 0;
+    const az = s.hasAim ? s.aim.z : zc;
+    this.setDir(ax - e.pos.x, yc - e.pos.y, az - e.pos.z);
+    const yaw0 = Math.atan2(this.dx * e.lat.x + this.dz * e.lat.z, this.dx * e.fwd.x + this.dz * e.fwd.z);
+    const pitch0 = Math.asin(Math.max(-1, Math.min(1, this.dy)));
+    // slow scanning spread (1344 s "scanning spread")
+    const spreadT = s.spread * (0.75 + 0.25 * Math.sin(ph));
+    const pb = I * this.perBeam(n) * 1.15;
+    for (let i = 0; i < n; i++) {
+      const u = n > 1 ? i / (n - 1) : 0.5;
+      this.dirYP(e, yaw0 + (u - 0.5) * spreadT, pitch0);
+      this.beam(e, this.lerpColor(s, u), pb, 0);
+    }
+  }
+
   /** "liquid sky": a scanned plane at `height` with gentle waves, plus its bright edge beams */
   private genSheet(s: LookSlot, e: Emitter, I: number): void {
     const ph = TAU * s.speed * s.bars;
     const dist = e.origin === 'stage' ? 62 : 48;
-    const pitch = s.tiltGiven ? s.tilt : Math.atan2(s.height - e.pos.y, dist);
+    const h = this.tribe ? Math.max(s.height, TRIBE_MIN_H) : s.height;
+    let pitch = s.tiltGiven ? s.tilt : Math.atan2(h - e.pos.y, dist);
+    // Tribe mode: never let the plane dip into the crowd
+    if (this.tribe) pitch = Math.max(pitch, Math.atan2(TRIBE_MIN_H - e.pos.y, 160));
     const yaw = e.group === 'deck' ? e.side * 0.1 * (0.3 + Math.abs(e.pos.x) / 50) : 0;
     this.dirYP(e, yaw, pitch);
     const fx = this.dx;
@@ -884,7 +1051,7 @@ export class LaserSystem implements System {
     let nx = fy * lz - fz * 0;
     let ny = fz * lx - fx * lz;
     let nz = fx * 0 - fy * lx;
-    const nl = Math.hypot(nx, ny, nz) || 1;
+    const nl = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
     nx /= nl;
     ny /= nl;
     nz /= nl;
@@ -976,7 +1143,7 @@ export class LaserSystem implements System {
     const f = x * e.fwd.x + z * e.fwd.z;
     const l = x * e.lat.x + z * e.lat.z;
     this.aimYaw = Math.atan2(l, f);
-    this.aimPitch = Math.atan2(y, Math.hypot(f, l));
+    this.aimPitch = Math.atan2(y, Math.sqrt(f * f + l * l));
     return true;
   }
 
@@ -992,7 +1159,7 @@ export class LaserSystem implements System {
 
   /** normalise and store a direction; returns its original length */
   private setDir(x: number, y: number, z: number): number {
-    const l = Math.hypot(x, y, z) || 1;
+    const l = Math.sqrt(x * x + y * y + z * z) || 1;
     this.dx = x / l;
     this.dy = y / l;
     this.dz = z / l;
@@ -1009,7 +1176,7 @@ export class LaserSystem implements System {
     let nx = -fx * fy;
     let ny = 1 - fy * fy;
     let nz = -fz * fy;
-    let nl = Math.hypot(nx, ny, nz);
+    let nl = Math.sqrt(nx * nx + ny * ny + nz * nz);
     if (nl < 1e-4) {
       nx = 1;
       ny = 0;
@@ -1032,6 +1199,16 @@ export class LaserSystem implements System {
    * Emit one beam from emitter e along (this.dx, dy, dz): clip on the ground / stage set, write the
    * instance, a hit spot, and accumulate the aperture flare (blinding when it points at the eye).
    */
+  /** a beam segment that starts somewhere other than the projector aperture (mirror bounces) */
+  private beamFrom(e: Emitter, ox: number, oy: number, oz: number, col: THREE.Color, power: number, len: number): void {
+    this.oOverride = true;
+    this.ox = ox;
+    this.oy = oy;
+    this.oz = oz;
+    this.beam(e, col, power, 0, len, true);
+    this.oOverride = false;
+  }
+
   private beam(e: Emitter, col: THREE.Color, power: number, dash: number, maxLen = 650, target = false): void {
     if (power <= 0.0005) return;
     const k3 = this.recIdx++ * 3;
@@ -1051,9 +1228,10 @@ export class LaserSystem implements System {
       py = this.smear[k3 + 1];
       pz = this.smear[k3 + 2];
     }
-    const ox = e.pos.x;
-    const oy = e.pos.y;
-    const oz = e.pos.z;
+    const fromAperture = !this.oOverride;
+    const ox = fromAperture ? e.pos.x : this.ox;
+    const oy = fromAperture ? e.pos.y : this.oy;
+    const oz = fromAperture ? e.pos.z : this.oz;
     const dx = this.dx;
     const dy = this.dy;
     const dz = this.dz;
@@ -1080,6 +1258,10 @@ export class LaserSystem implements System {
     const b = col.b * power;
     if (!this.gfx.pushBeam(ox, oy, oz, dx, dy, dz, len, r, g, b, dash, hit, 1, px, py, pz)) return;
     if (hit) this.gfx.pushSprite(ox + dx * len, oy + dy * len, oz + dz * len, target ? 0.32 : 0.2, r * 5, g * 5, b * 5, 1);
+    if (!fromAperture) {
+      this.envAdd(col, power);
+      return;
+    }
     // aperture flare
     const i4 = e.index * 4;
     const i3 = e.index * 3;
@@ -1142,6 +1324,7 @@ export class LaserSystem implements System {
       drawCalls: this.gfx.drawCalls,
       triangles: this.gfx.triangles,
       haze: +(this.gfx.shared.uHaze.value as number).toFixed(2),
+      mode: this.tribe ? 'tribe' : 'filmed',
       lowHaze: +this.lowHaze.toFixed(2),
     };
   }

@@ -26,6 +26,7 @@ uniform float uFogNear;
 uniform float uFogFar;
 uniform float uFogMode;
 uniform float uFlow;
+uniform float uExt;
 
 float hazeNoise(vec3 p) {
   float n = texture(uNoise, p * vec3(0.017, 0.028, 0.017) + uDrift).r;
@@ -39,7 +40,7 @@ float hazeProfile(float y) {
 }
 
 float hazeDensity(vec3 p) {
-  float puff = smoothstep(0.34, 0.7, hazeNoise(p));
+  float puff = smoothstep(0.36, 0.68, hazeNoise(p));
   return uHaze * hazeProfile(p.y) * mix(1.0, puff * puff * 2.4 + 0.04, uNoiseAmt);
 }
 
@@ -164,7 +165,7 @@ void main() {
   float hz = uGain * hazeDensity(vWorld);
   float ph = hazePhase(c);
   // single scattering (core): forward-peaked phase and 1/sin path length -> flares down the beam
-  float line = hz * ph / max(s, 0.1);
+  float line = hz * ph / max(s, 0.14);
   // multiple scattering (halo): far less directional
   float haloLine = hz * (0.6 + 0.4 * ph) / max(s, 0.3);
   float core = smearProfile(vX, vM, vSigC);
@@ -175,8 +176,8 @@ void main() {
     float d = fract(vAlong * 0.22 - uTime * 1.7);
     col *= mix(1.0, 0.18 + 0.82 * smoothstep(0.1, 0.25, d) * (1.0 - smoothstep(0.55, 0.7, d)), vDash);
   }
-  // emerges from the aperture, ends at the hit point
-  col *= smoothstep(0.12, 0.5, vAlong) * (1.0 - smoothstep(vLen - 0.05, vLen, vAlong));
+  // emerges from the aperture, loses power to the haze along the way (extinction), ends at the hit point
+  col *= smoothstep(0.12, 0.5, vAlong) * (1.0 - smoothstep(vLen - 0.05, vLen, vAlong)) * exp(-vAlong * uExt);
   col *= fogTransmit(dist) * vNear;
   gl_FragColor = vec4(min(col, vec3(48.0)), 1.0);
 }
@@ -282,7 +283,7 @@ void main() {
   float tex = smoothstep(0.34, 0.74, n1 * 0.55 + n2 * 0.3 + n3 * 0.15);
   // seen edge-on the texture reads as clouds; seen from above (drone) keep it a smoother "sea"
   float faceOn = smoothstep(0.25, 0.7, nv) * step(0.0, dot(normalize(vNormal), V) * sign(vNormal.y + 1e-4));
-  float t3 = mix(tex * tex * tex * 3.4 + 0.04, tex * tex * 1.6 + 0.25, faceOn);
+  float t3 = mix(tex * tex * tex * 3.4 + 0.04, tex * 0.9 + 0.3, faceOn);
   float haze = uHaze * hazeProfile(vWorld.y) * t3;
   float I = uGainS * haze * hazePhase(c) * pow(max(vR, 4.0), -0.75) / max(nv, 0.05);
   float pattern;
@@ -290,7 +291,8 @@ void main() {
     // scan structure: two slowly sliding line families -> a moving interference (moire) texture
     float s1 = lines(vU * 47.0 + uTime * 0.21, 3.0);
     float s2 = lines(vU * 53.0 - uTime * 0.16, 3.0);
-    pattern = 0.78 + 0.75 * s1 * s2;
+    // from below the haze texture dominates; from above (drone) the hatching of the scan shows
+    pattern = mix(0.78 + 0.75 * s1 * s2, 0.3 + 2.4 * s1, faceOn);
     // the scanning beam itself: a brighter line travelling back and forth inside the sheet
     float scan = 0.5 + 0.5 * sin(uTime * 4.1 + vSegPh);
     pattern += 1.1 * exp(-pow((vU - scan) * 45.0, 2.0));
@@ -305,7 +307,7 @@ void main() {
   }
   // fine flicker (scanner sampling / speckle)
   pattern *= 0.88 + 0.12 * sin(uTime * 41.0 + vU * 331.0 + vR * 0.7);
-  float fade = (1.0 - smoothstep(0.6, 1.0, vR / vRange)) * smoothstep(0.3, 3.0, vR);
+  float fade = (1.0 - smoothstep(0.6, 1.0, vR / vRange)) * smoothstep(0.3, 3.0, vR) * exp(-vR * uExt);
   vec3 col = vColor * I * pattern * fade * fogTransmit(dist);
   gl_FragColor = vec4(min(col, vec3(40.0)), 1.0);
 }
