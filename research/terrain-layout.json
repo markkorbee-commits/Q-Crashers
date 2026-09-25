@@ -1,0 +1,294 @@
+{
+  "meta": {
+    "title": "Defqon.1 2026 RED field + MainStage layout (Endshow reconstruction)",
+    "version": "1.0",
+    "compiled": "2026-09-25",
+    "authority": "research/design-bible.md (this file is its machine-readable copy; bible wins on conflict)",
+    "units": "metres, degrees, seconds",
+    "frame": "Origin = centre of the stage-deck FRONT EDGE at floor level. +Y up. -Z into the stage, +Z into the audience field. +X = spectator's right (bearing 235 deg). Right-handed (Three.js).",
+    "rotYConvention": "rotY in radians about +Y; the model's local +Z (e.g. bar counter front) faces world direction (sin rotY, 0, cos rotY). rotYDeg given for readability.",
+    "classification": "tags: FACT, INFERENCE, ASSUMPTION, UNKNOWN (see research/uncertainties.md)",
+    "reviewNotes": [
+      "2026-09-25 independent review: bengalFlares side pots X +-63 -> +-86; moon azimuthDegEnd 167.4 -> 167.1 and dirWorldEnd recomputed (PyEphem 4.2.1); show start tolerance +-1 -> +-2 min; crownWidthRange/crownHeightRange added (Ruler A was not depth-corrected); illumination 0.96 and all other sky values verified",
+      "Row-4 pillar plinths (Z 130.75-139.25) overlap the road inner edge (Z 137) by ~2 m; not moved (rows +-6 m), see uncertainties #75",
+      "Photo P ground-plane fit puts the FOH front edge at Z ~90 +-3 and the riser front edge at Z ~59 +-3 (json: 93 / 61); kept, see uncertainties #76"
+    ]
+  },
+  "frame": {
+    "originWGS84": [52.4400834, 5.7575039],
+    "originRDNew": [180179.1, 494764.6],
+    "y0_NAP_m": -2.38,
+    "plusZBearingDeg": 325,
+    "plusXBearingDeg": 235,
+    "northDirWorld": [-0.574, 0, 0.819],
+    "eastDirWorld": [-0.819, 0, -0.574],
+    "wgs84ToWorld": "e=(lon-5.7575039)*68001.1; n=(lat-52.4400834)*111275.7; X=-0.819152*e-0.573576*n; Z=-0.573576*e+0.819152*n; Y=hNAP+2.38",
+    "tag": "FACT (orientation from OSM/aerials) + INFERENCE (origin +-3 m)"
+  },
+  "stageFacingAzimuthDeg": 325,
+  "audienceLookAzimuthDeg": 145,
+  "stage": {
+    "frontLineWidth": 184,
+    "frontLineX": [-92, 92],
+    "crownWidth": 81,
+    "crownHeight": 28.0,
+    "crownWidthRange": [76, 89],
+    "crownHeightRange": [25, 31],
+    "deckHeight": 1.9,
+    "tag": "INFERENCE (K1/human ruler + moon-calibrated drone camera + EXIF photogrammetry; design-bible 5.3)",
+    "centralDeck": { "x": [-37, 37], "z": [-14, 0], "topY": 1.9, "skirtColor": "#5C0A19" },
+    "rearExtentZ": -45,
+    "djPortal": { "x": 0, "frontZ": -6, "depth": 3, "width": 5.4, "apexY": 7.2, "deskSize": [4, 1.1], "deskZ": -7.5, "logoShield": { "size": [1.8, 1.6], "y": [7.4, 9.0] } },
+    "castleCore": { "facadeZ": -12, "x": [-37, 37], "crenellationY": 9.5, "towers": [
+      { "x": -24, "z": -12, "w": 5.5, "topY": 14, "spireY": 18 },
+      { "x": -14, "z": -12, "w": 5.5, "topY": 16, "spireY": 18 },
+      { "x": 14, "z": -12, "w": 5.5, "topY": 16, "spireY": 18 },
+      { "x": 24, "z": -12, "w": 5.5, "topY": 14, "spireY": 18 } ],
+      "skullMedallions": [[-20, 6.5, -11.8], [20, 6.5, -11.8]], "skullMedallionDiameter": 3.5 },
+    "dragon": {
+      "headPivot": [-2.5, 14, -12], "yawDeg": -12, "pitchDeg": -5,
+      "skullWidth": 9, "headWidthInclHorns": 16, "mouthOpening": [7, 5.5], "gapeDeg": 40,
+      "chinY": 9.3, "snoutZ": -5, "crestTopY": 21.5, "crestSpikes": 10, "teeth": 34, "mouthLedDots": 200,
+      "gearRing": { "center": [6.5, 13, -10], "diameter": 3 },
+      "rightForeleg": { "x": [8, 16], "talonTipY": 9.5, "z": -12, "talons": 3, "talonLength": [2.5, 3.5] },
+      "leftKnuckleOrb": { "center": [-10, 8.5, -9], "diameter": 3.5, "tag": "ASSUMPTION" },
+      "rider": { "position": [6.5, 17.5, -16], "seatedHeight": 5.5, "topY": 23 },
+      "skullMovingHeads": 8,
+      "mouthFlameAnchor": { "position": [-4, 11, -5], "enabledByDefault": false, "tag": "UNKNOWN (never observed)" }
+    },
+    "wings": {
+      "planeZ": -20, "leanBackDeg": 10,
+      "roots": [[-5, 14, -16], [5, 14, -16]],
+      "spars": [
+        { "side": "L", "name": "inner", "root": [-6, 15], "tip": [-14.5, 26.5] },
+        { "side": "L", "name": "middle", "root": [-9, 14], "tip": [-29, 28.0] },
+        { "side": "L", "name": "outer", "root": [-12, 13], "tip": [-40.5, 26.5] },
+        { "side": "R", "name": "inner", "root": [6, 15], "tip": [14.5, 26.5] },
+        { "side": "R", "name": "middle", "root": [9, 14], "tip": [29, 28.0] },
+        { "side": "R", "name": "outer", "root": [12, 13], "tip": [40.5, 26.5] } ],
+      "sparDiameter": 0.9, "finialHeight": 3.5, "bladeSpikesPerSpar": [8, 12],
+      "membraneOuterEnds": [[-41, 11, -18], [41, 11, -18]],
+      "rosettes": [[-33, 15.5], [-24, 16.5], [-16, 15.5], [16, 15.5], [24, 16.5], [33, 15.5]],
+      "rosetteDiameter": 4.5
+    },
+    "pa": {
+      "innerHangs": [{ "x": -11, "z": -4 }, { "x": 11, "z": -4 }],
+      "outerHangs": [{ "x": -31, "z": -6 }, { "x": 31, "z": -6 }],
+      "arrayBottomY": 4.9, "arrayTopY": 14.2, "bumperY": 14.6, "boxesPerHang": 20, "boxType": "K1 1.34 x 0.44 m",
+      "sideHangs": "10 x K2 beside each main hang",
+      "trussTowerTopY": 16.5,
+      "subs": { "count": 12, "blockSize": [2.7, 1.65, 1.1], "x": [-42, 42], "z": [1.2, 2.3], "tag": "FACT (visible) / ASSUMPTION (count)" }
+    },
+    "sideSections": [
+      { "side": "left", "x": [-92, -37], "frontZ": -4, "rearZ": [-22, -30], "wallTopY": 9.5,
+        "towers": [{ "x": -48, "z": -10, "w": 5, "topY": 13.5 }, { "x": -63, "z": -10, "w": 5, "topY": 13.5 }, { "x": -78, "z": -10, "w": 5, "topY": 13.5 }],
+        "cornerTower": { "x": -92, "z": -4, "w": 6, "topY": 15 },
+        "lanternPostSpacing": 8, "lanternTopY": 11.5 },
+      { "side": "right", "x": [37, 92], "frontZ": -4, "rearZ": [-22, -30], "wallTopY": 9.5,
+        "towers": [{ "x": 48, "z": -10, "w": 5, "topY": 13.5 }, { "x": 63, "z": -10, "w": 5, "topY": 13.5 }, { "x": 78, "z": -10, "w": 5, "topY": 13.5 }],
+        "cornerTower": { "x": 92, "z": -4, "w": 6, "topY": 15 },
+        "lanternPostSpacing": 8, "lanternTopY": 11.5 }
+    ],
+    "arms": [
+      { "side": "left", "polyline": [[-92, -4], [-94, 58]], "rampartHeightAboveGround": 1.4, "localGroundY": 4.5,
+        "lanternPostsZ": [2, 10, 18, 26, 34, 42, 50, 58], "postHeight": 4.0, "lanternHeight": 1.2,
+        "openingsZ": [[28, 32], [36, 40], [44, 48], [52, 56]],
+        "endTurret": { "x": -94, "z": 58, "w": 4, "topY": 12.5 }, "tag": "INFERENCE (drone back-projection) / ASSUMPTION (detail)" },
+      { "side": "right", "polyline": [[92, -4], [94, 58]], "rampartHeightAboveGround": 1.4, "localGroundY": 4.5,
+        "lanternPostsZ": [2, 10, 18, 26, 34, 42, 50, 58], "postHeight": 4.0, "lanternHeight": 1.2,
+        "openingsZ": [[28, 32], [36, 40], [44, 48], [52, 56]],
+        "endTurret": { "x": 94, "z": 58, "w": 4, "topY": 12.5 }, "tag": "INFERENCE / ASSUMPTION" }
+    ]
+  },
+  "pillars": [
+    { "id": "L1", "x": -20, "z": 36, "height": 12.8 },
+    { "id": "R1", "x": 20, "z": 36, "height": 12.8 },
+    { "id": "L2", "x": -20, "z": 69, "height": 12.8 },
+    { "id": "R2", "x": 20, "z": 69, "height": 12.8 },
+    { "id": "L3", "x": -20, "z": 102, "height": 12.8 },
+    { "id": "R3", "x": 20, "z": 102, "height": 12.8 },
+    { "id": "L4", "x": -20, "z": 135, "height": 12.8 },
+    { "id": "R4", "x": 20, "z": 135, "height": 12.8 }
+  ],
+  "pillarSpec": {
+    "note": "The lantern pillars ARE the 8 delay towers (dressed as stone obelisks with crystal lanterns).",
+    "plinth": { "size": 8.5, "deckY": 0.4, "railingHeight": 1.1, "cannonProps": 4 },
+    "shaft": { "size": 2.6, "baseMoulding": { "size": 3.4, "topY": 1.6 }, "capital": { "size": 3.4, "y": [8.8, 9.6] }, "ledStripsPerFace": 1, "baseUplights": 4 },
+    "crystal": { "shape": "elongated octahedron", "width": 2.5, "height": 3.2, "y": [9.6, 12.8], "defaultColor": "#40A0FF", "upperHalf": "dark cap", "lowerHalf": "emissive" },
+    "delayArrays": { "count": 2, "boxes": "6 x K2 each", "y": [4.2, 8.2], "face": "+Z" },
+    "capitalEffects": ["flame head 2-3 m", "gerb", "beam fixture", "laser"],
+    "laserMirrors": ["L1", "R1", "L2", "R2"],
+    "tag": "INFERENCE (positions, height) / FACT (look)"
+  },
+  "delayTowers": [
+    { "id": "L1", "x": -20, "z": 36, "h": 12.8 },
+    { "id": "R1", "x": 20, "z": 36, "h": 12.8 },
+    { "id": "L2", "x": -20, "z": 69, "h": 12.8 },
+    { "id": "R2", "x": 20, "z": 69, "h": 12.8 },
+    { "id": "L3", "x": -20, "z": 102, "h": 12.8 },
+    { "id": "R3", "x": 20, "z": 102, "h": 12.8 },
+    { "id": "L4", "x": -20, "z": 135, "h": 12.8 },
+    { "id": "R4", "x": 20, "z": 135, "h": 12.8 }
+  ],
+  "foh": { "x": 0, "z": 90, "w": 12.8, "d": 6, "h": 0.5, "railingHeight": 1.1, "note": "Endshow camera/FOH platform with tripod operator; optional festival FOH tower roof at Y 8 on the same footprint", "tag": "INFERENCE" },
+  "pianoRiser": { "x": 0, "z": 59, "w": 5.6, "d": 4, "h": 0.6, "laserSource": [0, 1.8, 59], "tag": "INFERENCE" },
+  "bars": [
+    { "id": "BAR-L", "x": -100.5, "z": 55, "rotY": 1.5708, "rotYDeg": 90, "width": 46, "depth": 7, "groundY": 5.2, "servicePointsZ": [35.3, 43.2, 51.1, 59.0, 66.9, 74.9], "roof": "tan tensile", "tag": "INFERENCE (official floorplan, +-8 m)" },
+    { "id": "BAR-R", "x": 100.5, "z": 52, "rotY": -1.5708, "rotYDeg": -90, "width": 46, "depth": 7, "groundY": 5.2, "servicePointsZ": [31.6, 39.5, 47.4, 55.3, 63.2, 71.2], "roof": "tan tensile", "tag": "INFERENCE" },
+    { "id": "BAR-BL", "x": -64, "z": 126, "rotY": 2.5534, "rotYDeg": 146.3, "width": 29, "depth": 6, "groundY": 0, "tag": "INFERENCE" },
+    { "id": "BAR-BR", "x": 84.5, "z": 124.5, "rotY": 3.1416, "rotYDeg": 180, "width": 23, "depth": 6, "groundY": 0, "tag": "INFERENCE (facing ASSUMPTION)" }
+  ],
+  "beerFastLanes": [[-53.8, 124.2], [95.3, 130.0]],
+  "waterPoints": [
+    { "x": -74.3, "z": 171.4, "type": "tap", "tag": "FACT (map)" },
+    { "x": -81.7, "z": 171.6, "type": "tap", "tag": "FACT (map)" },
+    { "x": -66.8, "z": 171.3, "type": "tap", "tag": "FACT (map)" },
+    { "x": -110.7, "z": 145.7, "type": "tap", "tag": "FACT (map)" },
+    { "x": -123, "z": 146, "type": "free water at toilet block (heat protocol)", "tag": "FACT policy / INFERENCE position" },
+    { "x": 190, "z": 137, "type": "free water at toilet block (heat protocol)", "tag": "FACT policy / INFERENCE position" },
+    { "x": -48, "z": 118, "type": "misting pole", "tag": "ASSUMPTION" },
+    { "x": 48, "z": 118, "type": "misting pole", "tag": "ASSUMPTION" },
+    { "x": -104, "z": 95, "type": "misting pole", "tag": "ASSUMPTION" },
+    { "x": 104, "z": 95, "type": "misting pole", "tag": "ASSUMPTION" }
+  ],
+  "toilets": [
+    { "rect": [[-135, 142], [-111, 150]], "tag": "INFERENCE" },
+    { "rect": [[178, 133], [202, 141]], "tag": "INFERENCE" }
+  ],
+  "firstAid": [{ "x": 116.7, "z": 122.7, "note": "EHBO RED post (air-conditioned heat post in 2026 plan)", "tag": "FACT (map)" }],
+  "infoStands": [{ "id": "celebrate-safe-unity", "x": 120, "z": 150, "tag": "ASSUMPTION (real stand ~290 m away, off-map)" }],
+  "fences": [
+    { "id": "pitBarrier", "points": [[-92, -1], [-46, 6], [46, 6], [92, -1]], "height": 1.2, "type": "steel crowd barrier", "tag": "ASSUMPTION" },
+    { "id": "backstageLeft", "points": [[-92, -6], [-108, -6], [-108, -20]], "height": 2.0, "type": "Heras + black scrim", "tag": "FACT (2024 position)" },
+    { "id": "backstageRight", "points": [[92, -6], [108, -6], [108, -20]], "height": 2.0, "type": "Heras + black scrim", "tag": "FACT (2024 position)" },
+    { "id": "armRampartLeft", "points": [[-92, -4], [-94, 58]], "height": 1.4, "openingsZ": [[28, 32], [36, 40], [44, 48], [52, 56]], "type": "scenic crenellated rampart", "tag": "INFERENCE / ASSUMPTION" },
+    { "id": "armRampartRight", "points": [[92, -4], [94, 58]], "height": 1.4, "openingsZ": [[28, 32], [36, 40], [44, 48], [52, 56]], "type": "scenic crenellated rampart", "tag": "INFERENCE / ASSUMPTION" },
+    { "id": "fohRailing", "points": [[-6.4, 87], [6.4, 87], [6.4, 93], [-6.4, 93], [-6.4, 87]], "height": 1.1, "type": "railing on 0.5 m platform", "tag": "FACT (photo)" },
+    { "id": "pianoRiserRailing", "points": [[-2.8, 61], [-2.8, 57], [2.8, 57], [2.8, 61]], "height": 1.1, "tag": "FACT (photo) / ASSUMPTION (sides)" },
+    { "id": "plinthRailings", "note": "8.5 x 8.5 m square around each pillar, centred on the pillar", "height": 1.1, "tag": "FACT (look)" },
+    { "id": "walibiPerimeter", "points": [[-147, -46], [-176, 91]], "height": 2.5, "tag": "FACT (OSM extent, simplified)" },
+    { "id": "festivalFenceWest", "points": [[-124, 122], [-132, 274]], "height": 2.0, "tag": "FACT (floorplan dashed line)" }
+  ],
+  "entrances": [
+    { "id": "E1_main_west", "a": [108, 137], "b": [125, 160], "center": [116.5, 148.5], "note": "main flow from the festival core along the main road", "tag": "INFERENCE" },
+    { "id": "E2_lake_loop", "a": [-108, 137], "b": [-125, 118], "center": [-116.5, 127.5], "note": "alternative route, passes WC-L", "tag": "INFERENCE" },
+    { "id": "backEdge", "a": [-44, 149], "b": [44, 149], "note": "open along the 12 m road", "tag": "INFERENCE" },
+    { "id": "premiumDeckMain", "a": [51, 209], "b": [51, 209], "tag": "FACT (map)" },
+    { "id": "premiumDeckAlt", "a": [-52, 184], "b": [-52, 184], "tag": "FACT (map)" }
+  ],
+  "spawn": { "position": [115, 0, 150], "facing": [-0.6, 0, -0.8], "alt": [0, 0, 160] },
+  "bounds": {
+    "walkablePolygon": [[-108, -6], [108, -6], [108, 99], [130, 150], [125, 172], [-120, 172], [-135, 150], [-108, 120]],
+    "xMin": -135, "xMax": 130, "zMin": -6, "zMax": 172, "yMin": -2, "yMax": 60, "freeCameraYMax": 300,
+    "colliders": ["stage footprint (side sections Z<-4, central deck Z<0)", "pitBarrier", "arm ramparts (with openings)", "8 plinths", "foh", "pianoRiser", "bar counters", "tree trunks", "lake shore"]
+  },
+  "terrain": {
+    "floor": { "paved": [[-44, 0], [44, 0], [44, 113], [-44, 113]], "color": "#A9A99C", "tag": "FACT" },
+    "hardstanding": { "rect": [[-44, 113], [44, 137]], "color": "#858278", "tag": "FACT" },
+    "aisleStrip": { "rect": [[-12, 0], [12, 137]], "colorShift": -0.08, "tag": "ASSUMPTION" },
+    "sideBanks": { "innerSlope": 0.096, "toeAbsX": 46, "crestY": 5.2, "crestAbsX": [100, 109], "outerToeAbsX": 126, "zRange": [-20, 105], "rampZ": [105, 115], "grassColor": "#7C7F4A", "tag": "FACT (AHN4) / ASSUMPTION (colour)" },
+    "rearBank": { "toeZ": -5, "slope": 0.10, "crestZ": [-62, -55], "crestY": 5.5, "notchX": [-6, 6], "notchDepth": 1.0, "tag": "FACT" },
+    "backFall": { "fromZ": 113, "toZ": 172, "dropY": -0.5, "tag": "FACT" },
+    "function": "side=(-20<=Z<=105)?clamp((|X|-46)*0.096,0,5.2):0 (crest 5.2..5.6 at |X|100..109, outer 5.4-(|X|-109)*0.32 to |X|126); rear=(Z<-5)?clamp((-Z-5)*0.10,0,5.6):0; Y=max(side,rear); Z>113: Y=-0.5*(Z-113)/59",
+    "heightmapFile": "scratchpad refs/terrain/ahn_heightmap_redframe_2m.json (161x186, 2 m, X -160..160, Z -100..270, metres NAP)",
+    "road": { "centreline": [[-137, 94], [-131, 110], [-114, 131], [-87, 144], [-44, 143], [43, 143], [128, 160], [188, 179], [245, 181]], "width": 12, "color": "#B2AC9B", "tag": "FACT" },
+    "decking": { "rect": [[-57, 149], [47, 172]], "y": -0.3, "tag": "FACT 2024 / INFERENCE 2026" },
+    "premiumDeck": { "rect": [[-52, 172], [51, 211]], "deckY": 1.0, "photoTerrace": { "rect": [[-30, 166], [30, 172]], "y": 5.0 }, "tentRoofs": [[-53, -20], [-12, 13], [16, 50]], "tag": "FACT 2024 layout / INFERENCE terrace" },
+    "lake": { "waterY": -1.8, "polygon": [[-108, 246], [-29, 251], [-19, 245], [-3, 246], [28, 255], [44, 256], [204, 251], [215, 244], [227, 225], [209, 217], [67, 215], [62, 210], [59, 183], [52, 175], [40, 174], [-2, 180], [-31, 178], [-50, 172], [-78, 182], [-114, 184], [-118, 188], [-120, 210], [-119, 233], [-108, 246]], "tag": "FACT (OSM)" },
+    "beach": { "rect": [[-20, 255], [20, 275]], "color": "#CDCAB9", "tag": "FACT" }
+  },
+  "trees": [
+    { "id": "leftBelt", "heightRange": [15, 22], "trunkSpacing": [4, 6], "polygon": [[16, -59], [17, -63], [-40, -63], [-54, -82], [-64, -75], [-123, -71], [-128, -63], [-128, -37], [-124, -34], [-121, 82], [-118, 91], [-91, 117], [-48, 116], [-48, 107], [-84, 107], [-91, 105], [-108, 89], [-108, -48], [-105, -55], [-97, -58], [16, -59]], "tag": "FACT (OSM outline) / ASSUMPTION (heights)" },
+    { "id": "rightBelt", "heightRange": [15, 22], "trunkSpacing": [4, 6], "polygon": [[128, -38], [124, -57], [118, -66], [109, -73], [98, -78], [87, -65], [24, -63], [27, -58], [87, -57], [99, -55], [105, -51], [108, -34], [108, 99], [58, 109], [56, 113], [129, 113], [128, -38]], "tag": "FACT (OSM outline) / ASSUMPTION (heights)" }
+  ],
+  "horizonLandmarks": [
+    { "id": "goliathCoaster", "trackBBox": { "x": [-178, -73], "z": [-365, -64] }, "height": 46.9, "lit": false, "tag": "FACT" },
+    { "id": "yellowStage", "center": [182, 18], "extent": { "x": [153, 211], "z": [-52, 88] }, "lightColors": ["#C02070", "#FF3030", "#30A0FF"], "note": "the magenta structure right of the stage in front aerials", "tag": "FACT position / INFERENCE identity" },
+    { "id": "indigoStage", "center": [246, -85], "tag": "INFERENCE" },
+    { "id": "goldStage", "center": [350, -43], "tag": "INFERENCE" },
+    { "id": "magentaStage", "center": [385, 132], "tag": "INFERENCE" },
+    { "id": "uvStage", "center": [311, 244], "tag": "INFERENCE" },
+    { "id": "blueStage", "center": [445, 257], "tag": "INFERENCE" },
+    { "id": "ferrisWheel", "center": [86.5, 187.5], "diameter": 32, "planeParallelTo": "Z", "tag": "FACT (map)" }
+  ],
+  "pyroAnchors": {
+    "tag": "ASSUMPTION positions calibrated on frames (see design-bible 7.5-7.7); [x, y, z]",
+    "deckFrontFlames": [[-35.65, 1.9, -0.4], [-32.55, 1.9, -0.4], [-29.45, 1.9, -0.4], [-26.35, 1.9, -0.4], [-23.25, 1.9, -0.4], [-20.15, 1.9, -0.4], [-17.05, 1.9, -0.4], [-13.95, 1.9, -0.4], [-10.85, 1.9, -0.4], [-7.75, 1.9, -0.4], [-4.65, 1.9, -0.4], [-1.55, 1.9, -0.4], [1.55, 1.9, -0.4], [4.65, 1.9, -0.4], [7.75, 1.9, -0.4], [10.85, 1.9, -0.4], [13.95, 1.9, -0.4], [17.05, 1.9, -0.4], [20.15, 1.9, -0.4], [23.25, 1.9, -0.4], [26.35, 1.9, -0.4], [29.45, 1.9, -0.4], [32.55, 1.9, -0.4], [35.65, 1.9, -0.4]],
+    "sideFrontFlames": [[-41.0, 1.9, -3.6], [-46.5, 1.9, -3.6], [-52.0, 1.9, -3.6], [-57.5, 2.1, -3.6], [-63.0, 2.63, -3.6], [-68.5, 3.16, -3.6], [-74.0, 3.69, -3.6], [-79.5, 4.22, -3.6], [-85.0, 4.74, -3.6], [-90.5, 5.27, -3.6], [41.0, 1.9, -3.6], [46.5, 1.9, -3.6], [52.0, 1.9, -3.6], [57.5, 2.1, -3.6], [63.0, 2.63, -3.6], [68.5, 3.16, -3.6], [74.0, 3.69, -3.6], [79.5, 4.22, -3.6], [85.0, 4.74, -3.6], [90.5, 5.27, -3.6]],
+    "armPostFlames": [[-93, 5.9, 2], [-93, 5.9, 10], [-93, 5.9, 18], [-93, 5.9, 26], [-93, 5.9, 34], [-93, 5.9, 42], [-93, 5.9, 50], [-93, 5.9, 58], [93, 5.9, 2], [93, 5.9, 10], [93, 5.9, 18], [93, 5.9, 26], [93, 5.9, 34], [93, 5.9, 42], [93, 5.9, 50], [93, 5.9, 58]],
+    "wingSparFlames": [[-11.1, 21.9, -20], [-13.65, 25.35, -20], [-21.0, 22.4, -20], [-27.0, 26.6, -20], [-29.1, 21.1, -20], [-37.65, 25.15, -20], [11.1, 21.9, -20], [13.65, 25.35, -20], [21.0, 22.4, -20], [27.0, 26.6, -20], [29.1, 21.1, -20], [37.65, 25.15, -20]],
+    "towerTorches15m": [[-14, 16.5, -13], [14, 16.5, -13]],
+    "cornerFireballs": [[-92, 15.5, -4], [92, 15.5, -4]],
+    "pillarCapitalFlames": [[-20, 9.7, 36], [20, 9.7, 36], [-20, 9.7, 69], [20, 9.7, 69], [-20, 9.7, 102], [20, 9.7, 102], [-20, 9.7, 135], [20, 9.7, 135]],
+    "deckGerbs": [[-38, 1.9, -0.8], [-34, 1.9, -0.8], [-30, 1.9, -0.8], [-26, 1.9, -0.8], [-22, 1.9, -0.8], [-18, 1.9, -0.8], [-14, 1.9, -0.8], [-10, 1.9, -0.8], [-6, 1.9, -0.8], [-2, 1.9, -0.8], [2, 1.9, -0.8], [6, 1.9, -0.8], [10, 1.9, -0.8], [14, 1.9, -0.8], [18, 1.9, -0.8], [22, 1.9, -0.8], [26, 1.9, -0.8], [30, 1.9, -0.8], [34, 1.9, -0.8], [38, 1.9, -0.8]],
+    "roofGerbs": [[-35.0, 9.6, -12.5], [-30.3, 9.6, -12.5], [-25.7, 9.6, -12.5], [-21.0, 18.0, -22], [-16.3, 18.0, -22], [-11.7, 18.0, -22], [-7.0, 18.0, -22], [-2.3, 18.0, -22], [2.3, 18.0, -22], [7.0, 18.0, -22], [11.7, 18.0, -22], [16.3, 18.0, -22], [21.0, 18.0, -22], [25.7, 9.6, -12.5], [30.3, 9.6, -12.5], [35.0, 9.6, -12.5]],
+    "sideRampartGerbs": [[-44.0, 9.6, -4.5], [-50.5, 9.6, -4.5], [-57.0, 9.6, -4.5], [-63.5, 9.6, -4.5], [-70.0, 9.6, -4.5], [-76.5, 9.6, -4.5], [-83.0, 9.6, -4.5], [-89.5, 9.6, -4.5], [44.0, 9.6, -4.5], [50.5, 9.6, -4.5], [57.0, 9.6, -4.5], [63.5, 9.6, -4.5], [70.0, 9.6, -4.5], [76.5, 9.6, -4.5], [83.0, 9.6, -4.5], [89.5, 9.6, -4.5]],
+    "armGerbs": "same positions as armPostFlames",
+    "wingFinialGerbs": [[-14.5, 26.5, -20], [-29, 28.0, -20], [-40.5, 26.5, -20], [14.5, 26.5, -20], [29, 28.0, -20], [40.5, 26.5, -20]],
+    "pillarCapitalGerbs": "same positions as pillarCapitalFlames",
+    "roofComets": [[-32, 18, -22], [-24, 18, -22], [-16, 18, -22], [-8, 18, -22], [0, 18, -22], [8, 18, -22], [16, 18, -22], [24, 18, -22], [32, 18, -22]],
+    "frontComets": [[-38.5, 1.9, -0.6], [-31.5, 1.9, -0.6], [-24.5, 1.9, -0.6], [-17.5, 1.9, -0.6], [-10.5, 1.9, -0.6], [-3.5, 1.9, -0.6], [3.5, 1.9, -0.6], [10.5, 1.9, -0.6], [17.5, 1.9, -0.6], [24.5, 1.9, -0.6], [31.5, 1.9, -0.6], [38.5, 1.9, -0.6]],
+    "armEndXFans": [[-94, 5.9, 58], [94, 5.9, 58]],
+    "hangLineGlitter": [[-11, 16.5, -4], [11, 16.5, -4]],
+    "crestComets": [[-106, 5.5, 0], [-106, 5.5, 12], [-106, 5.5, 24], [-106, 5.5, 36], [-106, 5.5, 48], [-106, 5.5, 60], [106, 5.5, 0], [106, 5.5, 12], [106, 5.5, 24], [106, 5.5, 36], [106, 5.5, 48], [106, 5.5, 60]],
+    "aerialTrussA": { "z": -30, "y": 22, "x": [-60, 60], "step": 4, "count": 31 },
+    "aerialTrussB": { "z": -38, "y": 26, "x": [-44, 44], "step": 4, "count": 23 },
+    "aerialBreakHeightAGL": [45, 90],
+    "co2Jets": [[-30, 16.5, -16], [-24, 16.5, -16], [-18, 16.5, -16], [-12, 16.5, -16], [12, 16.5, -16], [18, 16.5, -16], [24, 16.5, -16], [30, 16.5, -16], [-35, 1.9, -1.5], [-25, 1.9, -1.5], [-15, 1.9, -1.5], [-5, 1.9, -1.5], [5, 1.9, -1.5], [15, 1.9, -1.5], [25, 1.9, -1.5], [35, 1.9, -1.5], [-94, 5.9, 58], [94, 5.9, 58]],
+    "bengalFlaresReviewNote": "side pots moved from X +-63 to +-86 (review 2026-09-25): drone frame f006 puts the red sources at the outer ends of the straight front line; INFERENCE +-7 m",
+    "bengalFlares": [[-86, 9.6, -4.5], [86, 9.6, -4.5], [-30, 1.9, -1], [-10, 1.9, -1], [10, 1.9, -1], [30, 1.9, -1]],
+    "flashMines": [[-20, 1.9, -1], [-8, 1.9, -1], [8, 1.9, -1], [20, 1.9, -1]]
+  },
+  "lasers": [
+    { "group": "deckFront", "count": 12, "positions": [[-33, 2.2, -0.5], [-27, 2.2, -0.5], [-21, 2.2, -0.5], [-15, 2.2, -0.5], [-9, 2.2, -0.5], [-3, 2.2, -0.5], [3, 2.2, -0.5], [9, 2.2, -0.5], [15, 2.2, -0.5], [21, 2.2, -0.5], [27, 2.2, -0.5], [33, 2.2, -0.5]] },
+    { "group": "castleRoof", "count": 8, "positions": [[-24, 16, -13], [-14, 16, -13], [14, 16, -13], [24, 16, -13], [-32, 10, -12], [-7, 10, -12], [7, 10, -12], [32, 10, -12]] },
+    { "group": "dragonFlanks", "count": 2, "positions": [[-7, 15, -10], [7, 15, -10]] },
+    { "group": "wingBases", "count": 4, "positions": [[-34, 19, -19], [-20, 20, -19], [20, 20, -19], [34, 19, -19]] },
+    { "group": "cornerTowers", "count": 4, "positions": [[-92, 14, -4.5], [-92, 14, -3.5], [92, 14, -4.5], [92, 14, -3.5]] },
+    { "group": "armEnds", "count": 6, "positions": [[-94, 12, 57.5], [-94, 12, 58], [-94, 12, 58.5], [94, 12, 57.5], [94, 12, 58], [94, 12, 58.5]] },
+    { "group": "pillarCapitals", "count": 8, "positions": [[-20, 9.7, 36], [20, 9.7, 36], [-20, 9.7, 69], [20, 9.7, 69], [-20, 9.7, 102], [20, 9.7, 102], [-20, 9.7, 135], [20, 9.7, 135]] },
+    { "group": "piano", "count": 1, "positions": [[0, 1.8, 59]], "mirrors": ["L1", "R1", "L2", "R2"] }
+  ],
+  "sky": {
+    "showStartLocal": "2026-06-27T22:32:45+02:00",
+    "showStartUTC": "2026-06-27T20:32:45Z",
+    "durationS": 1581,
+    "startTag": "INFERENCE +-2 min (moon fit in f004 + EXIF 22:41:39 of the red-canopy photo; review 2026-09-25 widened from +-1 min: the moon pixel alone gives ~22:31:15)",
+    "sun": { "azimuthDegStart": 317.9, "altitudeDegStart": -4.0, "azimuthDegEnd": 323.4, "altitudeDegEnd": -6.6, "dirWorldStart": [0.124, -0.070, 0.992], "civilDuskShowT": 1253, "tag": "FACT (PyEphem)" },
+    "twilightGlow": { "bearingDeg": [318, 323], "side": "behind the audience (+Z, slightly +X)" },
+    "zenithKeys": [{ "t": 0, "hex": "#0A2A4E" }, { "t": 120, "hex": "#06183A" }, { "t": 400, "hex": "#030A1E" }, { "t": 800, "hex": "#02060F" }, { "t": 1300, "hex": "#010204" }],
+    "horizonBehindStageKeys": [{ "t": 0, "hex": "#0E2D4A" }, { "t": 120, "hex": "#081E3C" }, { "t": 400, "hex": "#05051F" }, { "t": 800, "hex": "#020206" }, { "t": 1300, "hex": "#010104" }],
+    "horizonTwilightKeys": [{ "t": 0, "low": "#C99A68", "mid": "#5E8C9A", "high": "#1F4A6B" }, { "t": 120, "low": "#A8805E", "mid": "#4C7C8E", "high": "#183C58" }, { "t": 400, "low": "#7A6450", "mid": "#2E5A6E", "high": "#0F2A40" }, { "t": 800, "low": "#4A4040", "mid": "#1E3E52", "high": "#0A1A2A" }, { "t": 1300, "low": "#2A2A2E", "mid": "#122838", "high": "#060E18" }],
+    "twilightTag": "ASSUMPTION (physics; never directly seen in the video)",
+    "stars": false,
+    "clouds": { "type": "broken mid-level deck with gaps", "coverage": 0.55, "baseAltitudeM": [2500, 3500], "undersideLitBy": "stage and pyro within ~300 m", "earlyHazeBands": true, "tag": "FACT (moon visible, haze bands) / ASSUMPTION (numbers)" },
+    "planets": [
+      { "id": "venus", "mag": -4.0, "azimuthDegStart": 281.2, "altitudeDegStart": 13.7, "azimuthDegEnd": 286.2, "altitudeDegEnd": 9.9, "dirWorldStart": [0.672, 0.237, 0.701] },
+      { "id": "jupiter", "mag": -1.7, "azimuthDegStart": 296.7, "altitudeDegStart": 5.8, "azimuthDegEnd": 301.7, "altitudeDegEnd": 2.4 }
+    ],
+    "weather": { "airTempC": 22.5, "dewPointC": 19.2, "relHumidity": 0.81, "windFromDeg": 340, "windSpeedMs": 4.5, "gustMs": 9, "smokeDriftDirWorld": [0.26, 0, -0.97], "precipitation": "dry during the show", "tag": "FACT (KNMI Lelystad 22-23 h) / INFERENCE (transfer to site)" },
+    "lightning": { "enabled": false, "optional": true, "fromShowT": 1200, "bearingDegRange": [250, 290], "dirWorldRange": [[0.97, 0, 0.26], [0.57, 0, 0.82]], "maxRatePerMin": 1.5, "tag": "INFERENCE (storm line W-SW, arrived at Lelystad 23:00)" },
+    "haze": { "globalRange": [0.35, 0.9], "lowFogLayerM": [0, 4] }
+  },
+  "moon": {
+    "litLimb": "towards the right (west), tilted ~7 deg upward; unlit sliver on the left",
+    "azimuthDeg": 161.5,
+    "altitudeDeg": 7.4,
+    "azimuthDegEnd": 167.1,
+    "altitudeDegEnd": 8.4,
+    "dirWorldStart": [0.282, 0.128, -0.951],
+    "dirWorldEnd": [0.372, 0.146, -0.917],
+    "illumination": 0.96,
+    "phase": "waxing gibbous (full 2026-06-29 23:57 UT)",
+    "angularDiameterDeg": 0.49,
+    "color": "#F2DCC0",
+    "haloColor": "#D7CAE4",
+    "tag": "FACT (PyEphem) + FACT (visible in frames, pixel match in f004)"
+  },
+  "referenceCameras": [
+    { "id": "droneF004", "position": [8.9, 57.3, 236.6], "pitchDeg": -10.1, "yawDegLeftOfAxis": 1.2, "focalPx1280": 870, "hfovDeg": 72.6, "showT": 39.5 },
+    { "id": "officialPhoto", "position": [0, 6.8, 168], "lens": "36 mm full frame", "hfovDeg": 50, "showT": 538 },
+    { "id": "heroFieldCam", "position": [0, 1.8, 172], "pitchDeg": 9, "hfovDeg": 69 },
+    { "id": "farAisleCam", "position": [0, 3, 175], "lookAt": [0, 8, 0], "hfovDeg": 55 }
+  ]
+}

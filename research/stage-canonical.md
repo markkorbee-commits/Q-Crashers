@@ -1,5 +1,13 @@
 # MainStage 2026 — canonical build dimensions (creative-director decision)
 
+> **Review note (2026-09-25): SUPERSEDED by `design-bible.md` §5 and `terrain-layout.json`. Do not build
+> from this file.** Several values here conflict with the bible:
+> - foreleg: viewer-LEFT here; the bible has a gold foreleg viewer-RIGHT (FACT, thumbnail);
+> - pillars: X ±22 at Z 46.5… here; the bible has X ±20 at Z 36/69/102/135;
+> - side arms and front line: these differ too;
+> - wing tips: 24–26 m here; the bible has 26.5–28 m;
+> - DJ portal: 5 m wide with apex 6 m here; the bible has 5.4 m and 7.2 m.
+
 Authoritative for the stage/crown engineers. Derived from `stage-analysis.md` (photogrammetry on the
 official Endshow photo, EXIF 2026-06-27 22:41, K1 box width 1.34 m as scale anchor),
 `terrain-analysis.md` (official 2026 floorplan vectors, 2024 aerial) and the storyboard aerials
