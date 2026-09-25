@@ -76,19 +76,49 @@ export class Timeline {
     }
     // mask cuts the chapter gaps out of the progress fill as well
     this.fill.style.setProperty('--tl-mask', stops.length ? `linear-gradient(90deg, #000 0, ${stops.join(', ')}, #000 100%)` : 'none');
-    this.el.querySelectorAll('.moment').forEach((n) => n.remove());
-    for (const m of show.file.moments ?? []) {
-      this.el.insertBefore(h('div', { class: 'moment', style: `left:${((m.t / dur) * 100).toFixed(3)}%`, title: m.label }), this.head);
-    }
     this.built = true;
+    this.markerWidth = -1;
     this.layout();
+  }
+
+  private markerWidth = -1;
+  /** merged marker groups (moments closer than 8 px), rebuilt when the width changes */
+  private groups: { t: number; label: string }[] = [];
+
+  /** moment markers: moments closer than 8 px merge into one marker whose tooltip lists all */
+  private placeMoments() {
+    const w = Math.round(this.width);
+    if (w === this.markerWidth || w <= 0) return;
+    this.markerWidth = w;
+    const show = this.app.show;
+    const dur = show.duration || 1;
+    this.el.querySelectorAll('.moment').forEach((n) => n.remove());
+    const ms = [...(show.file.moments ?? [])].sort((a, b) => a.t - b.t);
+    const groups: { t0: number; t1: number; labels: string[] }[] = [];
+    const gap = (8 / w) * dur;
+    for (const m of ms) {
+      const g = groups[groups.length - 1];
+      if (g && m.t - g.t1 < gap) {
+        g.t1 = m.t;
+        g.labels.push(m.label);
+      } else groups.push({ t0: m.t, t1: m.t, labels: [m.label] });
+    }
+    this.groups = groups.map((g) => ({ t: (g.t0 + g.t1) / 2, label: g.labels.join(' · ') }));
+    this.el.classList.toggle('narrow', w < 800);
+    for (const g of groups) {
+      const t = (g.t0 + g.t1) / 2;
+      this.el.insertBefore(h('div', { class: `moment${g.labels.length > 1 ? ' multi' : ''}`, style: `left:${((t / dur) * 100).toFixed(3)}%`, title: g.labels.join(' · ') }), this.head);
+    }
   }
 
   private layout() {
     const r = this.el.getBoundingClientRect();
     this.width = r.width;
     this.lastPx = -1;
-    if (this.built) this.drawEnergy();
+    if (this.built) {
+      this.drawEnergy();
+      this.placeMoments();
+    }
   }
 
   /** silhouette of section energy, tinted by each section's palette */
@@ -167,7 +197,7 @@ export class Timeline {
   private nearMoment(t: number): string | null {
     const dur = this.app.show.duration || 1;
     const tol = (dur * 6) / Math.max(200, this.width);
-    for (const m of this.app.show.file.moments ?? []) if (Math.abs(m.t - t) < tol) return m.label;
+    for (const g of this.groups) if (Math.abs(g.t - t) < tol) return g.label;
     return null;
   }
 

@@ -1,10 +1,10 @@
-import type { BarSystem } from '../bar/BarSystem';
+import { REFUSAL_TEXT, type BarSystem } from '../bar/BarSystem';
 import { barById } from '../bar/bars';
-import { CATEGORY_LABEL, CATEGORY_ORDER, CUP_DEPOSIT_EUR, DRINKS, eur, TOPUP_EUR, type Drink } from '../bar/drinks';
+import { CATEGORY_LABEL, CATEGORY_ORDER, CUP_RULE, DRINKS, eur, isAlcoholic, TOPUP_EUR, type Drink } from '../bar/drinks';
 import { perception } from './contracts';
 import { h, setText } from './dom';
 import { icon } from './icons';
-import { tierFor } from './PerceptionUI';
+import { tierFor, tierName } from './PerceptionUI';
 import type { UI } from './UI';
 
 const VESSEL_ICON: Record<string, string> = { redcup: 'beer', clearcup: 'glass', bottle: 'drop', can: 'bolt', shotglass: 'shot' };
@@ -74,10 +74,19 @@ export class BarMenu {
         'div',
         { class: 'wallet' },
         h('span', { class: 'coins' }, h('span', { html: icon('coin'), style: 'display:contents' }), this.coinsEl, h('small', null, 'bracelet')),
-        h('span', { class: 'muted small', style: 'flex:1;min-width:160px' }, `Cashless Legendary Bracelet · ${eur(CUP_DEPOSIT_EUR)} cup deposit · prices 2026 estimated`),
+        h('span', { class: 'muted small', style: 'flex:1;min-width:160px' }, `Cashless Legendary Bracelet · ${CUP_RULE} · prices 2026 estimated`),
         topUp,
       ),
     );
+    // staff refuse alcohol to visibly drunk guests (Alcoholwet): say so, offer the free water
+    if (bar.refusing) {
+      const water = h('button', { class: 'btn small', type: 'button', html: `${icon('drop')}<span>Take the free water</span>` });
+      water.addEventListener('click', () => {
+        const w = DRINKS.find((x) => x.id === 'tapwater');
+        if (w) this.order(w);
+      });
+      body.appendChild(h('div', { class: 'disclaimer-box refusal' }, h('span', { html: icon('warning'), style: 'display:contents' }), h('span', { style: 'flex:1' }, REFUSAL_TEXT), water));
+    }
     // one dense grid, grouped by category (a small label on each card keeps the grouping readable)
     const grid = h('div', { class: 'drinks' });
     for (const cat of CATEGORY_ORDER) for (const d of DRINKS) if (d.category === cat) grid.appendChild(this.drinkRow(d));
@@ -89,8 +98,8 @@ export class BarMenu {
       h(
         'div',
         { class: 'bac-strip' },
-        h('span', { html: `${icon('drop')}` , style: 'display:contents' }),
-        h('span', null, `BAC ${bac.toFixed(2)} ‰ · ${tierFor(bac)?.label ?? 'Sober'}`),
+        h('span', { html: `${icon('drop')}`, style: 'display:contents' }),
+        h('span', null, `BAC ${bac.toFixed(2)} ‰ · ${tierName(tierFor(bac))}`),
         h('div', { class: 'meter' }, fill),
         h('span', null, 'No alcohol under 18 · water is free at every water point'),
       ),
@@ -121,9 +130,13 @@ export class BarMenu {
     const bar = this.bar;
     if (!bar || !this.coinsEl) return;
     setText(this.coinsEl, eur(bar.credit));
+    const refusing = bar.refusing;
     for (const d of DRINKS) {
       const b = this.buyBtns.get(d.id);
-      if (b) b.disabled = !bar.canAfford(d);
+      if (!b) continue;
+      const refused = refusing && isAlcoholic(d);
+      b.disabled = refused || !bar.canAfford(d);
+      b.closest('.drink')?.classList.toggle('refused', refused);
     }
   }
 
@@ -132,7 +145,12 @@ export class BarMenu {
     if (!bar || this.pouring || !this.body) return;
     const r = bar.order(d.id);
     if (!r.ok) {
-      this.ui.toast(r.message, 2400, 'coin');
+      this.ui.toast(r.message, r.refused ? 5200 : 2600, r.refused ? 'warning' : 'coin');
+      // refused service: the bartender hands over a free water instead
+      if (r.refused) {
+        const w = DRINKS.find((x) => x.id === 'tapwater');
+        if (w) this.order(w);
+      }
       return;
     }
     this.pouring = true;

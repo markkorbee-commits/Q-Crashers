@@ -23,6 +23,25 @@
 .tc.tc-dormant {
   display: none;
 }
+/* the overlay UI (#ui, an earlier sibling) decides when the thumb controls are out of the way:
+   before entering, with the interface hidden (cinema), and behind menus / cards */
+#ui.pre ~ .tc,
+#ui.cinema ~ .tc,
+#ui.layer-open ~ .tc {
+  display: none;
+}
+/* lift the controls above the slim touch show bar (never under it, never overlapping it) */
+#ui.touch ~ .tc {
+  --tc-lift: 70px;
+}
+/* touch laptops keep the full desktop show bar */
+#ui:not(.touch) ~ .tc {
+  --tc-lift: 140px;
+}
+/* the HUD prompt is the single tappable interaction prompt when the overlay UI is present */
+#ui ~ .tc .tc-interact {
+  display: none !important;
+}
 
 /* ---------- joystick ---------- */
 .tc-joy {
@@ -99,7 +118,7 @@
 }
 .tc-hint-move {
   left: calc(var(--sal) + 96px);
-  bottom: calc(var(--sab) + 14px);
+  bottom: calc(var(--sab) + var(--tc-lift, 0px) + 10px);
   transform: translateX(-50%);
 }
 .tc-hint-look {
@@ -133,7 +152,7 @@
 .tc-cluster {
   position: absolute;
   right: calc(var(--sar) + 18px);
-  bottom: calc(var(--sab) + 18px);
+  bottom: calc(var(--sab) + var(--tc-lift, 18px));
   width: 188px;
   height: 172px;
 }
@@ -370,4 +389,8 @@
   .tc-interact {
     bottom: calc(var(--sab) + 178px);
   }
+}
+/* photo mode: the shutter sits on the right edge, keep the fly buttons below it */
+#ui.photo ~ .tc .tc-back {
+  display: none;
 }

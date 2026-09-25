@@ -4,7 +4,10 @@ import { CAMERA_MODES, cameraRig, player } from './contracts';
 import { h, store } from './dom';
 import { fmtDistance, fmtTime } from './format';
 import { icon } from './icons';
-import { miniMapSvg, updateMiniMapPlayer } from './MiniMap';
+import { clusterSpots, miniMapSvg, updateMiniMapPlayer, X0, X1, Z0, Z1 } from './MiniMap';
+import { prefs, savePref } from './settings';
+import { flashingToggle } from './Cards';
+import { IS_ARTIFACT } from '../core/target';
 import type { UI } from './UI';
 
 /** Build a panel shell (glass popover / bottom sheet on phones). */
@@ -35,7 +38,10 @@ export function openPositions(ui: UI, trigger?: HTMLElement | null): void {
   const app = ui.app;
   const { el, body } = panelShell(ui, 'Positions', 'Choose your spot', true);
   const spots = [...app.spots];
-  const map = h('div', { html: miniMapSvg(app, spots) });
+  // touch: bigger markers (≥ 30 px hit areas) and a name callout before teleporting
+  const big = ui.touch;
+  const clusters = clusterSpots(spots, big ? 17 : 14);
+  const map = h('div', { class: 'map-wrap', html: miniMapSvg(app, spots, clusters, big) });
   const svg = map.querySelector('svg') as SVGSVGElement;
   const yaw = () => player(app)?.yaw ?? 0;
   updateMiniMapPlayer(svg, app, yaw());
@@ -45,19 +51,21 @@ export function openPositions(ui: UI, trigger?: HTMLElement | null): void {
     ui.layers.close();
     ui.teleport(s);
   };
+  const dist = (i: number) => Math.hypot(spots[i].position.x - app.playerPos.x, spots[i].position.z - app.playerPos.z);
   const list = h('div', { class: 'list' });
   const rows: HTMLButtonElement[] = [];
   const view = spots.map((s, i) => ({ s, i })).filter((x) => !x.s.id.startsWith('bar_'));
   const bars = spots.map((s, i) => ({ s, i })).filter((x) => x.s.id.startsWith('bar_'));
+  const markerOf = (i: number) => svg.querySelector(`[data-cluster="${clusters.findIndex((c) => c.idx.includes(i))}"]`);
   const addRows = (arr: { s: (typeof spots)[number]; i: number }[], heading: string) => {
     if (!arr.length) return;
     list.appendChild(h('div', { class: 'list-h', style: list.childElementCount ? '' : 'margin-top:0' }, heading));
     for (const { s, i } of arr) {
-      const d = Math.hypot(s.position.x - app.playerPos.x, s.position.z - app.playerPos.z);
+      const d = dist(i);
       const coords = `x ${s.position.x.toFixed(0)} · z ${s.position.z.toFixed(0)}`;
       const r = rowBtn(h('span', { class: 'n' }, String(i + 1)), s.label, coords, d < 3 ? 'here' : fmtDistance(d), () => go(i));
-      r.addEventListener('pointerenter', () => svg.querySelector(`[data-spot="${i}"]`)?.classList.add('hl'));
-      r.addEventListener('pointerleave', () => svg.querySelector(`[data-spot="${i}"]`)?.classList.remove('hl'));
+      r.addEventListener('pointerenter', () => markerOf(i)?.classList.add('hl'));
+      r.addEventListener('pointerleave', () => markerOf(i)?.classList.remove('hl'));
       rows[i] = r;
       list.appendChild(r);
     }
@@ -65,17 +73,65 @@ export function openPositions(ui: UI, trigger?: HTMLElement | null): void {
   addRows(view, 'Viewing spots');
   addRows(bars, 'Bars');
   if (!spots.length) list.appendChild(h('p', { class: 'muted small' }, 'No positions registered yet.'));
+
+  // callout over the map: the names behind a marker, each with a Go button
+  const callout = h('div', { class: 'map-callout glass strong', role: 'dialog', 'aria-label': 'Spots at this marker' });
+  map.appendChild(callout);
+  let openCluster = -1;
+  const hideCallout = () => {
+    callout.classList.remove('show');
+    svg.querySelector('.spot.sel')?.classList.remove('sel');
+    openCluster = -1;
+  };
+  const showCallout = (ci: number) => {
+    const c = clusters[ci];
+    hideCallout();
+    openCluster = ci;
+    svg.querySelector(`[data-cluster="${ci}"]`)?.classList.add('sel');
+    callout.innerHTML = '';
+    for (const i of c.idx) {
+      const b = h('button', { class: 'co-row', type: 'button' }, h('span', { class: 'n' }, String(i + 1)), h('span', { class: 'co-t' }, h('b', null, spots[i].label), h('small', null, dist(i) < 3 ? 'you are here' : fmtDistance(dist(i)))), h('span', { class: 'go', html: `Go${icon('play')}` }));
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        go(i);
+      });
+      callout.appendChild(b);
+    }
+    // marker position in the wrapper (the SVG letterboxes its view box)
+    const wr = map.getBoundingClientRect();
+    const m = svg.getScreenCTM();
+    let px = ((c.x - X0) / (X1 - X0)) * wr.width,
+      pz = ((c.z - Z0) / (Z1 - Z0)) * wr.height;
+    if (m) {
+      const p = new DOMPoint(c.x, c.z).matrixTransform(m);
+      px = p.x - wr.left;
+      pz = p.y - wr.top;
+    }
+    const half = Math.min(120, wr.width / 2 - 4);
+    callout.style.left = `${Math.min(wr.width - half, Math.max(half, px)).toFixed(0)}px`;
+    callout.style.top = `${pz.toFixed(0)}px`;
+    callout.classList.toggle('below', pz < wr.height * 0.45);
+    callout.classList.add('show');
+  };
   svg.querySelectorAll<SVGGElement>('.spot').forEach((g) => {
-    const i = Number(g.dataset.spot);
-    g.addEventListener('click', () => go(i));
-    g.addEventListener('pointerenter', () => rows[i]?.classList.add('hl'));
-    g.addEventListener('pointerleave', () => rows[i]?.classList.remove('hl'));
+    const ci = Number(g.dataset.cluster);
+    const idx = clusters[ci].idx;
+    g.addEventListener('click', (e) => {
+      e.stopPropagation();
+      // mouse on a single spot: teleport at once; touch or overlapping spots: name first
+      if (idx.length === 1 && !big) go(idx[0]);
+      else if (openCluster === ci) hideCallout();
+      else showCallout(ci);
+    });
+    g.addEventListener('pointerenter', () => idx.forEach((i) => rows[i]?.classList.add('hl')));
+    g.addEventListener('pointerleave', () => idx.forEach((i) => rows[i]?.classList.remove('hl')));
   });
+  svg.addEventListener('click', hideCallout);
   body.append(
     h('div', { class: 'pos-wrap' }, map, h('div', { class: 'pos-list' }, list)),
-    h('p', { class: 'note', html: `${icon('info')}<span>Teleporting switches to first-person view. Tap a number on the map or pick a spot from the list.</span>` }),
+    h('p', { class: 'note pos-note', html: `${icon('info')}<span>Teleporting switches to first-person view. ${big ? 'Tap a marker to see its name, then Go' : 'Click a number on the map'} — or pick a spot from the list.</span>` }),
   );
-  el.classList.add('xwide');
+  el.classList.add('xwide', 'positions');
   ui.layers.open('positions', el, { kind: 'panel', trigger: trigger ?? ui.hud.btn.positions });
 }
 
@@ -147,8 +203,46 @@ export function openQuality(ui: UI, trigger?: HTMLElement | null): void {
     const meta = `${Math.round(q.crowdCount / 1000)}k crowd`;
     list.appendChild(rowBtn('gauge', lvl[0].toUpperCase() + lvl.slice(1), Q_DESC[lvl], meta, () => pick(lvl), !auto && app.quality.level === lvl));
   }
-  body.append(list, h('p', { class: 'note', html: `${icon('info')}<span>GPU: ${escapeHtml(app.device.gpu)}. Auto lowers the internal resolution first, then the preset, based on measured frame times.</span>` }));
+  body.append(
+    list,
+    h('p', { class: 'note', html: `${icon('info')}<span>GPU: ${escapeHtml(app.device.gpu)}. Auto lowers the internal resolution first, then the preset, based on measured frame times.</span>` }),
+    h('div', { class: 'list-h' }, 'Safety'),
+    flashingToggle(ui),
+    h('div', { class: 'list-h' }, 'Controls'),
+    controlsSection(ui),
+  );
   ui.layers.open('quality', el, { kind: 'panel', trigger: trigger ?? ui.hud.btn.quality });
+}
+
+/** look sensitivity, invert Y, field of view, touch look speed (saved on this device) */
+function controlsSection(ui: UI): HTMLElement {
+  const wrap = h('div', { class: 'controls' });
+  const slider = (label: string, min: number, max: number, step: number, value: number, fmt: (v: number) => string, on: (v: number) => void) => {
+    const input = h('input', { type: 'range', min: String(min), max: String(max), step: String(step), value: String(value), 'aria-label': label }) as HTMLInputElement;
+    const val = h('span', { class: 'meta' }, fmt(value));
+    input.addEventListener('input', () => {
+      const v = parseFloat(input.value);
+      val.textContent = fmt(v);
+      ui.hud.paintRange(input);
+      on(v);
+    });
+    ui.hud.paintRange(input);
+    wrap.appendChild(h('div', { class: 'ctl-row' }, h('span', { class: 'ctl-l' }, label), input, val));
+  };
+  const pct = (v: number) => `${Math.round(v * 100)} %`;
+  if (!ui.touch || matchMedia('(any-pointer: fine)').matches) slider('Mouse look', 0.3, 2.5, 0.05, prefs.lookSensitivity, pct, (v) => savePref('lookSensitivity', v));
+  if (ui.touch) slider('Touch look', 0.4, 2.5, 0.05, prefs.touchLook, pct, (v) => savePref('touchLook', v));
+  const rig = cameraRig(ui.app);
+  const fov0 = prefs.fov >= 50 ? prefs.fov : (rig?.fovSetting ?? 72);
+  slider('Field of view', 60, 100, 1, fov0, (v) => `${Math.round(v)}°`, (v) => {
+    savePref('fov', v);
+    rig?.setBaseFov?.(v);
+  });
+  const inv = h('input', { type: 'checkbox', role: 'switch', 'aria-label': 'Invert vertical look' }) as HTMLInputElement;
+  inv.checked = prefs.invertY;
+  inv.addEventListener('change', () => savePref('invertY', inv.checked));
+  wrap.appendChild(h('label', { class: 'ctl-row toggle' }, h('span', { class: 'ctl-l' }, 'Invert vertical look'), h('span', { class: 'switch' }, inv, h('i'))));
+  return wrap;
 }
 
 // ------------------------------------------------------------------------------------------
@@ -160,7 +254,7 @@ export function openCameraSheet(ui: UI, trigger?: HTMLElement | null): void {
   const list = h('div', { class: 'list' });
   for (const m of CAMERA_MODES) {
     list.appendChild(
-      rowBtn(m.icon, m.label, m.hint, m.key, () => {
+      rowBtn(m.icon, m.label, ui.touch ? m.hint.replace(/ \(Space \/ C for up and down\)/, '') : m.hint, ui.touch ? '' : m.key, () => {
         ui.layers.close();
         ui.setCamera(m.id);
       }, m.id === mode),
@@ -186,7 +280,8 @@ export function openAudioMenu(ui: UI, trigger?: HTMLElement | null): void {
   };
   list.append(
     rowBtn('upload', 'Load the Endshow audio file', 'MP3, M4A, WAV… or drop it anywhere', kind === 'file' ? 'active' : '', act('file'), kind === 'file'),
-    rowBtn('broadcast', 'Official video (YouTube)', 'Synced picture-in-picture · accuracy reference', kind === 'youtube' ? 'active' : '', act('youtube'), kind === 'youtube'),
+    // the published artifact cannot embed YouTube (sandboxed page)
+    IS_ARTIFACT ? '' : rowBtn('broadcast', 'Official video (YouTube)', 'Synced picture-in-picture · accuracy reference', kind === 'youtube' ? 'active' : '', act('youtube'), kind === 'youtube'),
     rowBtn('synth', 'Rehearsal track', 'Synthesized, follows the show tempo', kind === 'synth' ? 'active' : '', act('synth'), kind === 'synth'),
     rowBtn('mute', 'Silent', 'Visual show only', kind === 'silent' ? 'active' : '', act('silent'), kind === 'silent'),
   );

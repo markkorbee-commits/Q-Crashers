@@ -31,39 +31,68 @@ export class PhotoPanel {
   private tmpV = new THREE.Vector3();
 
   constructor(private ui: UI, parent: HTMLElement) {
-    const ctl = (label: string, ico: string, min: number, max: number, step: number, value: number, on: (v: number) => void): Ctl => {
+    const touch = ui.touch;
+    // touch: a slim strip at the top with one slider at a time (chips pick it), a big shutter
+    // on the right edge, collapsible; desktop: the full side panel
+    const chips = h('div', { class: 'ph-chips', role: 'tablist', 'aria-label': 'Photo setting' });
+    const ctls: HTMLElement[] = [];
+    const ctl = (label: string, short: string, ico: string, min: number, max: number, step: number, value: number, on: (v: number) => void): Ctl => {
       const input = h('input', { type: 'range', min: String(min), max: String(max), step: String(step), value: String(value), 'aria-label': label });
       const val = h('span', { class: 'v' });
       input.addEventListener('input', () => {
         on(parseFloat(input.value));
         ui.hud.paintRange(input);
       });
-      this.el.appendChild(h('div', { class: 'ctl' }, h('label', null, h('span', { html: `${icon(ico)}${label}` }), val), input));
+      const row = h('div', { class: `ctl${ctls.length === 0 ? ' active' : ''}` }, h('label', null, h('span', { html: `${icon(ico)}${label}` }), val), input);
+      const idx = ctls.length;
+      ctls.push(row);
+      const chip = h('button', { class: `chip${idx === 0 ? ' on' : ''}`, type: 'button', role: 'tab', html: `${icon(ico)}<span>${short}</span>` });
+      chip.addEventListener('click', () => {
+        ctls.forEach((c, i) => c.classList.toggle('active', i === idx));
+        chips.querySelectorAll('.chip').forEach((c, i) => c.classList.toggle('on', i === idx));
+      });
+      chips.appendChild(chip);
+      this.el.appendChild(row);
       return { input, value: val };
     };
-    const exit = h('button', { class: 'btn small ghost', type: 'button', html: `${icon('close')}<span>Exit</span>` });
+    const exit = h('button', { class: 'btn small ghost ph-exit', type: 'button', html: `${icon('close')}<span>Exit</span>` });
     exit.addEventListener('click', () => ui.togglePhoto(false));
-    const capture = h('button', { class: 'btn small primary', type: 'button', html: `${icon('camera')}<span>Capture</span>` });
+    const capture = h('button', { class: 'btn small primary ph-capture', type: 'button', html: `${icon('camera')}<span>Capture</span>` });
     capture.addEventListener('click', () => void this.capture());
     const af = h('button', { class: 'btn small', type: 'button', html: `${icon('focus')}<span>Autofocus</span>` });
     af.addEventListener('click', () => this.autofocus());
+    const fold = h('button', { class: 'icon-btn ph-fold', type: 'button', 'aria-label': 'Fold the photo controls', html: icon('minus') });
+    fold.addEventListener('click', () => {
+      const folded = this.el.classList.toggle('folded');
+      fold.innerHTML = icon(folded ? 'plus' : 'minus');
+      fold.setAttribute('aria-label', folded ? 'Show the photo controls' : 'Fold the photo controls');
+    });
+    const help = touch
+      ? 'Left thumb flies, <b>UP</b> / <b>DOWN</b> climb, swipe on the right to aim. Pick a setting below.'
+      : 'Fly with <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>, <kbd>Space</kbd>/<kbd>C</kbd> up/down. Click the scene to look, <kbd>Esc</kbd> to adjust. <kbd>O</kbd> exits.';
     this.el = h(
       'aside',
-      { class: 'photo-panel glass strong rule-top', 'aria-label': 'Photo mode' },
-      h('div', { class: 'kicker' }, 'Photo mode'),
-      h('p', { class: 'small muted', style: 'margin:6px 0 2px', html: 'Fly with <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>, <kbd>Space</kbd>/<kbd>C</kbd> up/down. Click the scene to look, <kbd>Esc</kbd> to adjust. <kbd>O</kbd> exits.' }),
+      { class: `photo-panel glass strong rule-top${touch ? ' touch' : ''}`, 'aria-label': 'Photo mode' },
+      h('div', { class: 'ph-head' }, h('div', { class: 'kicker' }, 'Photo mode'), touch ? exit : null, touch ? fold : null),
+      h('p', { class: 'small muted ph-help', style: 'margin:6px 0 2px', html: help }),
+      touch ? chips : null,
     );
-    this.fov = ctl('Field of view', 'fov', 12, 110, 1, 60, (v) => this.setFov(v));
-    this.focus = ctl('Focus distance', 'focus', 0, 1, 0.001, 0.5, (v) => this.setFocus(this.focusFromSlider(v)));
-    this.aperture = ctl('Aperture', 'aperture', 0, 1, 0.01, 0, (v) => this.setAperture(v));
-    this.exposure = ctl('Exposure', 'sun', -2, 2, 0.05, 0, (v) => this.setExposure(v));
-    this.roll = ctl('Roll', 'roll', -45, 45, 0.5, 0, (v) => this.setRoll(v));
-    this.el.appendChild(h('div', { class: 'actions' }, af, capture));
-    this.el.appendChild(h('div', { class: 'actions', style: 'margin-top:8px' }, exit));
+    this.fov = ctl('Field of view', 'FOV', 'fov', 12, 110, 1, 60, (v) => this.setFov(v));
+    this.focus = ctl('Focus distance', 'Focus', 'focus', 0, 1, 0.001, 0.5, (v) => this.setFocus(this.focusFromSlider(v)));
+    this.aperture = ctl('Aperture', 'Blur', 'aperture', 0, 1, 0.01, 0, (v) => this.setAperture(v));
+    this.exposure = ctl('Exposure', 'Light', 'sun', -2, 2, 0.05, 0, (v) => this.setExposure(v));
+    this.roll = ctl('Roll', 'Roll', 'roll', -45, 45, 0.5, 0, (v) => this.setRoll(v));
+    this.el.appendChild(h('div', { class: 'actions ph-actions' }, af, capture));
+    if (!touch) this.el.appendChild(h('div', { class: 'actions', style: 'margin-top:8px' }, exit));
+    // big shutter for thumbs (touch layout only)
+    this.shutter = h('button', { class: 'shutter', type: 'button', 'aria-label': 'Take the photo', html: icon('camera') });
+    this.shutter.addEventListener('click', () => void this.capture());
     this.frame = h('div', { class: 'photo-frame', 'aria-hidden': 'true' }, h('i'), h('i'), h('i'), h('i'));
     this.flash = h('div', { class: 'flash' });
-    parent.append(this.frame, this.el, this.flash);
+    parent.append(this.frame, this.el, this.shutter, this.flash);
   }
+
+  private shutter: HTMLButtonElement;
 
   private focusFromSlider(v: number) {
     return 0.5 * Math.pow(1000, v); // 0.5 m .. 500 m

@@ -184,6 +184,10 @@ a {
   backdrop-filter: none;
   background: rgba(12, 12, 16, 0.9);
 }
+/* no blur on the weakest preset: sheets and cards must be opaque to stay readable */
+#ui.lite .glass.strong {
+  background: rgba(10, 10, 13, 0.975);
+}
 #ui.lite .scrim {
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
@@ -1413,12 +1417,12 @@ input[type='range']::-moz-range-thumb {
   bottom: calc(40px + var(--sa-b));
 }
 
-/* click to resume */
+/* click to resume: bottom centre above the show bar (never over the stage), fades on its own */
 .resume {
   position: absolute;
   left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
+  bottom: calc(150px + var(--sa-b));
+  transform: translateX(-50%);
   display: none;
   align-items: center;
   gap: 10px;
@@ -1431,6 +1435,13 @@ input[type='range']::-moz-range-thumb {
 .resume.show {
   display: inline-flex;
   animation: fade-in 0.5s var(--ease);
+}
+.showbar.away ~ .resume {
+  bottom: calc(40px + var(--sa-b));
+}
+/* the interaction prompt owns that spot */
+.prompt.show ~ .resume {
+  display: none;
 }
 .resume .ico {
   width: 18px;
@@ -1654,12 +1665,94 @@ input[type='range']::-moz-range-thumb {
 .minimap .spot {
   cursor: pointer;
 }
-.minimap .spot circle {
-  transition: r 0.15s;
-}
-.minimap .spot:hover circle,
-.minimap .spot.hl circle {
+.minimap .spot:hover .dot,
+.minimap .spot.hl .dot,
+.minimap .spot.sel .dot {
   fill: var(--red-hot);
+}
+.minimap .spot.sel .dot {
+  stroke: #ffd9c9;
+  stroke-width: 2;
+}
+.map-wrap {
+  position: relative;
+  min-width: 0;
+}
+.map-wrap > svg {
+  display: block;
+}
+/* name callout over the map (touch: tap a marker, then Go) */
+.map-callout {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 3;
+  display: none;
+  flex-direction: column;
+  gap: 4px;
+  width: min(240px, calc(100% - 8px));
+  padding: 6px;
+  border-radius: 12px;
+  transform: translate(-50%, calc(-100% - 16px));
+  animation: fade-in 0.2s var(--ease);
+}
+.map-callout.below {
+  transform: translate(-50%, 16px);
+}
+.map-callout.show {
+  display: flex;
+}
+.co-row {
+  appearance: none;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.04);
+  text-align: left;
+  cursor: pointer;
+}
+.co-row:hover,
+.co-row:active {
+  border-color: rgba(225, 6, 0, 0.6);
+  background: rgba(225, 6, 0, 0.14);
+}
+.co-row .n {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font: 600 10.5px/1 var(--font-ui);
+  background: rgba(225, 6, 0, 0.25);
+  border: 1px solid rgba(225, 6, 0, 0.6);
+}
+.co-row b {
+  display: block;
+  font-size: 12.5px;
+  line-height: 1.2;
+}
+.co-row small {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+}
+.co-row .go {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: 600 11px/1 var(--font-ui);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--red-hot);
+}
+.co-row .go .ico {
+  width: 13px;
+  height: 13px;
 }
 
 /* perception */
@@ -2374,9 +2467,8 @@ ul.fx li::before {
     height: 24px;
   }
   .status {
-    top: calc(12px + var(--sa-t));
-    left: calc(70px + var(--sa-l));
-    width: 210px;
+    top: calc(58px + var(--sa-t));
+    width: 220px;
     padding: 8px 12px;
   }
   .status .big {
@@ -2403,4 +2495,777 @@ ul.fx li::before {
   padding: 32px;
   max-width: 640px;
   margin: 10vh auto;
+}
+
+/* =====================================================================================
+   ROUND-1 UX FIXES: layers hide the HUD, touch layout, safety, perception, photo (touch)
+   ===================================================================================== */
+
+/* ---------- open layers: the HUD steps back (no ghost text through cards and sheets) ---------- */
+#ui.modal-open .hud-el,
+#ui.modal-open .resume,
+#ui.modal-open .pip .bar {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+@media (max-width: 640px), (max-height: 500px) and (pointer: coarse) {
+  /* bottom sheets: only the toolbar (their trigger) stays */
+  #ui.panel-open .hud-el:not(.toolbar),
+  #ui.panel-open .resume {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+}
+
+/* ---------- show bar extras ---------- */
+.time .clock {
+  margin-left: 10px;
+  padding-left: 10px;
+  border-left: 1px solid var(--line-2);
+  color: var(--muted);
+}
+.time .clock::after {
+  content: ' CEST';
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+/* ---------- touch layout: one slim show bar, thumb controls above it ---------- */
+#ui.touch .showbar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  grid-template-rows: auto auto;
+  column-gap: 8px;
+  row-gap: 0;
+  align-items: center;
+  padding: 6px 6px 6px 8px;
+  bottom: calc(6px + var(--sa-b));
+  width: calc(100% - 12px - var(--sa-l) - var(--sa-r));
+  max-width: 980px;
+}
+#ui.touch .showbar .sb-top,
+#ui.touch .showbar .sb-bottom {
+  display: contents;
+}
+#ui.touch .showbar .playbtn {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  width: 42px;
+  height: 42px;
+  margin: 0;
+}
+#ui.touch .showbar .now {
+  grid-column: 2;
+  grid-row: 1;
+}
+#ui.touch .showbar .now .lbl,
+#ui.touch .showbar .time .clock {
+  display: none;
+}
+#ui.touch .showbar .time {
+  grid-column: 3;
+  grid-row: 1;
+  font-size: 11px;
+}
+#ui.touch .showbar .tl {
+  grid-column: 2 / span 2;
+  grid-row: 2;
+  height: 24px;
+  margin: 0;
+}
+#ui.touch .showbar .moments-btn {
+  grid-column: 4;
+  grid-row: 1 / span 2;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+}
+#ui.touch .showbar .moments-btn .t {
+  display: none;
+}
+#ui.touch .showbar .show-narrow {
+  grid-column: 5;
+  grid-row: 1 / span 2;
+  width: 42px;
+  height: 42px;
+}
+#ui.touch .showbar .sb-bottom > .icon-btn:not(.playbtn):not(.moments-btn):not(.show-narrow),
+#ui.touch .showbar .grow,
+#ui.touch .showbar .vol,
+#ui.touch .showbar .seg {
+  display: none !important;
+}
+/* the interaction prompt sits above the right-thumb buttons (one tappable prompt, no duplicate) */
+#ui.touch .prompt,
+#ui.touch .showbar.away ~ .prompt {
+  left: auto;
+  right: calc(14px + var(--sa-r));
+  bottom: calc(256px + var(--sa-b));
+  transform: none;
+  padding: 10px 16px 10px 10px;
+  font-size: 14px;
+  max-width: calc(100% - 28px);
+}
+#ui.touch .prompt kbd {
+  min-width: 32px;
+  height: 32px;
+}
+#ui.touch .resume {
+  display: none !important;
+}
+#ui.touch .toasts {
+  top: calc(62px + var(--sa-t));
+}
+
+/* coach marks: one-time labels under the toolbar icons (touch has no hover tooltips) */
+.src-chip {
+  position: relative;
+}
+#ui.coach .toolbar [data-label]::after,
+#ui.coach .showbar [data-label]::after {
+  content: attr(data-label);
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 7px);
+  transform: translateX(-50%);
+  font: 600 9.5px/1 var(--font-ui);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #fff;
+  background: rgba(150, 8, 0, 0.94);
+  border: 1px solid rgba(255, 120, 90, 0.6);
+  padding: 4px 6px;
+  border-radius: 6px;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: fade-in 0.4s var(--ease);
+  z-index: 3;
+}
+#ui.coach .showbar [data-label]::after {
+  top: auto;
+  bottom: calc(100% + 10px);
+}
+#ui.coach .toasts {
+  top: calc(118px + var(--sa-t));
+}
+/* icons are closer together than the labels are wide: stagger every second label */
+#ui.coach .toolbar button:nth-of-type(odd)[data-label]::after {
+  top: calc(100% + 29px);
+}
+#ui.coach .showbar .moments-btn[data-label]::after {
+  bottom: calc(100% + 32px);
+}
+
+/* ---------- onboarding: position chips, safety line ---------- */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.chip {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 14px 0 11px;
+  border-radius: 999px;
+  border: 1px solid var(--line-2);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--paper-2);
+  font: 600 12px/1 var(--font-ui);
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.chip .ico {
+  width: 17px;
+  height: 17px;
+  color: var(--red-hot);
+}
+.chip:hover {
+  border-color: rgba(243, 237, 228, 0.3);
+  color: var(--paper);
+}
+.chip.on {
+  color: #fff;
+  border-color: rgba(255, 90, 60, 0.8);
+  background: rgba(225, 6, 0, 0.3);
+}
+.chip.on .ico {
+  color: #fff;
+}
+.onboarding .actions {
+  margin-top: 18px;
+}
+.onboarding .legend {
+  margin-top: 16px;
+}
+.safety {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 176, 32, 0.32);
+  background: rgba(255, 176, 32, 0.07);
+  cursor: pointer;
+}
+.safety .si .ico {
+  width: 20px;
+  height: 20px;
+  color: var(--warn);
+}
+.safety .st {
+  flex: 1;
+  min-width: 0;
+}
+.safety b {
+  display: block;
+  font-size: 12.5px;
+  color: #ffe9c4;
+  font-weight: 600;
+}
+.safety small {
+  display: block;
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.safety.compact {
+  margin-top: 14px;
+  padding: 8px 12px;
+}
+/* toggle switch */
+.switch {
+  position: relative;
+  flex: none;
+  width: 42px;
+  height: 24px;
+}
+.switch input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+  z-index: 1;
+}
+.switch i {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: rgba(243, 237, 228, 0.16);
+  border: 1px solid var(--line-2);
+  transition: background 0.18s;
+}
+.switch i::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--paper);
+  transition: transform 0.18s var(--ease);
+}
+.switch input:checked + i {
+  background: var(--red);
+  border-color: var(--red-hot);
+}
+.switch input:checked + i::after {
+  transform: translateX(18px);
+}
+.switch input:focus-visible + i {
+  outline: 2px solid var(--red-hot);
+  outline-offset: 2px;
+}
+.landing .flashing {
+  margin-top: 8px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: #ffcf8a;
+}
+
+/* controls (quality panel) */
+.controls {
+  display: grid;
+  gap: 6px;
+}
+.ctl-row {
+  display: grid;
+  grid-template-columns: 116px minmax(0, 1fr) 52px;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+}
+.ctl-row .ctl-l {
+  font-size: 12.5px;
+  color: var(--paper-2);
+}
+.ctl-row .meta {
+  font: 500 11.5px/1 var(--font-mono);
+  color: var(--muted);
+  text-align: right;
+}
+.ctl-row.toggle {
+  grid-template-columns: 1fr auto;
+  cursor: pointer;
+}
+
+/* ---------- audio chooser: search row, compact landscape phones ---------- */
+.search-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+}
+.search-row b {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+}
+.search-row small {
+  display: block;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.card.searching {
+  width: min(420px, 100%);
+}
+.card.searching .search-row {
+  margin: 0;
+  border: 0;
+  background: transparent;
+  padding: 2px 0;
+}
+.chooser.detecting .options {
+  opacity: 0.45;
+}
+.option[disabled] {
+  cursor: progress;
+}
+@media (max-height: 480px) {
+  .chooser .kicker,
+  .chooser .intro,
+  .chooser .note {
+    display: none;
+  }
+  .chooser h3 {
+    font-size: 21px;
+    margin: 0 36px 0 0;
+  }
+  .chooser .options {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .chooser .option {
+    grid-template-columns: 36px 1fr auto;
+    gap: 10px;
+    padding: 9px 10px;
+    min-height: 64px;
+  }
+  .chooser .option .oi {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+  }
+  .chooser .option .ot > span {
+    display: none;
+  }
+  .chooser .option b {
+    font-size: 13.5px;
+  }
+  .chooser .search-row {
+    margin-top: 10px;
+    padding: 7px 10px;
+  }
+  .card.chooser {
+    width: min(640px, 100%);
+  }
+  .onboarding .lead {
+    font-size: 17px;
+    margin: 6px 0 10px;
+  }
+  .onboarding .lead br {
+    display: none;
+  }
+}
+
+/* ---------- positions: phones ---------- */
+@media (max-height: 500px) and (pointer: coarse) {
+  /* landscape phone: map and list side by side, both use the full sheet height */
+  .panel.positions {
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100% - 64px - var(--sa-t) - var(--sa-b));
+    top: calc(58px + var(--sa-t));
+    padding: 12px 14px 12px;
+  }
+  .panel.positions header {
+    margin-bottom: 8px;
+  }
+  .panel.positions header h4 {
+    font-size: 17px;
+  }
+  .panel.positions > div:last-child {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .panel.positions .pos-wrap {
+    flex: 1;
+    min-height: 0;
+    grid-template-columns: auto minmax(0, 1fr);
+    height: 100%;
+  }
+  .panel.positions .map-wrap {
+    height: 100%;
+  }
+  .panel.positions .minimap {
+    height: 100%;
+    width: auto;
+    max-height: none;
+    aspect-ratio: 350 / 380;
+  }
+  .panel.positions .pos-list {
+    max-height: 100%;
+    height: 100%;
+  }
+  .panel.positions .pos-note {
+    display: none;
+  }
+}
+@media (max-width: 640px) {
+  .panel.positions .minimap {
+    max-height: 42vh;
+    width: 100%;
+  }
+}
+
+/* ---------- perception status widget ---------- */
+.status .row .tier {
+  max-width: 60%;
+}
+.meter.labelled {
+  margin-bottom: 14px;
+}
+.meter .tick.limit {
+  background: var(--warn);
+  width: 2px;
+}
+.meter .tick span {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  font: 500 8.5px/1 var(--font-ui);
+  color: var(--dim);
+}
+.meter .tick.limit span {
+  color: var(--warn);
+}
+.meter .end {
+  position: absolute;
+  right: 0;
+  top: 9px;
+  font: 500 8.5px/1 var(--font-ui);
+  color: var(--dim);
+}
+.warnline .wt {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.warnline small {
+  font-size: 10.5px;
+  color: var(--muted);
+}
+.warnline.danger {
+  color: #fff;
+}
+.warnline.danger small {
+  color: #ffd1c4;
+  font-weight: 600;
+}
+.status .warnline {
+  min-height: 0;
+}
+.st-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.st-actions .btn {
+  min-height: 32px;
+  padding: 0 11px;
+  font-size: 10.5px;
+  gap: 6px;
+}
+.st-actions .btn .ico {
+  width: 15px;
+  height: 15px;
+}
+.st-actions .btn.on {
+  border-color: rgba(125, 220, 138, 0.6);
+  background: rgba(125, 220, 138, 0.14);
+}
+.btn.danger {
+  background: linear-gradient(180deg, #ff2210, #c80500);
+  border-color: rgba(255, 120, 90, 0.7);
+  color: #fff;
+}
+.status.danger {
+  border-color: rgba(255, 42, 18, 0.9);
+  animation: danger-pulse 1.4s ease-in-out infinite;
+}
+@keyframes danger-pulse {
+  50% {
+    box-shadow: 0 0 0 2px rgba(255, 42, 18, 0.55), 0 0 30px rgba(255, 30, 0, 0.55), 0 18px 50px rgba(0, 0, 0, 0.45);
+  }
+}
+/* toasts must not cover the status widget */
+@media (min-width: 700px) {
+  #ui.has-status .toasts {
+    width: min(560px, calc(100% - 2 * (272px + var(--sa-l))));
+  }
+}
+@media (max-width: 699px) {
+  #ui.has-status .toasts {
+    top: calc(210px + var(--sa-t));
+  }
+}
+/* landscape phones: a compact status that stays clear of the joystick */
+@media (max-height: 500px) and (pointer: coarse) {
+  #ui.touch .status {
+    top: calc(58px + var(--sa-t));
+    width: min(310px, 38vw);
+    padding: 8px 10px;
+  }
+  #ui.touch .status .st-actions {
+    flex-wrap: nowrap;
+    margin-top: 6px;
+  }
+  #ui.touch .status .st-actions .btn {
+    min-height: 30px;
+    padding: 0 9px;
+  }
+  #ui.touch .status .kicker {
+    font-size: 9.5px;
+    margin-bottom: 4px !important;
+  }
+  #ui.touch .status .meter {
+    display: none;
+  }
+  #ui.touch .status .big {
+    font-size: 21px;
+  }
+  #ui.touch .status .vitals {
+    margin-top: 4px;
+  }
+  #ui.touch .status .vital {
+    padding: 4px 6px;
+    gap: 3px;
+  }
+  #ui.touch .status .warnline {
+    font-size: 10.5px;
+    margin-top: 6px;
+  }
+  #ui.touch .status .warnline small {
+    display: none;
+  }
+}
+/* perception panel: never under the show bar; its detail scrolls inside */
+.panel.perception {
+  max-height: calc(100% - 66px - 150px - var(--sa-t) - var(--sa-b));
+}
+@media (max-width: 640px), (max-height: 500px) and (pointer: coarse) {
+  .panel.perception {
+    max-height: min(84vh, calc(100% - 64px - var(--sa-t)));
+  }
+}
+.seg-pick {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line);
+}
+.seg-pick button {
+  appearance: none;
+  flex: 1;
+  min-height: 32px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font: 600 11.5px/1 var(--font-mono);
+  cursor: pointer;
+}
+.seg-pick button:hover {
+  color: var(--paper);
+  background: rgba(255, 255, 255, 0.06);
+}
+.seg-pick button.on {
+  color: #fff;
+  background: rgba(225, 6, 0, 0.35);
+}
+ul.fx.links a {
+  color: var(--paper);
+  text-decoration-color: rgba(255, 42, 18, 0.7);
+  text-underline-offset: 3px;
+}
+.card.outcome {
+  border-color: rgba(255, 42, 18, 0.7);
+}
+
+/* ---------- bar menu: refusal of service ---------- */
+.disclaimer-box.refusal {
+  align-items: center;
+  margin: 10px 0 4px;
+}
+.drink.refused {
+  opacity: 0.45;
+}
+.drink.refused small.alc::after {
+  content: ' · not served';
+  color: var(--warn);
+}
+
+/* ---------- photo mode on touch: slim strip at the top, one slider, big shutter ---------- */
+.photo-panel .ph-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.photo-panel .ph-head .kicker {
+  flex: 1;
+}
+.ph-chips {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  margin-top: 8px;
+  scrollbar-width: none;
+}
+.ph-chips .chip {
+  min-height: 36px;
+  padding: 0 11px 0 9px;
+  font-size: 11px;
+  flex: none;
+}
+.photo-panel.touch {
+  top: calc(8px + var(--sa-t));
+  left: calc(8px + var(--sa-l));
+  right: calc(88px + var(--sa-r));
+  width: auto;
+  max-width: 560px;
+  padding: 10px 12px;
+  max-height: none;
+  overflow: visible;
+}
+.photo-panel.touch .ph-head .btn {
+  min-height: 34px;
+}
+.photo-panel.touch .ph-help {
+  font-size: 11px;
+}
+.photo-panel.touch .ctl {
+  display: none;
+  margin-top: 6px;
+}
+.photo-panel.touch .ctl.active {
+  display: block;
+}
+.photo-panel.touch .ph-capture {
+  display: none;
+}
+.photo-panel.touch .ph-actions {
+  margin-top: 6px;
+}
+.photo-panel.touch.folded .ph-help,
+.photo-panel.touch.folded .ph-chips,
+.photo-panel.touch.folded .ctl,
+.photo-panel.touch.folded .ph-actions {
+  display: none !important;
+}
+.photo-panel.touch.folded {
+  right: auto;
+}
+.shutter {
+  position: absolute;
+  right: calc(16px + var(--sa-r));
+  top: 50%;
+  transform: translateY(-50%);
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.92);
+  background: radial-gradient(circle, #ff2a12 0 52%, rgba(20, 4, 4, 0.55) 54%);
+  color: #fff;
+  display: none;
+  place-items: center;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+  z-index: 12;
+}
+.shutter .ico {
+  width: 24px;
+  height: 24px;
+}
+.shutter:active {
+  transform: translateY(-50%) scale(0.93);
+}
+#ui.touch.photo .shutter {
+  display: grid;
+}
+#ui.cinema .shutter,
+#ui.modal-open .shutter {
+  display: none !important;
+}
+@media (max-height: 500px) {
+  .photo-panel:not(.touch) {
+    max-height: calc(100% - 16px);
+  }
+}
+
+/* ---------- timeline: narrow bars get thin ticks, close moments merge ---------- */
+.tl.narrow .moment {
+  width: 2px;
+  height: 8px;
+  margin-left: -1px;
+  bottom: 15px;
+  transform: none;
+  border-radius: 1px;
+  box-shadow: 0 0 4px var(--red-hot);
+}
+.tl .moment.multi {
+  width: 9px;
+  height: 9px;
+  margin-left: -4.5px;
+  bottom: 16px;
+  background: #fff;
+  box-shadow: 0 0 0 2px var(--red), 0 0 8px var(--red-hot);
+}
+.tl.narrow .moment.multi {
+  width: 3px;
+  height: 10px;
+  margin-left: -1.5px;
+  bottom: 14px;
+  transform: none;
 }

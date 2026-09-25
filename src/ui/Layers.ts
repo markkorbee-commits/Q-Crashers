@@ -42,6 +42,23 @@ export class Layers {
     return this.stack.length > 0;
   }
 
+  /** true when a modal card (scrim) is open */
+  get modalOpen(): boolean {
+    return this.stack.some((l) => l.opts.kind === 'modal');
+  }
+
+  /**
+   * Host classes for CSS: `layer-open` (any layer), `modal-open` (a modal card) and `panel-open`
+   * (a popover / bottom sheet). The HUD and the touch controls hide behind open layers.
+   */
+  private syncHost(): void {
+    const c = this.host.classList;
+    const modal = this.modalOpen;
+    c.toggle('layer-open', this.stack.length > 0);
+    c.toggle('modal-open', modal);
+    c.toggle('panel-open', this.stack.some((l) => l.opts.kind === 'panel'));
+  }
+
   get topId(): string | null {
     return this.stack.length ? this.stack[this.stack.length - 1].id : null;
   }
@@ -79,6 +96,7 @@ export class Layers {
       const f = (el.querySelector('[autofocus]') as HTMLElement | null) ?? all.find((x) => !x.classList.contains('close-x')) ?? all[0] ?? null;
       f?.focus({ preventScroll: true });
     });
+    this.syncHost();
     this.onChange?.(true);
   }
 
@@ -92,12 +110,19 @@ export class Layers {
     l.opts.trigger?.setAttribute('aria-expanded', 'false');
     if (hadFocus && l.opts.trigger && document.contains(l.opts.trigger)) l.opts.trigger.focus({ preventScroll: true });
     l.opts.onClose?.();
+    this.syncHost();
     if (!silent || this.stack.length === 0) this.onChange?.(this.stack.length > 0);
   }
 
   closeAll(): void {
     while (this.stack.length) this.close(undefined, true);
+    this.syncHost();
     this.onChange?.(false);
+  }
+
+  /** kind of an open layer (null when not open) */
+  kindOf(id: string): 'modal' | 'panel' | null {
+    return this.stack.find((l) => l.id === id)?.opts.kind ?? null;
   }
 
   /** Escape: close the top layer if it is dismissible; returns true when something closed */
