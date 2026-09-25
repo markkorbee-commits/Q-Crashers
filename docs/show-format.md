@@ -126,3 +126,40 @@ Latest-started active `look` per group wins, cross-faded over `fade`.
 `pillars` accepts `shaft`/`color2` (shaft uplight colour) and `shaftIntensity`. Position names for
 lights targets: `truss`, `floor`, `towers`, `field`, `wings`, `deck`, `roof`, `castle`, `sides`,
 `side_sections`, `corners`, `arms`, `pillars`, `foh`, `speaker_hangs`, `dragon`, `towers_top`.
+
+## Implementation extensions (optional params supported by the systems)
+
+### lasers
+* `fade` (s) crossfade from the look being replaced on those projectors; latest look wins per
+  projector; `sheet` runs on its own layer and combines with beam figures.
+* `aim: [x,y,z]` world point a fan / sweep / cone / burst / chevron centres on.
+* preset `chevron` + `distance` (convergence Z, default 70): the In The Cold gold V (5+5 deck units,
+  centre pair dark).
+* `crossfire` with `origin: field` = the Domitor Draconis piano bounce; `segments` 1–8 (author one
+  cue per piano hit with segments 1, 2, 3, 4 to build the V).
+* `grid` with `height` also makes the deck front part of the low web; `origin: field|all` uses the
+  plinth units.
+* Audience mode: sheets/tunnels/web/chevron sit ≥ 4.5 m above heads in "Tribe" mode (crowd present)
+  and skim 1–3 m over the floor in "As filmed" mode (`?mode=filmed`).
+
+### pyro / fireworks / fog
+* `pyro.flame` / `firewall`: `angle` (deg, tilt away from centre), `intensity`; firewall fills gaps
+  to ≤ 3.2 m. `pyro.dragon_breath`: `pitch`. `jet` / `gerb` / `sparkular`: `angle`, `spread`,
+  `pattern`, `stagger`. `pyro.burst` with dur ≥ 2 s acts as a Bengal flare; `pyro.bengal`: `color`,
+  `size` (default target `wing_tips`, use target `bengal`).
+* `fireworks.shell` / `salvo` / `finale`: `height` = ABSOLUTE break altitude above ground (default 90;
+  finale 62); `size` = burst radius; `rise` = lift time in s (0 = breaks exactly at the cue time),
+  otherwise the lift takes `0.8 + 0.021 × (height − launch y)` s — to land a break on a musical hit
+  at T, put the cue at T minus that. `color` may be a comma list / array (cycled); `color2` = pistil
+  or colour change. A shell with only filter targets fires ONE shell; named anchors fire one per
+  point; `x`/`z` give an absolute position. Extra shell type `glitter`.
+* `salvo`: `count`, `spread`, `pattern` (line|v|arc|random), `stagger`.
+* `comet`: `height` = rise above the launch point (default 40); `count` total vs `per` (per point);
+  one comet per point with `angle` > 0 makes a V; `end`: none|pearl|crackle|shell type; `serpent`;
+  `stagger`; `lean`.
+* `cake`: `shots` (20), `angle`, `height` (rise), `dur` (shots × 0.14 s), `type`, `zipper`.
+* `mine`: `height`, `count`, `spread`, `type` (strobe|crackle|glitter).
+* `finale`: `density`, `palette`, `dur`, `height`, `spread` (210 m), `types`, `comets` (roof fans/s).
+* `fog.level`: `haze` (or `density`), `fade`. `fog.burst`: `size`, `color`. `fog.lowfog`: `density`,
+  `area` (deck|field|all), `spill`, `color`.
+* Flash convention: one shell 0.4–1.2, a flame row up to 2.2, soft cap 2.5 per system.
