@@ -5,10 +5,26 @@ import { makeHazeNoise3D } from './noise3d';
 import { BEAM_FRAG, BEAM_VERT, SPRITE_FRAG, SPRITE_VERT, SURF_FRAG, SURF_VERT } from './shaders';
 
 const BEAM_STRIDE = 16;
-const SURF_STRIDE = 20;
+const SURF_STRIDE = 24;
 const SPRITE_STRIDE = 8;
 /** vertices along a beam ribbon (redistributed around the camera's closest point in the shader) */
 const BEAM_SEGMENTS = 16;
+
+/** surface kinds (instance attribute sC.w) */
+export const SURF_SHEET = 0;
+export const SURF_CONE = 1;
+/** the low-fog layer lit where the sheets skim it ("laser sea") */
+export const SURF_FOG = 2;
+
+/**
+ * Laser segment budget per quality level — research/design-bible.md §7.4 (ultra 640 / high 400 /
+ * medium 200 / mobile 96). The quality preset's laserBudget can only lower it. Big drawing buffers
+ * (4K, high-DPR phones) get a further fill-rate cut; the generators then draw fewer, brighter and
+ * slightly wider beams (per-beam power ∝ 1/√n) so the figures keep their weight.
+ */
+const BIBLE_BEAMS: Record<string, number> = { ultra: 640, high: 400, medium: 200, mobile: 96 };
+/** drawing-buffer pixel count up to which the full budget applies */
+const FULL_BUDGET_PIXELS = 2.1e6;
 
 export interface SurfaceQuality {
   maxSurfaces: number;
@@ -36,7 +52,10 @@ function surfaceQuality(q: QualitySettings): SurfaceQuality {
  */
 export class LaserRenderer {
   readonly group = new THREE.Group();
+  /** allocated beam instances (the quality budget) */
   beamCap = 0;
+  /** beams the generators may use this frame (≤ beamCap, scaled down for very large drawing buffers) */
+  beamBudget = 0;
   surfCap = 0;
   spriteCap = 0;
   beamCount = 0;
@@ -129,7 +148,8 @@ export class LaserRenderer {
   }
 
   setQuality(q: QualitySettings): void {
-    const beams = Math.max(32, q.laserBudget);
+    const beams = Math.max(32, Math.min(q.laserBudget, BIBLE_BEAMS[q.level] ?? q.laserBudget));
+    this.beamBudget = beams;
     this.sq = surfaceQuality(q);
     this.shared.uOct.value = q.volumetrics ? 2 : 1;
     this.shared.uNoiseAmt.value = q.volumetrics ? 0.78 : 0.6;
@@ -137,6 +157,13 @@ export class LaserRenderer {
     this.buildSurfaces(this.sq);
     const sprites = beams + 96;
     if (sprites !== this.spriteCap) this.buildSprites(sprites);
+  }
+
+  /** per-frame budget from the drawing-buffer size (fill rate of the additive ribbons scales with it) */
+  updateBudget(pixels: number): number {
+    const k = pixels > FULL_BUDGET_PIXELS ? Math.max(0.5, Math.sqrt(FULL_BUDGET_PIXELS / pixels)) : 1;
+    this.beamBudget = Math.max(32, Math.floor(this.beamCap * k));
+    return this.beamBudget;
   }
 
   // ---------------------------------------------------------------- geometry
@@ -204,6 +231,7 @@ export class LaserRenderer {
     g.setAttribute('sC', new THREE.InterleavedBufferAttribute(buf, 4, 8));
     g.setAttribute('sD', new THREE.InterleavedBufferAttribute(buf, 4, 12));
     g.setAttribute('sE', new THREE.InterleavedBufferAttribute(buf, 4, 16));
+    g.setAttribute('sF', new THREE.InterleavedBufferAttribute(buf, 4, 20));
     g.instanceCount = 0;
     this.surfBuf = buf;
     this.surfGeo = g;
@@ -280,7 +308,7 @@ export class LaserRenderer {
     dash: number, hit: boolean, width: number,
     px: number, py: number, pz: number,
   ): boolean {
-    if (this.beamCount >= this.beamCap) return false;
+    if (this.beamCount >= this.beamBudget) return false;
     const d = this.beamData;
     let o = this.beamCount * BEAM_STRIDE;
     d[o++] = ox;
@@ -303,12 +331,20 @@ export class LaserRenderer {
     return true;
   }
 
+  /**
+   * One ruled surface: apex, range, forward axis, fan half-angle (sheet / fog) or cone half-angle,
+   * plane normal (sheet) / cone up axis, kind (SURF_*), colour × power, wave amplitude, wave phases,
+   * segment mask + phase, and the extras: `zoneX` = |x| beyond which the surface is blanked (laser
+   * safety zoning over the banks; 0 = none), `squash` = vertical / horizontal aperture of an
+   * elliptical cone (1 = round), `lift` = sheet height above the low-fog top (fog layer only).
+   */
   pushSurface(
     ax: number, ay: number, az: number, range: number,
     fx: number, fy: number, fz: number, angle: number,
     nx: number, ny: number, nz: number, mode: number,
     r: number, g: number, b: number, waveAmp: number,
     ph1: number, ph2: number, seg: number, segPh: number,
+    zoneX = 0, squash = 1, lift = 0,
   ): boolean {
     if (this.surfCount >= this.surfCap) return false;
     const d = this.surfData;
@@ -332,7 +368,11 @@ export class LaserRenderer {
     d[o++] = ph1;
     d[o++] = ph2;
     d[o++] = seg;
-    d[o] = segPh;
+    d[o++] = segPh;
+    d[o++] = zoneX > 0 ? zoneX : 1e5;
+    d[o++] = squash;
+    d[o++] = lift;
+    d[o] = 0;
     this.surfCount++;
     return true;
   }

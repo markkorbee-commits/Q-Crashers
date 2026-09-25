@@ -164,6 +164,11 @@ export interface Fixture {
   cx: number;
   /** 0..1 deterministic per-fixture random */
   seed: number;
+  /**
+   * 0..1 selection rank inside its cluster (golden-ratio sequence over the mirror-symmetric index): a
+   * look using a share d of the heads lights those with sel < d — evenly spread, same on both sides
+   */
+  sel: number;
   /** rest (home) direction used while dark */
   rest: THREE.Vector3;
   /** look-resolution class (see classifyFixtures) */
@@ -336,6 +341,7 @@ export function buildRig(anchors: Anchors, density: number, own?: Map<string, TH
       ck: n > 1 ? (k / (n - 1)) * 2 - 1 : 0,
       cx: 0,
       seed: hash32(i * 7919 + 17) / 4294967296,
+      sel: 0,
       rest: new THREE.Vector3(),
       cls: 0,
     });
@@ -475,6 +481,9 @@ export function buildRig(anchors: Anchors, density: number, own?: Map<string, TH
 
   // fan "diverge" coordinate per cluster: position along the fan axis relative to the cluster centre
   computeDiverge(fixtures);
+  // selection rank: in-cluster order from the centre line outwards (|x|, so mirrored clusters match)
+  // through the golden-ratio sequence -> any share of heads is an even, symmetric subset of every row
+  computeSelection(fixtures);
   // rest directions: fanned up and slightly towards the audience
   for (const f of fixtures) {
     const a = ((f.cx * 28 + f.fanOut * Math.abs(f.side) * 12) * Math.PI) / 180;
@@ -506,6 +515,19 @@ function computeDiverge(fixtures: Fixture[]): void {
     let m = 0;
     for (const f of list) m = Math.max(m, Math.abs(f.pos.clone().sub(c).dot(f.fanAxis)));
     for (const f of list) f.cx = m > 0.05 ? f.pos.clone().sub(c).dot(f.fanAxis) / m : f.ck;
+  }
+}
+
+function computeSelection(fixtures: Fixture[]): void {
+  const byCluster = new Map<number, Fixture[]>();
+  for (const f of fixtures) {
+    let a = byCluster.get(f.cluster);
+    if (!a) byCluster.set(f.cluster, (a = []));
+    a.push(f);
+  }
+  for (const list of byCluster.values()) {
+    list.sort((a, b) => Math.abs(a.pos.x) - Math.abs(b.pos.x) || a.pos.x - b.pos.x || a.pos.y - b.pos.y);
+    list.forEach((f, r) => (f.sel = (r * 0.6180339887) % 1));
   }
 }
 

@@ -12,12 +12,13 @@ import {
   PM_PULSE,
   PRESETS,
   STROBE_TAIL,
+  TAN_NARROW,
   type LightCue,
   type StateBlend,
 } from './cues';
 import { BeamLayer, createNoise3D, FixtureBodies, PoolLayer, SPR_BLINDER, SPR_LENS, SPR_STROBE, SpriteLayer, WashGlow, type SharedUniforms } from './layers';
-import { evalLook, vnoise, type AimOut } from './looks';
-import { buildRig, GROUP_NAMES, isDefaultAnchor, matchTarget, RIG_SOURCES, type Rig } from './rig';
+import { evalLook, lookIsDark, vnoise, type AimOut } from './looks';
+import { buildRig, GROUP_NAMES, isDefaultAnchor, RIG_SOURCES, type Rig } from './rig';
 
 /** HDR scale of a beam's haze column (the shader adds geometry/phase terms) */
 const BEAM_GAIN = 2.8;
@@ -51,7 +52,10 @@ const BLINDER_FLASH = new THREE.Color('#ffd29a');
  *  look:    target (common convention: anchor / position names + left/right/center) narrows a look to
  *           those fixtures — the latest matching look wins per fixture, so e.g. a 'sides' fan can run on
  *           top of a rig-wide sky look; tilt (deg, base elevation / fan lean), pan (deg, 'still'),
- *           spread (deg, fan / circle size)
+ *           spread (deg, fan / circle size); density (0..1 share of the heads, default from the
+ *           intensity: ≤ 0.35 → 1/5 of the heads … ≥ 0.85 → all, see cues.defaultDensity). The look
+ *           intensity goes through a dimmer curve (LOOK_GAMMA 1.5). 'still' without tilt stands the
+ *           structure heads in a raised fan (22°) instead of aiming them into the eye line.
  *  position names: wings, deck, roof, castle, towers_top, dragon, speaker_hangs, sides, side_sections,
  *           corners, arms, towers / delay_towers / pillars (obelisk capitals), foh, truss, floor, field
  *  pillars: shaft | color2 (shaft uplight colour, default amber #c56e46), shaftIntensity (0..1, 0.8)
@@ -130,6 +134,14 @@ export class LightingSystem implements System {
       return c.dur;
     });
     app.show.registerLifetime('strobe', (c) => c.dur + STROBE_TAIL);
+    // systems initialised after us (grounds, terrain…) register the real pillar / FOH anchors: refit the
+    // rig once loading is complete, not in the first rendered frame
+    const off = app.events.on('loading:progress', (e) => {
+      if (e.progress < 1) return;
+      off();
+      if (this.rig && this.anchorsChanged()) this.rebuildRig();
+      if (this.rig && this.idx.revision !== app.show.revision) this.idx.sync(app.show, this.rig);
+    });
 
     if (app.params.has('lightsdev') || app.params.has('lightstest')) {
       const dev = await import('./dev/DevProxy');
@@ -169,7 +181,10 @@ export class LightingSystem implements System {
     this.sTan = new Float32Array(n);
     this.chaseArr = new Array(rig.pillars.length).fill(1);
     this.blends = rig.classes.map(() => ({ from: null, to: null, k: 1 }));
-    this.idx.revision = -1; // look tracks are per fixture class: rebuild
+    // look tracks are per fixture class, hit / strobe masks per fixture / emitter: rebuild now (during
+    // loading) instead of on the first rendered frame
+    if (this.app.show.file) this.idx.sync(this.app.show, rig);
+    else this.idx.revision = -1;
     const radial = this.q.level === 'mobile' ? 8 : this.q.level === 'medium' ? 10 : 12;
     this.beams.build(Math.min(n, this.q.beamBudget), radial);
     this.pools.build(n);
@@ -219,7 +234,7 @@ export class LightingSystem implements System {
     if (this.anchorsChanged()) this.rebuildRig();
     if (!this.terrain) this.terrain = (app.get('terrain') as { heightAt?(x: number, z: number): number } | undefined) ?? {};
     const rig = this.rig!;
-    if (this.idx.revision !== show.revision) this.idx.rebuild(show, rig.classes);
+    if (this.idx.revision !== show.revision) this.idx.sync(show, rig);
     const t = ctx.showTime;
     const beat = ctx.beat;
     const env = app.env;
@@ -265,9 +280,26 @@ export class LightingSystem implements System {
     const sCol = this.sCol;
     const sDim = this.sDim;
     const sTan = this.sTan;
+    const nHits = this.hits.length;
+    const nChases = this.chases.length;
     for (let i = 0; i < n; i++) {
       const f = fx[i];
       const bl = this.blends[f.cls];
+      // both looks dark (the whole blackout / quiet passages): park the head, skip the look maths
+      const toDark = lookIsDark(bl.to);
+      if (toDark && (bl.k >= 1 || lookIsDark(bl.from))) {
+        let lit = false;
+        for (let h = 0; h < nHits && !lit; h++) lit = this.hits[h].mask![i] === 1;
+        for (let h = 0; h < nChases && !lit; h++) lit = this.chases[h].mask![i] === 1;
+        if (!lit) {
+          sDim[i] = 0;
+          sTan[i] = TAN_NARROW;
+          sDir[i * 3] = f.rest.x;
+          sDir[i * 3 + 1] = f.rest.y;
+          sDir[i * 3 + 2] = f.rest.z;
+          continue;
+        }
+      }
       evalLook(bl.to, f, t, beat, A);
       if (bl.to) cA.copy(bl.to.c1).lerp(bl.to.c2, A.mix);
       else cA.setRGB(1, 1, 1);
@@ -315,9 +347,9 @@ export class LightingSystem implements System {
         tan = B.tan + (A.tan - B.tan) * k;
       }
       // hits: snap to full in the hit colour, decaying over dur
-      for (let h = 0; h < this.hits.length; h++) {
+      for (let h = 0; h < nHits; h++) {
         const c = this.hits[h];
-        if (!matchTarget(c.target, f.tags, f.pos.x)) continue;
+        if (c.mask![i] !== 1) continue;
         const u = (t - c.t0) / Math.max(0.05, c.dur);
         if (u < 0 || u >= 1) continue;
         const e = c.intensity * (1 - u) * (1 - u);
@@ -328,9 +360,9 @@ export class LightingSystem implements System {
         if (e > dim) dim = e;
       }
       // chases: a flash running across the rig on the beat grid
-      for (let h = 0; h < this.chases.length; h++) {
+      for (let h = 0; h < nChases; h++) {
         const c = this.chases[h];
-        if (t >= c.t0 + c.dur || !matchTarget(c.target, f.tags, f.pos.x)) continue;
+        if (t >= c.t0 + c.dur || c.mask![i] !== 1) continue;
         const e = chaseEnv(c, f.u, f.cluster, t) * c.intensity;
         dim = dim * 0.3 + e;
         if (c.color) {
@@ -436,7 +468,7 @@ export class LightingSystem implements System {
       if (e.kind === 'strobe') {
         for (let h = 0; h < this.strobes.length; h++) {
           const c = this.strobes[h];
-          if (!matchTarget(c.target, e.tags, e.pos.x)) continue;
+          if (c.mask![j] !== 1) continue;
           const v = strobeEnv(c, t, beat) * c.intensity;
           if (v > level) {
             level = v;
@@ -456,7 +488,7 @@ export class LightingSystem implements System {
       } else {
         for (let h = 0; h < this.blinders.length; h++) {
           const c = this.blinders[h];
-          if (!matchTarget(c.target, e.tags, e.pos.x)) continue;
+          if (c.mask![j] !== 1) continue;
           const u = t - c.t0;
           const v = (u <= c.dur ? Math.min(1, u / 0.03) : Math.exp(-(u - c.dur) / 0.32)) * c.intensity;
           if (v > level) {
@@ -510,7 +542,9 @@ export class LightingSystem implements System {
     this.floorGlow.copy(env.stageColor);
     const floorI = Math.min(1.5, (1.4 * sumDim) / nf) + strobe * 0.6 + blindMax * 0.8;
     if (strobe > 0) this.floorGlow.lerp(this.cT.setRGB(1, 1, 1), Math.min(1, strobe));
-    this.glow.update(cam.position, env.stageWashColor, env.stageWashIntensity + strobe * 0.35, this.floorGlow, floorI, 0.022 * hz);
+    // (the wash level saturates: a 1.1 wash reads as a stronger set colour, not as a denser fog)
+    const washGlow = env.stageWashIntensity / (1 + 0.45 * env.stageWashIntensity);
+    this.glow.update(cam.position, env.stageWashColor, washGlow + strobe * 0.35, this.floorGlow, floorI, 0.02 * hz);
 
     this.dev?.update(ctx);
     this.cpuMs = this.cpuMs * 0.9 + (performance.now() - t0) * 0.1;
@@ -519,6 +553,8 @@ export class LightingSystem implements System {
   /** floor height under (x, z): stage deck, else the terrain system's heightAt (flat 0 fallback) */
   private groundAt(x: number, z: number): number {
     if (z < 0 && z > -14 && x > -37 && x < 37) return 1.9;
+    // the paved field is flat (terrain-layout.json: banks from |X| 46, rear bank behind Z −4, fall after 113)
+    if (z > -4 && z < 113 && x > -46 && x < 46) return 0;
     const h = this.terrain?.heightAt;
     return h ? h.call(this.terrain, x, z) : 0;
   }
