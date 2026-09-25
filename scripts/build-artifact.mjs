@@ -15,7 +15,8 @@ execSync(`npx vite build --outDir ${out} --emptyOutDir`, { stdio: 'inherit', env
 
 let html = fs.readFileSync(path.join(out, 'index.html'), 'utf8');
 const pick = (re) => [...html.matchAll(re)].map((m) => m[0]);
-const title = (html.match(/<title>[\s\S]*?<\/title>/) ?? ['<title>Defqon.1 2026 Endshow</title>'])[0];
+// artifact gallery name (the explanation goes into the publish description)
+const title = '<title>Defqon.1 Endshow Experience</title>';
 const fonts = pick(/<link[^>]+fonts\.(googleapis|gstatic)\.com[^>]*>/g);
 const metas = pick(/<meta name="(description|theme-color)"[^>]*>/g);
 const styles = [];
