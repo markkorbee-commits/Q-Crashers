@@ -60,7 +60,7 @@ export class MainStageSystem implements System {
     this.app = app;
     this.root.name = 'MainStage';
     const q = app.quality;
-    this.mats = new StageMaterials(app.renderer, q);
+    this.mats = await StageMaterials.create(app.renderer, q);
     this.resolver = new LookResolver(app.show);
     const t1 = performance.now();
     this.timing.materials = t1 - t0;

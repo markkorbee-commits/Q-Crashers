@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import type { QualitySettings } from '../../core/types';
-import { makeDecorAtlas } from './decorAtlas';
+import { type DecorSet, makeDecorAtlas } from './decorAtlas';
 import { createLedMaterial } from './LedMaterial';
 import { createStageUniforms, makeNightEnv, patchStageShading, type StageUniforms } from './StageShading';
-import { makeGrainTextures, makeStoneTextures } from './stoneTextures';
+import { makeGrainTextures, makeStoneTextures, type PbrSet } from './stoneTextures';
 
 /** K1-style cabinet front: black perforated grille, chamfered frame, rigging hardware hints. */
 function makeGrilleTexture(aniso: number): THREE.Texture {
@@ -48,19 +48,35 @@ export class StageMaterials {
   /** generation timings (ms) */
   readonly ms = { env: 0, stone: 0, decor: 0 };
 
-  constructor(renderer: THREE.WebGLRenderer, q: QualitySettings) {
+  /** generate all procedural textures, yielding to the event loop between the heavy steps */
+  static async create(renderer: THREE.WebGLRenderer, q: QualitySettings): Promise<StageMaterials> {
+    const idle = () => new Promise<void>((r) => setTimeout(r, 0));
     const aniso = Math.min(q.anisotropy, renderer.capabilities.getMaxAnisotropy());
-    const texSize = q.level === 'mobile' ? 512 : 1024;
+    const ms = { env: 0, stone: 0, decor: 0 };
     let t = performance.now();
-    this.env = makeNightEnv(renderer);
-    this.ms.env = performance.now() - t;
+    const env = makeNightEnv(renderer);
+    ms.env = performance.now() - t;
+    await idle();
     t = performance.now();
-    const stone = makeStoneTextures(texSize, aniso);
-    this.ms.stone = performance.now() - t;
+    const stone = makeStoneTextures(q.level === 'mobile' ? 512 : 1024, aniso);
+    ms.stone = performance.now() - t;
+    await idle();
     t = performance.now();
     const grain = makeGrainTextures(q.level === 'mobile' ? 128 : 256, aniso);
     const decor = makeDecorAtlas(q.level === 'mobile' ? 512 : 1024, aniso);
-    this.ms.decor = performance.now() - t;
+    ms.decor = performance.now() - t;
+    await idle();
+    return new StageMaterials(aniso, { env, stone, grain, decor }, ms);
+  }
+
+  private constructor(
+    aniso: number,
+    tex: { env: THREE.Texture; stone: PbrSet; grain: PbrSet; decor: DecorSet },
+    ms: { env: number; stone: number; decor: number },
+  ) {
+    const { stone, grain, decor } = tex;
+    this.env = tex.env;
+    Object.assign(this.ms, ms);
     const grille = makeGrilleTexture(aniso);
     this.textures.push(stone.map, stone.normalMap, stone.orm, grain.map, grain.normalMap, grain.orm, decor.map, decor.emissiveMap, decor.normalMap, grille, this.env);
 
