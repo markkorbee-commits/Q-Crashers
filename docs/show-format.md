@@ -21,6 +21,11 @@ every fx listed for it; unknown fx/params must be ignored gracefully (never thro
   `crest_comets`, `co2`, `bengal` (red flares), `mines`, `hang_glitter`, `piano` (laser source on
   the piano riser) — or the filters `all`, `left`, `right`, `center` (applied to the system's
   default anchor). Several targets may be combined.
+  The MainStage registers every stage anchor on its built geometry (counts as in the design bible:
+  24 `deck_front`, 20 `side_front`, 16 `arm_posts` incl. the arm-end bastions, 20 `deck_gerbs`,
+  12 `front_comets`, 9 `roof_comets`, 16 `side_rampart`, 12 `towers_top`, 6 `wing_tips`, 6 spar
+  flames per `wing_left`/`wing_right`). Groups are ordered left → right (X); `arm_posts` runs as a
+  ring: left arm from its far end towards the stage, then the right arm outwards.
 * Colours (`color`, `color2`): `primary` | `secondary` | `accent` (current section palette) |
   a named colour from `src/show/colors.ts` (`red`, `deepred`, `orange`, `amber`, `gold`, `fire`,
   `white`, `warm`, `cold`, `ice`, `blue`, `deepblue`, `cyan`, `green`, `lime`, `purple`,

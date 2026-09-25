@@ -29,6 +29,10 @@ export interface CrownAnchors {
   wingRight: THREE.Vector3[];
   /** top points of spikes/pinnacles usable for gerbs/comets */
   roof: THREE.Vector3[];
+  /** moving heads modelled along the wings' leading edges (rows per membrane panel) */
+  wingFixtures: THREE.Vector3[][];
+  /** the dragon's shoulders (wing roots on the yoke): laser / fixture mounting points */
+  shoulders: [THREE.Vector3, THREE.Vector3];
 }
 
 const yieldFrame = () => new Promise<void>((r) => setTimeout(r, 0));
@@ -251,10 +255,12 @@ export class DragonCrown {
       dragonMouth: toW(mouthH),
       dragonEyes: [toW(head.eyesH[0]), toW(head.eyesH[1])],
       dragonHead: toW(head.headH),
-      wingTips: [wl.layout.finialTops[0].clone(), wr.layout.finialTops[0].clone()],
+      wingTips: [...wl.layout.finialTops, ...wr.layout.finialTops].map((p) => p.clone()),
       wingLeft: wl.points.map((p) => p.clone()),
       wingRight: wr.points.map((p) => p.clone()),
       roof: [...wl.roof, ...[...head.crestTips].sort((a, b) => b.y - a.y).slice(0, 3), body.riderTop, ...wr.roof].map((p) => p.clone()),
+      wingFixtures: [...wl.fixtureRows, ...wr.fixtureRows].map((r) => r.map((p) => p.clone())),
+      shoulders: [wl.layout.shoulder.clone(), wr.layout.shoulder.clone()],
     };
     this.U.uMouthPos.value.copy(toW(new THREE.Vector3(0, -1.0, 1.6)));
 
@@ -347,10 +353,12 @@ export class DragonCrown {
       dragonMouth: v(-2.9, 12.8, -6.9),
       dragonEyes: [v(-4.6, 16.7, -10.4), v(0.6, 16.7, -8.5)],
       dragonHead: v(-1.4, 16.0, -11.0),
-      wingTips: [l.finialTops[0], r.finialTops[0]],
+      wingTips: [...l.finialTops, ...r.finialTops],
       wingLeft: [...l.tips, ...l.finialTops],
       wingRight: [...r.tips, ...r.finialTops],
       roof: [...l.finialTops, v(0.1, 22.0, -17.9), v(6.7, 23.2, -18.3), ...r.finialTops],
+      wingFixtures: [],
+      shoulders: [l.shoulder, r.shoulder],
     };
   }
 

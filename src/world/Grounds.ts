@@ -6,7 +6,7 @@ import { GeoBuilder, lin } from './geom';
 import { Landmarks } from './landmarks';
 import { LanternPillars } from './pillars';
 import { buildProps, type PropsOut } from './props';
-import { ARM_TIP, FOH, LANTERN_Y, PILLAR, PILLARS, STAGE_HALF, terrainHeight } from './site';
+import { ARM, DECK_HALF, FOH, LANTERN_Y, PILLAR, PILLARS, SIDE_FRONT_Z, STAGE_HALF, terrainHeight } from './site';
 import { buildStructures } from './structures';
 import { patchWorldMaterial } from './worldLights';
 
@@ -108,36 +108,37 @@ export class GroundsSystem implements System {
   }
 
   /**
-   * Scale-reference stand-in for the MainStage (only with ?stageproxy): 'box' = the 120 × 40 m
-   * scaffold placeholder, anything else = a silhouette at the canonical dimensions
-   * (stage-canonical.md: deck 1.9 m, castle wall 9.3 m, towers 13–16 m, wing tips ~25 m, arms).
+   * Scale-reference stand-in for the MainStage (only with ?stageproxy): 'box' = a 184 × 28 m block,
+   * anything else = a silhouette of the design-bible outline (deck X ±37 at 1.9 m, castle facade Z −12
+   * to 9.5 m with towers to 16–18 m, wings to 28 m, side sections to X ±92 at Z −4, corner towers,
+   * forward arms along the banks to Z +58).
    */
   private buildStageProxy(kind: string): void {
     const mat = patchWorldMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, emissive: new THREE.Color(0.02, 0.004, 0.004) }), { key: 'proxy' });
     const b = new GeoBuilder();
     if (kind === 'box') {
-      b.box(120, 40, 20, 0, 20, -10, lin('#401010'));
+      b.box(2 * STAGE_HALF, 28, 26, 0, 14, -13, lin('#401010'));
     } else {
       const stone = lin('#6b6a70');
       const red = lin('#6a1a18');
-      b.box(2 * STAGE_HALF, 1.9, 18, 0, 0.95, -9, lin('#3a0a12'));
-      b.box(96, 9.3, 6, 0, 1.9 + 4.65, -9, stone);
-      for (const x of [-46, -34, -20, 20, 34, 46]) b.box(5, 14.5, 5, x, 7.25, -9, stone);
-      // dragon head + wings (rough volumes at canonical heights)
-      b.box(9, 15, 8, 0, 12, -6, red);
+      b.box(2 * DECK_HALF, 1.9, 14, 0, 0.95, -7, lin('#3a0a12'));
+      b.box(2 * DECK_HALF, 9.5, 12, 0, 4.75, -18, stone);
+      for (const x of [-25.5, -17.3, 17.3, 25.5]) b.box(4.5, 16, 4.5, x, 8, -13, stone);
+      // dragon head + wings (rough volumes)
+      b.box(9, 13, 8, -2, 14, -9, red);
       for (const sx of [-1, 1]) {
-        for (const [x, y] of [[14, 24], [28, 25.5], [39, 24.5]] as [number, number][]) {
-          b.beam(new THREE.Vector3(sx * 6, 12, -14), new THREE.Vector3(sx * x, y, -16), 0.9, lin('#b0602a'));
+        for (const [x, y] of [[14.5, 26.5], [29, 28], [40.5, 26.5]] as [number, number][]) {
+          b.beam(new THREE.Vector3(sx * 26, 4, -17.5), new THREE.Vector3(sx * x, y, -21), 0.9, lin('#b0602a'));
         }
-        b.box(34, 10, 1, sx * 22, 16, -16, lin('#8a2a1a'));
-        // arms to the field corners
-        const a = new THREE.Vector3(sx * STAGE_HALF, 0, 0),
-          c = new THREE.Vector3(sx * ARM_TIP.x, 0, ARM_TIP.z);
-        const len = a.distanceTo(c);
-        const yaw = Math.atan2(-(c.z - a.z), c.x - a.x);
-        const mid = a.clone().add(c).multiplyScalar(0.5);
-        b.box(len, 7, 3, mid.x, terrainHeight(mid.x, mid.z) + 3.5, mid.z, stone, yaw);
-        b.box(28, 9, 6, sx * 74, 4.5, -8, stone);
+        b.box(30, 12, 1, sx * 26, 17, -20, lin('#8a2a1a'));
+        // side sections (front Z −4, wall walk 9.5 over the rising bank), corner tower, arm
+        const w = STAGE_HALF - DECK_HALF;
+        b.box(w, 10.5, 20, sx * (DECK_HALF + w / 2), 4.25, SIDE_FRONT_Z - 10, stone);
+        b.box(6, 16, 6, sx * STAGE_HALF, 7, SIDE_FRONT_Z, stone);
+        const zm = (ARM.z0 + ARM.z1) / 2;
+        const xm = (ARM.x0 + ARM.x1) / 2;
+        b.box(1.2, 1.4, ARM.z1 - ARM.z0, sx * xm, terrainHeight(xm, zm) + 0.7, zm, stone);
+        b.box(4, 8, 4, sx * ARM.x1, terrainHeight(ARM.x1, ARM.z1) + 4, ARM.z1, stone);
       }
     }
     const m = new THREE.Mesh(b.build(), mat);

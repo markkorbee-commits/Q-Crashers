@@ -3,7 +3,7 @@ import type { App } from '../core/App';
 import { Rng } from '../core/rng';
 import type { Collider2D, FrameContext, QualitySettings, System } from '../core/types';
 import { buildSiteMask, SITE_RECT } from './groundMaps';
-import { LAKE, PILLARS, PIT_Z, terrainHeight, WATER_Y } from './site';
+import { ARM, BACKSTAGE_Z, LAKE, PILLARS, PIT_Z, terrainHeight, WATER_Y } from './site';
 import { cloudNoiseTexture, groundDetailTexture, makeCanvas, canvasTexture } from './tex';
 import { Vegetation } from './vegetation';
 import { patchWorldMaterial, SKY_REFLECT_GLSL, worldUniforms } from './worldLights';
@@ -219,8 +219,8 @@ export class TerrainSystem implements System {
       [[-60, 150], [-72, 166]],
       [[104, 136], [116, 126]],
       // queue lanes from the floor up to the crest bars (plates laid for the weekend over the grass)
-      [[-46, 50], [-94, 50]],
-      [[46, 47], [94, 47]],
+      [[-46, 46], [-96, 46]],
+      [[46, 46], [96, 46]],
     ];
     const tex = treadTexture();
     const mat = patchWorldMaterial(
@@ -306,23 +306,25 @@ export class TerrainSystem implements System {
   }
 
   // -------------------------------------------------------------------------------------------
-  // playable boundary (terrain-analysis §14.1, adapted to the canonical stage arms)
-
+  // playable boundary (design-bible §6.8). The stage side is closed by the MainStage's own colliders
+  // (deck/castle, side sections, corner towers, arm ramparts with their 4 m gates, the front and arm
+  // crowd barriers); this outline closes the rest: the backstage fences on both crests (Z −6 from the
+  // corner towers to the crest edge), the crest edges above the tree belts, the back corners, the road
+  // / decking edge by the lake. The crest behind the arms (the bars) is reached through the arm gates
+  // (Z 28…56) or around the arm ends (Z > 60).
   private registerBounds(): void {
+    const cx = ARM.x0 + 3;
     const B: [number, number][] = [
-      [-58, PIT_Z + 0.6],
-      [58, PIT_Z + 0.6],
-      [91, 27],
-      [108, 27],
-      [108, 99],
+      [cx, BACKSTAGE_Z],
+      [108.5, BACKSTAGE_Z],
+      [108.5, 99],
       [130, 150],
       [125, 173],
       [-120, 173],
       [-135, 150],
-      [-108, 120],
-      [-108, 27],
-      [-91, 27],
-      [-58, PIT_Z + 0.6],
+      [-108.5, 120],
+      [-108.5, BACKSTAGE_Z],
+      [-cx, BACKSTAGE_Z],
     ];
     const add = (c: Collider2D) => this.app.addCollider(c);
     for (let i = 1; i < B.length; i++) segmentColliders(B[i - 1], B[i], 0.8, 'bounds').forEach(add);

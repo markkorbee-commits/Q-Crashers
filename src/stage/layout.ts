@@ -1,75 +1,126 @@
-import * as THREE from 'three';
+import { terrainHeight } from '../world/site';
 
 /**
- * Canonical MainStage 2026 dimensions (research/stage-canonical.md). Metres, stage front z = 0,
- * audience +Z, +X = spectator's right. Everything the stage modules build is derived from these.
+ * MainStage 2026 build dimensions — research/design-bible.md §5 + research/terrain-layout.json
+ * (authoritative; stage-canonical.md is superseded). Metres, origin = centre of the deck FRONT edge
+ * at floor level, audience +Z, +X = spectator's right. Every stage module derives from these.
+ *
+ * Where the bible's castle numbers collide with the (fixed, camera-calibrated) dragon crown the
+ * castle yields — documented next to each value:
+ *  - inner castle towers: bible X ±14. The crown's gold right foreleg (X +7…+15, Z −17…−12.5)
+ *    grips the parapet exactly there, so the inner towers stand at X ±17.3 (4 m wide, rising behind
+ *    the facade) and the claw reads in front of them, as in the official thumbnail.
+ *  - logo shield: bible Y 7.4–9.0; kept below 8.5 because the dragon's chin hangs at Y 8.7 right
+ *    behind it (crown layout).
+ *  - skull medallions: bible Y 6.5; lifted to 7.1 so the gallery floor (Y 5.5) does not cut them.
  */
 export const L = {
-  /** deck top (photogrammetry: 1.9 m) */
+  /** deck top (people vs fascia ruler: 1.9 m) */
   deckY: 1.9,
-  /** straight stage front line |x| <= frontHalf */
-  frontHalf: 60,
-  deckBackZ: -18,
-  /** castle base extent |x| <= castleHalf */
-  castleHalf: 48.5,
-  /** recessed wall facade plane */
-  facadeZ: -8,
-  /** castle terrace (red skirt + railing) in front of the facade */
-  terraceY: 3.1,
-  terraceFrontZ: -6,
-  wallTop: 9.3,
-  /** portal (DJ gate): 5 m wide, apex 6 m above the deck */
-  portalW: 5,
-  portalApex: 7.9,
-  gateHalf: 6,
-  gateFrontZ: -6.2,
-  /** DJ desk */
-  boothZ: -4.1,
-  /** front-of-stage barrier line */
-  barrierZ: 3,
-  /** side section straight wall */
-  sideWallZ: -7,
-  sideWallTop: 7.6,
-  /** angled arms: front edge from armA to armB (right side; mirrored for the left) */
-  armA: new THREE.Vector2(60, 0),
-  armB: new THREE.Vector2(88, 24),
-  armLedge: 3,
-  armWallTop: 7.2,
-  /** line arrays (K1-like): inner / outer x, hang plane z */
-  innerArrayX: 10.8,
-  outerArrayX: 31,
-  arrayZ: -1.1,
-  arrayBottom: 4.95,
-  /** K1 box: 1.34 x 0.44 x 0.56 m */
+  /** central deck X ±37, Z −14…0 */
+  deckHalf: 37,
+  deckBackZ: -14,
+  /** corner plinths joining the deck front (Z 0) to the side-section ledge (Z −3) */
+  plinthX1: 40,
+
+  // ---- castle core ----------------------------------------------------------------------------
+  facadeZ: -12,
+  coreHalf: 37,
+  /** crenellation line = wall walk (core and side sections) */
+  wallTop: 9.5,
+  merlonH: 1.05,
+  /** dark roof over the core and its scaffold back wall */
+  roofY: 9.2,
+  coreBackZ: -30,
+  /** gate porch (DJ portal block) in front of the facade */
+  porchHalf: 12.2,
+  porchFrontZ: -6,
+  /** porch screen wall: front face at porchFrontZ, this thick */
+  screenT: 0.9,
+  porchTop: 8.3,
+  /** stair recess behind the screen (flights rise outward X ±6.2 → ±11.6) */
+  stairX0: 6.2,
+  stairX1: 11.6,
+  stairBackZ: -9.9,
+  /** DJ portal: 5.4 m wide, apex 7.2 m, front face Z −6, 3 m deep; desk at Z −7.5 */
+  portalW: 5.4,
+  portalApex: 7.2,
+  portalDepth: 3,
+  boothZ: -7.5,
+  shieldY0: 7.05,
+  shieldY1: 8.5,
+  /** upper castle platform (Y 5.5): porch rear + a gallery along the facade */
+  platformY: 5.5,
+  galleryFrontZ: -10.4,
+  /** raised battlement block the right foreleg's talons hook over */
+  clawBlock: [10.4, 14.6] as const,
+  clawBlockTop: 10.85,
+
+  // ---- PA (K1 ruler) ------------------------------------------------------------------------------
+  innerHangX: 11,
+  innerHangZ: -4,
+  outerHangX: 31,
+  outerHangZ: -6,
+  arrayBottom: 4.9,
+  arrayTop: 14.2,
+  bumperY: 14.6,
+  trussTop: 16.5,
+  /** K1 box: 1.34 x 0.44 x 0.56 m, K2: 1.34 x 0.35 x 0.5 m */
   k1: { w: 1.34, h: 0.44, d: 0.56 },
-  /** KS28 sub: 1.34 x 0.55 x 0.7 m */
-  ks28: { w: 1.34, h: 0.55, d: 0.7 },
+  k2: { w: 1.34, h: 0.35, d: 0.5 },
+  /** sub block = 2 wide x 3 high KS28 */
+  subBlock: { w: 2.7, h: 1.65, d: 1.1 },
+
+  // ---- side sections ------------------------------------------------------------------------------
+  sideX0: 37,
+  sideX1: 92,
+  sideFrontZ: -4,
+  sideWallT: 1.3,
+  /** rear wall Z −22 at |X| 37 → −30 at |X| 80 */
+  sideRear: (ax: number) => (ax <= 37 ? -22 : ax >= 80 ? -30 : -22 - ((ax - 37) / 43) * 8),
+  ledgeFrontZ: -3,
+  sideTowers: [48, 63, 78],
+  sideTowerZ: -10,
+  sideTowerW: 5,
+  sideTowerTop: 13.5,
+  corner: { x: 92, z: -4, w: 6, top: 15 },
+  lanternPitch: 8,
+  lanternTop: 11.5,
+
+  // ---- forward arms (axis-parallel along the bank) ------------------------------------------------
+  armZ0: -4,
+  armZ1: 58,
+  armPostsZ: [2, 10, 18, 26, 34, 42, 50],
+  armOpenings: [
+    [28, 32],
+    [36, 40],
+    [44, 48],
+    [52, 56],
+  ] as [number, number][],
+  rampartH: 1.4,
+  rampartT: 1.2,
+  armEnd: { x: 94, z: 58, w: 4, top: 12.5 },
+
+  // ---- front of house ------------------------------------------------------------------------------
+  /** front-of-stage barrier line Z +3 across |X| ≤ 90, arm barriers along X ±90 */
+  barrierZ: 3,
+  barrierX: 90,
 } as const;
 
-/** towers of the central castle (right side; mirrored) */
-export interface TowerSpec {
-  x: number;
-  w: number;
-  depth: number;
-  frontZ: number;
-  body: number;
-  cap: 'battlement' | 'spire' | 'cone';
-  capTop: number;
+/** the arm's centre line: X from ±92 at Z −4 to ±94 at Z 58 (right side; mirror for the left) */
+export function armX(z: number): number {
+  return 92 + ((z - L.armZ0) / (L.armZ1 - L.armZ0)) * 2;
 }
 
-export const TOWERS: TowerSpec[] = [
-  { x: 20, w: 6, depth: 6, frontZ: -6.2, body: 14.0, cap: 'battlement', capTop: 17.2 },
-  { x: 34, w: 5, depth: 5, frontZ: -6.5, body: 12.8, cap: 'spire', capTop: 17.4 },
-  { x: 46, w: 5, depth: 5, frontZ: -6.5, body: 12.2, cap: 'cone', capTop: 15.8 },
-];
+/** ground height (terrain) */
+export const ground = terrainHeight;
 
-/** unit direction of the right arm and its normals */
-export function armFrame(): { dir: THREE.Vector2; len: number; nIn: THREE.Vector2; nOut: THREE.Vector2 } {
-  const d = new THREE.Vector2().subVectors(L.armB, L.armA);
-  const len = d.length();
-  d.normalize();
-  // inward (towards the audience / field centre) normal for the right arm
-  const nIn = new THREE.Vector2(-d.y, d.x);
-  if (nIn.y < 0) nIn.multiplyScalar(-1);
-  return { dir: d, len, nIn, nOut: nIn.clone().multiplyScalar(-1) };
+/** top of the side-section flame ledge at |x| (bible: Y = max(1.9, ground + 1)) */
+export function ledgeTop(x: number): number {
+  return Math.max(L.deckY, terrainHeight(x, -3.6) + 1);
+}
+
+/** rampart top of the arm at z (1.4 m above the local bank) */
+export function rampartTop(s: number, z: number): number {
+  return terrainHeight(s * armX(z), z) + L.rampartH;
 }

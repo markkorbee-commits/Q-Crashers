@@ -82,6 +82,8 @@ export class LaserRig {
   readonly mirrors: THREE.Vector3[] = [];
   /** anchors this rig registered itself (so a later rebuild can tell "customised by others" apart) */
   private mine = new Map<string, number>();
+  /** the customised anchor a previous build consumed (our own re-publication of it must not reset it) */
+  private src = new Map<string, THREE.Vector3[]>();
   private sig = 0;
 
   anchorSignature(a: Anchors): number {
@@ -100,7 +102,9 @@ export class LaserRig {
     if (!pts.length) return null;
     if (sameAsDefault(name, pts)) return null;
     const m = this.mine.get(name);
-    if (m !== undefined && Math.abs(m - signature(pts)) < 1e-6) return null;
+    // our own publication: keep using the custom source it was derived from (if any)
+    if (m !== undefined && Math.abs(m - signature(pts)) < 1e-6) return this.src.get(name) ?? null;
+    this.src.set(name, pts.map((p) => p.clone()));
     return pts;
   }
 

@@ -2,15 +2,17 @@ import * as THREE from 'three';
 import { Rng } from '../core/rng';
 import type { Collider2D } from '../core/types';
 import { GeoBuilder, lin } from './geom';
-import { ARM_TIP, CAM_PEN, DECKING, FOH, PILLAR, PILLARS, PIT_Z, PREMIUM, RISER, STAGE_HALF, terrainHeight, WATER_Y } from './site';
+import { ARM, BACKSTAGE_Z, CAM_PEN, DECKING, FOH, PILLAR, PILLARS, PREMIUM, RISER, terrainHeight, WATER_Y } from './site';
 import { canvasTexture, makeCanvas } from './tex';
 import { patchWorldMaterial } from './worldLights';
 
 /**
- * Man-made field structures: the front-of-stage barrier, crowd barriers (pillar rings, camera pen,
- * FOH ring, queue lanes), Heras perimeter fences with black scrim banners, the FOH / press tower,
+ * Man-made field structures: crowd barriers (pillar rings, camera pen, FOH ring, queue lanes), Heras
+ * perimeter / backstage fences with black scrim banners, the FOH / press tower,
  * the camera pen and riser on the axis, the RED entrance gates, and the Exclusive RED Experience
- * deck over the lake. Everything is instanced or merged per material.
+ * deck over the lake. Everything is instanced or merged per material. The front-of-stage and arm
+ * crowd barriers belong to the MainStage (src/stage/deck/Deck.ts barrierRuns), which lays them on
+ * the terrain together with the stage outline.
  */
 
 export interface StructureOut {
@@ -102,28 +104,22 @@ export function buildStructures(scene: THREE.Object3D, lowDetail: boolean): Stru
   const crowdGeo = crowdBarrierGeometry(lowDetail);
   addInst(crowdGeo, metal, crowd, 'crowd-barriers');
 
-  // ------------------------------------------------------------------ front-of-stage barrier (Mojo type, 1 m sections)
-  const mojo: THREE.Matrix4[] = [];
-  {
-    mojo.push(...panelsAlong([[-STAGE_HALF + 2, PIT_Z], [STAGE_HALF - 2, PIT_Z]], 1));
-    // along the forward stage arms, 3 m in front of them
-    for (const s of [-1, 1]) mojo.push(...panelsAlong([[s * (STAGE_HALF - 2), PIT_Z], [s * (ARM_TIP.x + 3), ARM_TIP.z + 3]], 1));
-  }
-  addInst(mojoGeometry(), metal, mojo, 'pit-barrier');
-
   // ------------------------------------------------------------------ Heras fences (3.5 m) with scrim / bare mesh
   const herasScrim: THREE.Matrix4[] = [];
   const herasBare: THREE.Matrix4[] = [];
   const scrimCell: number[] = [];
   {
     const rng = new Rng(61);
+    // backstage fences (terrain-layout.json fences.backstageLeft/Right, FACT 2024 position): from the
+    // corner towers along Z −6 to the crest edge, then back along the crest; the crest behind the arms
+    // (bars, crest paths) is audience area
+    const cornerOut = ARM.x0 + 3;
     const scrimLines: [number, number][][] = [
-      // arm tips to the bank crests: separates the audience from backstage
-      [[-(ARM_TIP.x + 3), ARM_TIP.z + 3], [-108, ARM_TIP.z + 3]],
-      [[ARM_TIP.x + 3, ARM_TIP.z + 3], [108, ARM_TIP.z + 3]],
+      [[-cornerOut, BACKSTAGE_Z], [-109.5, BACKSTAGE_Z], [-109.5, -22]],
+      [[cornerOut, BACKSTAGE_Z], [109.5, BACKSTAGE_Z], [109.5, -22]],
       // crest outer edges above the tree belts
-      [[-109.5, ARM_TIP.z + 3], [-109.5, 99]],
-      [[109.5, ARM_TIP.z + 3], [109.5, 99]],
+      [[-109.5, BACKSTAGE_Z], [-109.5, 99]],
+      [[109.5, BACKSTAGE_Z], [109.5, 99]],
       // back corners (diagonal boundary)
       [[109.5, 99], [130, 150]],
       [[-109.5, 99], [-109.5, 120], [-135, 150]],
@@ -370,21 +366,6 @@ function crowdBarrierGeometry(low: boolean): THREE.BufferGeometry {
   }
   const bars = low ? 7 : 13;
   for (let i = 1; i <= bars; i++) b.box(0.016, H - 0.22, 0.016, -W / 2 + (W * i) / (bars + 1), 0.2 + (H - 0.2) / 2, 0, galv);
-  return b.build();
-}
-
-/** Mojo-style pit barrier section (1 m): front plate, top rail, audience footplate (+Z side) */
-function mojoGeometry(): THREE.BufferGeometry {
-  const b = new GeoBuilder();
-  b.box(0.98, 1.2, 0.035, 0, 0.62, 0.05, alu);
-  b.box(1.0, 0.08, 0.14, 0, 1.24, 0.05, alu);
-  const plate = new THREE.BoxGeometry(0.98, 0.025, 1.0);
-  b.add(plate, new THREE.Matrix4().compose(new THREE.Vector3(0, 0.07, 0.56), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -0.08), new THREE.Vector3(1, 1, 1)), alu);
-  // rear braces on the pit side
-  for (const x of [-0.4, 0.4]) {
-    b.beam(new THREE.Vector3(x, 1.18, 0.03), new THREE.Vector3(x, 0.02, -0.75), 0.04, alu);
-    b.box(0.06, 0.04, 0.9, x, 0.02, -0.35, alu);
-  }
   return b.build();
 }
 

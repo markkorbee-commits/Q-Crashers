@@ -21,6 +21,8 @@ export interface WingResult {
   points: V3[];
   /** top points for gerbs */
   roof: V3[];
+  /** moving-head positions along each membrane panel's leading edge (one row per panel) */
+  fixtureRows: V3[][];
 }
 
 interface Finger {
@@ -201,6 +203,7 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
 
   // ------------------------------------------------------------------ membranes (Coons patches)
   const rosetteFrames: THREE.Matrix4[] = [];
+  const fixtureRows: V3[][] = [];
   const nu = segs(k, 22, 10);
   const nv = segs(k, 26, 12);
   const fingerAt = (f: Finger, t: number) => f.line.at(t);
@@ -348,8 +351,9 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
     }
     // row of moving-head bodies on short arms along the top edge (1.3 m pitch; beams are the
     // lighting system's job, these are the physical fixtures seen in the daylight photos)
-    if (k.detail > 0.5) {
+    {
       const nF = Math.max(3, Math.round(eLine.length / 1.3));
+      const row: V3[] = [];
       for (let i = 0; i < nF; i++) {
         const t = (i + 0.5) / nF;
         const p = eLine.at(t);
@@ -358,10 +362,13 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
         if (out.y < 0) out.negate();
         const base = p.clone().addScaledVector(out, 0.25).addScaledVector(nrm, 0.35);
         const fm = basisZ(nrm, out, base);
+        row.push(v3(0, 0.56, 0.05).applyMatrix4(fm));
+        if (k.detail <= 0.5) continue;
         W.armor.add(box(0.12, 0.5, 0.12), fm, 0x1a1a1e);
         W.armor.add(box(0.5, 0.14, 0.42), fm.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0.3, 0)), 0x1a1a1e);
         W.armor.add(box(0.36, 0.36, 0.5), fm.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0.56, 0.05)), 0x222226);
       }
+      fixtureRows.push(row);
     }
     // scalloped bottom edge trim (copper tube)
     const bot: V3[] = [];
@@ -473,7 +480,7 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
     W.strips.add(rp, 1, 0.12, 0, 0.5 + i * 0.1);
   });
 
-  return { layout: L, rosetteFrames, points, roof };
+  return { layout: L, rosetteFrames, points, roof, fixtureRows };
 }
 
 function withAxis(g: THREE.BufferGeometry, m: THREE.Matrix4): THREE.BufferGeometry {

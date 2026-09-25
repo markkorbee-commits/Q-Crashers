@@ -366,9 +366,25 @@ export function buildRig(anchors: Anchors, density: number, own?: Map<string, TH
   const wingZ = (y: number) => wz - (y - 14) * WING_LEAN;
 
   // ------------------------------------------------------------------------ stage structure (truss)
+  /** dragon skull: 8 heads (FACT, teardown), on the registered head if any */
+  const skullRow = () => {
+    const head = anchors.get('dragon_head')[0];
+    const hasHead = !!head && !isDefaultAnchor(anchors, 'dragon_head');
+    const hx = hasHead ? head.x : -2.5;
+    const hy = hasHead ? head.y + 4.6 : 18.6;
+    const hz = hasHead ? head.z - 0.8 : -12.6;
+    const nSkull = cnt(8, 2);
+    for (let k = 0; k < nSkull; k++) {
+      const a = (k / (nSkull - 1)) * 2 - 1;
+      add(G_TRUSS, T_DRAGON, v3(hx + a * 3.9, hy + 0.9 * (1 - a * a), hz), Z, false, k, nSkull, cluster);
+    }
+    cluster++;
+  };
   if (registered('fixtures_truss')) {
-    // registered by the stage engineer: cluster consecutive fixtures (sorted by x, split on gaps)
-    cluster = addAnchorClusters(anchors.get('fixtures_truss'), G_TRUSS, T_ROOF, false, cluster, add);
+    // registered by the stage engineer (positions on the real geometry, in rows): classify every
+    // fixture by the structure it sits on, so cue targets (wings, arms, sides, PA, towers…) still work
+    cluster = addRegisteredTruss(anchors.get('fixtures_truss'), density, cluster, add);
+    if (!fixtures.some((f) => f.tags === T_DRAGON)) skullRow();
   } else {
     // wing leading edges: continuous rows along the 6 finger spars (bible: 2 x 60 at ~1.3 m pitch)
     for (const s of [-1, 1]) {
@@ -386,18 +402,7 @@ export function buildRig(anchors: Anchors, density: number, own?: Map<string, TH
         cluster++;
       }
     }
-    // dragon skull: 8 heads (FACT, teardown), on the registered head if any
-    const head = anchors.get('dragon_head')[0];
-    const hasHead = !!head && !isDefaultAnchor(anchors, 'dragon_head');
-    const hx = hasHead ? head.x : -2.5;
-    const hy = hasHead ? head.y + 4.6 : 18.6;
-    const hz = hasHead ? head.z - 0.8 : -12.6;
-    const nSkull = cnt(8, 2);
-    for (let k = 0; k < nSkull; k++) {
-      const a = (k / (nSkull - 1)) * 2 - 1;
-      add(G_TRUSS, T_DRAGON, v3(hx + a * 3.9, hy + 0.9 * (1 - a * a), hz), Z, false, k, nSkull, cluster);
-    }
-    cluster++;
+    skullRow();
     // castle roofline: crenellations Y 9.5 at the facade Z −12, X ±7.5…±36.5 (bible: 40)
     for (const s of [-1, 1])
       for (const cx of [14.5, 29.5]) row(G_TRUSS, T_ROOF, cnt(10, 2), v3(s * cx, 9.95, -12.4), X, 1.45, Z);
@@ -415,7 +420,7 @@ export function buildRig(anchors: Anchors, density: number, own?: Map<string, TH
 
   // ------------------------------------------------------------------------ floor (deck lip)
   if (registered('fixtures_floor')) {
-    cluster = addAnchorClusters(anchors.get('fixtures_floor'), G_FLOOR, T_DECK, false, cluster, add);
+    cluster = addAnchorClusters(anchors.get('fixtures_floor'), G_FLOOR, T_DECK, false, cluster, add, density);
   } else {
     // deck lip X ±37, Y 1.9 (bible: 40) in 4 truss segments
     for (const cx of [-28, -9.5, 9.5, 28]) row(G_FLOOR, T_DECK, cnt(10, 2), v3(cx, 2.2, -0.65), X, 1.7, Z);
@@ -506,15 +511,60 @@ function computeDiverge(fixtures: Fixture[]): void {
 
 type AddFn = (group: number, tags: number, pos: THREE.Vector3, fwd: THREE.Vector3, hang: boolean, k: number, n: number, cl: number, fanAxis?: THREE.Vector3) => void;
 
-function addAnchorClusters(pts: THREE.Vector3[], group: number, tags: number, hang: boolean, cluster: number, add: AddFn): number {
+/** structure class of a registered truss fixture from where it sits (design-bible §5 layout) */
+export function trussTag(p: THREE.Vector3): number {
+  const ax = Math.abs(p.x);
+  if (ax > 88 && p.z > 2) return p.z > 54 ? T_ARMEND : T_ARM;
+  if (ax > 86) return T_CORNER;
+  if (ax > 38) return p.y > 12 ? T_TOWER : T_SIDE;
+  if (p.z > -8 && p.y > 15) return T_PA;
+  if (p.z < -15.5 && p.y > 8) return T_SPAR;
+  if (ax < 9 && p.y > 15) return T_DRAGON;
+  return p.y > 12 ? T_TOWER : T_ROOF;
+}
+
+/**
+ * Registered structure fixtures, consumed in registration order: consecutive fixtures of the same
+ * class less than 3 m apart form one cluster (a row / block, max 12). Arm fixtures aim across the field.
+ */
+function addRegisteredTruss(pts: THREE.Vector3[], density: number, cluster: number, add: AddFn): number {
+  const Z = new THREE.Vector3(0, 0, 1);
+  const tags = pts.map(trussTag);
+  let start = 0;
+  for (let i = 1; i <= pts.length; i++) {
+    const split = i === pts.length || tags[i] !== tags[i - 1] || pts[i].distanceTo(pts[i - 1]) > 3 || i - start >= 12;
+    if (!split) continue;
+    const t = tags[start];
+    const arm = t === T_ARM || t === T_ARMEND;
+    const keep = thin(i - start, density);
+    keep.forEach((j, k) => {
+      const p = pts[start + j];
+      const fwd = arm ? new THREE.Vector3(-Math.sign(p.x) || 1, 0, 0.2).normalize() : Z;
+      add(G_TRUSS, t, p, fwd, false, k, keep.length, cluster, arm ? Z : undefined);
+    });
+    cluster++;
+    start = i;
+  }
+  return cluster;
+}
+
+/** indices of a row of n registered fixtures kept at the given rig density (evenly spread, ≥ 1) */
+function thin(n: number, density: number): number[] {
+  const m = Math.min(n, Math.max(1, Math.round(n * density)));
+  const out: number[] = [];
+  for (let j = 0; j < m; j++) out.push(Math.min(n - 1, Math.round(((j + 0.5) * n) / m - 0.5)));
+  return out;
+}
+
+function addAnchorClusters(pts: THREE.Vector3[], group: number, tags: number, hang: boolean, cluster: number, add: AddFn, density = 1): number {
   const sorted = [...pts].sort((a, b) => a.x - b.x);
   const Z = new THREE.Vector3(0, 0, 1);
   let start = 0;
   for (let i = 1; i <= sorted.length; i++) {
     const split = i === sorted.length || sorted[i].distanceTo(sorted[i - 1]) > 6 || i - start >= 12;
     if (!split) continue;
-    const n = i - start;
-    for (let k = 0; k < n; k++) add(group, tags, sorted[start + k], Z, hang, k, n, cluster);
+    const keep = thin(i - start, density);
+    keep.forEach((j, k) => add(group, tags, sorted[start + j], Z, hang, k, keep.length, cluster));
     cluster++;
     start = i;
   }

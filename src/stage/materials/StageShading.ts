@@ -44,11 +44,11 @@ uniform vec3 uFlash;
 uniform vec3 uFlashPos;
 uniform vec3 uEnvTint;
 varying vec3 vStageWP;
-// cheap contact occlusion where vertical faces meet the deck (1.9) / terrace (3.1) / ground
+// cheap contact occlusion where vertical faces meet the deck (1.9) / upper platform (5.5) / ground
 float stageAO(vec3 wp) {
   vec3 gn = normalize(cross(dFdx(wp), dFdy(wp)));
   float vert = 1.0 - abs(gn.y);
-  float d = min(min(abs(wp.y - 1.9), abs(wp.y - 3.1)), abs(wp.y));
+  float d = min(min(abs(wp.y - 1.9), abs(wp.y - 5.5)), abs(wp.y));
   return mix(1.0, mix(0.45, 1.0, smoothstep(0.0, 1.1, d)), vert);
 }
 vec3 stageFlood(vec3 wp, vec3 n) {
@@ -69,7 +69,7 @@ vec3 stageFlood(vec3 wp, vec3 n) {
     acc += c * (beam * prof * lam);
   }
   // the side sections / arms get a lower flood density than the castle
-  acc *= mix(1.0, 0.55, smoothstep(50.0, 64.0, abs(wp.x)));
+  acc *= mix(1.0, 0.4, smoothstep(37.0, 50.0, abs(wp.x)));
   acc += uFront * max(dot(n, vec3(0.0, 0.2425, 0.9701)), 0.0);
   acc += uBack * max(dot(n, vec3(0.0, 0.9285, -0.3714)), 0.0);
   vec3 fd = uFlashPos - wp;

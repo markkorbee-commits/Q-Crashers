@@ -6,11 +6,11 @@ import type { Platform, PlayerController } from '../player/PlayerController';
 import { yawTowards } from '../player/spots';
 import { CastleBuilder } from './castle/Castle';
 import { SidesBuilder } from './castle/Sides';
-import { barrierLayout, barrierSegmentGeometry, DeckBuilder } from './deck/Deck';
+import { barrierLayout, barrierRuns, barrierSegmentGeometry, DeckBuilder } from './deck/Deck';
 import { SpeakerBuilder } from './deck/Speakers';
 import { DragonCrown } from './DragonCrown';
 import { createKit, type StageKit } from './kit';
-import { armFrame, L } from './layout';
+import { armX, L } from './layout';
 import { LookResolver } from './look/LookResolver';
 import { StageMaterials } from './materials/StageMaterials';
 import { StageLights } from './StageLights';
@@ -29,8 +29,11 @@ function addScaled(c: THREE.Color, src: THREE.Color, k: number): THREE.Color {
 }
 
 /**
- * The 2026 MainStage (RED, "Sacred Oath"): gothic castle base, deck, stage front line, angled
- * side sections, PA, barrier + the dragon/wings crown (DragonCrown, built by its own module).
+ * The 2026 MainStage (RED, "Sacred Oath"), laid out on design-bible §5 (src/stage/layout.ts): the
+ * gothic castle core with the DJ portal and the stairs, the central deck, side sections with corner
+ * towers, the forward arms along the banks, PA, crowd barriers + the dragon/wings crown (DragonCrown,
+ * built by its own module). Registers every stage anchor on the built geometry, the deck platform,
+ * the deck / stage / barrier colliders and the deck spots.
  *
  * Per frame: the 'stage' + 'screens' cues and app.env are resolved into ONE StageLook (pure
  * function of show time), which drives the LED shader, the virtual flood field of every set
@@ -76,7 +79,7 @@ export class MainStageSystem implements System {
     this.timing.geometry = t2 - t1;
 
     // barrier: one instanced mesh
-    const bl = barrierLayout();
+    const bl = barrierLayout(barrierRuns());
     const bg = barrierSegmentGeometry();
     this.barrier = new THREE.InstancedMesh(bg, this.mats.barrier, bl.length);
     bl.forEach((m, i) => this.barrier!.setMatrixAt(i, m));
@@ -143,16 +146,28 @@ export class MainStageSystem implements System {
       if (pts.length) a.set(n, pts);
     };
     const P = kit.pts;
-    // ordered left -> right along the flame ring (left arm tip ... front line ... right arm tip);
-    // every deck_front point is at deck height (index 0 is read by the PlayerController)
     const byX = (pts: THREE.Vector3[]) => [...pts].sort((p, q) => p.x - q.x || p.z - q.z);
+    /** ring order: left arm from its far end towards the stage, then the right arm outwards */
+    const ring = (pts: THREE.Vector3[]) => [...pts].sort((p, q) => Math.sign(p.x) - Math.sign(q.x) || Math.sign(p.x) * (p.z - q.z));
+    // every deck_front point is at deck height (index 0 is read by the PlayerController)
     set('deck_front', byX(P.deckFront));
     set('deck_back', byX(P.deckBack));
+    set('side_front', byX(P.sideFront));
+    set('arm_posts', ring(P.armPosts));
+    set('arm_ends', byX(P.armEnds));
+    set('deck_gerbs', byX(P.deckGerbs));
+    set('front_comets', byX(P.frontComets));
+    set('roof_comets', byX(P.roofComets));
+    set('side_rampart', byX(P.sideRampart));
+    set('tower_torches', byX(P.towerTorches));
+    set('corner_fireballs', byX(P.cornerFireballs));
     set('towers_top', byX(P.towersTop));
-    set('speaker_hangs', P.speakerHangs);
-    set('dj_booth', [new THREE.Vector3(0, L.deckY + 0.3, L.boothZ - 1.1)]);
-    set('laser_stage', byX(P.laserStage));
-    set('fixtures_truss', byX(P.fixturesTruss));
+    set('co2', byX(P.co2));
+    set('bengal', byX(P.bengal));
+    set('mines', byX(P.mines));
+    set('speaker_hangs', byX(P.speakerHangs));
+    set('hang_glitter', byX(P.hangGlitter));
+    set('dj_booth', [new THREE.Vector3(0, L.deckY + 0.3, L.boothZ - 1.0)]);
     set('fixtures_floor', byX(P.fixturesFloor));
     let c: ReturnType<DragonCrown['anchors']> | null = null;
     try {
@@ -160,59 +175,87 @@ export class MainStageSystem implements System {
     } catch (e) {
       console.error('[stage] crown anchors failed', e);
     }
-    if (!c) {
-      set('roof', byX(P.roof));
-      return;
+    // structure moving heads in rows (the lighting rig clusters consecutive points of a row)
+    const truss = [...P.fixturesTruss];
+    const lasers = [...P.laserStage];
+    const roof = [...P.roof, ...P.sideRampart];
+    if (c) {
+      for (const row of c.wingFixtures) truss.push(...row);
+      set('dragon_mouth', [c.dragonMouth]);
+      set('dragon_eyes', [c.dragonEyes[0], c.dragonEyes[1]]);
+      set('dragon_head', [c.dragonHead]);
+      set('wing_tips', byX(c.wingTips));
+      // "burning wings": the spar flames at ~60 % and ~90 % of every finger (crown points 7/8, 10/11, 13/14)
+      const sparFlames = (pts: THREE.Vector3[]) => (pts.length >= 15 ? [7, 8, 10, 11, 13, 14].map((i) => pts[i]) : pts);
+      set('wing_left', sparFlames(c.wingLeft));
+      set('wing_right', sparFlames(c.wingRight));
+      // lasers on the dragon's shoulders and on the inner / outer fingers (bible: flanks + wing bases)
+      for (const sh of c.shoulders) lasers.push(sh.clone().add(new THREE.Vector3(0, 2.0, 0.2)));
+      for (const w of [c.wingLeft, c.wingRight]) if (w.length >= 15) lasers.push(w[8].clone(), w[14].clone());
+      roof.push(...c.roof);
     }
-    // the wing spars carry rows of moving heads: they are part of the stage structure fixtures
-    set('fixtures_truss', byX([...P.fixturesTruss, ...c.wingLeft, ...c.wingRight]));
-    set('dragon_mouth', [c.dragonMouth]);
-    set('dragon_eyes', [c.dragonEyes[0], c.dragonEyes[1]]);
-    set('dragon_head', [c.dragonHead]);
-    set('wing_tips', c.wingTips);
-    set('wing_left', c.wingLeft);
-    set('wing_right', c.wingRight);
-    set('roof', [...P.roof, ...c.roof].sort((p, q) => p.x - q.x));
+    set('laser_stage', byX(lasers));
+    set('fixtures_truss', truss);
+    set('roof', byX(roof));
   }
 
   private registerWorld(app: App): void {
-    // raised walkable deck (the player on it is clamped to this rectangle)
+    // raised walkable deck (the player on it is clamped to this rectangle; only 'deck*' colliders apply)
     const player = app.get<PlayerController>('player');
-    const deck: Platform = { minX: -L.frontHalf - 1.5, maxX: L.frontHalf + 1.5, minZ: L.terraceFrontZ + 0.35, maxZ: -0.05, y: L.deckY };
+    const deck: Platform = { minX: -L.plinthX1, maxX: L.plinthX1, minZ: L.facadeZ + 0.05, maxZ: -0.05, y: L.deckY };
     if (player && Array.isArray(player.platforms)) {
       player.platforms.length = 0;
       player.platforms.push(deck);
     }
-    // colliders ON the deck (tag 'deck*'): booth, truss tower bases, stair railings of the terrace
-    app.addCollider({ kind: 'box', minX: -3.4, maxX: 3.4, minZ: L.boothZ - 0.6, maxZ: L.boothZ + 0.62, tag: 'deck-booth' });
-    for (const x of [L.innerArrayX, -L.innerArrayX, L.outerArrayX, -L.outerArrayX]) {
-      const z = L.arrayZ - 1.45;
-      app.addCollider({ kind: 'box', minX: x - 1.1, maxX: x + 1.1, minZ: z - 1.1, maxZ: z + 1.1, tag: 'deck-truss' });
-    }
+    const box = (minX: number, maxX: number, minZ: number, maxZ: number, tag: string) => app.addCollider({ kind: 'box', minX, maxX, minZ, maxZ, tag });
+    // colliders ON the deck: porch (screen, stairs, side walls), portal niche, booth, towers, PA truss bases
+    box(-L.porchHalf - 0.7, -L.portalW / 2 - 0.3, L.facadeZ, L.porchFrontZ, 'deck-porch');
+    box(L.portalW / 2 + 0.3, L.porchHalf + 0.7, L.facadeZ, L.porchFrontZ, 'deck-porch');
+    box(-L.portalW / 2 - 0.3, L.portalW / 2 + 0.3, L.facadeZ, L.porchFrontZ - L.portalDepth, 'deck-portal');
+    box(-2.1, 2.1, L.boothZ - 0.6, L.boothZ + 0.6, 'deck-booth');
     for (const s of [-1, 1]) {
-      const x0 = s * (L.gateHalf + 0.25),
-        x1 = s * (L.gateHalf + 1.7);
-      app.addCollider({ kind: 'box', minX: Math.min(x0, x1), maxX: Math.max(x0, x1), minZ: L.terraceFrontZ, maxZ: -3.9, tag: 'deck-steps' });
+      const ox = 25.5;
+      box(s > 0 ? ox - 2.5 : -ox - 2.5, s > 0 ? ox + 2.5 : -ox + 2.5, -15.2, -10.2, 'deck-tower');
+      for (const [hx, hz] of [
+        [L.innerHangX + 2.85, L.innerHangZ],
+        [L.outerHangX + 2.85, L.outerHangZ],
+      ])
+        box(s * hx - 0.8, s * hx + 0.8, hz - 0.8, hz + 0.8, 'deck-truss');
+      box(s > 0 ? L.sideX0 : -L.plinthX1, s > 0 ? L.plinthX1 : -L.sideX0, L.facadeZ, L.sideFrontZ, 'deck-side');
     }
-    // stage body (ground walkers): deck + castle + backstage block, central stairs
-    app.addCollider({ kind: 'box', minX: -L.frontHalf - 2, maxX: L.frontHalf + 2, minZ: -40, maxZ: 0.75, tag: 'stage' });
-    app.addCollider({ kind: 'box', minX: -2.7, maxX: 2.7, minZ: 0, maxZ: 2.25, tag: 'stage-stairs' });
-    // front barrier (straight) — the 'front' spot at z = 6 sits right behind it
-    const { dir, len, nIn } = armFrame();
-    const p0x = L.armA.x + nIn.x * L.barrierZ,
-      p0z = L.armA.y + nIn.y * L.barrierZ;
-    const tMeet = (L.barrierZ - p0z) / dir.y;
-    const xMeet = p0x + dir.x * tMeet;
-    app.addCollider({ kind: 'box', minX: -xMeet, maxX: xMeet, minZ: L.barrierZ - 0.8, maxZ: L.barrierZ + 0.85, tag: 'barrier' });
+    // stage body for ground walkers: deck + castle + backstage, side sections, corner towers
+    box(-L.plinthX1, L.plinthX1, -45, 0.75, 'stage');
+    box(-2.2, 2.2, 0, 2.25, 'stage-stairs');
     for (const s of [-1, 1]) {
-      // angled barrier + arm body as chains of circles
-      for (let t = tMeet; t <= len + L.armLedge; t += 0.9) {
-        app.addCollider({ kind: 'circle', x: s * (p0x + dir.x * t), z: p0z + dir.y * t + 0.3, r: 0.75, tag: 'barrier' });
+      const sx = (a: number, b: number): [number, number] => [Math.min(s * a, s * b), Math.max(s * a, s * b)];
+      const [a0, a1] = sx(L.plinthX1, L.corner.x - L.corner.w / 2);
+      box(a0, a1, -45, L.ledgeFrontZ + 0.1, 'stage-side');
+      const [c0, c1] = sx(L.corner.x - L.corner.w / 2, L.corner.x + L.corner.w / 2);
+      box(c0, c1, -45, L.corner.z + L.corner.w / 2 + 1.0, 'stage-corner');
+      // arm ramparts between the openings (4 m gates to the crest bars from Z 28 on)
+      let z0 = L.corner.z + L.corner.w / 2;
+      const spans: [number, number][] = [];
+      for (const [oa, ob] of L.armOpenings) {
+        spans.push([z0, oa]);
+        z0 = ob;
       }
-      for (let t = 0; t <= len + 2; t += 2.5) {
-        const cx = L.armA.x + dir.x * t - nIn.x * 1.5,
-          cz = L.armA.y + dir.y * t - nIn.y * 1.5;
-        app.addCollider({ kind: 'circle', x: s * cx, z: cz, r: 3.2, tag: 'stage-arm' });
+      for (const [za, zb] of spans) {
+        const [r0, r1] = sx(armX(za) - 0.85, armX(zb) + 0.85);
+        box(r0, r1, za - 0.4, zb + 0.4, 'stage-arm');
+      }
+      const E = L.armEnd;
+      const [e0, e1] = sx(E.x - E.w / 2 - 1.4, E.x + E.w / 2);
+      box(e0, e1, E.z - E.w / 2 - 0.4, E.z + E.w / 2, 'stage-armend');
+    }
+    // crowd barriers (front line + arm lines with the channels)
+    for (const r of barrierRuns()) {
+      const [ax, az] = r.a;
+      const [bx, bz] = r.b;
+      if (Math.abs(az - bz) < 1e-3) box(Math.min(ax, bx), Math.max(ax, bx), az - 0.5, az + 0.5, 'barrier');
+      else if (Math.abs(ax - bx) < 1e-3) box(ax - 0.5, ax + 0.5, Math.min(az, bz), Math.max(az, bz), 'barrier');
+      else {
+        const n = Math.ceil(Math.hypot(bx - ax, bz - az) / 0.5);
+        for (let i = 0; i <= n; i++) app.addCollider({ kind: 'circle', x: ax + ((bx - ax) * i) / n, z: az + ((bz - az) * i) / n, r: 0.5, tag: 'barrier' });
       }
     }
     // spots on the deck
@@ -221,9 +264,9 @@ export class MainStageSystem implements System {
       const position = new THREE.Vector3(x, L.deckY, z);
       app.addSpot({ id, label, position, yaw: yawTowards(position, target), pitch });
     };
-    spot('stage_left', 'Stage left wing', -52, -2.4, look, -0.02);
-    spot('stage_right', 'Stage right wing', 52, -2.4, look, -0.02);
-    spot('dj_booth', 'Behind the decks', 0, L.boothZ - 1.4, new THREE.Vector3(0, 2, 60), 0.02);
+    spot('stage_left', 'Stage left (deck)', -30, -3.4, look, -0.02);
+    spot('stage_right', 'Stage right (deck)', 30, -3.4, look, -0.02);
+    spot('dj_booth', 'Behind the decks', 0, L.boothZ - 1.0, new THREE.Vector3(0, 2, 60), 0.02);
   }
 
   // -------------------------------------------------------------------------------------------

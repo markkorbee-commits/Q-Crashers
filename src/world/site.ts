@@ -3,7 +3,7 @@ import * as THREE from 'three';
 /**
  * Site model of the RED field at the Walibi event site, Biddinghuizen (Defqon.1 2026).
  * Authoritative sources: research/terrain-analysis.md (OSM, AHN4, PDOK aerials, official 2026
- * floorplan) and research/stage-canonical.md. Local frame: metres, origin = centre of the stage
+ * floorplan) and research/design-bible.md (stage-canonical.md is superseded). Local frame: metres, origin = centre of the stage
  * front edge at floor level, +Z = bearing 325° (stage -> audience), +X = bearing 235°.
  * Every number below carries the research tag it came from.
  */
@@ -78,11 +78,23 @@ export const PILLAR = {
 /** lantern centre height (light source for the fake lighting) */
 export const LANTERN_Y = 11.2;
 
-/** front-of-stage barrier line (stage-canonical: z = +3, photo pit z 0…3) */
+/** front-of-stage barrier line (design-bible §5.4 / §6.4: Z +3, photo pit behind it) */
 export const PIT_Z = 3;
-/** straight stage front |x| ≤ 60, arms from (±60, 0) to (±88, +24) (stage-canonical) */
-export const STAGE_HALF = 60;
-export const ARM_TIP = { x: 88, z: 24 };
+/**
+ * MainStage outline (design-bible §5.2/§5.8, terrain-layout.json): central deck X ±37 (front Z 0),
+ * side sections to X ±92 (front Z −4), corner towers at (±92, −4), forward arms along the side banks
+ * from (±92, −4) to (±94, +58) — axis-parallel (the "angled" arms of the aerials are perspective).
+ * The stage module (src/stage/layout.ts) builds exactly this; the world only uses it for fences,
+ * bounds and the ?stageproxy stand-in.
+ */
+export const STAGE_HALF = 92;
+export const DECK_HALF = 37;
+export const SIDE_FRONT_Z = -4;
+export const ARM = { x0: 92, z0: -4, x1: 94, z1: 58 };
+/** backstage fence line on the bank crests (FACT 2024 position) */
+export const BACKSTAGE_Z = -6;
+/** crowd barrier along the inner side of each arm */
+export const ARM_BARRIER_X = 90;
 
 /**
  * FOH / press tower: the Endshow photo (delio, EXIF 22:41) was shot from the axis at Z ≈ 150, ≈ 6 m up,
