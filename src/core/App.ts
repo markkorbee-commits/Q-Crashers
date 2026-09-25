@@ -94,6 +94,7 @@ export class App {
     this.scene.add(this.camera);
     this.input = new Input(canvas);
     this.postfx = new PostFX(this.renderer, this.quality);
+    if (this.params.has('nopost')) this.postfx.enabled = false;
     window.addEventListener('resize', () => this.resize());
     this.resize();
   }

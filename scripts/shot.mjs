@@ -60,7 +60,7 @@ const stats = await page.evaluate(() => {
   return {
     fps: a.governor.fps, frameMs: a.governor.frameMs, quality: a.quality.level, scale: a.governor.scale,
     calls: i.render.calls, triangles: i.render.triangles, geometries: i.memory.geometries, textures: i.memory.textures,
-    showTime: a.clock.time, timings: Object.fromEntries(a.timings), systems: sys,
+    showTime: a.clock.time, timings: Object.fromEntries(a.timings), postfx: a.postfx.stats ? a.postfx.stats() : null, systems: sys,
   };
 }).catch((e) => ({ error: e.message }));
 console.log(JSON.stringify({ url, out, loadMs, errors: errors.slice(0, 30), stats }, null, 1));
