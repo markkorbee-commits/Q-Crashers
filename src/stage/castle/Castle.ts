@@ -92,18 +92,18 @@ export class CastleBuilder {
     const Y = L.deckY;
     const portal: Opening = { cx: 0, y0: Y, w: L.portalW, h: L.portalApex - Y, kind: 'pointed' };
     // gate wall with the portal opening (1.2 m thick)
-    this.slab(wallShape(-L.gateHalf, L.gateHalf, Y - 0.3, L.wallTop + 0.6, [portal], this.kit.seg), z, 1.2, TINT.warm);
-    // pointed gable over the gate (mostly behind the dragon's jaw)
-    const gable = new THREE.Shape([new THREE.Vector2(-L.gateHalf, L.wallTop + 0.6), new THREE.Vector2(L.gateHalf, L.wallTop + 0.6), new THREE.Vector2(0, L.wallTop + 4.2)]);
-    this.slab(gable, z - 0.3, 0.9, TINT.warm);
+    // the gate stops at the parapet line: above it (|x| < 6, y > 9.3) the dragon's jaw, neck and
+    // chest sit on the castle (crown module), so nothing of the castle may intrude there
+    this.slab(wallShape(-L.gateHalf, L.gateHalf, Y - 0.3, L.wallTop, [portal], this.kit.seg), z, 1.2, TINT.warm);
+    boxMinMax(k.stone, -L.gateHalf, L.wallTop - 0.3, z - 1.2, L.gateHalf, L.wallTop, z + 0.3, TINT.trim);
     // side buttresses of the gate block
     for (const s of [-1, 1]) {
-      boxMinMax(k.stone, s * L.gateHalf - 0.7 * s, Y, z - 1.2, s * L.gateHalf + 0.2 * s, L.wallTop + 1.4, z + 0.5, TINT.trim);
+      boxMinMax(k.stone, s * L.gateHalf - 0.7 * s, Y, z - 1.2, s * L.gateHalf + 0.2 * s, L.wallTop + 0.9, z + 0.5, TINT.trim);
       // stepped set-offs
       boxMinMax(k.stone, s * L.gateHalf - 0.8 * s, 4.2, z, s * L.gateHalf + 0.3 * s, 4.6, z + 0.75, TINT.trim);
       boxMinMax(k.stone, s * L.gateHalf - 0.8 * s, 7.4, z, s * L.gateHalf + 0.3 * s, 7.8, z + 0.65, TINT.trim);
       // pinnacle on the buttress
-      this.pinnacle(s * (L.gateHalf - 0.25), L.wallTop + 1.4, z - 0.35, 0.8, 2.6);
+      this.pinnacle(s * (L.gateHalf - 0.25), L.wallTop + 0.9, z - 0.35, 0.7, 2.2);
     }
     // bronze/gold scroll frame around the portal + cream outer ring
     this.frame(portal, z, 0.55, 0.38, TINT.wall, 'gold');
@@ -196,7 +196,7 @@ export class CastleBuilder {
     }
     for (const x of [-4.2, 4.2]) this.floodCan(x, Y, z + 0.6);
     // gate crenellation
-    this.merlons(-L.gateHalf, L.gateHalf, L.wallTop + 0.6, z + 0.05, 1.3);
+    for (const sx of [-1, 1]) this.merlons(Math.min(sx * 4.6, sx * L.gateHalf), Math.max(sx * 4.6, sx * L.gateHalf), L.wallTop, z + 0.05, 1.2);
     this.kit.pts.fixturesFloor.push(new THREE.Vector3(-3, Y + 0.35, L.boothZ - 1.6), new THREE.Vector3(3, Y + 0.35, L.boothZ - 1.6));
   }
 

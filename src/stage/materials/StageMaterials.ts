@@ -106,14 +106,15 @@ export class StageMaterials {
 
     this.gold = new THREE.MeshStandardMaterial({
       name: 'stage-gold',
-      color: new THREE.Color('#c79a52'),
+      color: new THREE.Color('#d0a45a'),
+      map: grain.map,
       roughnessMap: grain.orm,
       normalMap: grain.normalMap,
       normalScale: new THREE.Vector2(0.3, 0.3),
-      roughness: 0.55,
+      roughness: 0.48,
       metalness: 1,
       envMap: this.env,
-      envMapIntensity: 1.4,
+      envMapIntensity: 1.6,
     });
     patchStageShading(this.gold, this.u, { flood: 1 });
 
