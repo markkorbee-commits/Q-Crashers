@@ -22,7 +22,23 @@ export const LED_KIND = {
   screen: 8,
   /** blind arcade: dim recessed glow (arms) */
   blind: 9,
+  /** LED panel over a printed banner: shows 'screens' content, invisible (discarded) when off */
+  panel: 10,
 } as const;
+
+/** 'screens.content' modes -> uContent index used by the panel shader */
+export const CONTENT_MODE: Record<string, number> = {
+  off: 0,
+  color: 1,
+  fire: 2,
+  ice: 3,
+  runes: 4,
+  logo: 5,
+  title: 6,
+  eye: 7,
+  embers: 8,
+  pulse: 9,
+};
 
 /**
  * Pixel-mapped LED / emissive material for everything that glows on the castle and side sections.
@@ -52,6 +68,9 @@ export function createLedMaterial(): THREE.ShaderMaterial {
         uPortal: { value: new THREE.Color(0.6, 0.1, 0.3) },
         uPulse: { value: 0 },
         uStrobe: { value: 0 },
+        uContent: { value: 0 },
+        uContentCol: { value: new THREE.Color(1, 0.3, 0.1) },
+        uContentMix: { value: 0 },
       },
     ]),
     vertexShader: /* glsl */ `
@@ -90,6 +109,9 @@ export function createLedMaterial(): THREE.ShaderMaterial {
       uniform vec3 uPortal;
       uniform float uPulse;
       uniform float uStrobe;
+      uniform float uContent;
+      uniform vec3 uContentCol;
+      uniform float uContentMix;
       varying vec4 vLed;
       varying vec2 vUv;
       varying vec3 vWP;
@@ -148,6 +170,76 @@ export function createLedMaterial(): THREE.ShaderMaterial {
           c = mix(cA * 0.06, cA * 1.5, on);
         }
         return c;
+      }
+
+      float fbm2(vec2 p) { return vnoise(p) * 0.55 + vnoise(p * 2.03 + 7.1) * 0.3 + vnoise(p * 4.1 + 3.3) * 0.15; }
+
+      // procedural LED content on a panel; p = local metres (x from the left edge, y from the bottom), size = w,h
+      vec3 panelContent(vec2 p, vec2 size) {
+        float m = uContent;
+        vec2 c = p - size * 0.5;
+        vec3 col = uContentCol;
+        if (m < 1.5) {
+          return col * 1.2;
+        } else if (m < 2.5) {
+          // fire rising from the bottom
+          float n = fbm2(vec2(p.x * 1.4, p.y * 0.9 - uTime * 2.2));
+          float hgt = p.y / size.y;
+          float heat = clamp(n * 1.5 - hgt * 1.05 + 0.25, 0.0, 1.0);
+          vec3 fire = mix(vec3(0.35, 0.01, 0.0), mix(vec3(1.0, 0.25, 0.01), vec3(1.0, 0.62, 0.14), heat), heat);
+          return fire * (0.12 + 1.7 * heat * heat);
+        } else if (m < 3.5) {
+          // ice: slow crystalline cells + glints
+          vec2 q = p * 1.6;
+          vec2 i = floor(q);
+          float cell = h21(i);
+          float glint = step(0.93, h21(i + floor(uTime * 3.0)));
+          float edge = min(fract(q.x), fract(q.y));
+          vec3 ice = mix(vec3(0.05, 0.25, 0.6), vec3(0.6, 0.9, 1.0), cell);
+          return ice * (0.4 + 0.6 * smoothstep(0.0, 0.08, edge)) * 0.9 + vec3(glint) * 2.0;
+        } else if (m < 4.5) {
+          // runes: glyph cells toggling on the beat
+          vec2 g = vec2(0.42, 0.55);
+          vec2 i = floor(p / g);
+          vec2 f = fract(p / g);
+          float on = step(0.45, h21(i + vec2(floor(uBeat), 3.0)));
+          float stroke = step(0.35, h21(floor(f * vec2(3.0, 4.0)) + i * 7.0));
+          float inset = step(0.12, f.x) * step(f.x, 0.88) * step(0.1, f.y) * step(f.y, 0.9);
+          return col * on * stroke * inset * 1.6;
+        } else if (m < 5.5) {
+          // logo: an original shield outline with a pulsing core (no official marks)
+          vec2 d = c / (size.x * 0.42);
+          float shield = max(abs(d.x) - 0.8, d.y - 0.9);
+          shield = max(shield, length(vec2(d.x, max(d.y + 0.2, 0.0) * 0.0 + min(d.y + 0.2, 0.0))) - 0.95);
+          float ring = 1.0 - smoothstep(0.0, 0.06, abs(shield));
+          float core = 1.0 - smoothstep(0.1, 0.35, length(d - vec2(0.0, 0.05)));
+          return col * (ring * 1.6 + core * (0.8 + 0.6 * exp(-fract(uBeat) * 4.0)));
+        } else if (m < 6.5) {
+          // title: bright bars scrolling upwards
+          float b = step(0.55, fract(p.y * 1.2 - uTime * 0.8));
+          return col * b * 1.3;
+        } else if (m < 7.5) {
+          // eye: almond eye with a slit pupil that slowly looks around
+          vec2 d = c / (size.x * 0.46);
+          float lid = abs(d.y) - 0.55 * (1.0 - d.x * d.x);
+          float eyeMask = 1.0 - smoothstep(-0.02, 0.02, lid);
+          vec2 look = vec2(sin(uTime * 0.7) * 0.25, sin(uTime * 0.43) * 0.08);
+          float iris = 1.0 - smoothstep(0.26, 0.3, length(d - look));
+          float pupil = 1.0 - smoothstep(0.035, 0.06, abs(d.x - look.x)) * (1.0 - step(0.26, length(d - look)));
+          vec3 e = mix(vec3(1.0, 0.85, 0.6) * 0.8, col * 1.8, iris);
+          e *= mix(1.0, 0.05, iris * (1.0 - smoothstep(0.035, 0.06, abs(d.x - look.x))));
+          vec3 glow = col * 0.25 * (1.0 - smoothstep(0.0, 0.6, lid));
+          return e * eyeMask + glow * (1.0 - eyeMask);
+        } else if (m < 8.5) {
+          // embers: sparse sparks drifting up
+          vec2 q = vec2(p.x * 3.0, p.y * 2.0 - uTime * 1.2);
+          vec2 i = floor(q);
+          vec2 f = fract(q) - 0.5;
+          float r = h21(i);
+          float spark = step(0.8, r) * (1.0 - smoothstep(0.05, 0.14, length(f + (vec2(h21(i + 3.1), h21(i + 7.7)) - 0.5) * 0.6)));
+          return mix(vec3(1.0, 0.45, 0.05), vec3(1.0, 0.9, 0.5), r) * spark * 2.5 + vec3(0.25, 0.03, 0.0) * (1.0 - p.y / size.y);
+        }
+        return col * (0.15 + 1.4 * exp(-fract(uBeat) * 5.0));
       }
 
       void main() {
@@ -242,9 +334,20 @@ export function createLedMaterial(): THREE.ShaderMaterial {
         } else if (kind < 8.5) {
           float scan = 0.85 + 0.15 * sin(vUv.y * 60.0);
           col = vec3(0.25, 0.7, 1.0) * 0.9 * scan;
-        } else {
+        } else if (kind < 9.5) {
           float g = mix(0.9, 0.05, clamp(vUv.y * 1.3, 0.0, 1.0));
           col = uArcade * 0.16 * g * pulse;
+        } else {
+          // LED panel over a printed banner: dissolves in/out (screen-door), discarded when off
+          float d = h21(floor(gl_FragCoord.xy));
+          if (uContent < 0.5 || d >= uContentMix) discard;
+          vec2 size = vec2(max(0.01, vLed.w), max(0.01, strip));
+          vec2 p = vec2(vUv.x * size.x, vUv.y * size.y);
+          // LED module grid (5 cm pitch)
+          vec2 f = fract(p / 0.05);
+          float grid = smoothstep(0.0, 0.2, f.x) * smoothstep(1.0, 0.8, f.x) * smoothstep(0.0, 0.2, f.y) * smoothstep(1.0, 0.8, f.y);
+          grid = mix(grid, 0.6, clamp(fwidth(p.x / 0.05) - 0.4, 0.0, 1.0));
+          col = panelContent(p, size) * (0.35 + 0.65 * grid) * pulse;
         }
         col += vec3(uStrobe) * 3.0 * step(kind, 0.5);
         gl_FragColor = vec4(col, 1.0);

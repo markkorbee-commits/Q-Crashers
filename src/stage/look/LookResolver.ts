@@ -5,6 +5,7 @@ import type { LightEnv } from '../../core/LightEnv';
 import { resolveColor } from '../../show/colors';
 import type { ResolvedPalette, ShowEngine } from '../../show/ShowEngine';
 import type { Cue, SectionKind } from '../../show/ShowTypes';
+import { CONTENT_MODE } from '../materials/LedMaterial';
 import type { StageLook, StageLookEx } from '../StageLook';
 
 type Mode = StageLook['mode'];
@@ -204,6 +205,8 @@ export class LookResolver {
     out.bannerGlow = 0.55 + 0.45 * energy;
     out.skullGlow = 0.6 + 0.6 * energy;
     out.emblemGlow = 0.7 + 0.5 * energy;
+    out.content = 0;
+    out.contentMix = 0;
     const scr = show.active('screens', t, this.screens);
     for (let i = scr.length - 1; i >= 0; i--) {
       const c = scr[i];
@@ -211,6 +214,15 @@ export class LookResolver {
       const env01 = smoothstep(0, 0.3, t - c.t) * (1 - smoothstep(c.dur - 0.5, c.dur, t - c.t));
       const mode = typeof c.p.mode === 'string' ? c.p.mode : 'color';
       const col = resolveColor(c.p.color, pal, _c, 'primary');
+      out.content = CONTENT_MODE[mode] ?? 1;
+      // panels dissolve in over ~0.6 s and out over the last 0.6 s
+      out.contentMix = smoothstep(0, 0.6, t - c.t) * (1 - smoothstep(c.dur - 0.6, c.dur, t - c.t));
+      out.contentColor.copy(col);
+      if (!c.p.color) {
+        if (mode === 'eye' || mode === 'fire' || mode === 'embers') out.contentColor.copy(FIRE);
+        else if (mode === 'ice') out.contentColor.copy(ICE);
+        else if (mode === 'runes') out.contentColor.set('#ffb640');
+      }
       let cPat = pat;
       let cI = ledI;
       switch (mode) {

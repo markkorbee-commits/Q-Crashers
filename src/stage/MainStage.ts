@@ -294,6 +294,9 @@ export class MainStageSystem implements System {
     (l.uPortal.value as THREE.Color).copy(look.portal).multiplyScalar(1.2 + 1.5 * look.mouth);
     l.uPulse.value = look.pulse;
     l.uStrobe.value = look.strobe;
+    l.uContent.value = look.content;
+    l.uContentMix.value = look.contentMix;
+    (l.uContentCol.value as THREE.Color).copy(look.contentColor).multiplyScalar(2.2);
   }
 
   setQuality(q: QualitySettings): void {

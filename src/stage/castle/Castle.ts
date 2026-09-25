@@ -188,6 +188,7 @@ export class CastleBuilder {
     boxMinMax(k.paint, -2.15, Y + 0.08, L.boothZ - 0.55, 2.15, Y + 1.35, L.boothZ + 0.55, PAINT.black);
     boxMinMax(k.paint, -2.25, Y + 1.35, L.boothZ - 0.6, 2.25, Y + 1.42, L.boothZ + 0.62, PAINT.grey);
     decorPanel(k, "booth", 0, Y + 0.74, L.boothZ + 0.561, 4.2, 1.1, GLOW.banner);
+    k.led.rect(new THREE.Vector3(0, Y + 0.74, L.boothZ + 0.575), RIGHT, UP, 4.2, 1.1, LED_KIND.panel, 4.2, 1.1);
     // decks + mixer
     for (const x of [-1.25, -0.42, 0.42, 1.25]) {
       const w = Math.abs(x) > 1 ? 0.62 : 0.5;
@@ -551,6 +552,8 @@ export class CastleBuilder {
     const bx = s * 27.25;
     rod(k.metal, new THREE.Vector3(bx - 1.35, 8.85, z + 0.05), new THREE.Vector3(bx + 1.35, 8.85, z + 0.05), 0.07, METAL.black);
     decorPanel(k, 'banner', bx, 8.85 - 2.65, z + 0.08, 2.2, 5.3, GLOW.banner);
+    // the banner doubles as an LED panel for 'screens' content (invisible while off)
+    k.led.rect(new THREE.Vector3(bx, 8.85 - 2.65, z + 0.1), RIGHT, UP, 2.2, 5.3, LED_KIND.panel, 2.2, 5.3);
     // skull niche panel on the outer bay
     decorPanel(k, 'skullNiche', s * 40, 5.25, z - 0.05, 2.5, 4.0, GLOW.skull);
     boxMinMax(k.gold, s * 40 - 1.35, 3.1, z - 0.3, s * 40 + 1.35, 3.25, z + 0.05);

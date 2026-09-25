@@ -54,6 +54,7 @@ export class SidesBuilder {
     k.led.bar(new THREE.Vector3(xa, L.sideWallTop - 0.35, z + 0.36), new THREE.Vector3(xb, L.sideWallTop - 0.35, z + 0.36), OUT, 0.1);
     // banner (variant) between the arches + lantern post
     decorPanel(k, 'banner2', s * 55.1, 4.75, z + 0.05, 2.0, 4.8, GLOW.banner);
+    k.led.rect(new THREE.Vector3(s * 55.1, 4.75, z + 0.07), new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), 2.0, 4.8, LED_KIND.panel, 2.0, 4.8);
     this.post(new THREE.Vector3(s * 55.1, 0, z - 0.3), 0, L.sideWallTop + 1.4);
     for (const x of [51.3, 58.9]) {
       k.pts.roof.push(new THREE.Vector3(s * x, L.sideWallTop + 0.55, z - 0.3));

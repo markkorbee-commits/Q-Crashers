@@ -90,6 +90,11 @@ export interface StageLookEx extends StageLook {
   strobe: number;
   /** current section energy 0..1 */
   energy: number;
+  /** 'screens.content' shown on the LED banner panels: CONTENT_MODE index (0 = off) */
+  content: number;
+  contentColor: THREE.Color;
+  /** 0..1 dissolve of the panels */
+  contentMix: number;
 }
 
 export function createStageLookEx(): StageLookEx {
@@ -108,5 +113,8 @@ export function createStageLookEx(): StageLookEx {
     pulseColor: new THREE.Color('#ffffff'),
     strobe: 0,
     energy: 0.5,
+    content: 0,
+    contentColor: new THREE.Color('#ff5a12'),
+    contentMix: 0,
   };
 }
