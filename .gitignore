@@ -8,3 +8,4 @@ public/assets/audio/*
 !public/assets/audio/*.analysis.json
 .shots/
 .claude/
+dist-artifact/

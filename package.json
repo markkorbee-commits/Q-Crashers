@@ -9,7 +9,9 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host",
     "typecheck": "tsc --noEmit",
-    "fetch-audio": "bash scripts/fetch-audio.sh"
+    "fetch-audio": "bash scripts/fetch-audio.sh",
+    "build:artifact": "node scripts/build-artifact.mjs",
+    "validate-show": "node scripts/validate-show.mjs"
   },
   "license": "UNLICENSED",
   "dependencies": {
