@@ -61,3 +61,49 @@ export function createStageLook(): StageLook {
     flash: new THREE.Color(0, 0, 0),
   };
 }
+
+/**
+ * Extra, castle-only fields (the crown only reads the StageLook base fields; passing this subtype
+ * is contract compatible).
+ */
+export interface StageLookEx extends StageLook {
+  /** extended LED pattern for the castle battens: 0..4 as ledPattern, 5 fire, 6 wave, 7 runes */
+  ledPatternX: number;
+  /** 0 steady, 1 fire flicker, 2 frozen shimmer, 3 embers */
+  windowMode: number;
+  /** crystal lanterns on the side sections */
+  lantern: THREE.Color;
+  /** arcade backlight / portal interior */
+  arcade: THREE.Color;
+  portal: THREE.Color;
+  /** front-line fixture lenses */
+  lamp: THREE.Color;
+  /** decor glow multipliers */
+  bannerGlow: number;
+  skullGlow: number;
+  emblemGlow: number;
+  /** colour of the 'stage.pulse' cue */
+  pulseColor: THREE.Color;
+  /** 0..1 strobe level (from app.env) */
+  strobe: number;
+  /** current section energy 0..1 */
+  energy: number;
+}
+
+export function createStageLookEx(): StageLookEx {
+  return {
+    ...createStageLook(),
+    ledPatternX: 0,
+    windowMode: 0,
+    lantern: new THREE.Color('#8a3cff'),
+    arcade: new THREE.Color('#5a2cff'),
+    portal: new THREE.Color('#ff3a6a'),
+    lamp: new THREE.Color('#dfe8ff'),
+    bannerGlow: 1,
+    skullGlow: 1,
+    emblemGlow: 1,
+    pulseColor: new THREE.Color('#ffffff'),
+    strobe: 0,
+    energy: 0.5,
+  };
+}
