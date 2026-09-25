@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+# Copyrighted media is never committed: supply it locally (see public/assets/audio/README.md)
+public/assets/audio/*
+!public/assets/audio/README.md
+.shots/

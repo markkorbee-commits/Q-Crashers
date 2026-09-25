@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "meta": {
+    "id": "defqon1-2026-endshow",
+    "title": "The Endshow | Defqon.1 2026",
+    "duration": 1581,
+    "audio": { "src": ["./assets/audio/endshow-2026.m4a", "./assets/audio/endshow-2026.mp3", "./assets/audio/endshow-2026.ogg", "./assets/audio/endshow-2026.opus", "./assets/audio/endshow-2026.webm", "./assets/audio/endshow-2026.wav"], "youtubeId": "fLWY-Sxb1bE", "offset": 0 }
+  },
+  "chapters": [
+    { "t": 0, "title": "The Four Seasons \"Winter\" (Defqon.1 Version)", "artist": "Vivaldi" },
+    { "t": 115, "title": "Discorecord (Galactixx Remix)", "artist": "Frontliner" },
+    { "t": 274, "title": "Sacred Oath (Defqon.1 2026 Anthem)", "artist": "D-Sturb ft. E-Life" },
+    { "t": 567, "title": "L.P.A.", "artist": "Akimbo & Missy" },
+    { "t": 622, "title": "Sacred Flame", "artist": "Bass Modulators" },
+    { "t": 886, "title": "Domitor Draconis", "artist": "JDX" },
+    { "t": 1098, "title": "Embers", "artist": "D-Block & S-te-Fan" },
+    { "t": 1318, "title": "In The Cold", "artist": "Atmozfears & Jesse Jax" }
+  ],
+  "tempo": [ { "start": 0, "end": 1581, "bpm": 150, "anchor": 0, "kick": true } ],
+  "sections": [ { "start": 0, "end": 1581, "label": "placeholder", "kind": "drop", "energy": 0.8, "palette": "red" } ],
+  "palettes": { "red": { "primary": "#ff1a0a", "secondary": "#ff7a00", "accent": "#ffffff" } },
+  "moments": [],
+  "cues": []
+}

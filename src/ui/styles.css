@@ -1,0 +1,104 @@
+:root {
+  --red: #e10600;
+  --red-deep: #7a0000;
+  --ink: #07070a;
+  --paper: #f3ede4;
+  --muted: #a39b92;
+  --font-display: 'Oswald', 'Impact', system-ui, sans-serif;
+  --font-ui: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+}
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: var(--font-ui);
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: none;
+}
+#app,
+#gl {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+#ui {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+#ui > * {
+  pointer-events: auto;
+}
+.landing {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(ellipse at 50% 60%, #2a0303 0%, #07070a 70%);
+  text-align: center;
+  padding: 16px;
+}
+.landing h1 {
+  font-family: var(--font-display);
+  font-size: clamp(40px, 9vw, 110px);
+  letter-spacing: 0.04em;
+  margin: 0;
+  line-height: 0.95;
+}
+.landing h2 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(16px, 3vw, 30px);
+  letter-spacing: 0.3em;
+  margin: 12px 0 36px;
+  color: var(--red);
+}
+.progress {
+  width: min(360px, 80vw);
+  height: 3px;
+  background: #2a2a2a;
+}
+.progress .bar {
+  height: 100%;
+  width: 0;
+  background: var(--red);
+  transition: width 0.2s;
+}
+.load-label {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 10px 0 28px;
+  min-height: 1em;
+}
+.landing button {
+  font-family: var(--font-display);
+  font-size: 20px;
+  letter-spacing: 0.12em;
+  padding: 14px 28px;
+  background: var(--red);
+  color: #fff;
+  border: 0;
+  cursor: pointer;
+}
+.landing button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.fatal {
+  padding: 32px;
+  max-width: 640px;
+  margin: 10vh auto;
+}

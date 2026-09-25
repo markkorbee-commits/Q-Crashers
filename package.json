@@ -1,0 +1,24 @@
+{
+  "name": "defqon1-2026-endshow-experience",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Defqon.1 2026 - The Endshow Experience: an interactive real-time 3D tribute (hobby project)",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host",
+    "typecheck": "tsc --noEmit",
+    "fetch-audio": "bash scripts/fetch-audio.sh"
+  },
+  "license": "UNLICENSED",
+  "dependencies": {
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@types/three": "^0.186.0",
+    "playwright-core": "1.56",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.1"
+  }
+}
