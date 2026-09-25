@@ -174,8 +174,10 @@ export interface TubeOpts {
   vScale?: number;
   /** reference up vector for the cross-section orientation (keeps flat sides consistent) */
   up?: V3;
-  /** per-point radius scale x/y (elliptical) */
+  /** cross-section scale along the binormal axis (elliptical tubes) */
   aspect?: number;
+  /** cross-section scale along the normal axis (with `up`, N is the axis closest to `up`) */
+  aspectN?: number;
 }
 
 /** Tube along sampled points with a radius function r(t), t in [0,1]. */
@@ -204,6 +206,7 @@ export function tube(pts: V3[], r: (t: number) => number, o: TubeOpts = {}): THR
   let len = 0;
   const vScale = o.vScale ?? 4;
   const aspect = o.aspect ?? 1;
+  const aspectN = o.aspectN ?? 1;
   for (let i = 0; i < n; i++) {
     if (i > 0) len += pts[i].distanceTo(pts[i - 1]);
     const t = i / (n - 1);
@@ -211,7 +214,7 @@ export function tube(pts: V3[], r: (t: number) => number, o: TubeOpts = {}): THR
     for (let j = 0; j <= radial; j++) {
       const a = (j / radial) * Math.PI * 2;
       const k = o.shape ? o.shape(a) : 1;
-      const cx = Math.cos(a) * rr * k;
+      const cx = Math.cos(a) * rr * k * aspectN;
       const cy = Math.sin(a) * rr * k * aspect;
       pos.push(pts[i].x + N[i].x * cx + B[i].x * cy, pts[i].y + N[i].y * cx + B[i].y * cy, pts[i].z + N[i].z * cx + B[i].z * cy);
       uv.push(j / radial, len / vScale);

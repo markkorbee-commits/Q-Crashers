@@ -37,6 +37,10 @@ export interface CrownUniforms {
   uPixel: THREE.IUniform<number>;
   uTime: THREE.IUniform<number>;
   uFlashV: THREE.IUniform<number>;
+  /** show time (s) for the sweeping light pools */
+  uShowT: THREE.IUniform<number>;
+  /** 0..1 strength of the moving-head light pools sweeping over the set */
+  uPoolAmt: THREE.IUniform<number>;
 }
 
 export function createUniforms(): CrownUniforms {
@@ -64,6 +68,8 @@ export function createUniforms(): CrownUniforms {
     uPixel: { value: 0.001 },
     uTime: { value: 0 },
     uFlashV: { value: 0 },
+    uShowT: { value: 0 },
+    uPoolAmt: { value: 0.35 },
   };
 }
 
@@ -117,6 +123,19 @@ uniform vec3 uAmbient;
 uniform vec3 uMouthPos;
 uniform vec3 uMouthCol;
 uniform vec3 uLava;
+uniform float uShowT;
+uniform float uPoolAmt;
+// soft light pools of the moving-head washes sweeping across the set (deterministic in show time)
+float crownPools(vec3 p) {
+  float f = 0.0;
+  for (int i = 0; i < 4; i++) {
+    float fi = float(i);
+    vec2 c = vec2(sin(uShowT * (0.23 + fi * 0.07) + fi * 1.7) * 32.0, 15.0 + sin(uShowT * (0.19 + fi * 0.05) + fi * 2.3) * 7.0);
+    vec2 d = (p.xy - c) / vec2(10.0, 7.0);
+    f += exp(-dot(d, d));
+  }
+  return f;
+}
 varying vec3 vCrownPos;
 varying float vCrownFx;
 void crownLight(vec3 Lw, vec3 col, vec3 N, vec3 V, PhysicalMaterial m, inout ReflectedLight rl, float wrap) {
@@ -138,11 +157,16 @@ const WASH_APPLY = /* glsl */ `
   #endif
   // floods sit low on the deck / castle roof: stronger on the lower parts of the set
   float hFade = mix(1.2, 0.6, smoothstep(6.0, 27.0, vCrownPos.y));
+  #ifndef CROWN_LITE
+  hFade *= 1.0 + uPoolAmt * (clamp(crownPools(vCrownPos), 0.0, 1.3) - 0.45);
+  #endif
   float xs = clamp(vCrownPos.x / 30.0, -1.0, 1.0);
   crownLight(vec3(-0.45, -0.35, 0.82), uWashA * hFade * (1.0 - 0.35 * xs), geometryNormal, geometryViewDir, material, reflectedLight, 0.0);
   crownLight(vec3(0.45, -0.3, 0.84), uWashB * hFade * (1.0 + 0.35 * xs), geometryNormal, geometryViewDir, material, reflectedLight, 0.0);
   crownLight(vec3(0.1, 0.42, 0.9), uKey, geometryNormal, geometryViewDir, material, reflectedLight, 0.0);
+  #ifndef CROWN_LITE
   crownLight(vec3(0.0, 0.55, -0.83), uRim, geometryNormal, geometryViewDir, material, reflectedLight, 0.0);
+  #endif
   crownLight(vec3(0.15, 0.75, 0.45), uFlash, geometryNormal, geometryViewDir, material, reflectedLight, 0.3);
   // glowing throat: a point light between the jaws
   vec3 dm = uMouthPos - vCrownPos;
@@ -165,12 +189,15 @@ export interface PatchOpts {
   membrane?: boolean;
   /** use the vertex fx channel to add LED-coloured emissive (edge lights on plates) */
   fxLed?: boolean;
+  /** cheaper lighting (no light pools, no rim light) for mobile GPUs */
+  lite?: boolean;
 }
 
 /** Inject the virtual wash rig (+ optional effects) into a MeshStandardMaterial. */
 export function patchStandard(mat: THREE.MeshStandardMaterial, U: CrownUniforms, o: PatchOpts): THREE.MeshStandardMaterial {
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, U);
+    if (o.lite) sh.defines = { ...(sh.defines ?? {}), CROWN_LITE: '' };
     sh.vertexShader = sh.vertexShader
       .replace(
         '#include <common>',
@@ -216,7 +243,7 @@ iblIrradiance *= uEnvTint;`,
 {
   #ifdef USE_EMISSIVEMAP
   float crack = texture2D(emissiveMap, vEmissiveMapUv).r;
-  totalEmissiveRadiance += uLava * crack * crack * 1.1 * step(0.5, vCrownFx);
+  totalEmissiveRadiance += uLava * crack * crack * 0.8 * step(0.5, vCrownFx);
   #endif
 }`;
     }
@@ -256,7 +283,7 @@ iblIrradiance *= uEnvTint;`,
     if (emissive) fs = fs.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n${emissive}`);
     sh.fragmentShader = fs;
   };
-  mat.customProgramCacheKey = () => 'crown-' + o.key;
+  mat.customProgramCacheKey = () => 'crown-' + o.key + (o.lite ? '-lite' : '');
   return mat;
 }
 

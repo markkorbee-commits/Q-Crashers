@@ -64,7 +64,6 @@ export class DragonCrown {
   private tmpR = new THREE.Matrix4();
   private tmpC = new THREE.Color();
   private tmpC2 = new THREE.Color();
-  private detailMeshes: THREE.Object3D[] = [];
   private level: QualitySettings['level'] = 'high';
 
   async build(q: QualitySettings): Promise<void> {
@@ -91,6 +90,7 @@ export class DragonCrown {
 
     // ---------------------------------------------------------------- materials
     const U = this.U;
+    const lite = q.level === 'mobile';
     const std = (key: string, p: THREE.MeshStandardMaterialParameters, set?: PbrSet, extra: Parameters<typeof patchStandard>[2] = { key }) => {
       const m = new THREE.MeshStandardMaterial({
         vertexColors: true,
@@ -98,7 +98,7 @@ export class DragonCrown {
         ...(set ? { map: set.map, normalMap: set.normalMap, roughnessMap: set.roughnessMap } : {}),
         ...p,
       });
-      patchStandard(m, U, { ...extra, key });
+      patchStandard(m, U, { ...extra, key, lite });
       this.materials.push(m);
       return m;
     };
@@ -121,9 +121,9 @@ export class DragonCrown {
       envMapIntensity: 0.35,
       vertexColors: true,
     });
-    patchStandard(membraneMat, U, { key: 'membrane', membrane: true });
+    patchStandard(membraneMat, U, { key: 'membrane', membrane: true, lite });
     const rosetteMat = new THREE.MeshStandardMaterial({ color: '#c8a060', metalness: 0.9, roughness: 0.35, envMap: env, envMapIntensity: 1.1, map: panel.map, normalMap: panel.normalMap });
-    patchStandard(rosetteMat, U, { key: 'rosette' });
+    patchStandard(rosetteMat, U, { key: 'rosette', lite });
     const stripMat = createStripMaterial(U);
     const bulbMat = createBulbMaterial(U);
     const glowMat = createRosetteGlowMaterial(U);
@@ -171,7 +171,6 @@ export class DragonCrown {
         m.matrixAutoUpdate = false;
         parent.add(m);
         this.meshes.push(m);
-        this.detailMeshes.push(m);
       }
       if (b.bulbs.count) {
         this.stat.bulbs += b.bulbs.count;
@@ -270,6 +269,8 @@ export class DragonCrown {
     const cam = ctx.camera;
     U.uPixel.value = (2 * Math.tan(THREE.MathUtils.degToRad(cam.fov) * 0.5)) / Math.max(200, typeof window !== 'undefined' ? window.innerHeight : 720);
     U.uTime.value = ctx.time;
+    U.uShowT.value = ctx.showTime;
+    U.uPoolAmt.value = look.mode === 'dormant' ? 0 : 0.4;
 
     // LEDs
     U.uLed.value.copy(look.led);
@@ -298,7 +299,7 @@ export class DragonCrown {
     // inner fire: throat point light + lava cracks
     const fire = this.tmpC2.setRGB(1.0, 0.32, 0.06).lerp(look.eyes, 0.55);
     U.uMouthCol.value.copy(fire).multiplyScalar(look.mouth * 11 + 0.3);
-    U.uLava.value.copy(fire).multiplyScalar(look.mouth * 0.55 + (look.mode === 'ember' || look.mode === 'rage' ? 0.3 : 0.03));
+    U.uLava.value.copy(fire).multiplyScalar(look.mouth * 0.5 + (look.mode === 'ember' || look.mode === 'rage' ? 0.22 : 0.03));
 
     this.eyeMat.color.copy(look.eyes).multiplyScalar(Math.max(0.05, look.eyesIntensity) * 1.3);
 
@@ -312,7 +313,6 @@ export class DragonCrown {
         this.tmpR.makeRotationZ(look.rosetteAngle * dir + i * 0.4);
         this.tmpM.multiplyMatrices(this.rosetteFrames[i], this.tmpR);
         this.rosettes.setMatrixAt(i, this.tmpM);
-        this.tmpM.elements[12] += 0;
         this.tmpR.makeTranslation(0, 0, 0.2);
         this.tmpM.multiply(this.tmpR);
         this.rosetteGlow.setMatrixAt(i, this.tmpM);
@@ -338,13 +338,13 @@ export class DragonCrown {
     const l = wingLayout(-1);
     const r = wingLayout(1);
     return {
-      dragonMouth: v(0, 10.8, -3.2),
-      dragonEyes: [v(-3.4, 14.6, -6.2), v(2.6, 14.9, -7.6)],
-      dragonHead: v(0, 15, -8),
+      dragonMouth: v(-2.9, 12.8, -6.9),
+      dragonEyes: [v(-4.6, 16.7, -10.4), v(0.6, 16.7, -8.5)],
+      dragonHead: v(-1.4, 16.0, -11.0),
       wingTips: [l.finialTops[0], r.finialTops[0]],
       wingLeft: [...l.tips, ...l.finialTops],
       wingRight: [...r.tips, ...r.finialTops],
-      roof: [...l.finialTops, v(0, 20.3, -13), ...r.finialTops],
+      roof: [...l.finialTops, v(0.1, 22.0, -17.9), v(6.7, 23.2, -18.3), ...r.finialTops],
     };
   }
 

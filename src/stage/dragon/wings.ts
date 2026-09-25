@@ -318,6 +318,16 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
     }
     membranes.add(g, memb);
     for (let i = 0; i < pos.length; i += 3) membPts.push(v3(pos[i], pos[i + 1], pos[i + 2]));
+    // thin batten ribs between the pixel lanes: the "stacked curved rib" structure of the skin
+    for (let lane = 2; lane <= 4; lane++) {
+      const ci = Math.round((lane / 6) * nu);
+      const rib: V3[] = [];
+      for (let j = Math.round(nv * 0.1); j <= Math.round(nv * 0.97); j++) {
+        const o = (j * (nu + 1) + ci) * 3;
+        rib.push(v3(pos[o], pos[o + 1], pos[o + 2]).addScaledVector(nrm, 0.08));
+      }
+      if (rib.length > 2) W.copper.add(tube(rib, () => 0.08, { radial: 5 }), null, PAL.copperDeep);
+    }
 
     // top edge: LED strip, small spikes, dots
     const edge: V3[] = [];
@@ -383,7 +393,7 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
         const len = fi === 1 ? [1.5, 1.9, 2.3][Math.min(2, size)] : [1.5, 1.9, 2.3][size];
         const e0 = v3(-0.2, 0.2, 0.08).applyMatrix4(m);
         const e1 = v3(-0.31 + len * 0.18 * 0.6, len * 0.8, 0.08).applyMatrix4(m);
-        W.strips.add([e0, e1], 0, 0.08, t * 20, (fi * 0.3 + i * 0.07) % 1);
+        W.strips.add([e0, e1], 0, 0.12, t * 20, (fi * 0.3 + i * 0.07) % 1);
       }
     }
   });

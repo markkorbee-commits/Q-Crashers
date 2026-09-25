@@ -248,7 +248,7 @@ export function buildHead(k: Kit): HeadResult {
     const ey = v3().crossVectors(ex, nrm).normalize();
     const eyeC = c.clone().addScaledVector(nrm, 0.3);
     const dots = [v2(0, 0)];
-    for (let i = 0; i < 6; i++) dots.push(v2(Math.cos((i / 6) * Math.PI * 2) * 0.24, Math.sin((i / 6) * Math.PI * 2) * 0.24));
+    for (let i = 0; i < 6; i++) dots.push(v2(Math.cos((i / 6) * Math.PI * 2) * 0.36, Math.sin((i / 6) * Math.PI * 2) * 0.36));
     for (const d of dots) {
       const q = eyeC.clone().addScaledVector(ex, d.x).addScaledVector(ey, d.y).applyMatrix4(HM);
       W.bulbs.add(q, BULB.eye, 0, 0.09, 0.2);
@@ -591,7 +591,7 @@ export function buildHead(k: Kit): HeadResult {
       const z = -0.9 + t * 5.4;
       pts.push(v3(0.1 * Math.sin(t * 5), -0.55 + Math.pow(Math.max(0, t - 0.72) / 0.28, 2) * 0.9 - 0.15 * Math.sin(t * Math.PI), z));
     }
-    const tg = tube(pts, (t) => (1.05 - 0.35 * t) * (t > 0.9 ? Math.max(0.2, (1 - t) * 10) : 1), { radial: segs(k, 14, 8), aspect: 0.28, up: v3(0, 1, 0), capEnd: true });
+    const tg = tube(pts, (t) => (0.95 - 0.45 * t) * (t > 0.86 ? Math.max(0.25, Math.sqrt((1 - t) / 0.14)) : 1), { radial: segs(k, 14, 8), aspectN: 0.28, up: v3(0, 1, 0), capEnd: true });
     J.flesh.add(tg, null, PAL.tongue);
     // tongue bulbs
     for (let i = 0; i < Math.round(18 * (0.5 + 0.5 * k.detail)); i++) {

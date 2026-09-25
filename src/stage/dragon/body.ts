@@ -93,7 +93,7 @@ export function buildBody(k: Kit): BodyResult {
         const a = -1.1 + (j / 10) * 2.2;
         pts.push(v3(c.x + Math.sin(a) * w, y - Math.cos(a) * 0.25, c.z + Math.cos(a) * 2.85 + 0.1));
       }
-      W.armor.add(tube(pts, () => 0.5, { radial: 8, aspect: 0.35, up: v3(0, 0, 1), capStart: true, capEnd: true }), null, i % 2 ? PAL.plateRed : PAL.bronze);
+      W.armor.add(tube(pts, () => 0.5, { radial: 8, aspectN: 0.35, up: v3(0, 0, 1), capStart: true, capEnd: true }), null, i % 2 ? PAL.plateRed : PAL.bronze);
     }
     // bronze bosses with bulbs
     const boss = [v3(-1.6, 1.1, 2.3), v3(1.5, 0.6, 2.4), v3(-0.4, -0.6, 2.8), v3(1.9, -1.4, 2.0), v3(-1.9, -1.2, 2.1), v3(0.5, 2.2, 2.2)];
@@ -146,7 +146,7 @@ export function buildBody(k: Kit): BodyResult {
     ];
     const s = spline(pts, 16);
     // flattened sideways (a claw is taller than wide) and tapering to a sharp tip
-    W.steel.add(tube(s, (t) => THREE.MathUtils.lerp(0.62, 0.03, Math.pow(t, 1.1)), { radial: segs(k, 12, 7), capStart: true, aspect: 0.62, up: v3(1, 0, 0) }), null, talonMat);
+    W.steel.add(tube(s, (t) => THREE.MathUtils.lerp(0.62, 0.03, Math.pow(t, 1.1)), { radial: segs(k, 12, 7), capStart: true, aspectN: 0.62, up: v3(1, 0, 0) }), null, talonMat);
     // armoured knuckle cap
     W.armor.add(tube([base.clone().add(v3(0, -0.1, -0.5)), base.clone().add(v3(0, 0.25, 0.35))], (t) => 0.72 - t * 0.12, { radial: 6, capStart: true, capEnd: true }), null, PAL.plateRed);
   };
@@ -227,12 +227,12 @@ function buildRider(k: Kit): { riderEyes: V3[]; riderTop: V3 } {
   const W = k.world;
   const R = W.rider;
   const radial = segs(k, 14, 8);
-  const seat = v3(6.6, 18.0, -18.3);
-  const RM = new THREE.Matrix4().compose(seat, new THREE.Quaternion().setFromEuler(new THREE.Euler(0.05, -0.3, 0)), v3(1.45, 1.45, 1.45));
+  const seat = v3(7.7, 17.7, -18.6);
+  const RM = new THREE.Matrix4().compose(seat, new THREE.Quaternion().setFromEuler(new THREE.Euler(0.05, -0.36, 0)), v3(1.55, 1.55, 1.55));
   const add = (g: THREE.BufferGeometry, m: THREE.Matrix4 | null, c: THREE.ColorRepresentation = PAL.riderDark) => R.add(g, m ? RM.clone().multiply(m) : RM, c);
   const T = (x: number, y: number, z: number) => new THREE.Matrix4().makeTranslation(x, y, z);
   // saddle
-  add(tube(bez2(v3(-0.9, 0.05, -0.9), v3(0, -0.35, 0), v3(0.9, 0.05, 0.9).setX(0).setZ(1.0), 8), () => 0.45, { radial: 10, aspect: 0.4, up: v3(0, 1, 0), capStart: true, capEnd: true }), null, PAL.darkBronze);
+  add(tube(bez2(v3(-0.9, 0.05, -0.9), v3(0, -0.35, 0), v3(0.9, 0.05, 0.9).setX(0).setZ(1.0), 8), () => 0.45, { radial: 10, aspectN: 0.4, up: v3(0, 1, 0), capStart: true, capEnd: true }), null, PAL.darkBronze);
   // pelvis
   add(new THREE.BoxGeometry(1.1, 0.6, 0.85), T(0, 0.35, 0));
   // legs straddling the neck
