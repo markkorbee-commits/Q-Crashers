@@ -3,7 +3,7 @@ import type { App } from '../core/App';
 import { Rng } from '../core/rng';
 import type { Collider2D, FrameContext, QualitySettings, System } from '../core/types';
 import { buildSiteMask, SITE_RECT } from './groundMaps';
-import { ARM, BACKSTAGE_Z, LAKE, PILLARS, PIT_Z, terrainHeight, WATER_Y } from './site';
+import { ARM, BACKSTAGE_Z, LAKE, PILLARS, PIT_Z, terraceHeight, terrainHeight, WATER_Y } from './site';
 import { cloudNoiseTexture, groundDetailTexture, makeCanvas, canvasTexture } from './tex';
 import { Vegetation } from './vegetation';
 import { patchWorldMaterial, SKY_REFLECT_GLSL, worldUniforms } from './worldLights';
@@ -44,6 +44,8 @@ export class TerrainSystem implements System {
     this.detail = groundDetailTexture(mobile ? 256 : Math.min(512, ts));
     this.detail.anisotropy = q.anisotropy;
     this.macro = cloudNoiseTexture(mobile ? 128 : 256);
+    this.macro.anisotropy = q.anisotropy;
+    this.siteMask.anisotropy = Math.max(4, q.anisotropy);
     this.buildGround(mobile);
     this.buildWater();
     this.buildPlates();
@@ -53,9 +55,9 @@ export class TerrainSystem implements System {
     this.registerBounds();
   }
 
-  /** ground height at x,z (metres, floor = 0) */
+  /** walkable ground height at x,z (metres, floor = 0): terrain, or the photo terrace deck / stairs */
   heightAt(x: number, z: number): number {
-    return terrainHeight(x, z);
+    return terraceHeight(x, z) ?? terrainHeight(x, z);
   }
 
   // -------------------------------------------------------------------------------------------
@@ -272,18 +274,22 @@ export class TerrainSystem implements System {
     this.app.scene.add(this.plates);
   }
 
-  /** rubber cable protectors feeding the 8 delay towers (the 2024 aerial shows lines along the rows) */
+  /**
+   * rubber cable protectors feeding the 8 delay towers (the 2024 aerial shows lines along the rows).
+   * Segments butt together and the (weathered, dull) yellow lid runs continuously: a thin bright lid
+   * broken every 0.9 m aliased into a dotted "ant trail" at a distance.
+   */
   private buildCableRamps(): void {
     const seg = 0.9;
-    const body = new THREE.BoxGeometry(0.52, 0.06, seg * 0.98);
+    const body = new THREE.BoxGeometry(0.52, 0.06, seg);
     body.translate(0, 0.03, 0);
-    const lid = new THREE.BoxGeometry(0.14, 0.012, seg * 0.9);
+    const lid = new THREE.BoxGeometry(0.16, 0.01, seg);
     lid.translate(0, 0.064, 0);
-    const colB = new Float32Array(body.getAttribute('position').count * 3).fill(0.06);
+    const colB = new Float32Array(body.getAttribute('position').count * 3).fill(0.05);
     body.setAttribute('color', new THREE.BufferAttribute(colB, 3));
     const nL = lid.getAttribute('position').count;
     const colL = new Float32Array(nL * 3);
-    for (let i = 0; i < nL; i++) colL.set([0.75, 0.55, 0.05], i * 3);
+    for (let i = 0; i < nL; i++) colL.set([0.2, 0.15, 0.03], i * 3);
     lid.setAttribute('color', new THREE.BufferAttribute(colL, 3));
     const geo = mergeSimple([body, lid]);
     const mat = patchWorldMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8 }), { key: 'ramps' });
@@ -338,9 +344,10 @@ export class TerrainSystem implements System {
 
   setQuality(q: QualitySettings): void {
     if (this.vegetation) this.vegetation.setBudget(q.treeCount);
-    if (this.detail) {
-      this.detail.anisotropy = q.anisotropy;
-      this.detail.needsUpdate = true;
+    for (const t of [this.detail, this.macro]) {
+      if (!t) continue;
+      t.anisotropy = q.anisotropy;
+      t.needsUpdate = true;
     }
   }
 
@@ -467,6 +474,11 @@ float gDamp = 0.0;
   vec4 mac2 = texture2D( tMacro, xz * ( 1.0 / 47.0 ) + 0.21 );
   float dist = length( vGW - cameraPosition );
   float fine = 1.0 - smoothstep( 40.0, 160.0, dist );
+  // high-frequency detail (pebbles, blades, aggregate) fades to its mean well before it would alias
+  float nearD = 1.0 - smoothstep( 6.0, 38.0, dist );
+  float d2b = mix( 0.5, d2.b, nearD );
+  // metres per pixel on the ground (joint / grate anti-aliasing)
+  vec2 fwm = max( fwidth( xz ), vec2( 1e-4 ) );
 
   // --- heat-parched grass (straw / olive / bare soil)
   float patchy = smoothstep( 0.32, 0.72, mac.r * 0.55 + mac2.g * 0.45 );
@@ -476,9 +488,9 @@ float gDamp = 0.0;
   vec4 mid = texture2D( tMacro, xz * ( 1.0 / 11.0 ) + 0.63 );
   patchy = clamp( patchy + ( mid.g - 0.5 ) * 0.9, 0.0, 1.0 );
   vec3 grass = mix( olive, straw, patchy );
-  grass *= 0.78 + 0.45 * mid.r;
-  grass *= mix( 1.0, 0.55 + 0.9 * d1.g, fine * 0.85 + 0.15 );
-  grass = mix( grass, soil, smoothstep( 0.5, 0.85, d2.a ) * 0.4 + smoothstep( 0.62, 0.8, mac2.r ) * 0.25 );
+  grass *= 0.8 + 0.4 * mid.r;
+  grass *= mix( 1.0, 0.74 + 0.52 * d1.g, nearD * 0.75 + fine * 0.1 );
+  grass = mix( grass, soil, smoothstep( 0.5, 0.85, mix( 0.5, d2.a, nearD ) ) * 0.4 + smoothstep( 0.62, 0.8, mac2.r ) * 0.25 );
   float hG = d1.g * 0.7 + d2.g * 0.3;
 
   // --- far polder: crop parcels on the site grid, ditches between them
@@ -494,20 +506,21 @@ float gDamp = 0.0;
   }
 
   // --- worn ground: dirt / gravel / sand
-  vec3 dirt = mix( vec3( 0.13, 0.095, 0.065 ), vec3( 0.21, 0.17, 0.12 ), d2.b );
-  vec3 sand = vec3( 0.45, 0.42, 0.35 ) * ( 0.85 + 0.25 * d1.b );
+  vec3 dirt = mix( vec3( 0.14, 0.105, 0.072 ), vec3( 0.19, 0.155, 0.11 ), d2b );
+  vec3 sand = vec3( 0.45, 0.42, 0.35 ) * ( 0.9 + 0.15 * mix( 0.5, d1.b, nearD ) );
   vec3 worn = xz.y > 240.0 ? sand : ( xz.y < -30.0 ? mix( dirt, vec3( 0.26, 0.24, 0.2 ), 0.6 ) : dirt );
   float wear = clamp( m.b * ( 0.75 + 0.5 * mac2.b ), 0.0, 1.0 );
   vec3 col = mix( grass, worn, wear );
   float h = mix( hG, d2.b * 0.6, wear );
   float rough = 0.96;
 
-  // --- roads / hard-standing (light gravel-asphalt road, darker hard-standing)
+  // --- roads / hard-standing (light gravel-asphalt road, darker compacted gravel hard-standing):
+  //     low-contrast grain near the eye, broad tyre-worn and dusty patches at every distance
   float road = smoothstep( 0.25, 0.45, m.g );
-  vec3 roadC = mix( vec3( 0.11, 0.105, 0.095 ), vec3( 0.30, 0.28, 0.23 ), smoothstep( 0.6, 0.95, m.g ) ) * ( 0.8 + 0.35 * d2.b ) * ( 0.9 + 0.2 * mac2.g );
+  vec3 roadC = mix( vec3( 0.12, 0.112, 0.1 ), vec3( 0.30, 0.28, 0.23 ), smoothstep( 0.6, 0.95, m.g ) ) * ( 0.91 + 0.16 * d2b ) * ( 0.84 + 0.3 * mac2.g ) * ( 0.9 + 0.2 * mid.b );
   col = mix( col, roadC, road );
   h = mix( h, d2.b * 0.3, road );
-  rough = mix( rough, 0.82, road );
+  rough = mix( rough, 0.82 + 0.1 * mac2.r, road );
 
   // --- concrete floor: 4 m slabs, joints, aggregate, tyre marks, gutters with gully grates
   float conc = smoothstep( 0.3, 0.6, m.r );
@@ -515,17 +528,26 @@ float gDamp = 0.0;
     vec2 sl = xz / 4.0;
     vec2 cell = floor( sl );
     vec2 fr = fract( sl );
-    float edge = min( min( fr.x, 1.0 - fr.x ), min( fr.y, 1.0 - fr.y ) ) * 4.0;
-    float joint = ( 1.0 - smoothstep( 0.008, 0.03, edge ) ) * ( 0.25 + 0.75 * fine );
+    // sawn joints (≈ 3.5 cm) box-filtered against the pixel footprint: no dotted "ant trails" at
+    // grazing angles, the lines fade to their true average darkness with distance
+    vec2 e2 = min( fr, 1.0 - fr ) * 4.0;
+    const float JW = 0.018;
+    vec2 jl = ( 1.0 - smoothstep( JW - fwm * 0.5, JW + fwm * 0.5, e2 ) ) * min( vec2( 1.0 ), ( 2.0 * JW ) / fwm );
+    float joint = max( jl.x, jl.y );
     float tint = gHash( cell );
-    vec3 cc = vec3( 0.27, 0.265, 0.24 ) * ( 0.84 + 0.3 * tint ) * ( 0.8 + 0.32 * d1.r ) * ( 0.86 + 0.24 * mac.b );
+    // slab-to-slab variation kept subtle (the floor is poured concrete, not tile); broad dirt, dust
+    // and tyre-worn lanes at 10–60 m scales give it the weathered festival-ground look
+    vec3 cc = vec3( 0.25, 0.245, 0.225 ) * ( 0.94 + 0.12 * tint ) * ( 0.9 + 0.18 * mix( 0.5, d1.r, nearD ) ) * ( 0.84 + 0.28 * mac.b );
+    cc *= 0.8 + 0.32 * smoothstep( 0.2, 0.8, mac2.g );
     cc *= m.r < 0.95 ? 0.85 : 1.0;
-    float tyre = smoothstep( 0.72, 1.0, sin( xz.x * 1.7 + mac2.r * 5.0 ) ) * smoothstep( 0.5, 0.8, mac.g ) * 0.22;
-    cc *= 1.0 - tyre - smoothstep( 0.6, 0.92, d2.a ) * 0.18 - smoothstep( 0.55, 0.85, mac2.a ) * 0.12;
-    cc *= 1.0 - joint * 0.3;
+    float tyre = smoothstep( 0.72, 1.0, sin( xz.x * 1.7 + mac2.r * 5.0 ) ) * smoothstep( 0.5, 0.8, mac.g ) * 0.22 * ( 0.4 + 0.6 * fine );
+    cc *= 1.0 - tyre - smoothstep( 0.6, 0.92, mix( 0.5, d2.a, nearD ) ) * 0.18 - smoothstep( 0.55, 0.85, mac2.a ) * 0.14;
+    cc *= 1.0 - joint * 0.35;
     float gd = abs( abs( xz.x ) - 29.0 );
-    float gut = ( 1.0 - smoothstep( 0.1, 0.45, gd ) ) * step( xz.y, 113.0 ) * step( 0.0, xz.y );
-    float grate = step( gd, 0.28 ) * step( abs( fract( xz.y / 10.0 + 0.5 ) - 0.5 ) * 10.0, 0.3 ) * step( xz.y, 113.0 ) * step( 0.0, xz.y );
+    float inFloor = step( xz.y, 113.0 ) * step( 0.0, xz.y );
+    float gut = ( 1.0 - smoothstep( 0.1, 0.45 + fwm.x, gd ) ) * inFloor;
+    float gz = abs( fract( xz.y / 10.0 + 0.5 ) - 0.5 ) * 10.0;
+    float grate = ( 1.0 - smoothstep( 0.28 - fwm.x * 0.5, 0.28 + fwm.x * 0.5, gd ) ) * ( 1.0 - smoothstep( 0.3 - fwm.y * 0.5, 0.3 + fwm.y * 0.5, gz ) ) * inFloor;
     cc = mix( cc, cc * 0.6, gut );
     cc = mix( cc, vec3( 0.025 ), grate );
     // damp: the gutters and low spots still wet from the shower before the storm (INFERENCE)
@@ -534,7 +556,8 @@ float gDamp = 0.0;
     cc *= 1.0 - 0.35 * damp;
     col = mix( col, cc, conc );
     h = mix( h, d1.r * 0.2 - joint * 0.9 - grate * 0.5, conc );
-    rough = mix( rough, mix( 0.78, 0.16, damp ), conc );
+    // roughness varies with wear / dust (no uniform polished sheen)
+    rough = mix( rough, mix( 0.74 + 0.18 * mac2.r, 0.18, damp ), conc );
   }
 
   // --- timber decking ("flonders") behind the road
@@ -552,7 +575,8 @@ float gDamp = 0.0;
   }
   diffuseColor.rgb *= col;
   gRough = rough;
-  gH = h * ( 0.3 + 0.7 * fine );
+  // derivative bump only close to the eye: far away it turns into per-pixel sparkle ("TV static")
+  gH = h * nearD;
 }
 `;
 

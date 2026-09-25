@@ -6,13 +6,13 @@ import { GeoBuilder, lin } from './geom';
 import { Landmarks } from './landmarks';
 import { LanternPillars } from './pillars';
 import { buildProps, type PropsOut } from './props';
-import { ARM, DECK_HALF, FOH, LANTERN_Y, PILLAR, PILLARS, SIDE_FRONT_Z, STAGE_HALF, terrainHeight } from './site';
+import { ARM, CAM_PEN, DECK_HALF, LANTERN_Y, PILLAR, PILLAR_ANCHOR_Y, PILLARS, SIDE_FRONT_Z, STAGE_HALF, TERRACE, terrainHeight } from './site';
 import { buildStructures } from './structures';
 import { patchWorldMaterial } from './worldLights';
 
 /**
- * The grounds of the RED field: the 8 lantern pillars (delay towers), barriers and fences, the FOH /
- * press tower, entrances, facilities, flags, and the distant skyline. Registers the world anchors
+ * The grounds of the RED field: the 8 lantern pillars (delay towers), barriers and fences, the low FOH /
+ * camera platform, the photo terrace, entrances, facilities, flags, and the distant skyline. Registers the world anchors
  * (pillars_top/base, delay_towers, foh, laser_field, fireworks_back/sides), the named viewing spots
  * and the colliders. Pillar lamps/shafts follow app.env (lighting engineer) every frame.
  */
@@ -57,16 +57,18 @@ export class GroundsSystem implements System {
   private registerAnchors(): void {
     const A = this.app.anchors;
     const v = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
-    // pillar order = PILLARS (row-major from the stage outwards, left before right) — chase index
-    A.set('pillars_top', PILLARS.map((p) => v(p.x, PILLAR.top, p.z)));
-    A.set('pillars_base', PILLARS.map((p) => v(p.x, PILLAR.plinthH, p.z)));
+    // pillar order = PILLARS (row-major from the stage outwards, left before right) — chase index.
+    // 'pillars_top' Y = capital top + 3.2 (the rigs derive the capital ledge from it, bible §5.10)
+    A.set('pillars_top', PILLARS.map((p) => v(p.x, PILLAR_ANCHOR_Y, p.z)));
+    A.set('pillars_base', PILLARS.map((p) => v(p.x, PILLAR.deckH, p.z)));
     // fixture positions on the delay towers: the capital top (moving heads on its corners)
     A.set('delay_towers', PILLARS.map((p) => v(p.x, PILLAR.capTop + 0.4, p.z)));
-    // FOH / press tower: front edge of the roof (followspots / field lasers / camera position)
-    const yF = terrainHeight(0, FOH.z0);
-    A.set('foh', [v(0, yF + FOH.roof + 0.3, FOH.z0 - 0.4)]);
-    // field laser emitters: pillar capitals (beams between pillar tops) + the FOH roof corners
-    A.set('laser_field', [...PILLARS.map((p) => v(p.x, PILLAR.capTop + 0.5, p.z)), v(-6.5, yF + FOH.roof + 0.2, FOH.z0), v(6.5, yF + FOH.roof + 0.2, FOH.z0)]);
+    // FOH / camera platform on the axis (bible §5.11): deck centre (floor fixtures, crew, director)
+    const yF = terrainHeight(CAM_PEN.x, CAM_PEN.z) + CAM_PEN.deckY;
+    A.set('foh', [v(CAM_PEN.x, yF, CAM_PEN.z)]);
+    // field laser emitters: pillar capitals (beams between pillar tops) + stands at the platform front
+    const zF = CAM_PEN.z - CAM_PEN.d / 2 + 0.4;
+    A.set('laser_field', [...PILLARS.map((p) => v(p.x, PILLAR.capTop + 0.5, p.z)), v(-5.6, yF + 2.2, zF), v(5.6, yF + 2.2, zF)]);
     // aerial shells from mortar racks on the rear bank between the stage rear (z ≈ −30) and the tree belt (z ≈ −57)
     A.set('fireworks_back', Array.from({ length: 9 }, (_, i) => {
       const x = -80 + i * 20;
@@ -90,10 +92,16 @@ export class GroundsSystem implements System {
       const eye = new THREE.Vector3(x, terrainHeight(x, z), z);
       return { id, label, position, yaw: yawTowards(eye, look), pitch: pitchTowards(eye, look) * pitchScale };
     };
+    // the official Endshow photo P (design-bible §5.12): front rail of the photo terrace, deck Y 5,
+    // eye ≈ 6.8 m, looking straight down the aisle, slightly up
+    const T = TERRACE;
+    const photo: NamedSpot = { id: 'photo', label: 'Photo terrace (official photo)', position: new THREE.Vector3(-0.9, T.deckY, T.z0 + 1.6), yaw: 0, pitch: 0.06 };
     const spots: NamedSpot[] = [
       S('entrance', 'Field entrance (E1)', 121.4, 151.2),
       S('back', 'Back of the field', 0, 134),
-      S('foh', 'FOH tower', 4, 146),
+      // just behind the FOH / camera platform on the axis, ≈ 95 m from the stage front
+      S('foh', 'FOH / camera platform', 3.5, CAM_PEN.z + CAM_PEN.d / 2 + 2.2),
+      photo,
       S('middle', 'Middle of the field', -4, 74),
       S('crowd', 'In the crowd', 6, 32),
       S('front', 'Front row', 0, 5.5, new THREE.Vector3(0, 16, -6), 0.6),

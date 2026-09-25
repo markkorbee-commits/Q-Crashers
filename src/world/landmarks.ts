@@ -23,9 +23,11 @@ export interface LightPoint {
   color: string;
   /** world size (m) of the glow sprite */
   size: number;
-  /** 0 steady, 1 obstruction blink (W-rot), 2 slow flicker, 3 steady red obstruction */
+  /** 0 steady, 1 obstruction blink (W-rot), 2 slow flicker, 3 steady red obstruction, 4 broad haze glow */
   kind: number;
 }
+
+const xyz = (v: THREE.Vector3) => ({ x: v.x, y: v.y, z: v.z });
 
 export class Landmarks {
   readonly group = new THREE.Group();
@@ -180,33 +182,95 @@ export class Landmarks {
     this.triangles += (rg.getAttribute('position').count / 3) * towers.length;
   }
 
+  /**
+   * The other festival areas (bible §6.1: "their lights are the coloured clusters on the right
+   * horizon"): low open silhouettes — a truss roof on four towers over a dark deck, peaked tents,
+   * PURPLE as white tensile sails by the lake — kept at 8–14 m so the tree belts hide most of them
+   * from the field, with clustered glows in the area hue and a few slow upward beams.
+   */
   private buildAreas(mat: THREE.Material, lights: LightPoint[]): void {
     const b = new GeoBuilder();
+    const fabric = new GeoBuilder();
     const rng = new Rng(4040);
+    const beams: { p: THREE.Vector3; dir: THREE.Vector3; col: THREE.Color; len: number; w: number; seed: number }[] = [];
+    const truss = lin('#141416');
     for (const a of OTHER_AREAS) {
-      // dark stage / tent silhouette and a few structures, lit by work lights and dim coloured glows
       const d = Math.hypot(a.x, a.z);
       const s = d > 330 ? 330 / d : 1; // compress the farthest areas (angular size preserved)
       const cx = a.x * s,
         cz = a.z * s;
       const y = terrainHeight(cx, cz) - 0.3;
       const face = Math.atan2(-cx, -cz);
-      const q = new THREE.Quaternion().setFromAxisAngle(THREE.Object3D.DEFAULT_UP, face);
+      const q = new THREE.Quaternion().setFromAxisAngle(THREE.Object3D.DEFAULT_UP, face + rng.range(-0.5, 0.5));
       const base = new THREE.Matrix4().compose(new THREE.Vector3(cx, y, cz), q, new THREE.Vector3(s, s, s));
+      const at = (px: number, py: number, pz: number) => new THREE.Vector3(px, py, pz).applyMatrix4(base);
       const put = (w: number, h: number, dd: number, px: number, py: number, pz: number, c: [number, number, number]) =>
         b.add(GeoBuilder.unit('box'), base.clone().multiply(new THREE.Matrix4().compose(new THREE.Vector3(px, py, pz), new THREE.Quaternion(), new THREE.Vector3(w, h, dd))), c);
-      const sw = a.r * 1.2;
-      put(sw, 14 + rng.range(0, 8), 14, 0, 9, 0, lin('#101012'));
-      put(sw * 0.35, 20 + rng.range(0, 8), 6, -sw * 0.45, 12, 2, lin('#0d0d0f'));
-      put(sw * 0.35, 20 + rng.range(0, 8), 6, sw * 0.45, 12, 2, lin('#0d0d0f'));
-      const n = 10 + rng.int(0, 10);
-      for (let k = 0; k < n; k++) {
-        const p = new THREE.Vector3(rng.range(-sw / 2, sw / 2), rng.range(2, 22), rng.range(-6, 8)).applyMatrix4(base);
-        const coloured = rng.chance(0.4);
-        lights.push({ x: p.x, y: p.y, z: p.z, color: coloured ? a.hue : rng.pick(['#fff1d6', '#ffd49a', '#e8f0ff']), size: (coloured ? 4 : 2.2) * s + 0.8, kind: coloured ? 2 : 0 });
+      const hue = new THREE.Color(a.hue);
+      const sw = a.r * 1.1;
+      if (a.name === 'PURPLE') {
+        // open tensile roofs (three white sails on masts) over the lakeside dance floor
+        for (let k = 0; k < 3; k++) {
+          const ox = (k - 1) * 12,
+            oz = rng.range(-3, 3);
+          const g = new THREE.PlaneGeometry(11, 9, 6, 4);
+          const pa = g.getAttribute('position') as THREE.BufferAttribute;
+          for (let i = 0; i < pa.count; i++) {
+            const u = pa.getX(i) / 11,
+              v = pa.getY(i) / 9;
+            pa.setZ(i, (u * u - v * v) * 6 + 7.5);
+          }
+          g.rotateX(-Math.PI / 2);
+          g.computeVertexNormals();
+          fabric.add(g, base.clone().multiply(new THREE.Matrix4().makeTranslation(ox, 0, oz)), lin('#b8b2c8'));
+          for (const [mx, mz] of [[-5.5, -4.5], [5.5, -4.5], [-5.5, 4.5], [5.5, 4.5]]) b.beam(at(ox + mx, 0, oz + mz), at(ox + mx, 9.5, oz + mz), 0.18, truss);
+        }
+      } else {
+        // stage: truss roof grid on four towers (open — light shows through), dark deck + backdrop
+        const W = sw,
+          H = 9 + rng.range(0, 4),
+          D = 10;
+        for (const tx of [-W / 2, W / 2]) for (const tz of [-D / 2, D / 2]) b.beam(at(tx, 0, tz), at(tx, H, tz), 0.6, truss);
+        for (const tz of [-D / 2, D / 2]) b.beam(at(-W / 2, H, tz), at(W / 2, H, tz), 0.5, truss);
+        for (let k = 0; k <= 4; k++) b.beam(at(-W / 2 + (W * k) / 4, H, -D / 2), at(-W / 2 + (W * k) / 4, H, D / 2), 0.35, truss);
+        put(W * 0.9, 1.4, D * 0.8, 0, 0.7, 0, lin('#0c0c0d'));
+        put(W * 0.8, H * 0.6, 0.3, 0, H * 0.3 + 1.4, -D / 2 + 0.3, lin('#0e0e10'));
+        // two to three peaked tents beside it (bars, merch), pale canvas
+        const nt = 2 + rng.int(0, 1);
+        for (let k = 0; k < nt; k++) {
+          const side = k % 2 ? 1 : -1;
+          const tx = side * (W / 2 + 7 + rng.range(0, 6)),
+            tz = rng.range(-4, 8);
+          const tw = rng.range(6, 9);
+          fabric.add(GeoBuilder.unit('box'), base.clone().multiply(new THREE.Matrix4().compose(new THREE.Vector3(tx, 1.3, tz), new THREE.Quaternion(), new THREE.Vector3(tw, 2.6, tw))), lin('#8f8a80'));
+          const cone = new THREE.ConeGeometry(tw * 0.72, 3.2, 4);
+          cone.rotateY(Math.PI / 4);
+          fabric.add(cone, base.clone().multiply(new THREE.Matrix4().makeTranslation(tx, 4.2, tz)), lin('#a39e92'));
+          lights.push({ ...xyz(at(tx, 2.2, tz + tw / 2 + 0.2)), color: '#ffcf8a', size: 2.2 * s + 0.6, kind: 0 });
+        }
+        // upward beams from the roof (slowly sweeping, area hue)
+        const nb = 3 + rng.int(0, 2);
+        for (let k = 0; k < nb; k++) {
+          const px = -W / 2 + (W * (k + 0.5)) / nb;
+          const dir = new THREE.Vector3(rng.range(-0.35, 0.35), 1, rng.range(-0.25, 0.25)).normalize().applyQuaternion(q);
+          beams.push({ p: at(px, H - 0.4, 0), dir, col: hue.clone().lerp(new THREE.Color('#ffffff'), rng.range(0, 0.2)), len: 70 * s + 25, w: 0.6 * s + 0.2, seed: rng.next() });
+        }
       }
+      // clustered glows: the coloured wash under the roof, work lights, a few flickering fixtures
+      const n = 12 + rng.int(0, 8);
+      for (let k = 0; k < n; k++) {
+        const coloured = rng.chance(0.6);
+        const p = at(rng.range(-sw / 2, sw / 2), coloured ? rng.range(1.5, 9) : rng.range(3, 10), rng.range(-5, 6));
+        lights.push({ ...xyz(p), color: coloured ? a.hue : rng.pick(['#fff1d6', '#ffd49a', '#e8f0ff']), size: (coloured ? 4.5 : 2.2) * s + 0.8, kind: coloured ? 2 : 0 });
+      }
+      // a broad dim glow of the area hue over the whole cluster (haze lit from below)
+      lights.push({ ...xyz(at(0, 7, 0)), color: a.hue, size: sw * 1.2 * s + 8, kind: 4 });
     }
     this.add(b.build(), mat, 'other-areas');
+    // canvas / sails: faintly lit from inside by the area lights (emissive tint)
+    const fm = patchWorldMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, side: THREE.DoubleSide, emissive: new THREE.Color(0.03, 0.022, 0.04) }), { key: 'area-fabric', lamps: false });
+    this.add(fabric.build(), fm, 'other-areas-fabric');
+    this.buildAreaBeams(beams);
     // Biddinghuizen village glow (NE, ~3 km), farms and street lights on the polder roads
     for (let k = 0; k < 70; k++) {
       const az = rng.range(30, 62);
@@ -221,6 +285,84 @@ export class Landmarks {
       if (Math.abs(dir.x * dist) < 300 && dir.z * dist > -300 && dir.z * dist < 350) continue;
       lights.push({ x: dir.x * dist, y: rng.range(2, 7), z: dir.z * dist, color: rng.pick(['#ffb45a', '#ffe0b0', '#ffffff']), size: rng.range(1.5, 3), kind: rng.chance(0.1) ? 2 : 0 });
     }
+  }
+
+  /** thin additive light shafts over the other areas (one draw call, swaying from show time) */
+  private buildAreaBeams(beams: { p: THREE.Vector3; dir: THREE.Vector3; col: THREE.Color; len: number; w: number; seed: number }[]): void {
+    if (!beams.length) return;
+    const SEG = 6;
+    const pos: number[] = [];
+    const col: number[] = [];
+    const sway: number[] = [];
+    const idx: number[] = [];
+    const up = new THREE.Vector3(0, 1, 0);
+    const t1 = new THREE.Vector3();
+    const t2 = new THREE.Vector3();
+    for (const bm of beams) {
+      t1.crossVectors(bm.dir, up);
+      if (t1.lengthSq() < 1e-4) t1.set(1, 0, 0);
+      t1.normalize();
+      t2.crossVectors(bm.dir, t1).normalize();
+      const v0 = pos.length / 3;
+      for (const t of [0, 1]) {
+        const r = bm.w * (1 + t * 5);
+        for (let k = 0; k < SEG; k++) {
+          const a = (k / SEG) * Math.PI * 2;
+          const p = bm.p.clone().addScaledVector(bm.dir, bm.len * t).addScaledVector(t1, Math.cos(a) * r).addScaledVector(t2, Math.sin(a) * r);
+          pos.push(p.x, p.y, p.z);
+          col.push(bm.col.r, bm.col.g, bm.col.b);
+          sway.push(bm.seed, bm.len, t);
+        }
+      }
+      for (let k = 0; k < SEG; k++) {
+        const a = v0 + k,
+          b2 = v0 + ((k + 1) % SEG),
+          c = v0 + SEG + k,
+          d = v0 + SEG + ((k + 1) % SEG);
+        idx.push(a, b2, c, b2, d, c);
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    g.setAttribute('aSway', new THREE.Float32BufferAttribute(sway, 3));
+    g.setIndex(idx);
+    g.computeBoundingSphere();
+    const mat = new THREE.ShaderMaterial({
+      uniforms: { uTime: this.U.uTime },
+      vertexShader: /* glsl */ `
+        attribute vec3 color;
+        attribute vec3 aSway;
+        uniform float uTime;
+        varying vec3 vCol;
+        varying float vT;
+        void main() {
+          vec3 p = position;
+          float s = aSway.x * 6.283;
+          p.xz += vec2( sin( uTime * 0.31 + s ), cos( uTime * 0.23 + s * 1.7 ) ) * aSway.z * aSway.y * 0.2;
+          vec4 mv = modelViewMatrix * vec4( p, 1.0 );
+          gl_Position = projectionMatrix * mv;
+          vCol = color;
+          vT = aSway.z;
+        }`,
+      fragmentShader: /* glsl */ `
+        varying vec3 vCol;
+        varying float vT;
+        void main() {
+          float a = pow( 1.0 - vT, 2.0 ) * 0.014;
+          gl_FragColor = vec4( vCol * a, 1.0 );
+        }`,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      fog: false,
+    });
+    const m = new THREE.Mesh(g, mat);
+    m.name = 'area-beams';
+    m.renderOrder = 4;
+    this.group.add(m);
+    this.triangles += idx.length / 3;
   }
 
   private buildLights(pts: LightPoint[]): void {
@@ -270,12 +412,14 @@ export class Landmarks {
             // synchronised W-rot obstruction lights: 1 s on, 0.5 off, 1 on, 1.5 off
             float ph = mod( uTime, 4.0 );
             k = ( ph < 1.0 || ( ph > 1.5 && ph < 2.5 ) ) ? 1.0 : 0.04;
-          } else if ( aKind > 1.5 && aKind < 2.5 ) {
+          } else if ( aKind > 1.5 && aKind < 2.5 || aKind > 3.5 ) {
             k = 0.65 + 0.35 * sin( uTime * ( 1.3 + aSeed * 2.0 ) + aSeed * 30.0 );
           }
           // small sprites carry the energy of the whole lamp: brighter when sub-pixel
           float area = max( 1.0, 2.6 / max( px, 0.3 ) );
-          vCol = color * k * uGain * min( area, 4.0 ) * ( aKind > 0.5 && aKind < 1.5 || aKind > 2.5 ? 3.0 : 1.6 );
+          // kind 4 = broad dim haze glow over a lit area (no hot core)
+          float gain = aKind > 3.5 ? 0.12 : ( aKind > 0.5 && aKind < 1.5 || aKind > 2.5 ? 3.0 : 1.6 );
+          vCol = color * k * uGain * min( area, 4.0 ) * gain;
         }`,
       fragmentShader: /* glsl */ `
         varying vec3 vCol;

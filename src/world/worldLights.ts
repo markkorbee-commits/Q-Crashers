@@ -50,18 +50,21 @@ vec3 wlSky( vec3 r ) {
 const LAMP_GAIN = 70;
 const SPILL_GAIN = 90;
 const STAGE_GAIN = 5200;
-const FLASH_GAIN = 2600;
+/** fireworks / pyro flashes on the grounds: aerial shells burst 60–150 m up, so the field gets a
+ *  modest share (photo P: silhouetted pillars and a dim red floor under a full crackle canopy) */
+const FLASH_GAIN = 1100;
+/** flash saturation for the grounds (a dense finale must not light the floor like a studio) */
+const WORLD_FLASH_K = 7;
 
 const tmp = new THREE.Color();
 
 /**
  * Soft-knee compression of the accumulated flash energy (factor applied to env.flashColor, which is
  * pre-multiplied by intensity): single bursts (≈1–5) pass almost linearly, a dense finale saturates
- * around 18 instead of blowing the whole world out.
+ * around K (18 for the sky / haze) instead of blowing the whole world out.
  */
-export function flashCompression(total: number): number {
+export function flashCompression(total: number, K = 18): number {
   if (!(total > 0)) return 0;
-  const K = 18;
   return (K * (1 - Math.exp(-total / K))) / total;
 }
 
@@ -94,7 +97,7 @@ export function updateWorldLights(env: LightEnv, time: number): void {
   u.uWStageCol.value.x += sb;
   u.uWStageCol.value.y += sb;
   u.uWStageCol.value.z += sb;
-  const fl = FLASH_GAIN * flashCompression(env.flashIntensity);
+  const fl = FLASH_GAIN * flashCompression(env.flashIntensity, WORLD_FLASH_K);
   u.uWFlashCol.value.set(env.flashColor.r * fl, env.flashColor.g * fl, env.flashColor.b * fl);
   u.uWFlash.value.set(env.flashPos.x, env.flashPos.y, env.flashPos.z, 400);
 }
@@ -149,7 +152,9 @@ const APPLY = /* glsl */ `
     vec3 L = lp - geometryPosition;
     float d2 = dot( L, L );
     wl.direction = L * inversesqrt( d2 );
-    wl.color = uWStageCol / ( d2 + uWStage.w );
+    // the stage wash is aimed at the front of the field: it falls off faster than a point source
+    // (≈ 0.4 at 30 m, 0.1 at 90 m on top of 1/d²), so the floor stays dim red, not a lit tile hall
+    wl.color = uWStageCol / ( d2 + uWStage.w ) * ( 1400.0 / ( 1400.0 + d2 ) );
     RE_Direct( wl, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, wm, reflectedLight );
     lp = ( viewMatrix * vec4( uWFlash.xyz, 1.0 ) ).xyz;
     L = lp - geometryPosition;
