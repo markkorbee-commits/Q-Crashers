@@ -43,7 +43,7 @@ page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
 const url = `${base}?${query}`;
 const t0 = Date.now();
 await page.goto(url, { waitUntil: 'load', timeout: 120000 });
-await page.waitForFunction(() => window.__app && window.__app.ready, null, { timeout: 180000 }).catch(() => errors.push('timeout waiting for __app.ready'));
+await page.waitForFunction(() => window.__app && window.__app.ready, null, { timeout: 900000, polling: 250 }).catch(() => errors.push('timeout waiting for __app.ready'));
 const loadMs = Date.now() - t0;
 if (evalJs) await page.evaluate(evalJs).catch((e) => errors.push('eval: ' + e.message));
 await page.waitForTimeout(wait);
@@ -60,7 +60,8 @@ const stats = await page.evaluate(() => {
   return {
     fps: a.governor.fps, frameMs: a.governor.frameMs, quality: a.quality.level, scale: a.governor.scale,
     calls: i.render.calls, triangles: i.render.triangles, geometries: i.memory.geometries, textures: i.memory.textures,
-    showTime: a.clock.time, timings: Object.fromEntries(a.timings), postfx: a.postfx.stats ? a.postfx.stats() : null, systems: sys,
+    showTime: a.clock.time, timings: Object.fromEntries(a.timings), postfx: a.postfx.stats ? a.postfx.stats() : null,
+    programs: a.renderer.info.programs ? a.renderer.info.programs.length : null, load: a.loadTimings ?? null, gpuPrep: a.gpuPrep ?? null, systems: sys,
   };
 }).catch((e) => ({ error: e.message }));
 console.log(JSON.stringify({ url, out, loadMs, errors: errors.slice(0, 30), stats }, null, 1));

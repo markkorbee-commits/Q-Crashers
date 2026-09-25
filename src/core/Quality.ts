@@ -6,7 +6,7 @@ export const QUALITY_PRESETS: Record<QualityLevel, QualitySettings> = {
     maxPixelRatio: 2,
     renderScale: 1,
     msaa: 4,
-    shadows: true,
+    shadows: false,
     shadowMapSize: 2048,
     crowdCount: 42000,
     crowdNearCount: 3500,
@@ -135,19 +135,55 @@ export function pickQuality(d: DeviceProfile): QualityLevel {
   return 'high';
 }
 
+/** Next lower / higher preset (null at the ends). */
+export function neighbourLevel(level: QualityLevel, dir: -1 | 1): QualityLevel | null {
+  const i = QUALITY_ORDER.indexOf(level) + dir;
+  return i >= 0 && i < QUALITY_ORDER.length ? QUALITY_ORDER[i] : null;
+}
+
 /**
- * Runtime performance governor: dynamic resolution first, preset step-down second.
- * Measures real frame times (not assumptions).
+ * Dynamic-resolution steps (multipliers on the preset's renderScale). Few and coarse on purpose:
+ * every step resizes the canvas and the post-processing targets.
+ */
+export const DYN_SCALES: readonly number[] = [1, 0.9, 0.8, 0.7, 0.6];
+/** frames per measurement window */
+const WINDOW = 45;
+/** stable windows before probing a higher resolution; doubles after each failed probe */
+const MIN_PROBE_WINDOWS = 8;
+const MAX_PROBE_WINDOWS = 128;
+
+/**
+ * Runtime performance governor. At runtime it only ever changes the render resolution, which is
+ * cheap and hitch-free: it never touches presets itself. When even the lowest resolution step misses
+ * the budget for several seconds (or there is lasting headroom at full resolution) it returns a
+ * preset *suggestion* ('down' / 'up'); the App applies it only at a safe moment (show paused / not
+ * started), never in the middle of the show.
+ *
+ * Headroom detection: on a v-synced display the frame time never drops below the refresh interval,
+ * so "much faster than budget" is only visible on high-refresh / unsynced displays. Otherwise the
+ * governor probes one step up after a stable period and falls back at once if the probe misses,
+ * doubling the wait after every failed probe.
  */
 export class PerfGovernor {
   /** current dynamic resolution multiplier applied on top of preset.renderScale */
   scale = 1;
-  private samples: number[] = [];
-  private cooldown = 3;
-  private lowStreak = 0;
   fps = 60;
   frameMs = 16.7;
   enabled = true;
+  /** index into DYN_SCALES */
+  private step = 0;
+  private readonly samples = new Float32Array(WINDOW);
+  private n = 0;
+  /** measurement windows still to ignore (warm-up after load, seek, quality or resolution change) */
+  private cooldown = 2;
+  private window = 0;
+  private slowStreak = 0;
+  private fastStreak = 0;
+  private okStreak = 0;
+  private heavyStreak = 0;
+  private lightStreak = 0;
+  private lastUpWindow = -100;
+  private probeWindows = MIN_PROBE_WINDOWS;
 
   constructor(private targetFps: number) {}
 
@@ -155,42 +191,108 @@ export class PerfGovernor {
     this.targetFps = fps;
   }
 
-  /** returns 'down' when the preset should be lowered, 'up' when there is plenty headroom */
+  /** current resolution step (0 = full resolution) */
+  get level(): number {
+    return this.step;
+  }
+
+  /**
+   * Forget the current measurement (after a seek, a quality change or a long hitch).
+   * `forget` also returns to full resolution and clears the probe back-off (new preset).
+   */
+  reset(opts: { cooldown?: number; forget?: boolean } = {}): void {
+    this.n = 0;
+    this.slowStreak = this.fastStreak = this.okStreak = this.heavyStreak = this.lightStreak = 0;
+    this.cooldown = Math.max(this.cooldown, opts.cooldown ?? 1);
+    if (opts.forget) {
+      this.probeWindows = MIN_PROBE_WINDOWS;
+      this.setStep(0);
+    }
+  }
+
+  /**
+   * Feed one frame's real duration. Returns a preset suggestion ('down' / 'up') or null. Resolution
+   * changes are applied to `scale` directly (the caller watches it).
+   */
   sample(dtSec: number): 'down' | 'up' | null {
-    if (dtSec <= 0 || dtSec > 0.5) return null;
-    this.samples.push(dtSec * 1000);
-    if (this.samples.length < 45) return null;
-    const sorted = [...this.samples].sort((a, b) => a - b);
-    const median = sorted[Math.floor(sorted.length * 0.5)];
-    this.samples.length = 0;
+    // ignore hitches (tab switch, GC, seek rebuilds): they are not steady-state cost
+    if (!(dtSec > 0) || dtSec > 0.25) return null;
+    this.samples[this.n++] = dtSec * 1000;
+    if (this.n < WINDOW) return null;
+    this.n = 0;
+    this.samples.sort(); // typed array: numeric, in place, no allocation
+    const median = this.samples[WINDOW >> 1];
     this.frameMs = median;
     this.fps = 1000 / median;
+    this.window++;
     if (!this.enabled) return null;
     if (this.cooldown > 0) {
       this.cooldown--;
       return null;
     }
     const budget = 1000 / this.targetFps;
-    if (median > budget * 1.18) {
-      if (this.scale > 0.62) {
-        this.scale = Math.max(0.6, this.scale - 0.1);
+    const probing = this.window - this.lastUpWindow <= 2;
+
+    if (median > budget * 1.2) {
+      this.fastStreak = this.okStreak = this.lightStreak = 0;
+      this.slowStreak++;
+      // react at once to a failed probe or a severe overload, otherwise confirm over two windows
+      if (this.slowStreak < 2 && !probing && median < budget * 1.6) return null;
+      this.slowStreak = 0;
+      // the higher resolution we just tried is too expensive: back off before the next attempt
+      if (probing) {
+        this.probeWindows = Math.min(this.probeWindows * 2, MAX_PROBE_WINDOWS);
+        this.lastUpWindow = -100; // probe over (failed)
+      }
+      if (this.step + 1 < DYN_SCALES.length) {
+        this.setStep(this.step + 1);
         this.cooldown = 1;
         return null;
       }
-      this.lowStreak++;
-      if (this.lowStreak >= 2) {
-        this.lowStreak = 0;
-        this.cooldown = 3;
-        this.scale = 1;
+      // lowest resolution and still over budget: suggest a lighter preset (applied later, safely)
+      if (++this.heavyStreak >= 3) {
+        this.heavyStreak = 0;
+        this.cooldown = 2;
         return 'down';
       }
-    } else {
-      this.lowStreak = 0;
-      if (median < budget * 0.8 && this.scale < 1) {
-        this.scale = Math.min(1, this.scale + 0.05);
-        this.cooldown = 1;
+      return null;
+    }
+
+    this.slowStreak = this.heavyStreak = 0;
+    // a probe that survived its trial windows: the device copes, probe sooner next time
+    if (this.window - this.lastUpWindow === 3) this.probeWindows = Math.max(MIN_PROBE_WINDOWS, this.probeWindows >> 1);
+    if (median < budget * 0.75) {
+      // real headroom (high-refresh or unsynced display)
+      this.okStreak = 0;
+      this.fastStreak++;
+      if (this.step > 0 && this.fastStreak >= 3) {
+        this.fastStreak = 0;
+        this.up();
+      } else if (this.step === 0 && ++this.lightStreak >= 20) {
+        this.lightStreak = 0;
+        return 'up';
       }
+      return null;
+    }
+
+    // within budget: after a stable period, probe one resolution step up
+    this.fastStreak = this.lightStreak = 0;
+    this.okStreak++;
+    if (this.step > 0 && this.okStreak >= this.probeWindows) {
+      this.okStreak = 0;
+      this.up();
     }
     return null;
+  }
+
+  private up(): void {
+    this.setStep(this.step - 1);
+    this.lastUpWindow = this.window;
+    this.cooldown = 0;
+  }
+
+  private setStep(i: number): void {
+    this.step = Math.max(0, Math.min(DYN_SCALES.length - 1, i));
+    this.scale = DYN_SCALES[this.step];
   }
 }

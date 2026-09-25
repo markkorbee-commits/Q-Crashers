@@ -31,7 +31,13 @@ export interface QualitySettings {
   renderScale: number;
   /** MSAA samples on the HDR render target (0 = off) */
   msaa: number;
+  /**
+   * Reserved, false in every preset: the show rig has no shadow-casting light and
+   * renderer.shadowMap stays disabled (a night show lit by hundreds of moving beams does not read
+   * single-light shadows). Kept so existing castShadow code paths type-check; they are no-ops.
+   */
   shadows: boolean;
+  /** reserved (see `shadows`) */
   shadowMapSize: number;
   /** total crowd members (all LODs) */
   crowdCount: number;
