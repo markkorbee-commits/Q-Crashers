@@ -32,6 +32,16 @@ const page = [title, ...metas, ...fonts, ...styles, ...preloads, body, ...script
 fs.writeFileSync(path.join(out, 'index.html'), page);
 for (const m of html.matchAll(/<link rel="stylesheet"[^>]*href="\.\/([^"]+\.css)"[^>]*>/g)) fs.rmSync(path.join(out, m[1]), { force: true });
 
+// audio: publish only the web-friendly AAC file (every browser plays it; artifact files must be < 15 MB)
+const audioDir = path.join(out, 'assets', 'audio');
+if (fs.existsSync(audioDir)) {
+  for (const f of fs.readdirSync(audioDir)) {
+    if (!/^endshow-2026\.m4a$|\.analysis\.json$/.test(f)) fs.rmSync(path.join(audioDir, f), { force: true });
+  }
+  const m4a = path.join(audioDir, 'endshow-2026.m4a');
+  if (fs.existsSync(m4a) && fs.statSync(m4a).size > 15 * 1024 * 1024) throw new Error('endshow-2026.m4a is larger than the 15 MB artifact file limit');
+}
+
 const files = [];
 const walk = (dir) => {
   for (const f of fs.readdirSync(dir)) {
