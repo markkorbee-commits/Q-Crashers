@@ -504,8 +504,10 @@ export class WashGlow {
       vertexShader: GLOW_VERT,
       fragmentShader: GLOW_FRAG,
       uniforms: {
-        uBlobC: { value: [C(0, 14, -5, 1), C(-44, 13, -9, 0.75), C(44, 13, -9, 0.75), C(0, 4, 10, 0.1)] },
-        uBlobS: { value: [S(30, 15, 12), S(22, 13, 11), S(22, 13, 11), S(62, 4.5, 14)] },
+        // the glow hugs the lit set (facade Z −12, towers ≤ 16 m, wing roots): a few metres of haze in
+        // front of the floods, not a 40 m tall coloured cloud over the whole frame
+        uBlobC: { value: [C(0, 11, -6, 1), C(-44, 10, -8, 0.7), C(44, 10, -8, 0.7), C(0, 3.5, 8, 0.1)] },
+        uBlobS: { value: [S(27, 9.5, 9), S(20, 8.5, 9), S(20, 8.5, 9), S(60, 4, 12)] },
         uBlobCol: { value: this.cols },
         uBoxMin: { value: this.min },
         uBoxMax: { value: this.max },

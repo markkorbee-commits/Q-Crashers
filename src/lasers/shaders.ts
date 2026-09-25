@@ -190,9 +190,10 @@ void main() {
 export const SURF_VERT = /* glsl */ `
 attribute vec4 sA; // apex.xyz, range
 attribute vec4 sB; // forward.xyz, angle (fan half-angle | cone half-angle)
-attribute vec4 sC; // normal.xyz, mode (0 fan, 1 cone)
+attribute vec4 sC; // normal.xyz, kind (0 sheet fan, 1 cone, 2 low-fog layer fan)
 attribute vec4 sD; // colour * power (rgb), wave amplitude (rad)
 attribute vec4 sE; // wave phase 1, wave phase 2, segment mask amount, segment phase
+attribute vec4 sF; // safety zone |x| limit, cone vertical squash, sheet height above the fog top, -
 
 varying vec3 vWorld;
 varying vec3 vNormal;
@@ -204,21 +205,25 @@ varying float vRange;
 varying float vMode;
 varying float vSeg;
 varying float vSegPh;
+varying float vZone;
+varying float vLift;
+varying vec3 vColor2;
 
 vec3 rayDir(float u) {
   vec3 F = sB.xyz;
   vec3 N = sC.xyz;
   vec3 R = normalize(cross(N, F));
   float amp = sD.w;
-  if (sC.w < 0.5) {
+  if (sC.w < 0.5 || sC.w > 1.5) {
     float a = (u - 0.5) * 2.0 * sB.w;
     float alpha = amp * (0.62 * sin(5.0 * a + sE.x) + 0.38 * sin(8.7 * a - sE.y + 1.3));
     vec3 d = cos(a) * F + sin(a) * R;
     return normalize(d * cos(alpha) + N * sin(alpha));
   }
+  // (elliptical) cone: horizontal half-angle sB.w, the vertical aperture scaled by sF.y
   float phi = u * 6.2831853;
-  float h = sB.w * (1.0 + amp * sin(3.0 * phi + sE.x));
-  return normalize(cos(h) * F + sin(h) * (cos(phi) * R + sin(phi) * N));
+  float th = tan(sB.w * (1.0 + amp * sin(3.0 * phi + sE.x)));
+  return normalize(F + th * (cos(phi) * R + sF.y * sin(phi) * N));
 }
 
 void main() {
@@ -240,6 +245,10 @@ void main() {
   vMode = sC.w;
   vSeg = sE.z;
   vSegPh = sE.w;
+  vZone = sF.x;
+  vLift = sF.z;
+  // low-fog layer: the crest colour rides in the (unused) wave-phase slots
+  vColor2 = sC.w > 1.5 ? sE.xyz : sD.rgb;
   gl_Position = projectionMatrix * viewMatrix * vec4(P, 1.0);
 }
 `;
@@ -258,6 +267,9 @@ varying float vRange;
 varying float vMode;
 varying float vSeg;
 varying float vSegPh;
+varying float vZone;
+varying float vLift;
+varying vec3 vColor2;
 
 // anti-aliased family of thin lines at u*n: fades to its mean where lines get denser than pixels
 float lines(float x, float sharp) {
@@ -269,10 +281,15 @@ float lines(float x, float sharp) {
 
 void main() {
   if (vWorld.y < 0.02) discard;
+  // safety zoning (Tribe mode): the scanner blanks the directions that would reach the raised banks
+  float zone = 1.0 - smoothstep(vZone - 5.0, vZone, abs(vWorld.x));
+  if (zone <= 0.001) discard;
   vec3 V = cameraPosition - vWorld;
   float dist = length(V);
   V /= max(dist, 1e-4);
-  float nv = abs(dot(normalize(vNormal), V));
+  vec3 Nn = normalize(vNormal);
+  float nvs = dot(Nn, V);
+  float nv = abs(nvs);
   float c = dot(normalize(vDir), V);
   // the scanned plane only shows where there is smoke. Low fog pushed from the stage rolls towards
   // the audience: structures elongated along x (parallel to the stage), advected along +z.
@@ -281,39 +298,75 @@ void main() {
   float n2 = texture(uNoise, q * vec3(0.043, 0.2, 0.11) - uDrift * 2.3).r;
   float n3 = uOct > 1.5 ? texture(uNoise, vWorld * vec3(0.16, 0.4, 0.16) + uDrift * 4.0).r : 0.5;
   float tex = smoothstep(0.34, 0.74, n1 * 0.55 + n2 * 0.3 + n3 * 0.15);
-  // seen edge-on the texture reads as clouds; seen from above (drone) keep it a smoother "sea"
-  float faceOn = smoothstep(0.25, 0.7, nv) * step(0.0, dot(normalize(vNormal), V) * sign(vNormal.y + 1e-4));
-  float t3 = mix(tex * tex * tex * 3.4 + 0.04, tex * 0.9 + 0.3, faceOn);
-  float haze = uHaze * hazeProfile(vWorld.y) * t3;
-  // edge-on the sheet glows (1/|n.v|); when the eye is right next to the plane the whole ceiling would be
-  // edge-on, so the boost is limited there (the sheet has a finite thickness and waves)
-  float planeDist = abs(dot(cameraPosition - vWorld, normalize(vNormal)));
-  float nvMin = mix(0.13, 0.05, smoothstep(0.5, 4.5, planeDist));
-  float I = uGainS * haze * hazePhase(c) * pow(max(vR, 4.0), -0.75) / max(nv, nvMin);
-  float pattern;
-  if (vMode < 0.5) {
-    // scan structure: two slowly sliding line families -> a moving interference (moire) texture
-    float s1 = lines(vU * 47.0 + uTime * 0.21, 3.0);
+  float fade = (1.0 - smoothstep(0.6, 1.0, vR / vRange)) * smoothstep(0.3, 3.0, vR) * exp(-vR * uExt);
+  vec3 col;
+  float capI = 2.6;
+  if (vMode > 1.5) {
+    // ---- the low-fog layer under a skimming sheet ("laser sea", Embers f115/f116): the waving plane
+    // dips into the fog tops and lights them; the scan lines land on the fog as drifting streaks.
+    // A ~0.5 m thick glowing layer: its path-length boost is small (1/max(|n.v|, 0.22)).
+    // rolling swells (~10 x 5 m) and ripples (~3.5 x 2 m) pushed out from the stage; only the crests that
+    // rise into the sheet catch its light -> bright waves over dark troughs (f116)
+    float w1 = texture(uNoise, q * vec3(0.1, 0.3, 0.2) + uDrift).r;
+    float w2 = uOct > 1.5 ? texture(uNoise, q * vec3(0.29, 0.5, 0.52) - uDrift * 2.0).r : 0.5;
+    float fogTex = smoothstep(0.34, 0.76, w1 * 0.55 + w2 * 0.3 + n1 * 0.15);
+    float crest = fogTex * fogTex;
+    float streak = lines(vU * 29.0 + uTime * 0.07, 5.0);
+    float edgeU = smoothstep(0.0, 0.12, min(vU, 1.0 - vU));
+    float I = uGainS * uLowHaze * (0.025 + 0.8 * crest + 3.4 * crest * crest) * (0.55 + 1.3 * streak) * (0.55 + 0.45 * hazePhase(c))
+      * pow(max(vR, 6.0), -0.55) / max(nv, 0.25) * exp(-vLift / 1.3) * edgeU;
+    // deep scan colour in the troughs, the second colour on the lit crests
+    col = mix(vColor, vColor2, smoothstep(0.12, 0.6, crest)) * I;
+    capI = 2.2;
+  } else if (vMode < 0.5) {
+    // ---- a scanned sheet ("liquid sky"). Single scattering in a thin plane: radiance ∝ 1/|n.v| (the
+    // path through the sheet grows at grazing views), limited by the sheet's thickness + waviness
+    // (~0.03). Seen from inside / right next to its plane the sheet therefore collapses into a crisp
+    // bright line with a faint veil towards the camera — never a uniformly lit screen.
+    // Seen from above (drone) the smoke texture is a continuous sea; from below / edge-on it breaks
+    // into clumps but stays a readable ceiling.
+    float above = step(0.0, nvs * sign(Nn.y + 1e-4));
+    float faceOn = smoothstep(0.25, 0.7, nv) * above;
+    float t3 = mix(0.12 + 1.7 * tex * tex, tex * 0.9 + 0.3, faceOn);
+    float haze = uHaze * hazeProfile(vWorld.y) * t3;
+    // Near its plane (and from below) the eye / camera exposes for the blinding edge-on line: the rest
+    // of the plane, 10–30x dimmer, falls away into the dark (f017 / f147: a thin crisp band in a dark
+    // scene, not a lit floor or a coloured sky). From a drone high above, the whole sea stays readable.
+    float planeDist = abs(dot(cameraPosition - vWorld, Nn));
+    float kNear = 40.0 * (1.0 - smoothstep(0.5, 9.0, planeDist));
+    kNear = max(kNear, 10.0 * (1.0 - above));
+    float E = inversesqrt(nv * nv + 0.0005) * exp(-nv * kNear);
+    float I = uGainS * haze * hazePhase(c) * pow(max(vR, 4.0), -0.75) * E;
+    // scan structure: the fan of discrete beams the scanner draws (+ a second, sliding family -> moire)
+    float s1 = lines(vU * 41.0 + uTime * 0.21, 5.0);
     float s2 = lines(vU * 53.0 - uTime * 0.16, 3.0);
-    // from below the haze texture dominates; from above (drone) the hatching of the scan shows
-    pattern = mix(0.78 + 0.75 * s1 * s2, 0.3 + 2.4 * s1, faceOn);
+    float pattern = mix(0.35 + 1.5 * s1 + 0.45 * s1 * s2, 0.3 + 2.4 * s1, faceOn);
     // the scanning beam itself: a brighter line travelling back and forth inside the sheet
     float scan = 0.5 + 0.5 * sin(uTime * 4.1 + vSegPh);
     pattern += 1.1 * exp(-pow((vU - scan) * 45.0, 2.0));
     // galvo turnarounds dwell at the fan edges -> brighter edges
     float e = min(vU, 1.0 - vU);
     pattern *= 1.0 + 2.0 * exp(-e * 80.0);
+    // fine flicker (scanner sampling / speckle)
+    pattern *= 0.88 + 0.12 * sin(uTime * 41.0 + vU * 331.0 + vR * 0.7);
+    col = vColor * I * pattern;
   } else {
-    // cone shell: the drawn circle = dense scan lines + rotating bright segments
+    // ---- cone shell (tunnel): the drawn circle = dense scan lines + rotating bright segments
+    float t3 = tex * tex * 1.8 + 0.1;
+    float haze = uHaze * hazeProfile(vWorld.y) * t3;
+    float I = uGainS * haze * hazePhase(c) * pow(max(vR, 4.0), -0.75) * inversesqrt(nv * nv + 0.0036);
     float l = lines(vU * 96.0, 10.0);
     float m = 0.5 + 0.5 * cos(6.2831853 * (vU * 5.0 - vSegPh));
-    pattern = (0.6 + 1.6 * l) * mix(1.0, 0.15 + 1.6 * m * m * m, vSeg);
+    float pattern = (0.6 + 1.6 * l) * mix(1.0, 0.15 + 1.6 * m * m * m, vSeg);
+    pattern *= 0.88 + 0.12 * sin(uTime * 41.0 + vU * 331.0 + vR * 0.7);
+    col = vColor * I * pattern;
+    capI = 6.0;
   }
-  // fine flicker (scanner sampling / speckle)
-  pattern *= 0.88 + 0.12 * sin(uTime * 41.0 + vU * 331.0 + vR * 0.7);
-  float fade = (1.0 - smoothstep(0.6, 1.0, vR / vRange)) * smoothstep(0.3, 3.0, vR) * exp(-vR * uExt);
-  vec3 col = vColor * I * pattern * fade * fogTransmit(dist);
-  gl_FragColor = vec4(min(col, vec3(40.0)), 1.0);
+  col *= fade * fogTransmit(dist) * zone;
+  // soft ceiling: however close the eye gets, a sheet stays a textured glow, never a flat colour field
+  float mx = max(max(col.r, col.g), col.b);
+  col *= capI / max(mx, capI);
+  gl_FragColor = vec4(col, 1.0);
 }
 `;
 

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { ShowEngine } from '../show/ShowEngine';
 import type { Cue } from '../show/ShowTypes';
-import { matchTarget, parseGroups, parseTargets, type FixtureClass, type TargetFilter } from './rig';
+import { matchTarget, parseGroups, parseTargets, type Rig, type TargetFilter } from './rig';
 
 /**
  * Cue indexing for the lighting system. Everything here is rebuilt only when the show engine
@@ -27,9 +27,20 @@ export const P_STILL = 11;
 /** default speed (cycles per bar) per preset */
 const DEFAULT_SPEED = [0, 0.0625, 0.25, 0.125, 1, 0.25, 0.25, 0.125, 0.125, 0.0625, 0, 0];
 
-/** beam half-angle tangents */
+/** beam half-angle tangents (design-bible §7.1: narrow 0.8–1.5°, wide 3–6°) */
 export const TAN_NARROW = Math.tan((1.3 * Math.PI) / 180);
-export const TAN_WIDE = Math.tan((4.6 * Math.PI) / 180);
+export const TAN_WIDE = Math.tan((3.4 * Math.PI) / 180);
+
+/**
+ * Share of the heads a look uses when the cue gives no `density`: a lighting designer builds quiet looks
+ * from a few positions and brings the whole rig in only for the big moments. Low-intensity looks
+ * therefore light a sparse, evenly spread subset (≤ 0.35 → 1/5 of the heads, 0.5 → ~1/2, ≥ 0.85 → all).
+ */
+export function defaultDensity(intensity: number): number {
+  return Math.min(1, Math.max(0.2, 1.6 * intensity - 0.35));
+}
+/** look dimmer curve (console "square-law"-like): low levels stay low, full stays full */
+export const LOOK_GAMMA = 1.5;
 
 const num = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v.length > 0 ? v : undefined);
@@ -58,8 +69,14 @@ export interface LightCue {
   tilt: number | null;
   pan: number | null;
   spread: number | null;
+  /** share of the heads used (0..1), explicit `density` or defaultDensity(intensity) */
+  density: number;
+  /** look level after the dimmer curve */
+  level: number;
   // hit / chase / blinder / strobe
   target: TargetFilter;
+  /** hit / chase: 1 per matching fixture; blinder / strobe: 1 per matching emitter (built with the rig) */
+  mask: Uint8Array | null;
   pattern: string;
   /** chase step in beats */
   every: number;
@@ -85,6 +102,7 @@ function parse(c: Cue, show: ShowEngine): LightCue {
   const preset = presetIdx >= 0 ? presetIdx : c.fx === 'look' ? P_FAN : P_DARK;
   const beam = str(p.beam);
   const defaultWide = preset === P_AMBIENT;
+  const intensity = Math.max(0, num(p.intensity, 1));
   const lc: LightCue = {
     cue: c,
     t0: c.t,
@@ -92,7 +110,7 @@ function parse(c: Cue, show: ShowEngine): LightCue {
     fade: Math.max(0, num(p.fade, c.fx === 'wash' ? 1 : c.fx === 'pillars' ? 0.6 : 0.5)),
     seed: c.seed,
     bpm: show.tempo ? show.tempo.segmentAt(c.t).bpm : 150,
-    intensity: Math.max(0, num(p.intensity, 1)),
+    intensity,
     color: str(p.color),
     color2: str(p.color2),
     c1: new THREE.Color(1, 1, 1),
@@ -105,7 +123,10 @@ function parse(c: Cue, show: ShowEngine): LightCue {
     tilt: typeof p.tilt === 'number' ? p.tilt : null,
     pan: typeof p.pan === 'number' ? p.pan : null,
     spread: typeof p.spread === 'number' ? p.spread : null,
+    density: typeof p.density === 'number' && Number.isFinite(p.density) ? Math.min(1, Math.max(0.05, p.density)) : defaultDensity(intensity),
+    level: Math.pow(Math.min(intensity, 1), LOOK_GAMMA) * Math.max(1, intensity),
     target: parseTargets(c.targets, p.groups, { tags: 0, side: 0 }),
+    mask: null,
     pattern: str(p.pattern) ?? 'lr',
     every: p.every === 'halfbeat' ? 0.5 : p.every === 'bar' ? 4 : p.every === '2beat' ? 2 : 1,
     rate: Math.max(0.5, Math.min(30, num(p.rate, 12))),
@@ -267,8 +288,25 @@ export class LightCueIndex {
   readonly strobes = new EventTrack(STROBE_TAIL);
   revision = -1;
   count = 0;
+  /** content signature of the lights + strobe cue lists the index was built from */
+  private sig = NaN;
+  private rig: Rig | null = null;
 
-  rebuild(show: ShowEngine, classes: readonly FixtureClass[]): void {
+  /**
+   * Called when the show engine's revision changes. The engine recompiles whenever another system
+   * registers a lifetime (every system init), which does not change the lighting cues: rebuild only
+   * when their content (or the rig) really changed.
+   */
+  sync(show: ShowEngine, rig: Rig): void {
+    const sig = cueSignature(show);
+    if (sig !== this.sig || rig !== this.rig) this.rebuild(show, rig);
+    this.sig = sig;
+    this.rig = rig;
+    this.revision = show.revision;
+  }
+
+  rebuild(show: ShowEngine, rig: Rig): void {
+    const classes = rig.classes;
     this.looks = classes.map(() => new StateTrack());
     this.wash.items.length = 0;
     this.pillars.items.length = 0;
@@ -295,12 +333,15 @@ export class LightCueIndex {
           this.pillars.push(lc);
           break;
         case 'hit':
+          lc.mask = fixtureMask(lc.target, rig);
           this.hits.push(lc);
           break;
         case 'chase':
+          lc.mask = fixtureMask(lc.target, rig);
           this.chases.push(lc);
           break;
         case 'blinder':
+          lc.mask = emitterMask(lc.target, rig);
           this.blinders.push(lc);
           break;
         default:
@@ -309,7 +350,9 @@ export class LightCueIndex {
     }
     for (const c of show.all('strobe')) {
       if (c.fx !== 'hit' && c.fx !== 'burst' && c.fx !== 'kick') continue;
-      this.strobes.push(parse(c, show));
+      const lc = parse(c, show);
+      lc.mask = emitterMask(lc.target, rig);
+      this.strobes.push(lc);
       this.count++;
     }
     for (const t of this.looks) t.finish();
@@ -321,4 +364,46 @@ export class LightCueIndex {
     this.strobes.finish();
     this.revision = show.revision;
   }
+}
+
+/** target filter evaluated once per fixture (hits / chases never re-match per frame) */
+function fixtureMask(f: TargetFilter, rig: Rig): Uint8Array {
+  const m = new Uint8Array(rig.fixtures.length);
+  for (let i = 0; i < m.length; i++) {
+    const fx = rig.fixtures[i];
+    m[i] = matchTarget(f, fx.tags, fx.pos.x) ? 1 : 0;
+  }
+  return m;
+}
+
+function emitterMask(f: TargetFilter, rig: Rig): Uint8Array {
+  const m = new Uint8Array(rig.emitters.length);
+  for (let i = 0; i < m.length; i++) {
+    const e = rig.emitters[i];
+    m[i] = matchTarget(f, e.tags, e.pos.x) ? 1 : 0;
+  }
+  return m;
+}
+
+/** order-sensitive hash of everything the index reads from the lights / strobe cues (+ the tempo map) */
+function cueSignature(show: ShowEngine): number {
+  let h = 17;
+  const mix = (s: string) => {
+    for (let k = 0; k < s.length; k++) h = (Math.imul(h, 31) + s.charCodeAt(k)) | 0;
+  };
+  for (const sys of ['lights', 'strobe'] as const) {
+    const all = show.all(sys);
+    h = (Math.imul(h, 31) + all.length) | 0;
+    for (let i = 0; i < all.length; i++) {
+      const c = all[i];
+      h = (Math.imul(h, 31) + Math.round(c.t * 1000)) | 0;
+      h = (Math.imul(h, 31) + Math.round(c.dur * 1000)) | 0;
+      h = (Math.imul(h, 31) + c.seed) | 0;
+      mix(c.fx);
+      mix(c.targets.join(','));
+      mix(JSON.stringify(c.p ?? null));
+      if (show.tempo) h = (Math.imul(h, 31) + Math.round(show.tempo.segmentAt(c.t).bpm * 100)) | 0;
+    }
+  }
+  return h;
 }

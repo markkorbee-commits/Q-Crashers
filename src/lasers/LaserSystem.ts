@@ -5,7 +5,7 @@ import type { FrameContext, QualitySettings, System } from '../core/types';
 import { resolveColor } from '../show/colors';
 import type { Cue } from '../show/ShowTypes';
 import { laserize } from './laserColor';
-import { LaserRenderer } from './LaserRenderer';
+import { LaserRenderer, SURF_CONE, SURF_FOG, SURF_SHEET } from './LaserRenderer';
 import { type Emitter, type EmitterGroup, LaserRig } from './LaserRig';
 
 /**
@@ -27,8 +27,15 @@ import { type Emitter, type EmitterGroup, LaserRig } from './LaserRig';
  * identical picture.
  *
  * Audience mode (design-bible §7.4): "As filmed" (empty field) lets sheets / tunnels / the web skim 1–3 m
- * over the floor; "Tribe" mode (crowd present) clamps audience-level sheets, tunnels, the web and the
- * chevron to >= 4.5 m above the head plane.
+ * over the floor; "Tribe" mode (crowd present) keeps audience-level sheets, tunnels, the web and the
+ * chevron >= 4.5 m above the LOCAL head plane — terrain-aware, so the 5.2 m side banks, the crest and the
+ * bar queues on them are cleared too (tribeLift / sheetClearancePitch).
+ *
+ * Sheets: a projector well above the requested height slopes its plane gently (reaching the height only
+ * 110–150 m out) instead of diving through the field. Under a sheet that skims a fog.lowfog layer the fog
+ * tops light up ("laser sea", one extra surface: pushSea); a skimming tunnel feeds the same layer.
+ * In As-filmed mode a `tunnel` with `height` is a flattened cone of near-horizontal beams at 0.5–4 m.
+ * Budget: design-bible §7.4 segment counts (LaserRenderer), thinned for very large drawing buffers.
  *
  * Rendering (LaserRenderer): instanced camera-facing ribbons with a physical single-scattering haze
  * model and shutter motion smear, instanced ruled surfaces for sheets and tunnels, instanced aperture
@@ -43,6 +50,14 @@ const FIELD_MASK = G.pillar | G.base | G.turret | G.piano;
 /** head plane of a standing crowd (m) and the audience-scanning clearance above it (design-bible §7.4) */
 const HEAD_PLANE = 1.8;
 const TRIBE_MIN_H = HEAD_PLANE + 4.5;
+/** top of the fog.lowfog layer (FogSystem: puffs at Y ≈ 0.45 ± 0.5) — the "laser sea" glows there */
+const FOG_TOP = 0.95;
+/** the low fog lies on the paved field (|X| ≤ 44, FogSystem regions ±45): the sea layer stops at the bank toe */
+const FOG_ZONE_X = 47;
+/** audience area checked by the Tribe-mode clearance (field + side banks + back plaza) */
+const AUD_ZMIN = 2;
+const AUD_ZMAX = 175;
+const AUD_XMAX = 125;
 
 interface PresetDef {
   count: number;
@@ -282,6 +297,17 @@ export class LaserSystem implements System {
   private envPow = 0;
   private audienceWash = 0;
   private lowHaze = 0;
+  /** low-fog "sea" lit by the skimming sheets this frame (colour × power, summed over the sheets) */
+  private seaR = 0;
+  private seaG = 0;
+  private seaB = 0;
+  /** second scan colour (lights the crests) */
+  private sea2R = 0;
+  private sea2G = 0;
+  private sea2B = 0;
+  /** ribbon width scale: budget-thinned figures draw slightly wider beams */
+  private beamWidth = 1;
+  private terrain: { heightAt?(x: number, z: number): number } | null = null;
   private looksSig = -1;
   // shutter smear bookkeeping
   private recording = false;
@@ -357,6 +383,9 @@ export class LaserSystem implements System {
     this.flare.fill(0);
     this.envR = this.envG = this.envB = this.envPow = 0;
     this.audienceWash = 0;
+    this.seaR = this.seaG = this.seaB = 0;
+    this.sea2R = this.sea2G = this.sea2B = 0;
+    if (!this.terrain) this.terrain = (app.get('terrain') as { heightAt?(x: number, z: number): number } | undefined) ?? {};
 
     this.tribe = this.detectTribe();
 
@@ -416,9 +445,12 @@ export class LaserSystem implements System {
       req += s.members.length * this.beamsPerEmitter(s);
     }
     this.requested = req;
-    const budget = this.gfx.beamCap;
+    // design-bible budget, cut further for very large drawing buffers (fill rate)
+    const budget = this.gfx.updateBudget(this.v2.x * this.v2.y);
     this.budgetScale = req > budget ? budget / req : 1;
-    const surfCap = this.gfx.surfCap;
+    this.beamWidth = 1 + 0.8 * (1 - Math.sqrt(this.budgetScale));
+    // one surface stays reserved for the low-fog sea while sheets skim a low fog
+    const surfCap = Math.max(1, this.gfx.surfCap - (this.lowHaze > 0.05 && surfReq > 0 ? 1 : 0));
     const surfScale = surfReq > surfCap ? surfCap / surfReq : 1;
     for (let si = 0; si < this.slotCount; si++) {
       const s = this.slots[si];
@@ -450,6 +482,7 @@ export class LaserSystem implements System {
         if (s.hit) this.genHit(s, t);
         else this.genLook(s, si, t);
       }
+      this.pushSea();
     }
     this.pushFlares();
     this.gfx.end();
@@ -457,21 +490,19 @@ export class LaserSystem implements System {
     // ------------------------------------------------------------------ light environment
     if (this.envPow > 0) {
       const env = app.env;
-      // lasers light the haze more than the people: a modest contribution to the audience light
-      const k = Math.min(0.5, this.envPow * 0.006);
+      // lasers light the haze, hardly the people or the ground: a small contribution to the ambient
+      // show light (a sheet skimming the field must not tint the whole scene — f017 / f147)
       const inv = 1 / this.envPow;
-      const w0 = env.stageIntensity;
-      const w1 = k * 0.5;
+      const w0 = Math.max(0.12, env.stageIntensity);
+      const w1 = Math.min(0.1, this.envPow * 0.0012);
       const tw = w0 + w1;
-      if (tw > 0) {
-        env.stageColor.setRGB(
-          (env.stageColor.r * w0 + this.envR * inv * w1) / tw,
-          (env.stageColor.g * w0 + this.envG * inv * w1) / tw,
-          (env.stageColor.b * w0 + this.envB * inv * w1) / tw,
-        );
-      }
+      env.stageColor.setRGB(
+        (env.stageColor.r * w0 + this.envR * inv * w1) / tw,
+        (env.stageColor.g * w0 + this.envG * inv * w1) / tw,
+        (env.stageColor.b * w0 + this.envB * inv * w1) / tw,
+      );
       env.stageIntensity += w1;
-      env.audienceWash = Math.min(1, env.audienceWash + Math.min(0.35, this.audienceWash * 0.01));
+      env.audienceWash = Math.min(1, env.audienceWash + Math.min(0.1, this.audienceWash * 0.004));
     }
 
     const st = this.stat;
@@ -893,6 +924,10 @@ export class LaserSystem implements System {
   private genCone(s: LookSlot, e: Emitter, I: number, tunnel: boolean, surf: boolean): void {
     const n = s.nEff;
     const ph = TAU * s.speed * s.bars;
+    const kickBreath = this.hasKick ? 0.12 * this.kickEnv : 0;
+    const h = 0.5 * s.spread * (tunnel ? 1 + 0.1 * Math.sin(ph * 0.5) : 0.88 + kickBreath);
+    /** vertical / horizontal aperture of the cone (1 = round) */
+    let squash = 1;
     if (tunnel) {
       // aim down the aisle (stage) or at the stage (field)
       let tx: number;
@@ -902,6 +937,14 @@ export class LaserSystem implements System {
         tx = e.pos.x * 0.3;
         tz = 96;
         ty = 1.2 + Math.tan(s.tilt) * 96;
+        if (!this.tribe && s.heightGiven) {
+          // skimming tunnel over the empty field (In The Cold 1357.9 f138, the violet tunnel 1461.6): a
+          // flattened cone of near-horizontal beams between ~0.5 and ~4 m — a corridor between the
+          // lantern pillars that the low fog carries — instead of a round cone raking the floor
+          ty = Math.min(Math.max(s.height, 0.8), 4);
+          const rV = Math.min(2.2, Math.max(0.8, ty * 0.8));
+          squash = rV / 96 / Math.max(0.02, Math.tan(h));
+        }
       } else {
         tx = e.pos.x * 0.2;
         tz = -2;
@@ -916,30 +959,40 @@ export class LaserSystem implements System {
     }
     this.basis(this.dx, this.dy, this.dz);
     const b = this.bx;
-    const kickBreath = this.hasKick ? 0.12 * this.kickEnv : 0;
-    const h = 0.5 * s.spread * (tunnel ? 1 + 0.1 * Math.sin(ph * 0.5) : 0.88 + kickBreath);
     const rot = ph * (tunnel ? 1 : e.side);
-    const ch = Math.cos(h);
-    const sh = Math.sin(h);
+    const th = Math.tan(h);
     const pb = I * this.perBeam(n);
     for (let i = 0; i < n; i++) {
       const phi = rot + (TAU * i) / n;
-      const cp = Math.cos(phi) * sh;
-      const sp = Math.sin(phi) * sh;
-      this.setDir(ch * b[0] + cp * b[3] + sp * b[6], ch * b[1] + cp * b[4] + sp * b[7], ch * b[2] + cp * b[5] + sp * b[8]);
-      this.beam(e, s.hasColor2 && i % 2 ? s.color2 : s.color, pb * (tunnel ? 0.3 : 1), tunnel ? 0.3 : 0.55);
+      const cp = Math.cos(phi) * th;
+      const sp = Math.sin(phi) * th * squash;
+      this.setDir(b[0] + cp * b[3] + sp * b[6], b[1] + cp * b[4] + sp * b[7], b[2] + cp * b[5] + sp * b[8]);
+      if (tunnel && this.tribe) this.tribeLift(e.pos.x, e.pos.y, e.pos.z);
+      this.beam(e, s.hasColor2 && i % 2 ? s.color2 : s.color, pb * (tunnel ? (squash < 1 ? 0.55 : 0.3) : 1), tunnel ? 0.3 : 0.55);
     }
     if (tunnel && surf) {
       const c = s.color;
-      const P = I * 1.2;
+      const P = I * (squash < 1 ? 0.8 : 1.2);
       if (!this.recording) this.gfx.pushSurface(
         e.pos.x, e.pos.y, e.pos.z, 170,
         b[0], b[1], b[2], h,
-        b[6], b[7], b[8], 1,
+        b[6], b[7], b[8], SURF_CONE,
         c.r * P, c.g * P, c.b * P, 0.04,
         ph * 0.5, 0, 0.85, ph * 0.5 + rand01(e.index * 31 + (s.cue?.id ?? 0)),
+        0, squash,
       );
-      if (!this.recording) this.envAdd(c, P * 3);
+      if (!this.recording) this.envAdd(c, P);
+    }
+    // a skimming tunnel runs through the low fog: its lower beams light the fog tops (golden corridor, f138)
+    if (tunnel && squash < 1 && !this.recording && this.lowHaze > 0.05) {
+      const w = I * 0.7;
+      const c2 = s.hasColor2 ? s.color2 : s.color;
+      this.seaR += s.color.r * w;
+      this.seaG += s.color.g * w;
+      this.seaB += s.color.b * w;
+      this.sea2R += c2.r * w;
+      this.sea2G += c2.g * w;
+      this.sea2B += c2.b * w;
     }
   }
 
@@ -956,6 +1009,8 @@ export class LaserSystem implements System {
       for (let i = 0; i < n; i++) {
         const u = n > 1 ? i / (n - 1) : 0.5;
         this.dirYP(e, (u - 0.5) * s.spread + sway, pitch);
+        // over a crowd the web keeps its clearance above the heads — also where it reaches the banks
+        if (this.tribe) this.tribeLift(e.pos.x, e.pos.y, e.pos.z);
         this.beam(e, this.lerpColor(s, u), pb, 0, 170);
       }
       return;
@@ -999,29 +1054,47 @@ export class LaserSystem implements System {
   }
 
   /**
-   * Gold chevron (In The Cold, show-analysis 8.1): each unit fires a narrow fan down-forward at a shallow
-   * angle; all fans converge on the axis at Z = `distance` (70), so seen from above the two groups draw a
-   * V on the haze, and at head height they form a golden tunnel between the pillars.
+   * Gold chevron (In The Cold, show-analysis 8.1, f135/f136): 5 + 5 deck units each fire a narrow fan of
+   * thin beams down-forward at a shallow angle. Every fan lands in a small zone on the aisle axis 0–20 m
+   * past `distance` (70), beyond the row-2 lanterns, so seen from above the two groups draw a long hatched
+   * V whose arms start at the deck ends and meet at the apex. The fan width is set in metres at the apex
+   * (not as an angle), narrower for the inner units: no beam crosses the axis before ~Z 60, which would
+   * shrink the V into a blob next to the deck. Over a crowd the fans converge in the air above the heads.
    */
   private genChevron(s: LookSlot, e: Emitter, I: number): void {
     const n = s.nEff;
     const ph = TAU * s.speed * s.bars;
     const zc = num(s.cue?.p.distance, 70, 20, 200);
-    // as filmed the fans land on the floor at the convergence point (the tips of the V meet there);
-    // over a crowd they converge in the air above the heads
-    let yc = this.tribe ? TRIBE_MIN_H + 1.5 : 0;
-    if (s.hasAim) yc = s.aim.y;
+    const tr = this.tribe;
     const ax = s.hasAim ? s.aim.x : 0;
-    const az = s.hasAim ? s.aim.z : zc;
-    this.setDir(ax - e.pos.x, yc - e.pos.y, az - e.pos.z);
-    const yaw0 = Math.atan2(this.dx * e.lat.x + this.dz * e.lat.z, this.dx * e.fwd.x + this.dz * e.fwd.z);
-    const pitch0 = Math.asin(Math.max(-1, Math.min(1, this.dy)));
-    // slow scanning spread (1344 s "scanning spread")
-    const spreadT = s.spread * (0.75 + 0.25 * Math.sin(ph));
-    const pb = I * this.perBeam(n) * 1.15;
+    const az = s.hasAim ? s.aim.z : zc + 8;
+    const yc = s.hasAim ? s.aim.y : tr ? TRIBE_MIN_H + 1.5 : 0;
+    // horizontal frame unit -> apex
+    let hx = ax - e.pos.x;
+    let hz = az - e.pos.z;
+    const hd = Math.hypot(hx, hz) || 1;
+    hx /= hd;
+    hz /= hd;
+    const lx = hz;
+    const lz = -hx;
+    const outer = Math.min(1, Math.abs(e.pos.x) / 33);
+    const spreadDeg = s.spread / DEG;
+    // slow scanning spread (1344 s "scanning spread"), phase-shifted across the units
+    const scanK = 0.78 + 0.22 * Math.sin(ph + e.rank * 1.3);
+    /** lateral half-width of the fan at the apex (m) and depth of the landing zone along the fan (m) */
+    const w = (1 + 0.16 * spreadDeg) * (0.35 + 0.65 * outer) * scanK;
+    const depth = 8 + 0.3 * spreadDeg;
+    // thin lines with dark gaps: ~120 beams converge on a few square metres, keep each one modest
+    const pb = I * this.perBeam(n) * 0.8;
     for (let i = 0; i < n; i++) {
       const u = n > 1 ? i / (n - 1) : 0.5;
-      this.dirYP(e, yaw0 + (u - 0.5) * spreadT, pitch0);
+      const lat = (u - 0.5) * 2 * w;
+      // deterministic depth offsets (golden-ratio sequence): the landing points fill a narrow diamond, so
+      // the core of the V reads as a streak along the aisle rather than one hot spot
+      const v = ((i * 0.618034 + e.order * 0.371) % 1) - 0.5;
+      const along = v * depth * (1 - Math.abs(u - 0.5));
+      this.setDir(ax + lx * lat + hx * along - e.pos.x, yc - e.pos.y, az + lz * lat + hz * along - e.pos.z);
+      if (tr) this.tribeLift(e.pos.x, e.pos.y, e.pos.z);
       this.beam(e, this.lerpColor(s, u), pb, 0);
     }
   }
@@ -1029,12 +1102,19 @@ export class LaserSystem implements System {
   /** "liquid sky": a scanned plane at `height` with gentle waves, plus its bright edge beams */
   private genSheet(s: LookSlot, e: Emitter, I: number): void {
     const ph = TAU * s.speed * s.bars;
-    const dist = e.origin === 'stage' ? 62 : 48;
-    const h = this.tribe ? Math.max(s.height, TRIBE_MIN_H) : s.height;
-    let pitch = s.tiltGiven ? s.tilt : Math.atan2(h - e.pos.y, dist);
-    // Tribe mode: never let the plane dip into the crowd
-    if (this.tribe) pitch = Math.max(pitch, Math.atan2(TRIBE_MIN_H - e.pos.y, 160));
+    const stage = e.origin === 'stage';
+    const tr = this.tribe;
+    const h = tr ? Math.max(s.height, TRIBE_MIN_H) : s.height;
+    // the plane contains the aperture: a projector well above the requested height tilts it so that it
+    // reaches that height only far out over the field (a gently sloping ceiling), instead of diving
+    // through the requested height after 50–60 m and cutting into the ground in front of the camera
+    const reach = e.pos.y - h > 1.5 ? (stage ? 150 : 110) : stage ? 62 : 48;
+    let pitch = s.tiltGiven ? s.tilt : Math.atan2(h - e.pos.y, reach);
     const yaw = e.group === 'deck' ? e.side * 0.1 * (0.3 + Math.abs(e.pos.x) / 50) : 0;
+    const half = Math.min(Math.PI * 0.49, s.spread * 0.5);
+    const range = stage ? 250 : 150;
+    // Tribe mode: the whole fan footprint (field, banks, crest) stays >= 4.5 m above the local head plane
+    if (tr) pitch = Math.max(pitch, this.sheetClearancePitch(e, yaw, half, range));
     this.dirYP(e, yaw, pitch);
     const fx = this.dx;
     const fy = this.dy;
@@ -1058,15 +1138,27 @@ export class LaserSystem implements System {
       ny = -ny;
       nz = -nz;
     }
-    const half = Math.min(Math.PI * 0.49, s.spread * 0.5);
-    const range = e.origin === 'stage' ? 250 : 150;
     const amp = 0.011 + 0.004 * Math.sin(ph * 0.25);
     const seed = rand01(hash32(e.index * 977 + (s.cue?.id ?? 0)));
     const ph1 = ph + seed * TAU;
     const ph2 = ph * 0.73 + seed * 3.1;
     const P = I * 1.0 / Math.max(0.4, 2 * half);
     const c = s.color;
-    if (!this.recording) this.gfx.pushSurface(e.pos.x, e.pos.y, e.pos.z, range, fx, fy, fz, half, nx, ny, nz, 0, c.r * P, c.g * P, c.b * P, amp, ph1, ph2, 0, seed * TAU);
+    if (!this.recording) this.gfx.pushSurface(e.pos.x, e.pos.y, e.pos.z, range, fx, fy, fz, half, nx, ny, nz, SURF_SHEET, c.r * P, c.g * P, c.b * P, amp, ph1, ph2, 0, seed * TAU);
+    // a sheet skimming a low fog lights the fog tops ("laser sea"): collected here, drawn once (pushSea)
+    if (!this.recording && !tr && this.lowHaze > 0.05) {
+      const hField = e.pos.y + Math.tan(pitch) * 40;
+      const wSea = I * Math.exp(-Math.max(0, hField - FOG_TOP) / 1.3);
+      // the fog picks up both scan colours (Embers: deep blue sheet in the troughs, the ice-blue second
+      // colour on the crests)
+      const c2 = s.hasColor2 ? s.color2 : c;
+      this.seaR += c.r * wSea;
+      this.seaG += c.g * wSea;
+      this.seaB += c.b * wSea;
+      this.sea2R += c2.r * wSea;
+      this.sea2G += c2.g * wSea;
+      this.sea2B += c2.b * wSea;
+    }
     // edge beams: identical ray formula as the surface shader (u = 0, 1)
     const rx = ny * fz - nz * fy;
     const ry = nz * fx - nx * fz;
@@ -1082,9 +1174,83 @@ export class LaserSystem implements System {
       this.beam(e, c, I * 0.15, 0, range * 0.9);
     }
     if (!this.recording) {
-      this.envAdd(c, I * 4);
-      this.audienceWash += I * 10;
+      this.envAdd(c, I * 1.2);
+      this.audienceWash += I * 3;
     }
+  }
+
+  /**
+   * The low-fog layer lit by the skimming sheets (Embers "liquid sky", f115/f116): one horizontal fan
+   * surface at the fog top over the paved field, in the power-weighted colour of the sheets. Visible
+   * from eye level as a glowing, rolling sea under the sheet, and from the drones as the lit field.
+   */
+  private pushSea(): void {
+    const w = this.seaR + this.seaG + this.seaB;
+    // only a dense low fog forms a readable sea (Embers 0.9); a thin drift (0.2–0.4) stays dark
+    const x = Math.min(1, Math.max(0, (this.lowHaze - 0.3) / 0.4));
+    const gate = x * x * (3 - 2 * x);
+    if (this.tribe || gate < 0.01 || w < 0.01) return;
+    const k = 2.0 * gate;
+    // (the fog kind carries the crest colour in the wave-phase slots)
+    this.gfx.pushSurface(0, FOG_TOP, -1, 185, 0, 0, 1, 1.25, 0, 1, 0, SURF_FOG, this.seaR * k, this.seaG * k, this.seaB * k, 0, this.sea2R * k, this.sea2G * k, this.sea2B * k, 0, FOG_ZONE_X, 1, 0);
+  }
+
+  /** ground height (terrain system; flat 0 fallback) */
+  private groundAt(x: number, z: number): number {
+    const h = this.terrain?.heightAt;
+    return h ? h.call(this.terrain, x, z) : 0;
+  }
+
+  /**
+   * Tribe mode: raise the current direction (this.dx/dy/dz) just enough that the beam stays
+   * >= 4.5 m above the local head plane wherever it passes over the audience area (flat field, the
+   * 5.2 m side banks, the back plaza). Samples the terrain every 25 m along the beam.
+   */
+  private tribeLift(ox: number, oy: number, oz: number): void {
+    const hl = Math.hypot(this.dx, this.dz);
+    if (hl < 1e-3) return;
+    const ux = this.dx / hl;
+    const uz = this.dz / hl;
+    let need = -Infinity;
+    for (let k = 1; k <= 8; k++) {
+      const d = k * 25;
+      const x = ox + ux * d;
+      const z = oz + uz * d;
+      if (z < AUD_ZMIN || z > AUD_ZMAX || x > AUD_XMAX || x < -AUD_XMAX) continue;
+      const req = (this.groundAt(x, z) + TRIBE_MIN_H - oy) / d;
+      if (req > need) need = req;
+    }
+    if (need <= this.dy / hl) return;
+    this.setDir(ux, need, uz);
+  }
+
+  /** Tribe mode: minimum pitch of a sheet plane so that its whole footprint clears the heads (+4.5 m) */
+  private sheetClearancePitch(e: Emitter, yaw: number, half: number, range: number): number {
+    const cy = Math.cos(yaw);
+    const sy = Math.sin(yaw);
+    // yawed horizontal forward / lateral of the plane
+    const fx = cy * e.fwd.x + sy * e.lat.x;
+    const fz = cy * e.fwd.z + sy * e.lat.z;
+    const lx = cy * e.lat.x - sy * e.fwd.x;
+    const lz = cy * e.lat.z - sy * e.fwd.z;
+    let need = -Infinity;
+    for (let a = 0; a < 5; a++) {
+      const ang = (a / 4 - 0.5) * 2 * half;
+      const ca = Math.cos(ang);
+      const sa = Math.sin(ang);
+      for (let k = 1; k <= 8; k++) {
+        const d = (k / 8) * range;
+        const x = e.pos.x + (fx * ca + lx * sa) * d;
+        const z = e.pos.z + (fz * ca + lz * sa) * d;
+        if (z < AUD_ZMIN || z > AUD_ZMAX || x > AUD_XMAX || x < -AUD_XMAX) continue;
+        // the plane is level across its lateral axis: its height here depends on the forward distance only
+        const along = d * ca;
+        if (along < 1) continue;
+        const req = (this.groundAt(x, z) + TRIBE_MIN_H - e.pos.y) / along;
+        if (req > need) need = req;
+      }
+    }
+    return need === -Infinity ? -Math.PI / 2 : Math.atan(need);
   }
 
   private genHit(s: LookSlot, t: number): void {
@@ -1235,11 +1401,13 @@ export class LaserSystem implements System {
     const dz = this.dz;
     let len = maxLen;
     let hit = target;
+    let floorHit = false;
     if (dy < -1e-4) {
       const tg = oy / -dy;
       if (tg < len) {
         len = tg;
         hit = true;
+        floorHit = true;
       }
     }
     if (e.origin === 'field') {
@@ -1248,14 +1416,20 @@ export class LaserSystem implements System {
         if (tb > 0 && tb < len) {
           len = tb;
           hit = true;
+          floorHit = false;
         }
       }
     }
     const r = col.r * power;
     const g = col.g * power;
     const b = col.b * power;
-    if (!this.gfx.pushBeam(ox, oy, oz, dx, dy, dz, len, r, g, b, dash, hit, 1, px, py, pz)) return;
-    if (hit) this.gfx.pushSprite(ox + dx * len, oy + dy * len, oz + dz * len, target ? 0.32 : 0.2, r * 5, g * 5, b * 5, 1);
+    if (!this.gfx.pushBeam(ox, oy, oz, dx, dy, dz, len, r, g, b, dash, hit, this.beamWidth, px, py, pz)) return;
+    if (hit) {
+      // a beam grazing the floor spreads its spot over a long ellipse (1 / sin of the incidence): dim, so
+      // a fan of shallow beams landing together (chevron apex) does not bloom into one hot blob
+      const inc = floorHit && !target ? Math.min(1, Math.max(0.1, -dy * 5)) : 1;
+      this.gfx.pushSprite(ox + dx * len, oy + dy * len, oz + dz * len, target ? 0.32 : 0.2, r * 5 * inc, g * 5 * inc, b * 5 * inc, 1);
+    }
     if (!fromAperture) {
       this.envAdd(col, power);
       return;
@@ -1265,8 +1439,10 @@ export class LaserSystem implements System {
     const i3 = e.index * 3;
     const c = dx * this.toCam[i3] + dy * this.toCam[i3 + 1] + dz * this.toCam[i3 + 2];
     const eye = c > 0.9 ? Math.exp((c - 1) * 1400) : 0;
-    const wide = c > 0 ? Math.exp((c - 1) * 22) : 0;
-    const f = power * (0.06 + 1.2 * wide + 60 * eye);
+    // haze glow around the aperture when the beam heads roughly towards the viewer (~10°): a fan of a
+    // dozen beams must read as a bright point, not bloom into a blob over the deck (f137)
+    const wide = c > 0.5 ? Math.exp((c - 1) * 35) : 0;
+    const f = power * (0.05 + 0.6 * wide + 60 * eye);
     this.flare[i4] += col.r * f;
     this.flare[i4 + 1] += col.g * f;
     this.flare[i4 + 2] += col.b * f;
@@ -1312,7 +1488,7 @@ export class LaserSystem implements System {
     return {
       beams: s.beams,
       requested: s.requested,
-      budget: this.gfx.beamCap,
+      budget: this.gfx.beamBudget,
       budgetScale: +this.budgetScale.toFixed(2),
       surfaces: s.surfaces,
       sprites: s.sprites,

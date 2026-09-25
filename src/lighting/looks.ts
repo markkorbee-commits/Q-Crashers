@@ -34,6 +34,12 @@ import {
   type Fixture,
 } from './rig';
 
+/*
+ * Moving-head looks. A look's `intensity` goes through a dimmer curve (LOOK_GAMMA) and — unless the
+ * cue sets `density` — also decides how many heads take part (defaultDensity): quiet looks are a few
+ * evenly spread beams, the full rig is reserved for the big moments.
+ */
+
 /**
  * Which fixture positions take part in each preset (the others stay dark but follow the
  * preset's positions). A real LD rarely uses the whole rig for one effect: fans come from the
@@ -53,6 +59,15 @@ const PARTICIPATION: number[] = [
   T_ALL, // pulse
   T_ALL, // still
 ];
+
+/** rows with 1.3–1.7 m head pitch (wing leading edges, castle roofline, deck lip, side walls) */
+const T_DENSE = T_SPAR | T_ROOF | T_DECK | T_SIDE;
+/**
+ * Presets whose beams run parallel / static: on the dense rows every second head is enough (60 heads
+ * per wing side by side read as a picket fence, f007–f009 show a few beams at most).
+ * dark, ambient, sweep, fan, ballyhoo, circle, tilt_wave, audience, crosshatch, sky, pulse, still
+ */
+const DENSE_SHARE = [1, 1, 0.5, 1, 1, 0.5, 0.5, 1, 0.5, 0.5, 1, 0.5];
 
 /**
  * Moving-head look presets. Every preset is a PURE function of (show time, fixture, cue params,
@@ -271,7 +286,9 @@ export function evalLook(c: LightCue | null, f: Fixture, t: number, beat: BeatIn
       break;
     }
     case P_STILL: {
-      const base = g === G_TOWERS ? 20 : g === G_FIELD ? 16 : g === G_FLOOR ? 4 : 7;
+      // static positions: the structure's heads stand in a raised fan over the audience (a quiet look
+      // must not stare into the crowd — at 7° every head flared straight into the eye line)
+      const base = g === G_TOWERS ? 20 : g === G_FIELD ? 16 : g === G_FLOOR ? 4 : 22;
       setAim(f, (c.pan ?? 0) + f.cx * 3 * f.rx, c.tilt ?? base, o);
       o.mix = f.k & 1;
       break;
@@ -280,7 +297,18 @@ export function evalLook(c: LightCue | null, f: Fixture, t: number, beat: BeatIn
       setRest(f, o);
   }
   if ((PARTICIPATION[c.preset] & f.tags) === 0) dim = 0;
-  dim *= c.intensity;
+  else {
+    // share of the heads the look uses (cue `density`, default from its intensity): an evenly spread,
+    // mirror-symmetric subset per cluster; the others stay dark but follow the positions
+    const share = c.density * (f.tags & T_DENSE ? DENSE_SHARE[c.preset] : 1);
+    if (share < 1 && f.sel >= share) dim = 0;
+  }
+  dim *= c.level;
   if (c.kick) dim *= 0.28 + 0.72 * beat.kick;
   o.dim = dim;
+}
+
+/** true when a look lights nothing (null / dark preset / zero level): the fixture can skip evaluation */
+export function lookIsDark(c: LightCue | null): boolean {
+  return !c || c.preset === P_DARK || c.level <= 0;
 }
