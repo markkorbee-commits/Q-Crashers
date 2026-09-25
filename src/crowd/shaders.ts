@@ -43,6 +43,7 @@ export const COMMON = /* glsl */ `
 #define S_MIC 9
 #define S_CAMERA 10
 #define S_CTRL 11
+#define S_HAIRCAP 12
 
 #define M_SWAY 0
 #define M_BOUNCE 1
@@ -130,6 +131,7 @@ struct Pose {
   float walkYaw; // extra body yaw (walkers turning around)
   float shoW;
   float hipW;
+  float furl;   // flag lowered + furled (viewer right next to the carrier)
 };
 
 Pose restPose() {
@@ -137,7 +139,7 @@ Pose restPose() {
   Q.off = vec3(0.0); Q.rootR = vec3(0.0); Q.spine = vec3(0.0); Q.head = vec2(0.0);
   Q.armL = vec4(0.0); Q.armR = vec4(0.0); Q.legL = vec3(0.0); Q.legR = vec3(0.0);
   Q.cape = 0.12; Q.phone = 0.0; Q.light = 0.0; Q.flagTilt = vec2(0.0); Q.flag = 0.0;
-  Q.frame = 0.0; Q.squash = 1.0; Q.push = vec2(0.0); Q.walkYaw = 0.0; Q.shoW = 1.0; Q.hipW = 1.0;
+  Q.frame = 0.0; Q.squash = 1.0; Q.push = vec2(0.0); Q.walkYaw = 0.0; Q.shoW = 1.0; Q.hipW = 1.0; Q.furl = 0.0;
   return Q;
 }
 
@@ -305,6 +307,16 @@ Pose personPose(Person P) {
   vec4 aR = idR * wId + handsR * wHa + waveR * wWa + clap * wCl + hug * wHu + polR * wPo;
   if (leftH) { aL += fistUp * wFi + phoneA * wPh; aR += fistOther * wFi + idR * wPh; }
   else { aR += fistUp * wFi + phoneA * wPh; aL += fistOther * wFi + idL * wPh; }
+  // packed pit / front floor (~0.5 m apart): raised arms go up steeper and closer to the body so
+  // forearms do not pass through the neighbours' heads (hugs keep their reach)
+  if (zone <= 1) {
+    float tight = mix(1.0, zone == 0 ? 0.5 : 0.7, 1.0 - wHu);
+    aL.y *= tight; aR.y *= tight;
+    float rl = smoothstep(95.0 * D2R, 125.0 * D2R, aL.x) * (1.0 - wHu);
+    float rr = smoothstep(95.0 * D2R, 125.0 * D2R, aR.x) * (1.0 - wHu);
+    aL.x = mix(aL.x, max(aL.x, 142.0 * D2R), rl); aL.z = mix(aL.z, min(aL.z, 70.0 * D2R), rl);
+    aR.x = mix(aR.x, max(aR.x, 142.0 * D2R), rr); aR.z = mix(aR.z, min(aR.z, 70.0 * D2R), rr);
+  }
 
   // ---- body
   float drop = 0.0, lift = 0.0, lean = 0.0, roll = 0.0, twist = 0.0;
@@ -359,14 +371,15 @@ Pose personPose(Person P) {
   drop += wB * (0.035 + 0.05 * e) * inten * bnc;
   lean += wB * 4.0 * D2R * bnc;
   headP += wB * 7.0 * D2R * bnc;
-  // crouch before the drop / sit for the piano
-  drop += wCr * 0.5 + wSi * 0.6;
-  lean += wCr * 36.0 * D2R + wSi * 6.0 * D2R;
-  headP -= wCr * 22.0 * D2R;
-  xL.y += wSi * 24.0 * D2R; xR.y += wSi * 24.0 * D2R;
+  // crouch before the drop; sit down on the ground for the piano (knees up, arms around them)
+  drop += wCr * 0.5;
+  lean += wCr * 36.0 * D2R - wSi * 10.0 * D2R;
+  headP -= wCr * 22.0 * D2R - wSi * 6.0 * D2R;
   vec4 knees = AR(40.0, 14.0, 66.0, 0.0);
-  aL = mix(aL, knees, wCr + wSi);
-  aR = mix(aR, knees, wCr + wSi);
+  aL = mix(aL, knees, wCr);
+  aR = mix(aR, knees, wCr);
+  aL = mix(aL, AR(58.0, 8.0, 58.0 + 10.0 * hh(sd, 34.0), 0.0), wSi * (1.0 - wPh));
+  aR = mix(aR, AR(56.0, 8.0, 62.0, 0.0), wSi * (1.0 - wPh));
   // head banging (Domitor Draconis)
   float nod = pow(0.5 + 0.5 * cos(TAU * bp), 2.0);
   headP += wHb * 30.0 * D2R * nod;
@@ -379,13 +392,25 @@ Pose personPose(Person P) {
   // flag carriers: hold the pole, wave figure-eights when flags are up
   if (carrier) {
     float fw = below(mix(0.04, 1.0, hh(sd, 14.0)), moodv(M_FLAGS) * 1.1);
+    // a viewer right next to the carrier: the flag is lowered away from them and furled
+    vec2 vPl = uPlayer.xz - P.pos.xz;
+    vec2 vCm = cameraPosition.xz - P.pos.xz;
+    float nPl = uPlayer.w > 0.5 ? smoothstep(4.2, 2.4, length(vPl)) : 0.0;
+    float nCm = smoothstep(4.2, 2.4, length(vCm)) * step(cameraPosition.y, P.pos.y + 5.0);
+    vec2 vv = nCm > nPl ? vCm : vPl;
+    float furl = max(nPl, nCm);
+    fw *= 1.0 - furl;
     float fph = TAU * st * (0.55 + 0.35 * hh(sd, 15.0)) + ph;
     float sf = sin(fph);
     aR = mix(AR(66.0, 10.0, 78.0, -25.0), AR(150.0 + 10.0 * sf, 16.0 + 12.0 * sf, 22.0, -18.0), fw);
     aL = mix(AR(52.0, -8.0, 92.0, 0.0), AR(118.0, -2.0, 58.0, 0.0), fw);
     Q.flagTilt = vec2(0.42 * sf, 0.26 * sin(2.0 * fph)) * fw + vec2(0.05, -0.08) * (1.0 - fw);
+    float cy = cos(P.yaw), sy = sin(P.yaw);
+    vec2 lv = vec2(cy * vv.x - sy * vv.y, sy * vv.x + cy * vv.y);
+    Q.flagTilt = mix(Q.flagTilt, -normalize(lv + vec2(1e-4, 0.0)) * 1.05, furl);
     Q.spine.z += 5.0 * D2R * sf * fw;
     Q.flag = fw;
+    Q.furl = furl;
   }
 
   // walkers in the sparse zones (rear floor, crests, back plaza): to the bar, the toilets, friends …
@@ -410,24 +435,25 @@ Pose personPose(Person P) {
     wCh = 0.0; wPh = 0.0; wId = 1.0;
   }
 
-  // step aside for the player, and look at them
+  // make room for the player (a packed-crowd bubble: nearest bodies ~0.7 m away, not a clearing); a few glance
   vec2 dpl = P.pos.xz + Q.push - uPlayer.xz;
   float rpl = length(dpl);
-  if (uPlayer.w > 0.5 && rpl < 1.9) {
-    float rn = rpl + (1.9 - rpl) * (1.9 - rpl) * 0.28;
+  if (uPlayer.w > 0.5 && rpl < 1.4) {
+    float rn = rpl + (1.4 - rpl) * (1.4 - rpl) * 0.35;
     Q.push += (rpl > 1e-3 ? dpl / rpl : vec2(1.0, 0.0)) * (rn - rpl);
   }
   vec2 dcm = P.pos.xz + Q.push - uCamPush.xy;
   float rcm = length(dcm);
-  if (uCamPush.w > 0.01 && rcm < 1.6) {
-    float rn = rcm + (1.6 - rcm) * (1.6 - rcm) * 0.33;
+  if (uCamPush.w > 0.01 && rcm < 1.0) {
+    float rn = rcm + (1.0 - rcm) * (1.0 - rcm) * 0.5;
     Q.push += (rcm > 1e-3 ? dcm / rcm : vec2(1.0, 0.0)) * (rn - rcm) * uCamPush.w;
   }
-  if (uPlayer.w > 0.5 && rpl < 3.0) {
+  if (uPlayer.w > 0.5 && rpl < 2.2 && hh(sd, 33.0) < 0.22) {
     vec2 fwd = vec2(sin(P.yaw), cos(P.yaw));
     vec2 to = -dpl / max(rpl, 1e-3);
     float ang = atan(fwd.x * to.y - fwd.y * to.x, dot(fwd, to));
-    headY += clamp(-ang, -1.1, 1.1) * 0.8 * smoothstep(3.0, 1.2, rpl);
+    float glance = smoothstep(0.55, 1.0, sin(st * 0.37 + ph));
+    headY += clamp(-ang, -1.0, 1.0) * 0.6 * smoothstep(2.2, 1.0, rpl) * glance;
   }
   // look up at fireworks
   headP -= moodv(M_LOOKUP) * (0.22 + 0.28 * hh(sd, 16.0));
@@ -438,6 +464,11 @@ Pose personPose(Person P) {
   Q.legL = vec3(a, 0.0, 2.0 * a) + xL;
   Q.legR = vec3(a, 0.0, 2.0 * a) + xR;
   Q.legL.y += 3.0 * D2R; Q.legR.y += 3.0 * D2R;
+  // seated on the ground: hip joint ~0.16 m up, thighs rising forward, shins down to the feet
+  Q.legL = mix(Q.legL, vec3(128.0, 17.0, 130.0) * D2R, wSi);
+  Q.legR = mix(Q.legR, vec3(124.0, 15.0, 126.0) * D2R, wSi);
+  drop = mix(drop, 0.79, wSi);
+  lift *= 1.0 - wSi;
   Q.off.y += lift - drop;
   Q.rootR = vec3(lean * 0.4, twist, roll);
   Q.spine += vec3(lean * 0.6, 0.0, 0.0);
@@ -480,16 +511,17 @@ float emblem(vec2 p, float r) {
 }
 
 vec3 albedoOf(int bone, int slot, vec3 lp, ivec4 L) {
-  vec3 skin = uPal[L.x & 7];
+  vec3 skin = uPal[L.x & 7] * 0.72; // palette swatches are sRGB picks; skin reflects ~35-50 %
   bool costume = ((L.y >> 14) & 1) == 1;
   bool shirtless = ((L.y >> 7) & 1) == 1;
   bool tank = ((L.y >> 8) & 1) == 1;
-  vec3 top = shirtless ? skin : uPal[16 + (L.y & 15)];
-  vec3 bot = uPal[32 + ((L.y >> 9) & 7)];
-  if (costume) { top = uPal[56 + ((L.y >> 15) & 3)]; bot = top; }
+  // night: dyed cotton reflects less than the palette swatch (neons do not glow without UV)
+  vec3 top = shirtless ? skin : uPal[16 + (L.y & 15)] * 0.78;
+  vec3 bot = uPal[32 + ((L.y >> 9) & 7)] * 0.85;
+  if (costume) { top = uPal[56 + ((L.y >> 15) & 3)] * 0.8; bot = top; }
   int print = (L.y >> 4) & 7;
-  if (slot == S_CAP || slot == S_HAT) return uPal[40 + ((L.x >> 12) & 7)];
-  if (slot == S_HAIR || slot == S_PONY) return uPal[8 + ((L.x >> 3) & 7)];
+  if (slot == S_CAP || slot == S_HAT) return uPal[40 + ((L.x >> 12) & 7)] * (lp.y > 1.676 && lp.y < 1.69 && slot == S_HAT ? 0.7 : 0.9);
+  if (slot == S_HAIR || slot == S_PONY || slot == S_HAIRCAP) return uPal[8 + ((L.x >> 3) & 7)];
   if (slot == S_BANDANA) return mix(uPal[60], uPal[63], step(0.5, fract(lp.x * 40.0 + lp.y * 25.0)) * 0.7);
   if (slot == S_LANTERN_L || slot == S_LANTERN_R) return vec3(0.9, 0.8, 0.6);
   if (slot == S_MIC) return vec3(0.02);
@@ -498,25 +530,45 @@ vec3 albedoOf(int bone, int slot, vec3 lp, ivec4 L) {
   if (bone == B_HEAD) {
     int hs = (L.x >> 6) & 3;
     vec3 hair = uPal[8 + ((L.x >> 3) & 7)];
-    float hairTop = hs == 3 ? 1.69 : 1.665;
-    bool isHair = lp.y > hairTop - 0.03 * smoothstep(0.02, -0.08, lp.z) || (lp.z < -0.035 && lp.y > (hs == 1 ? 1.5 : 1.575));
+    // painted hairline = the hair-cap shell's hairline (geometry.ts hairline()): forehead 1.705,
+    // temples 1.665, above the ears 1.628, nape 1.556 (a buzz cut sits a little higher)
+    float k = abs(atan(lp.x, lp.z - 0.012)) / PI;
+    float hl = k < 0.38 ? 1.705 - 0.04 * k / 0.38 : (k < 0.62 ? 1.665 - 0.037 * (k - 0.38) / 0.24 : 1.628 - 0.072 * (k - 0.62) / 0.38);
+    if (hs == 3) hl += 0.008;
+    bool isHair = lp.y > hl - 0.003 || (hs == 1 && lp.z < -0.035 && lp.y > 1.5);
     if (isHair && lp.y > 1.52) c = hair;
     // face: eyes, brows, mouth, beards, festival sunglasses (front hemisphere only)
     if (lp.z > 0.035 && !isHair) {
-      vec2 e = vec2(abs(lp.x) - 0.031, lp.y - 1.652);
-      float eye = 1.0 - smoothstep(0.009, 0.014, length(e * vec2(1.0, 1.6)));
-      float brow = (1.0 - smoothstep(0.004, 0.008, abs(lp.y - 1.672))) * step(abs(abs(lp.x) - 0.031), 0.02);
-      float mouth = (1.0 - smoothstep(0.003, 0.006, abs(lp.y - 1.596))) * step(abs(lp.x), 0.022);
-      c = mix(c, c * 0.25, eye * 0.85);
-      c = mix(c, hair * 0.9, brow * 0.7);
-      c = mix(c, c * 0.45, mouth);
-      if (((L.x >> 19) & 1) == 1 && lp.y < 1.615 && lp.y > 1.55) c = mix(c, hair, 0.85);
-      if (((L.x >> 18) & 1) == 1 && abs(lp.y - 1.652) < 0.017 && abs(lp.x) < 0.058) c = vec3(0.012);
+      float ax = abs(lp.x);
+      // soft eye sockets, almond eyes (dark iris / lash line), brows, lips
+      vec2 e = vec2(ax - 0.03, lp.y - 1.652);
+      float socket = 1.0 - smoothstep(0.012, 0.024, length(e * vec2(0.85, 1.4)));
+      float eye = 1.0 - smoothstep(0.0085, 0.0115, length(e * vec2(1.0, 2.4)));
+      float brow = (1.0 - smoothstep(0.0025, 0.005, abs(lp.y - 1.671 + 0.004 * (ax - 0.03) / 0.02))) * (1.0 - smoothstep(0.016, 0.021, abs(ax - 0.031)));
+      float mouth = (1.0 - smoothstep(0.0022, 0.0045, abs(lp.y - 1.597))) * (1.0 - smoothstep(0.017, 0.022, ax));
+      float lip = (1.0 - smoothstep(0.004, 0.008, abs(lp.y - 1.592))) * (1.0 - smoothstep(0.014, 0.02, ax));
+      c = mix(c, c * 0.78, socket);
+      c = mix(c, c * 0.18, eye * 0.9);
+      c = mix(c, hair * 0.9, brow * 0.75);
+      c = mix(c, c * vec3(0.85, 0.62, 0.62), lip * 0.6);
+      c = mix(c, c * 0.4, mouth);
+      if (((L.x >> 19) & 1) == 1) {
+        // beard: full on chin / jaw, stubble on the cheeks, moustache above the lip
+        float jaw = smoothstep(1.62, 1.6, lp.y) * smoothstep(1.535, 1.55, lp.y);
+        float moust = (1.0 - smoothstep(0.004, 0.007, abs(lp.y - 1.607))) * (1.0 - smoothstep(0.022, 0.028, ax));
+        float full = step(0.55, fract(float(L.x) * 0.0137));
+        float amt = max(jaw * mix(0.45, 0.8, full) * (1.0 - lip * 0.8), moust * mix(0.4, 0.75, full));
+        c = mix(c, hair * 0.85, amt);
+      }
+      if (((L.x >> 18) & 1) == 1 && abs(lp.y - 1.652) < 0.017 && ax < 0.058) c = vec3(0.012);
     }
     if (costume && ((L.y >> 15) & 3) == 0) c = top; // morph suit
   } else if (bone == B_SPINE) {
     c = top;
     if (!shirtless && !costume) {
+      // ribbed collar + shoulder seams
+      if (lp.y > 1.452) c *= 0.72;
+      if (abs(abs(lp.x) - 0.15) < 0.006 && lp.y > 1.36) c *= 0.8;
       vec2 q = vec2(lp.x, lp.y);
       if (print == 1) {
         float d = lp.z < -0.05 ? emblem(q - vec2(0.0, 1.29), 0.085) : emblem(q - vec2(0.075, 1.36), 0.028);
@@ -544,8 +596,12 @@ vec3 albedoOf(int bone, int slot, vec3 lp, ivec4 L) {
   } else if (bone == B_PELVIS) {
     c = lp.y > 1.02 ? top : bot;
     if (shirtless && lp.y > 1.02) c = skin;
+    // T-shirt hem, waistband
+    if (!shirtless && !costume && lp.y > 1.02 && lp.y < 1.036) c *= 0.7;
+    if (lp.y <= 1.02 && lp.y > 0.99) c *= 0.62;
   } else if (bone == B_UARM_L || bone == B_UARM_R) {
     c = (!shirtless && !tank && lp.y > 1.27) || costume ? top : skin;
+    if (!shirtless && !tank && !costume && lp.y > 1.27 && lp.y < 1.29) c *= 0.7;
   } else if (bone == B_FARM_L || bone == B_FARM_R || bone == B_HAND_L || bone == B_HAND_R) {
     c = costume ? top : skin;
     if (((L.x >> 17) & 1) == 1 && lp.y < 0.915 && lp.y > 0.885) c = uPal[61];
@@ -553,9 +609,12 @@ vec3 albedoOf(int bone, int slot, vec3 lp, ivec4 L) {
     c = bot;
   } else if (bone == B_FOOT_L || bone == B_FOOT_R) {
     c = uPal[48 + ((L.x >> 15) & 3)];
+    if (lp.y < 0.02) c = mix(c, vec3(0.62), 0.7);      // sole
+    if (lp.y > 0.07 && lp.z > 0.02 && lp.z < 0.1) c *= 0.75; // laces / tongue
   } else if (bone == B_SHIN_L || bone == B_SHIN_R) {
     bool lng = ((L.y >> 12) & 1) == 1 || costume;
     c = (lng || lp.y > 0.5) ? bot : skin;
+    if (!lng && lp.y > 0.5 && lp.y < 0.525) c *= 0.72; // shorts hem
     if (((L.y >> 13) & 1) == 1 && lp.y < 0.2 && !lng) c = vec3(0.8);
     if (lp.y < 0.105) c = uPal[48 + ((L.x >> 15) & 3)];
   }
@@ -566,6 +625,7 @@ bool slotVisible(int slot, ivec4 L) {
   if (slot == S_BODY) return true;
   int hw = (L.x >> 9) & 7;
   int hs = (L.x >> 6) & 3;
+  if (slot == S_HAIRCAP) return hs != 3 && (hw == 0 || hw == 4) && ((L.y >> 14) & 1) == 0;
   if (slot == S_CAP) return hw == 1 || hw == 2;
   if (slot == S_HAT) return hw == 3;
   if (slot == S_BANDANA) return hw == 4;
@@ -582,7 +642,13 @@ bool slotVisible(int slot, ivec4 L) {
 }
 `;
 
-/** LightEnv-driven fake global illumination (stage, audience wash, flashes, strobes, sky, moon) */
+/**
+ * LightEnv-driven fake global illumination. The crowd is lit mostly FROM THE STAGE SIDE: the rig,
+ * its strobes and blinders face the audience, so they only reach surfaces that face the stage
+ * (max(N·L, 0), no wrap). Backs get the dim sky / haze ambient and — the main cue — a coloured rim
+ * at the silhouette edges, so at every drop the crowd reads as dark rim-lit silhouettes against the
+ * lit set (the Defqon night image), never as pale plaster mannequins.
+ */
 export const LIGHTING = /* glsl */ `
 uniform vec3 uStageCol;   // stage light reaching the audience (colour * intensity)
 uniform vec3 uStagePos;
@@ -596,7 +662,8 @@ uniform vec3 uSkyLow;
 uniform vec3 uTwilight;
 uniform vec3 uMoonCol;
 uniform vec3 uMoonDir;
-uniform vec3 uHazeAmb;   // lit haze over the field scatters the show colour from above
+uniform vec3 uHazeAmb;   // lit haze over the field scatters the show colour from above / the front
+uniform float uLumCap;   // crowd luminance ceiling (a fraction of the lit set's brightness)
 
 float washPattern(vec3 wp) {
   float t = uClock.x;
@@ -612,7 +679,7 @@ float washPattern(vec3 wp) {
     float dR = r - rr;
     s += exp(-(dA * dA) / 32.0 - (dR * dR) / 700.0);
   }
-  return 0.3 + 1.6 * s;
+  return 0.05 + 1.3 * s;
 }
 
 vec3 stageLight(vec3 wp, vec3 N) {
@@ -620,19 +687,24 @@ vec3 stageLight(vec3 wp, vec3 N) {
   float ds = length(Ls);
   Ls /= ds;
   float att = 1.0 / (1.0 + ds * ds / 14400.0);
-  float ndl = dot(N, Ls);
-  return (uStageCol + vec3(uStrobe * 2.4)) * att * (max(ndl, 0.0) + 0.035);
+  float ndl = max(dot(N, Ls), 0.0);
+  // strobes / blinders on the set face the audience: front-facing surfaces only
+  return (uStageCol * (ndl + 0.01) + vec3(uStrobe * 1.5) * ndl) * att;
 }
 
 vec3 envLight(vec3 wp, vec3 N) {
   vec3 c = stageLight(wp, N);
-  c += mix(uSkyLow, uSkyUp, N.y * 0.5 + 0.5);
-  c += uHazeAmb * (0.35 + 0.65 * max(N.y, 0.0)) / (1.0 + max(0.0, wp.z - 20.0) / 160.0);
+  // sky dome: shoulders / heads catch it, flanks and backs are shadowed by the packed neighbours
+  c += mix(uSkyLow, uSkyUp, N.y * 0.5 + 0.5) * (0.4 + 0.6 * max(N.y, 0.0));
+  // haze scatter: from above and from the stage side; surfaces facing away get ~8 %
+  vec3 Lh = normalize(vec3(-wp.x * 0.003, 0.0, -1.0));
+  float hzW = 0.07 + 0.42 * max(N.y, 0.0) + 0.3 * max(dot(N, Lh), 0.0);
+  c += uHazeAmb * hzW / (1.0 + max(0.0, wp.z - 20.0) / 160.0);
   c += uTwilight * max(dot(N, normalize(vec3(0.12, 0.3, 1.0))), 0.0);
   c += uMoonCol * max(dot(N, uMoonDir), 0.0);
   vec3 Lf = uFlashPos - wp;
   float df = length(Lf);
-  c += uFlashCol * max(dot(N, Lf / df), 0.0) / (1.0 + df * df / 8100.0);
+  c += uFlashCol * max(dot(N, Lf / df), 0.0) / (1.0 + df * df / 3600.0);
   // beams from the rig sweeping the audience hit heads, shoulders and faces
   vec3 Lw = normalize(vec3(-wp.x * 0.004, 0.75, -0.66));
   c += uWashCol * washPattern(wp) * max(dot(N, Lw), 0.0);
@@ -644,13 +716,23 @@ vec3 rimLight(vec3 wp, vec3 N, vec3 V) {
   float ds = length(uStagePos - wp);
   float att = 1.0 / (1.0 + ds * ds / 22500.0);
   float nv = clamp(dot(N, V), 0.0, 1.0);
-  float fres = pow(1.0 - nv, 2.6);
-  float back = clamp(dot(Ls, -V) * 0.7 + 0.35, 0.0, 1.0);
-  float side = clamp(dot(N, Ls) * 0.6 + 0.55, 0.0, 1.0);
+  float fres = pow(1.0 - nv, 3.0);
+  float back = clamp(dot(Ls, -V) * 0.8 + 0.25, 0.0, 1.0);
+  float side = clamp(dot(N, Ls) * 0.7 + 0.45, 0.0, 1.0);
+  vec3 rim = (uRimCol + vec3(uStrobe * 1.1)) * att * back * side;
   vec3 Lf = normalize(uFlashPos - wp);
-  vec3 rim = (uRimCol + vec3(uStrobe * 1.5)) * att * back * side;
-  rim += uFlashCol * 0.05 * clamp(dot(Lf, -V) * 0.7 + 0.3, 0.0, 1.0);
+  rim += uFlashCol * 0.3 * clamp(dot(Lf, -V) * 0.8 + 0.2, 0.0, 1.0) * clamp(dot(N, Lf) * 0.7 + 0.45, 0.0, 1.0);
   return rim * fres;
+}
+
+/** soft luminance ceiling: dark values untouched, highlights roll off towards cap */
+vec3 crowdTone(vec3 c, float cap) {
+  float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  const float k = 0.12;
+  if (l <= k) return c;
+  float x = l - k;
+  float lo = k + x / (1.0 + x / max(cap - k, 0.02));
+  return c * (lo / l);
 }
 `;
 
@@ -661,7 +743,9 @@ const FOG_F = /* glsl */ `#include <fog_pars_fragment>`;
 // NEAR / MID bodies (instanced over an index list) and PERFORMERS (pose from instance attributes)
 // ---------------------------------------------------------------------------------------------
 
-export function bodyVertex(kind: 'near' | 'mid' | 'performer'): string {
+export type BodyKind = 'near' | 'hero' | 'mid' | 'performer';
+
+export function bodyVertex(kind: BodyKind): string {
   const performer = kind === 'performer';
   const mid = kind === 'mid';
   return /* glsl */ `
@@ -678,7 +762,7 @@ attribute vec4 iP0; attribute vec4 iP1; attribute vec4 iP2; attribute vec4 iP3; 
     : 'attribute float aIdx;'
 }
 ${mid ? 'varying vec3 vCol;' : 'varying vec3 vN; varying vec3 vW; varying vec3 vLocal; flat varying ivec4 vLook; flat varying int vBone; flat varying int vSlot;'}
-${performer ? 'varying float vGlow;' : ''}
+${performer ? 'varying float vGlow; varying float vKey; varying vec3 vLanL; varying vec3 vLanR; varying vec2 vLanOn;' : ''}
 
 void main() {
 ${
@@ -689,7 +773,14 @@ ${
   Pose Q = restPose();
   Q.off = iP0.xyz; Q.cape = iP0.w; Q.rootR = iP1.xyz; Q.head.x = iP1.w; Q.spine = iP2.xyz; Q.head.y = iP2.w;
   Q.armL = iP3; Q.armR = iP4; Q.legL = iP5.xyz; Q.legR = vec3(iP5.w, iP6.xy); Q.shoW = iP6.z; Q.hipW = iP6.w;
-  vGlow = iAttr.w;`
+  // iAttr.w > 0: lantern bearer (glow), < 0: performer in a follow spot / key light (level)
+  vGlow = max(iAttr.w, 0.0);
+  vKey = max(-iAttr.w, 0.0);
+  vec3 nn = vec3(0.0, 1.0, 0.0);
+  vLanL = toWorld(P, Q, skinPt(B_HAND_L, vec3(0.215, 0.59, 0.03), nn, Q));
+  vLanR = toWorld(P, Q, skinPt(B_HAND_R, vec3(-0.215, 0.59, 0.03), nn, Q));
+  int props = (P.look.z >> 8) & 31;
+  vLanOn = vec2((props & 1) != 0 ? 1.0 : 0.0, (props & 2) != 0 ? 1.0 : 0.0) * vGlow;`
     : `  Person P = fetchPerson(aIdx);
   Pose Q = personPose(P);`
 }
@@ -709,7 +800,7 @@ ${
     ? `  vec3 alb = max(albedoOf(bone, slot, p, P.look), vec3(0.022));
   vec3 V = normalize(cameraPosition - wp);
   float ao = mix(0.28, 1.0, smoothstep(0.35, 1.5, p.y));
-  vCol = alb * envLight(wp, wn) * ao + rimLight(wp, wn, V) * (0.35 + 0.65 * smoothstep(0.9, 1.6, p.y));`
+  vCol = crowdTone(alb * envLight(wp, wn) * ao + rimLight(wp, wn, V) * (0.35 + 0.65 * smoothstep(0.9, 1.6, p.y)), uLumCap);`
     : `  vN = wn; vW = wp; vLocal = p; vLook = P.look; vBone = bone; vSlot = slot;`
 }
   #include <fog_vertex>
@@ -717,7 +808,7 @@ ${
 `;
 }
 
-export function bodyFragment(kind: 'near' | 'mid' | 'performer'): string {
+export function bodyFragment(kind: BodyKind): string {
   const performer = kind === 'performer';
   if (kind === 'mid') {
     return /* glsl */ `
@@ -736,7 +827,7 @@ ${ALBEDO_HEADER}
 ${LIGHTING}
 ${FOG_F}
 uniform sampler2D tFlags;
-${performer ? 'uniform vec4 uLantern; uniform vec4 uTube; uniform vec4 uKey; varying float vGlow;' : ''}
+${performer ? 'uniform vec4 uLantern; uniform vec4 uTube; uniform vec4 uKey; varying float vGlow; varying float vKey; varying vec3 vLanL; varying vec3 vLanR; varying vec2 vLanOn;' : ''}
 varying vec3 vN; varying vec3 vW; varying vec3 vLocal; flat varying ivec4 vLook; flat varying int vBone; flat varying int vSlot;
 
 void main() {
@@ -753,36 +844,66 @@ void main() {
   } else {
     alb = albedoOf(vBone, vSlot, vLocal, vLook);
   }
+  bool isSkin = alb == uPal[vLook.x & 7] * 0.72 && vSlot == S_BODY;
+  // woven cotton / skin micro-variation (breaks the flat plastic look up close)
+  alb *= 0.93 + 0.14 * vnoise(vLocal.xy * vec2(46.0, 61.0) + vLocal.z * 37.0);
 ${
   performer
-    ? `  if (vSlot == S_LANTERN_L || vSlot == S_LANTERN_R) {
-    float fl = 0.85 + 0.15 * sin(uClock.y * 23.0 + vW.x * 7.0) * sin(uClock.y * 7.3 + vW.z);
-    emit = vec3(1.0, 0.86, 0.55) * 5.0 * vGlow * fl;
+    ? `  float flick = 0.82 + 0.1 * sin(uClock.y * 23.0 + vW.x * 7.0) + 0.08 * sin(uClock.y * 37.0 + vW.z * 3.0);
+  if (vSlot == S_LANTERN_L || vSlot == S_LANTERN_R) {
+    // small square lantern: blackened frame, warm glass panes around a flickering flame
+    float sx = vSlot == S_LANTERN_L ? 1.0 : -1.0;
+    vec3 q = vLocal - vec3(0.215 * sx, 0.59, 0.03);
+    float ax = abs(q.x), az = abs(q.z);
+    float u = ax > az ? az : ax;
+    alb = vec3(0.03, 0.026, 0.024);
+    if (max(ax, az) > 0.05 && abs(q.y) < 0.053 && u < 0.043) {
+      float core = exp(-u * u / 0.0009 - (q.y + 0.012) * (q.y + 0.012) / 0.0014);
+      emit = vec3(1.0, 0.7, 0.34) * (0.8 + 2.2 * core) * flick * vGlow;
+    }
   }`
     : ''
 }
-  // black cotton still reflects ~3 %; humid skin gets a sheen towards the stage (hot night)
-  bool isSkin = alb == uPal[vLook.x & 7];
+  // humid skin gets a sheen towards the stage (hot night); hair a soft anisotropic-ish sheen
+  bool isHair = vSlot == S_HAIRCAP || vSlot == S_HAIR || vSlot == S_PONY;
   alb = max(alb, vec3(0.022));
   float spec = isSkin ? 1.0 : 0.0;
   // crowd occlusion: bodies below the head plane are shadowed by the neighbours
   float ao = ${performer ? '1.0' : 'mix(0.28, 1.0, smoothstep(0.35, 1.5, vLocal.y))'};
   vec3 light = envLight(vW, N) * ao;
+  float col0rim = 0.0;
 ${
   performer
     ? `  light += uLantern.rgb * uLantern.a * (0.55 + 0.45 * max(N.y, 0.0));
+  // each bearer's own lanterns light their hands, face and costume (flickering warm point lights)
+  if (vLanOn.x + vLanOn.y > 0.0) {
+    vec3 d1 = vLanL - vW; float l1 = max(length(d1), 0.05);
+    vec3 d2 = vLanR - vW; float l2 = max(length(d2), 0.05);
+    float pl = vLanOn.x * max(dot(N, d1 / l1), 0.0) / (0.05 + l1 * l1) + vLanOn.y * max(dot(N, d2 / l2), 0.0) / (0.05 + l2 * l2);
+    light += vec3(1.0, 0.55, 0.22) * flick * pl * 0.085;
+  }
   vec3 Lt = vec3(0.12, 1.95, 58.75) - vW;
   float dt = length(Lt);
   light += uTube.rgb * uTube.a * (max(dot(N, Lt / dt), 0.0) * 1.6 + 0.15) / (1.0 + dt * dt * 0.5);
-  // performers on the deck: front key from the FOH follow spots + the set wash spilling onto the deck
+  // performers on the deck: the set wash spilling onto the deck
   float onDeck = smoothstep(3.0, -0.5, vW.z);
   vec3 Lk = normalize(vec3(0.0, 11.0, 88.0) - vW);
-  light += uKey.rgb * uKey.a * onDeck * (max(dot(N, Lk), 0.0) * 0.9 + 0.12);`
+  light += uKey.rgb * uKey.a * onDeck * (max(dot(N, Lk), 0.0) * 0.9 + 0.12);
+  // follow spot / key light (MC from the FOH tower, pianist from the delay tower on his right)
+  if (vKey > 0.0) {
+    vec3 kp = vW.z > 20.0 ? vec3(14.0, 14.0, 42.0) : vec3(0.0, 11.0, 88.0);
+    vec3 Lk2 = normalize(kp - vW);
+    light += vec3(0.93, 0.96, 1.0) * vKey * (max(dot(N, Lk2), 0.0) + 0.06);
+    // separation light from behind (the rig / the laser tube) so the silhouette reads on dark ground
+    col0rim = vKey * 0.35;
+  }`
     : ''
 }
   vec3 Hs = normalize(normalize(uStagePos - vW) + V);
-  float sheen = pow(max(dot(N, Hs), 0.0), 24.0) * spec * 0.35;
-  vec3 col = alb * light + rimLight(vW, N, V) * (0.4 + 0.6 * smoothstep(0.9, 1.6, vLocal.y)) * (1.0 + spec * 0.5) + (uStageCol + uRimCol * 0.5) * sheen + emit;
+  float sheen = pow(max(dot(N, Hs), 0.0), 24.0) * spec * 0.35 + (isHair ? pow(max(dot(N, Hs), 0.0), 10.0) * 0.12 : 0.0);
+  vec3 col = alb * light + rimLight(vW, N, V) * (0.4 + 0.6 * smoothstep(0.9, 1.6, vLocal.y)) * (1.0 + spec * 0.5) + (uStageCol + uRimCol * 0.5) * sheen;
+  col += vec3(0.85, 0.9, 1.0) * col0rim * pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 2.5);
+  col = crowdTone(col, uLumCap${performer ? ' * 2.6' : ''}) + emit;
   gl_FragColor = vec4(col, 1.0);
   #include <fog_fragment>
   #include <colorspace_fragment>
@@ -822,6 +943,7 @@ const ALBEDO_HEADER = /* glsl */ `
 #define S_MIC 9
 #define S_CAMERA 10
 #define S_CTRL 11
+#define S_HAIRCAP 12
 uint hu(uint x) { x ^= x >> 16u; x *= 0x7feb352du; x ^= x >> 15u; x *= 0x846ca68bu; x ^= x >> 16u; return x; }
 float h2(vec2 c) { return float(hu(uint(int(c.x) + 8192) * 73856093u ^ uint(int(c.y) + 8192) * 19349663u)) * (1.0 / 4294967296.0); }
 float vnoise(vec2 p) {
@@ -890,6 +1012,8 @@ void main() {
 
 export const IMPOSTOR_FRAG = /* glsl */ `
 uniform sampler2D tAtlas;
+uniform vec4 uClock;
+${LIGHTING}
 ${FOG_F}
 varying vec2 vUv;
 varying float vH;
@@ -900,7 +1024,7 @@ void main() {
   float ao = mix(0.28, 1.0, smoothstep(0.2, 0.86, vH));
   if (a.r < 0.5) discard;
   vec3 alb = max(a.g < 0.17 ? vSkin : (a.g < 0.5 ? vHair : (a.g < 0.83 ? vTop : vBot)), vec3(0.022));
-  vec3 col = alb * vLight * ao + vRim * a.b;
+  vec3 col = crowdTone(alb * vLight * ao + vRim * a.b, uLumCap);
   gl_FragColor = vec4(col, 1.0);
   #include <fog_fragment>
   #include <colorspace_fragment>
@@ -951,11 +1075,12 @@ void main() {
     float windA = atan(uWind.x, uWind.z);
     float swing = 1.2 * sin(TAU * uClock.x * 0.62 + ph - u * 1.9) * waveAmt;
     float flyA = windA + swing + 0.25 * sin(rt * 0.6 + ph) * (1.0 - waveAmt);
-    float droop = mix(0.62, 0.18, waveAmt);
+    float droop = mix(mix(0.62, 0.18, waveAmt), 1.6, Q.furl);
     vec3 fly = normalize(vec3(sin(flyA), -droop * u, cos(flyA)));
     vec3 perp = normalize(cross(fly, vec3(0.0, 1.0, 0.0)));
     float rip = (0.07 + 0.05 * waveAmt) * u * sin(u * 9.0 - rt * (7.0 + 4.0 * waveAmt) + ph) + 0.03 * u * sin(u * 17.0 - rt * 13.0 + ph * 2.0);
-    float W = iFlag.w, H = iFlag2.x;
+    float W = iFlag.w * mix(1.0, 0.16, Q.furl), H = iFlag2.x * mix(1.0, 0.8, Q.furl);
+    rip *= 1.0 - 0.8 * Q.furl;
     if (iFlag2.y > 0.5) {
       // vertical banner hanging from a short crossbar at the pole top
       vec3 bar = normalize(vec3(fly.x, 0.0, fly.z));
@@ -1006,6 +1131,7 @@ void main() {
   float through = max(dot(Ls, -V), 0.0);
   float ds = length(uStagePos - vW);
   col += alb * (uStageCol + uRimCol * 0.6 + vec3(uStrobe)) * through * through * 0.9 / (1.0 + ds * ds / 20000.0) * step(0.5, vPart);
+  col = crowdTone(col, uLumCap * 1.4);
   gl_FragColor = vec4(col, 1.0);
   #include <fog_fragment>
   #include <colorspace_fragment>
@@ -1019,11 +1145,14 @@ void main() {
 export const LIGHTS_VERT = /* glsl */ `
 ${COMMON}
 ${PERSON_POSE}
+${FOG_V}
 uniform vec3 uScreen;
 uniform float uPixel;  // world size of ~1 px at 1 m
 varying vec2 vQ;
 varying vec3 vCol;
 varying float vShape;
+flat varying float vKind;
+flat varying float vSeed;
 void main() {
   Person P = fetchPerson(float(gl_InstanceID));
   Pose Q = personPose(P);
@@ -1039,39 +1168,82 @@ void main() {
   vec2 fwd = vec2(sin(P.yaw), cos(P.yaw));
   float seesScreen = smoothstep(-0.1, 0.25, -dot(fwd, toCam.xz / max(dist, 1e-3)));
   bool lighter = hh(P.seed, 21.0) < 0.14;
-  float flash = Q.light;
-  // screens show the stage: tinted by the show colours, a few brighter / whiter
-  vec3 col = mix(uScreen, vec3(0.9, 0.95, 1.0), hh(P.seed, 22.0) * 0.6) * (1.2 + 0.9 * hh(P.seed, 23.0)) * seesScreen;
-  // flashlight LEDs sit on the back of the phone (seen from the stage side); lighters glow all round
-  if (flash > 0.5) col = lighter ? vec3(1.0, 0.62, 0.22) * (3.2 + 0.8 * sin(uClock.y * 19.0 + P.seed)) : col + vec3(0.9, 0.95, 1.0) * 6.0 * (1.0 - seesScreen);
-  float vis = on * step(0.02, dot(col, vec3(1.0)));
-  float real = 0.036;
-  float size = max(real, dist * uPixel * 1.6);
-  float k = real / size;
-  vCol = col * vis * max(k * k, mix(0.012, 0.035, 1.0 - seesScreen)) * (0.6 + 0.4 * k);
-  vShape = k;
+  bool flash = Q.light > 0.5;
+  float bright = 0.3 + 0.7 * hh(P.seed, 23.0);
+  // kind 0: the screen filming the stage (seen from behind), 1: flashlight LED (from the stage side), 2: lighter
+  float kind = flash ? (lighter ? 2.0 : (seesScreen > 0.5 ? 0.0 : 1.0)) : 0.0;
+  vec3 col;
+  vec2 hs;
+  if (kind < 0.5) {
+    col = mix(uScreen, vec3(0.75, 0.8, 0.9), hh(P.seed, 22.0) * 0.3) * 0.34 * bright * seesScreen;
+    hs = vec2(0.034, 0.072);
+  } else if (kind < 1.5) {
+    col = vec3(0.95, 0.97, 1.0) * 7.0 * bright * (1.0 - seesScreen);
+    hs = vec2(0.035);
+  } else {
+    float fl = 0.8 + 0.2 * sin(uClock.y * 19.0 + P.seed) * sin(uClock.y * 7.3 + P.seed * 0.37);
+    col = vec3(1.0, 0.5, 0.14) * 2.6 * fl * (0.6 + 0.4 * bright);
+    hs = vec2(0.03, 0.05);
+    c.y += 0.05;
+  }
+  float vis = on * step(0.002, dot(col, vec3(1.0)));
+  // never smaller than ~0.6 px; energy conserving (tiny, dim dots far away, no bright cards)
+  float px = dist * uPixel;
+  vec2 size = max(hs, vec2(px * 0.6));
+  float k = (hs.x * hs.y) / (size.x * size.y);
+  vShape = clamp(hs.x / size.x, 0.0, 1.0);
+  vCol = col * vis * k;
+  vKind = kind;
+  vSeed = fract(P.seed * 0.000123);
   vQ = position.xy;
   vec3 up = vec3(0.0, 1.0, 0.0);
   vec3 dir = toCam / max(dist, 1e-3);
   vec3 right = normalize(cross(up, dir));
   vec3 up2 = cross(dir, right);
-  float asp = mix(1.0, 1.9, k);
-  vec3 wp = c + (right * position.x + up2 * position.y * asp) * size * (vis > 0.0 ? 1.0 : 0.0);
-  gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
+  vec3 wp = c + (right * position.x * size.x + up2 * position.y * size.y) * (vis > 0.0 ? 1.0 : 0.0);
+  vec4 mvPosition = viewMatrix * vec4(wp, 1.0);
+  gl_Position = projectionMatrix * mvPosition;
+  #include <fog_vertex>
 }
 `;
 
 export const LIGHTS_FRAG = /* glsl */ `
+${FOG_F}
 varying vec2 vQ;
 varying vec3 vCol;
 varying float vShape;
+flat varying float vKind;
+flat varying float vSeed;
 void main() {
-  float d = length(vQ);
-  float rect = 1.0 - smoothstep(0.75, 0.95, max(abs(vQ.x), abs(vQ.y)));
-  float dot_ = exp(-d * d * 3.0);
-  float a = mix(dot_, rect, vShape);
-  if (a < 0.01) discard;
-  gl_FragColor = vec4(vCol * a, 1.0);
+  vec3 col = vCol;
+  float d2 = dot(vQ, vQ);
+  float a;
+  if (vKind < 0.5) {
+    // phone screen: rounded rectangle, dark bezel, a "video of the stage" (dark, a few coloured lights)
+    vec2 q = abs(vQ);
+    float rect = 1.0 - smoothstep(0.78, 0.97, max(q.x, q.y * 0.98));
+    float content = 0.14 + 1.1 * exp(-dot(vQ - vec2(0.35 * sin(vSeed * 40.0), 0.25), vQ - vec2(0.35 * sin(vSeed * 40.0), 0.25)) * 7.0)
+      + 0.6 * exp(-dot(vQ - vec2(-0.3, -0.35 + 0.3 * cos(vSeed * 25.0)), vQ - vec2(-0.3, -0.35 + 0.3 * cos(vSeed * 25.0))) * 9.0);
+    float bez = smoothstep(0.7, 0.8, max(q.x, q.y));
+    float screen = mix(1.0, content * (1.0 - 0.85 * bez), vShape);
+    a = mix(exp(-d2 * 3.0), rect * screen, vShape);
+  } else if (vKind < 1.5) {
+    a = exp(-d2 * 16.0) + 0.1 * exp(-d2 * 2.2);   // LED core + halo
+  } else {
+    vec2 f = vec2(vQ.x * 1.6, vQ.y + 0.25);
+    a = exp(-dot(f, f) * 5.0) + 0.12 * exp(-d2 * 2.0); // flame + glow
+  }
+  if (a < 0.004) discard;
+  col *= a;
+  #ifdef USE_FOG
+    #ifdef FOG_EXP2
+      float fogF = 1.0 - exp(-fogDensity * fogDensity * vFogDepth * vFogDepth);
+    #else
+      float fogF = smoothstep(fogNear, fogFar, vFogDepth);
+    #endif
+    col *= 1.0 - fogF;
+  #endif
+  gl_FragColor = vec4(col, 1.0);
 }
 `;
 
