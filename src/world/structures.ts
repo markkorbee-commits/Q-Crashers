@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Rng } from '../core/rng';
 import type { Collider2D } from '../core/types';
 import { GeoBuilder, lin } from './geom';
-import { ARM, BACKSTAGE_Z, CAM_PEN, DECKING, FOH, PILLAR, PILLARS, PREMIUM, RISER, terrainHeight, WATER_Y } from './site';
+import { ARM, BACKSTAGE_Z, CAM_PEN, DECKING, FOH, PILLAR, PILLARS, PREMIUM, terrainHeight, WATER_Y } from './site';
 import { canvasTexture, makeCanvas } from './tex';
 import { patchWorldMaterial } from './worldLights';
 
@@ -94,8 +94,7 @@ export function buildStructures(scene: THREE.Object3D, lowDetail: boolean): Stru
     // camera pen and riser on the axis
     for (const loop of rectLoop(CAM_PEN.x, CAM_PEN.z, CAM_PEN.w, CAM_PEN.d)) crowd.push(...panelsAlong(loop, 2.5));
     colliders.push({ kind: 'box', minX: CAM_PEN.x - CAM_PEN.w / 2, maxX: CAM_PEN.x + CAM_PEN.w / 2, minZ: CAM_PEN.z - CAM_PEN.d / 2, maxZ: CAM_PEN.z + CAM_PEN.d / 2, tag: 'campen' });
-    for (const loop of rectLoop(RISER.x, RISER.z, RISER.w + 1.6, RISER.d + 1.6)) crowd.push(...panelsAlong(loop, 2.5));
-    colliders.push({ kind: 'box', minX: RISER.x - RISER.w / 2 - 0.8, maxX: RISER.x + RISER.w / 2 + 0.8, minZ: RISER.z - RISER.d / 2 - 0.8, maxZ: RISER.z + RISER.d / 2 + 0.8, tag: 'riser' });
+    // the piano riser (+ its railing and collider) is built by the crowd module's props (src/crowd/props.ts)
     // FOH ring
     const fw = FOH.x1 - FOH.x0 + 4,
       fd = FOH.z1 - FOH.z0 + 4;
@@ -251,9 +250,7 @@ export function buildStructures(scene: THREE.Object3D, lowDetail: boolean): Stru
   // ------------------------------------------------------------------ camera pen + riser on the axis
   {
     const b = new GeoBuilder();
-    const y = terrainHeight(RISER.x, RISER.z);
-    b.box(RISER.w, RISER.h, RISER.d, RISER.x, y + RISER.h / 2, RISER.z, lin('#1a1a1c'));
-    for (const sx of [-1, 1]) b.box(0.06, 1.0, RISER.d, RISER.x + sx * (RISER.w / 2 - 0.05), y + RISER.h + 0.5, RISER.z, alu);
+    // (piano riser: see src/crowd/props.ts)
     // stage-camera on a tripod + a small jib base in the pen
     const yp = terrainHeight(CAM_PEN.x, CAM_PEN.z);
     const tri = new THREE.Vector3(CAM_PEN.x + 1.5, yp + 1.5, CAM_PEN.z);

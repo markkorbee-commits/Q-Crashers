@@ -133,6 +133,17 @@ export class CrowdSystem implements System {
     this.populated = on;
     this.crowdGroup.visible = on && this.enabled;
     this.lastCam.set(1e9, 0, 0);
+    this.app?.events.emit('crowd:populated', { on, count: on ? this.count : 0 });
+  }
+
+  /** 'tribe' (crowd present) or 'filmed' (the empty 2026 grounds) — read by lasers / ambience */
+  get mode(): 'tribe' | 'filmed' {
+    return this.populated ? 'tribe' : 'filmed';
+  }
+
+  /** upper bound for setCount() on this device's quality preset */
+  get maxCount(): number {
+    return Math.min(MAX_COUNT, this.q?.crowdCount ?? MAX_COUNT);
   }
 
   /** crowd size (Tribe mode), 0…65,000, capped by the quality preset */
@@ -161,7 +172,7 @@ export class CrowdSystem implements System {
     const P = app.params;
     const cnt = parseInt(P.get('crowd') ?? '', 10);
     if (Number.isFinite(cnt)) this.target = clamp(cnt, 0, MAX_COUNT);
-    if (P.has('filmed') || P.get('populated') === '0') this.populated = false;
+    if (P.has('filmed') || P.get('mode') === 'filmed' || P.get('populated') === '0') this.populated = false;
     this.testEnv = P.has('crowdenv');
     const envHex = P.get('crowdenv') ?? '';
     if (/^[0-9a-f]{6}$/i.test(envHex)) this.testColor = new THREE.Color(`#${envHex}`);

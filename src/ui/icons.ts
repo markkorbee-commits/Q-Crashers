@@ -28,6 +28,7 @@ const P: Record<string, string> = {
   chevronDown: '<path d="m6 9 6 6 6-6"/>',
   chevronUp: '<path d="m6 15 6-6 6 6"/>',
   chevronRight: '<path d="m9 6 6 6-6 6"/>',
+  crowd: '<circle cx="7" cy="8" r="2.2"/><circle cx="17" cy="8" r="2.2"/><circle cx="12" cy="6.5" r="2.5"/><path d="M3 19.5c.3-3 2-4.8 4-4.8s3.2 1 3.8 2.4"/><path d="M21 19.5c-.3-3-2-4.8-4-4.8s-3.2 1-3.8 2.4"/><path d="M7.5 20c.4-3.4 2.2-5.4 4.5-5.4s4.1 2 4.5 5.4"/>',
   flag: '<path d="M5 21V4"/><path d="M5 4.5h12.5l-2.5 4 2.5 4H5"/>',
   upload: '<path d="M12 15.5V4"/><path d="m7.5 8.5 4.5-4.5 4.5 4.5"/><path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15"/>',
   broadcast: '<rect x="2.5" y="5" width="19" height="13" rx="2.2"/><path d="m10 9 5 2.5-5 2.5Z" fill="currentColor"/><path d="M8 21h8"/>',

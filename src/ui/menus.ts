@@ -211,3 +211,55 @@ export function openAudioMenu(ui: UI, trigger?: HTMLElement | null): void {
 export function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 }
+
+// ------------------------------------------------------------------------------------------
+// Crowd (G): the Tribe as it should have been, or the empty grounds as filmed
+// ------------------------------------------------------------------------------------------
+interface CrowdLike {
+  populated: boolean;
+  count: number;
+  targetCount: number;
+  maxCount: number;
+  setPopulated(on: boolean): void;
+  setCount(n: number): void;
+}
+
+export function openCrowd(ui: UI, trigger?: HTMLElement | null): void {
+  const app = ui.app;
+  const crowd = app.get('crowd') as unknown as CrowdLike | undefined;
+  const { el, body } = panelShell(ui, 'Crowd', 'Who is on the Holy Grounds?');
+  if (!crowd) {
+    body.appendChild(h('p', { class: 'muted small' }, 'The crowd is not available.'));
+    ui.layers.open('crowd', el, { kind: 'panel', trigger: trigger ?? null });
+    return;
+  }
+  const list = h('div', { class: 'list' });
+  const pick = (on: boolean) => {
+    crowd.setPopulated(on);
+    store.set('dq26.crowd', on ? 'tribe' : 'filmed');
+    ui.toast(on ? 'The Tribe is here' : 'As filmed on 27 June 2026: the empty Holy Grounds', 2600, 'crowd');
+    ui.layers.close();
+  };
+  list.appendChild(rowBtn('crowd', 'The Tribe', 'As it should have been: the Warriors on the Holy Grounds', `${Math.round(crowd.count / 1000)}k`, () => pick(true), crowd.populated));
+  list.appendChild(rowBtn('eye', 'As filmed', 'The empty grounds: only crew and performers, as in the 2026 Endshow video', '0', () => pick(false), !crowd.populated));
+  const max = crowd.maxCount;
+  const slider = h('input', { id: 'crowd-size', type: 'range', min: '5000', max: String(max), step: '1000', value: String(Math.min(max, crowd.targetCount || max)), 'aria-label': 'Crowd size' }) as HTMLInputElement;
+  const val = h('span', { class: 'meta' }, `${Math.round(Number(slider.value) / 1000)}k`);
+  slider.addEventListener('input', () => {
+    val.textContent = `${Math.round(Number(slider.value) / 1000)}k`;
+    ui.hud.paintRange(slider);
+  });
+  slider.addEventListener('change', () => {
+    crowd.setCount(Number(slider.value));
+    if (!crowd.populated) crowd.setPopulated(true);
+    store.set('dq26.crowdCount', slider.value);
+  });
+  body.append(
+    list,
+    h('div', { class: 'list-h' }, 'Crowd size'),
+    h('div', { style: 'display:flex;gap:12px;align-items:center' }, slider, val),
+    h('p', { class: 'note', html: `${icon('info')}<span>Saturday 27 June 2026 would have held about 45,000 people at RED (reduced by the heat plan). Larger crowds need a stronger GPU; this device allows up to ${Math.round(max / 1000)}k.</span>` }),
+  );
+  ui.hud.paintRange(slider);
+  ui.layers.open('crowd', el, { kind: 'panel', trigger: trigger ?? null });
+}

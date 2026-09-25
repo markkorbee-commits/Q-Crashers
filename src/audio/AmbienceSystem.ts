@@ -575,7 +575,8 @@ export class AmbienceSystem implements System {
     if (crowdSys && typeof crowdSys.densityAt === 'function') {
       try {
         const v = crowdSys.densityAt(x, z);
-        if (Number.isFinite(v)) d = clamp(v, 0, 1);
+        // crowd reports people per m² (pit ≈ 4.5): normalise to 0..1
+        if (Number.isFinite(v)) d = clamp(v / 3.5, 0, 1);
       } catch {
         /* fall back */
       }

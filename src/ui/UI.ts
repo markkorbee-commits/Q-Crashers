@@ -14,7 +14,7 @@ import { Hud } from './Hud';
 import { icon } from './icons';
 import { Landing } from './Landing';
 import { Layers } from './Layers';
-import { openAudioMenu, openCameraSheet, openMoments, openPositions, openQuality } from './menus';
+import { openAudioMenu, openCameraSheet, openCrowd, openMoments, openPositions, openQuality } from './menus';
 import { PerceptionUI } from './PerceptionUI';
 import { PhotoPanel } from './PhotoPanel';
 import { PiP } from './PiP';
@@ -157,6 +157,11 @@ export class UI {
       app.governor.enabled = false;
       if (app.quality.level !== q) app.setQuality(q as QualityLevel);
     }
+    const crowd = app.get('crowd') as unknown as { setPopulated?(on: boolean): void; setCount?(n: number): void } | undefined;
+    const cm = store.get('dq26.crowd');
+    if (!app.params.has('mode') && !app.params.has('filmed') && (cm === 'filmed' || cm === 'tribe')) crowd?.setPopulated?.(cm === 'tribe');
+    const cc = parseInt(store.get('dq26.crowdCount') ?? '', 10);
+    if (!app.params.has('crowd') && Number.isFinite(cc)) crowd?.setCount?.(cc);
     this.onCameraMode(cameraRig(app)?.mode ?? 'first', true);
     this.refreshSource();
 
@@ -203,6 +208,7 @@ export class UI {
       openPositions: (t: HTMLElement) => this.togglePanel('positions', () => openPositions(this, t)),
       openPerception: (t: HTMLElement) => this.togglePanel('perception', () => this.perc.open(t)),
       openQuality: (t: HTMLElement) => this.togglePanel('quality', () => openQuality(this, t)),
+      openCrowd: (t: HTMLElement) => this.togglePanel('crowd', () => openCrowd(this, t)),
       openAudio: (t: HTMLElement) => this.togglePanel('audio', () => openAudioMenu(this, t)),
       openCamera: (t: HTMLElement) => this.togglePanel('camera', () => openCameraSheet(this, t)),
       togglePhoto: () => this.togglePhoto(),
@@ -557,7 +563,7 @@ export class UI {
     if (isTypingTarget(e.target) || e.repeat || !this.entered) return;
     const top = this.layers.topId;
     if (top) {
-      const own: Record<string, string> = { KeyT: 'positions', KeyX: 'perception' };
+      const own: Record<string, string> = { KeyT: 'positions', KeyX: 'perception', KeyG: 'crowd' };
       if (own[e.code] === top || (e.key === '?' && top === 'help')) {
         this.layers.close(top);
         e.preventDefault();
@@ -583,6 +589,9 @@ export class UI {
         break;
       case 'KeyX':
         this.perc.open();
+        break;
+      case 'KeyG':
+        openCrowd(this);
         break;
       case 'KeyH':
         this.toggleCinema();

@@ -15,6 +15,7 @@ export interface AppEvents {
   'toast': { text: string; ms?: number };
   'perception:changed': { mode: string };
   'photo:mode': { on: boolean };
+  'crowd:populated': { on: boolean; count: number };
   'loading:progress': { label: string; progress: number };
 }
 

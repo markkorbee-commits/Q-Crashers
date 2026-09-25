@@ -16,6 +16,7 @@ export interface HudActions {
   openPositions(trigger: HTMLElement): void;
   openPerception(trigger: HTMLElement): void;
   openQuality(trigger: HTMLElement): void;
+  openCrowd(trigger: HTMLElement): void;
   openAudio(trigger: HTMLElement): void;
   openCamera(trigger: HTMLElement): void;
   togglePhoto(): void;
@@ -87,6 +88,7 @@ export class Hud {
       this.srcChip,
       h('span', { class: 'sep' }),
       tb('positions', 'pin', 'Positions (T)', (b) => a.openPositions(b)),
+      tb('crowd', 'crowd', 'Crowd: Tribe or as filmed (G)', (b) => a.openCrowd(b)),
       tb('perception', 'waves', 'Perception (X)', (b) => a.openPerception(b)),
       tb('photo', 'camera', 'Photo mode (O)', () => a.togglePhoto()),
       tb('quality', 'gauge', 'Graphics quality', (b) => a.openQuality(b)),
