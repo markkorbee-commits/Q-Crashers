@@ -1,5 +1,12 @@
 # Show timeline notes — `public/show/endshow-2026.json`
 
+> **Re-timed onto the measured audio (2026-09-25).** All times below are the *authored* (pre-audio) times.
+> The shipped file was migrated once by `scripts/retime-show.py`: the tempo map is now the measured per-track grid
+> from `public/show/audio-map.json` (86 segments, `source: "analyzed"`, shifted to the audible kick attack), the
+> 113 section starts moved to the audio boundaries (42 by ≥ 0.5 s, e.g. the Discorecord breakdown 182.3 → 176.1,
+> L.P.A. one beat later), and every cue, moment and chapter followed through a monotone warp with re-snapping to
+> the new grid. Evidence: `research/audio-map.md`; per-section table: `research/retime-report.md`.
+
 How the 1581 s Endshow choreography was authored, and why. Every section of the show file is listed below
 with its evidence class and the storyboard frames it rests on. Compiled 2026-09-25.
 

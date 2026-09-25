@@ -548,14 +548,15 @@ for (const [n, sysReq, what] of STORYBOARD) {
   const wins = (sysReq === 'any' ? [...liveBySys.pyro, ...liveBySys.fireworks] : liveBySys[sysReq])
     .filter(([s, e]) => e > a && s < b)
     .sort((u, v) => u[0] - v[0]);
-  // uncovered spans inside [a, b] (≤ 0.25 s slivers tolerated)
+  // uncovered spans inside [a, b]: ≤ 0.25 s slivers tolerated; a gap touching the window edge may be up to
+  // 1 s (the storyboard capture instant is only known to about ±1 s, and the audio re-timing keeps the music)
   let cur = a;
   const holes = [];
   for (const [s, e] of wins) {
-    if (s > cur + 0.25) holes.push([cur, s]);
+    if (s > cur + (cur === a ? 1 : 0.25)) holes.push([cur, s]);
     cur = Math.max(cur, e);
   }
-  if (cur < b - 0.25) holes.push([cur, b]);
+  if (cur < b - (cur > a ? 1 : 0.25)) holes.push([cur, b]);
   if (holes.length) storyGaps.push(`f${String(n).padStart(3, '0')} (${what}, ${sysReq}) not alive over ${a.toFixed(1)}–${b.toFixed(1)}: gap ${holes.map(([u, v]) => `${u.toFixed(1)}–${v.toFixed(1)}`).join(', ')}`);
 }
 for (const g of storyGaps) warn(`storyboard: ${g}`);
@@ -653,11 +654,11 @@ for (const g of storyGaps) warn(`storyboard: ${g}`);
     if (blocked / 144 > 0.17) out.push(`${Math.round((blocked / 144) * 100)} % of the frame covered (${[...hits].sort((a, b) => b[1] - a[1]).slice(0, 2).map(([n, c]) => `${n} ${c}`).join(', ')})`);
     return out;
   };
-  /** shots whose subject IS the structure (the pianist on the riser, the K close-up of lantern L1, f113) */
-  const CAM_EXCEPT = new Set([926.7, 1116.4]);
+  /** shots whose subject IS the structure (the pianist on the riser, the K close-up of lantern L1, f113): note tag #subject */
+  const CAM_EXCEPT = (c) => typeof c.note === 'string' && c.note.includes('#subject');
   for (const [i, c] of cues.entries()) {
     if (c.sys !== 'camera' || c.fx !== 'shot' || !Array.isArray(c.p?.pos) || !Array.isArray(c.p?.look)) continue;
-    if (CAM_EXCEPT.has(c.t)) continue;
+    if (CAM_EXCEPT(c)) continue;
     const p = c.p;
     const fov = numOr(p.fov, 50);
     const poses = [['start', p.pos, p.look]];
