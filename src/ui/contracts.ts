@@ -30,7 +30,14 @@ export interface PerceptionLike extends System {
   compare?: boolean;
   mode?: string;
   risk?: RiskLike;
+  /** 'off' | 'onset' | 'plateau' | 'comedown' | 'after' */
+  xtcPhase?: string;
+  /** grams of alcohol drunk but not yet absorbed */
+  stomach?: number;
+  resting?: boolean;
   addAlcohol?(grams: number): void;
+  setBac?(promille: number): void;
+  setResting?(on: boolean): void;
   soberUp?(): void;
   setXtc?(on: boolean): void;
   setCompare?(on: boolean): void;
@@ -39,6 +46,9 @@ export interface PerceptionLike extends System {
 
 export interface CameraLike extends System {
   mode?: string;
+  /** eye field of view (user setting) */
+  fovSetting?: number;
+  setBaseFov?(deg: number): void;
   setMode?(mode: CamMode): void;
   setFov?(deg: number): void;
   setRoll?(deg: number): void;
@@ -53,6 +63,9 @@ export interface PlayerLike extends System {
   yaw?: number;
   pitch?: number;
 }
+
+/** the first-aid post of the RED stage (official 2026 floorplan, design bible §6.5) */
+export const FIRST_AID = { x: 116.7, z: 122.7 };
 
 export const perception = (app: App) => app.get<PerceptionLike>('perception');
 export const cameraRig = (app: App) => app.get<CameraLike>('camera');

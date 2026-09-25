@@ -33,11 +33,12 @@ export class Landing {
         'div',
         { class: 'content' },
         h('div', { html: emblem(), style: 'display:contents' }),
-        h('div', { class: 'dateline' }, 'Holy Grounds, Biddinghuizen · Saturday 27 June 2026 · 22:40'),
+        h('div', { class: 'dateline' }, 'Holy Grounds, Biddinghuizen · Saturday 27 June 2026 · 22:33'),
         h('h1', { html: 'DEFQON<span class="dot">.</span>1 2026' }),
         h('h2', null, 'The Endshow Experience'),
         h('p', { class: 'tribute' }, 'The festival that never was. The Endshow that still happened.'),
         h('div', { class: 'disclaimer' }, 'Fan-made tribute. Not affiliated with Q-dance.'),
+        h('div', { class: 'flashing', role: 'note' }, '⚠ Contains flashing lights and strobe effects — you can reduce them after entering.'),
         h(
           'div',
           { class: 'loader', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-label': 'Loading' },

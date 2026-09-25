@@ -28,6 +28,9 @@ export interface HudActions {
   poke(): void;
 }
 
+/** wall-clock second of the day at show time 0 (22:32:45 CEST) */
+const SHOW_T0 = 22 * 3600 + 32 * 60 + 45;
+
 /** Heads-up display: brand, toolbar (top), show bar (bottom), interaction prompt, resume hint. */
 export class Hud {
   readonly brand: HTMLElement;
@@ -53,13 +56,15 @@ export class Hud {
   private promptSub: HTMLElement;
   private promptX: HTMLButtonElement;
   private resumeText: HTMLElement;
+  private clockEl: HTMLElement;
   private lastSec = -1;
+  private lastMin = -1;
   private lastPlaying: boolean | null = null;
   private lastChapter: unknown = undefined;
   private lastPrompt = '';
   hovering = false;
 
-  constructor(private app: App, parent: HTMLElement, private a: HudActions, touch: boolean) {
+  constructor(private app: App, parent: HTMLElement, private a: HudActions, private touch: boolean) {
     // ---- brand (top-left)
     this.brand = h(
       'div',
@@ -69,8 +74,9 @@ export class Hud {
     );
 
     // ---- toolbar (top-right)
+    const LABEL: Record<string, string> = { positions: 'Spots', crowd: 'Crowd', perception: 'Perception', photo: 'Photo', quality: 'Quality', cinema: 'Hide UI', fullscreen: 'Full', help: 'Help' };
     const tb = (id: string, ico: string, tip: string, fn: (el: HTMLButtonElement) => void, extra = '') => {
-      const b = h('button', { class: `icon-btn ${extra}`, type: 'button', 'aria-label': tip, 'data-tip': tip, 'data-tip-pos': id === 'help' ? 'left' : undefined, html: icon(ico) });
+      const b = h('button', { class: `icon-btn ${extra}`, type: 'button', 'aria-label': tip, 'data-tip': tip, 'data-label': LABEL[id], 'data-tip-pos': id === 'help' ? 'left' : undefined, html: icon(ico) });
       b.addEventListener('click', (e) => {
         fn(b);
         if ((e as PointerEvent).detail > 0) b.blur();
@@ -79,7 +85,7 @@ export class Hud {
       return b;
     };
     this.srcLabel = h('span', { class: 'lbl' }, 'Silent');
-    this.srcChip = h('button', { class: 'src-chip', type: 'button', 'aria-label': 'Audio source', 'data-tip': 'Audio source' }, h('span', { class: 'dot' }), h('span', { html: icon('music'), style: 'display:contents' }), this.srcLabel);
+    this.srcChip = h('button', { class: 'src-chip', type: 'button', 'aria-label': 'Audio source', 'data-tip': 'Audio source', 'data-label': 'Audio' }, h('span', { class: 'dot' }), h('span', { html: icon('music'), style: 'display:contents' }), this.srcLabel);
     this.srcChip.addEventListener('click', () => a.openAudio(this.srcChip));
     const fsOk = !!document.documentElement.requestFullscreen;
     this.toolbar = h(
@@ -103,6 +109,7 @@ export class Hud {
     this.trackEl = h('span', { class: 'track' }, '—');
     this.timeCur = h('span', { class: 'cur' }, '00:00');
     this.timeDur = h('span', null, '00:00');
+    this.clockEl = h('span', { class: 'clock', title: 'Wall-clock time on the Holy Grounds (CEST, reconstructed)' }, '22:32');
     this.playBtn = h('button', { class: 'icon-btn playbtn', type: 'button', 'aria-label': 'Play (K)', 'data-tip': 'Play / pause (K)', 'data-tip-pos': 'up', html: icon('play') });
     this.playBtn.addEventListener('click', (e) => {
       a.togglePlay();
@@ -135,7 +142,8 @@ export class Hud {
     }
     this.camBtn = sb('camera', 'eye', 'Camera view', (b) => a.openCamera(b), 'show-narrow');
     this.camBtn.style.display = 'none';
-    const moments = h('button', { class: 'icon-btn moments-btn', type: 'button', 'aria-label': 'Moments and tracks', 'data-tip': 'Jump to a moment', 'data-tip-pos': 'up', html: `${icon('flag')}<span class="t">Moments</span>` });
+    this.camBtn.dataset.label = 'Camera';
+    const moments = h('button', { class: 'icon-btn moments-btn', type: 'button', 'aria-label': 'Moments and tracks', 'data-tip': 'Jump to a moment', 'data-label': 'Moments', 'data-tip-pos': 'up', html: `${icon('flag')}<span class="t">Moments</span>` });
     moments.addEventListener('click', (e) => {
       a.openMoments(moments);
       if (e.detail > 0) moments.blur();
@@ -145,7 +153,7 @@ export class Hud {
     this.showbar = h(
       'section',
       { class: 'showbar glass rule-top hud-el', 'aria-label': 'Show controls', 'data-keep-panel': '' },
-      h('div', { class: 'sb-top' }, h('div', { class: 'now' }, h('span', { class: 'lbl' }, 'Now playing'), this.trackEl), h('div', { class: 'time' }, this.timeCur, ' / ', this.timeDur)),
+      h('div', { class: 'sb-top' }, h('div', { class: 'now' }, h('span', { class: 'lbl' }, 'Now playing'), this.trackEl), h('div', { class: 'time' }, this.timeCur, h('span', { class: 'dur' }, ' / ', this.timeDur), this.clockEl)),
       this.timeline.el,
       h(
         'div',
@@ -187,9 +195,9 @@ export class Hud {
     this.paintRange(this.vol);
   }
 
-  /** on very narrow screens the segmented camera control collapses into one button */
+  /** on very narrow screens and on touch devices the segmented camera control collapses into one button (camera sheet) */
   private updateNarrow() {
-    const narrow = window.innerWidth <= 480;
+    const narrow = window.innerWidth <= 480 || this.touch;
     this.camBtn.style.display = narrow ? '' : 'none';
   }
 
@@ -259,6 +267,12 @@ export class Hud {
     if (s !== this.lastSec) {
       this.lastSec = s;
       setText(this.timeCur, fmtTime(time));
+      // t = 0 <-> Saturday 27 June 2026, 22:32:45 CEST (design bible §1.3)
+      const min = Math.floor((SHOW_T0 + s) / 60);
+      if (min !== this.lastMin) {
+        this.lastMin = min;
+        setText(this.clockEl, `${String(Math.floor(min / 60) % 24).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`);
+      }
     }
     if (playing !== this.lastPlaying) {
       this.lastPlaying = playing;

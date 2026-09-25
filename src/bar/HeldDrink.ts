@@ -22,6 +22,7 @@ function lathe(points: [number, number][], seg = 28): THREE.LatheGeometry {
 export class HeldDrink {
   readonly root = new THREE.Group();
   private tilt = new THREE.Group();
+  private hand = new THREE.Group();
   private models = new Map<Vessel, THREE.Group>();
   private liquid!: THREE.Mesh;
   private liquidByVessel = new Map<Vessel, THREE.Mesh>();
@@ -183,6 +184,35 @@ export class HeldDrink {
       g.visible = false;
       this.tilt.add(g);
     }
+    // the hand holding it: four fingers curled round the front of the vessel, the thumb on the
+    // near side, palm behind, forearm leaving the frame to the lower right
+    const skin = mk('#c3906f');
+    const sleeve = mk('#15151a');
+    const hand = this.hand;
+    /** capsule from point a along direction d (length len) */
+    const limb = (r: number, len: number, a: THREE.Vector3, d: THREE.Vector3, m: THREE.Material) => {
+      const mesh = new THREE.Mesh(new THREE.CapsuleGeometry(r, len, 4, 10), m);
+      const dir = d.clone().normalize();
+      mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+      mesh.position.copy(a).addScaledVector(dir, len / 2);
+      hand.add(mesh);
+      return mesh;
+    };
+    // fingers: arcs round the far side of the vessel, starting at the palm (+x)
+    for (let i = 0; i < 4; i++) {
+      const f = new THREE.Mesh(new THREE.TorusGeometry(0.047 - i * 0.001, 0.0098 - i * 0.0007, 8, 16, 2.25 - i * 0.12), skin);
+      f.rotation.set(-Math.PI / 2, 0, -0.3);
+      f.position.y = 0.086 - i * 0.021;
+      hand.add(f);
+    }
+    // thumb across the near side, palm on the right, wrist and sleeve out of frame (lower right)
+    limb(0.0105, 0.034, new THREE.Vector3(0.045, 0.094, 0.03), new THREE.Vector3(-1, 0.05, 0.55), skin);
+    const palm = new THREE.Mesh(new THREE.BoxGeometry(0.032, 0.09, 0.066), skin);
+    palm.position.set(0.052, 0.05, -0.004);
+    hand.add(palm);
+    limb(0.027, 0.07, new THREE.Vector3(0.06, 0.03, 0.0), new THREE.Vector3(0.7, -0.75, 0.45), skin);
+    limb(0.037, 0.32, new THREE.Vector3(0.1, -0.015, 0.03), new THREE.Vector3(0.7, -0.75, 0.45), sleeve);
+    this.tilt.add(hand);
     this.root.add(this.tilt);
     this.root.visible = false;
     this.root.renderOrder = 10;
@@ -208,6 +238,10 @@ export class HeldDrink {
     this.sipsLeft = drink.sips;
     this.fill = this.fillFrom = this.fillTo = drink.vessel === 'can' ? 1 : 0.92;
     for (const [v, g] of this.models) g.visible = v === drink.vessel;
+    // grip size follows the vessel (cup ≈ 4 cm radius, can / bottle ≈ 3 cm, shot glass 2.5 cm)
+    const r = drink.vessel === 'can' ? 0.031 : drink.vessel === 'bottle' ? 0.035 : drink.vessel === 'shotglass' ? 0.027 : 0.04;
+    const s = r / 0.04;
+    this.hand.scale.set(s, drink.vessel === 'shotglass' ? 0.55 : 1, s);
     this.liquidMat.color.set(drink.liquid);
     this.foam.visible = !!drink.foam;
     const liq = this.liquidByVessel.get(drink.vessel);
@@ -253,8 +287,10 @@ export class HeldDrink {
     const cam = this.camera;
     const halfH = Math.tan(THREE.MathUtils.degToRad(cam.fov * 0.5)) * 0.42;
     const halfW = halfH * cam.aspect;
-    const restX = Math.min(0.2, halfW * 0.62);
-    const restY = -halfH * 0.62;
+    // low in the frame, well right of centre: clear of the (centred) interaction prompt and the
+    // view; portrait phones keep it above the thumb buttons
+    const restX = Math.min(0.24, halfW * 0.68);
+    const restY = -halfH * (cam.aspect < 1 ? 0.4 : 0.74);
 
     // walking bob
     const dx = playerX - this.lastX,

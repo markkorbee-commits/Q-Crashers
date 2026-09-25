@@ -3,7 +3,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { Rng, hashString } from '../core/rng';
 import type { Collider2D } from '../core/types';
 import type { BarDef } from './bars';
-import { counterFrontTexture, fridgeTexture, glowTexture, menuBoardTexture, signTexture, trackwayTexture } from './BarTextures';
+import { canopyGlowTexture, counterFrontTexture, fasciaTexture, fridgeTexture, glowTexture, menuBoardTexture, shutterTexture, signTexture, trackwayTexture } from './BarTextures';
 
 /**
  * Builds every bar into a handful of merged meshes (one per material, shared by all bars)
@@ -30,7 +30,10 @@ type BucketId =
   | 'track'
   | 'glow'
   | 'led'
-  | 'warm';
+  | 'warm'
+  | 'tent'
+  | 'fascia'
+  | 'shutter';
 
 export interface StaffMember {
   bar: BarDef;
@@ -50,6 +53,8 @@ export interface BuiltBars {
   bulbCount: number;
   textures: THREE.Texture[];
   materials: THREE.Material[];
+  /** open (lit, staffed) or closed (dark, shutters down — "As filmed": the site was closed) */
+  setOpen(open: boolean): void;
 }
 
 export const BAR_DEPTH = 6;
@@ -167,13 +172,21 @@ export function buildBars(bars: BarDef[], lowDetail: boolean): BuiltBars {
     front: counterFrontTexture(),
     track: trackwayTexture(),
     glow: glowTexture(),
+    fascia: fasciaTexture(),
+    canopy: canopyGlowTexture(),
+    shutter: shutterTexture(),
   };
   const mats: Record<BucketId, THREE.Material> = {
     steel: new THREE.MeshStandardMaterial({ color: '#373b42', metalness: 0.4, roughness: 0.5 }),
     panel: new THREE.MeshStandardMaterial({ color: '#1b1d22', metalness: 0.15, roughness: 0.8 }),
     deck: new THREE.MeshStandardMaterial({ color: '#232428', metalness: 0.2, roughness: 0.75 }),
     top: new THREE.MeshStandardMaterial({ color: '#4a4e55', metalness: 0.5, roughness: 0.3 }),
-    front: new THREE.MeshStandardMaterial({ color: '#200000', map: textures.front, emissive: '#ffffff', emissiveMap: textures.front, emissiveIntensity: 2.4, roughness: 0.35 }),
+    // dark timber cladding; only the LED line under the top and the kick glow emit
+    front: new THREE.MeshStandardMaterial({ color: '#ffffff', map: textures.front, emissive: '#ffffff', emissiveMap: textures.front, emissiveIntensity: 1.1, roughness: 0.7 }),
+    // tan tensile membranes, glowing warm from the 3000 K under-canopy LEDs (bible §11)
+    tent: new THREE.MeshStandardMaterial({ color: '#cbb48f', roughness: 0.9, side: THREE.DoubleSide, emissive: '#ffffff', emissiveMap: textures.canopy, emissiveIntensity: 0.75 }),
+    fascia: new THREE.MeshBasicMaterial({ map: textures.fascia, color: hdr('#ffffff', 1.15) }),
+    shutter: new THREE.MeshStandardMaterial({ map: textures.shutter, roughness: 0.55, metalness: 0.45 }),
     sign: new THREE.MeshBasicMaterial({ map: textures.sign, color: hdr('#ffffff', 2.2) }),
     fridge: new THREE.MeshStandardMaterial({ color: '#101010', map: textures.fridge, emissive: '#ffffff', emissiveMap: textures.fridge, emissiveIntensity: 1.5, roughness: 0.2, metalness: 0.1 }),
     board: new THREE.MeshStandardMaterial({ color: '#202020', map: textures.board, emissive: '#ffffff', emissiveMap: textures.board, emissiveIntensity: 1.05, roughness: 0.6 }),
@@ -183,7 +196,8 @@ export function buildBars(bars: BarDef[], lowDetail: boolean): BuiltBars {
     glass: new THREE.MeshStandardMaterial({ color: '#d9e6ee', roughness: 0.15, metalness: 0.1, transparent: true, opacity: 0.45, emissive: '#3a4a55', emissiveIntensity: 0.4 }),
     bottle: new THREE.MeshStandardMaterial({ color: '#2f5a2a', roughness: 0.2, metalness: 0.2, emissive: '#0e2a10', emissiveIntensity: 0.8 }),
     track: new THREE.MeshStandardMaterial({ color: '#8a8c8f', map: textures.track, roughness: 0.85, metalness: 0.15 }),
-    glow: new THREE.MeshBasicMaterial({ map: textures.glow, color: hdr('#ff3212', 0.5), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }),
+    // warm light spill from the counter and the under-canopy LEDs on the ground plates
+    glow: new THREE.MeshBasicMaterial({ map: textures.glow, color: hdr('#ff9a52', 0.34), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }),
     led: new THREE.MeshBasicMaterial({ color: hdr('#ff1a06', 3.2) }),
     warm: new THREE.MeshBasicMaterial({ color: hdr('#ffc98a', 3.0) }),
   };
@@ -218,19 +232,38 @@ export function buildBars(bars: BarDef[], lowDetail: boolean): BuiltBars {
     for (let x = -W / 2 + 0.4; x < W / 2; x += 0.6) B.box('steel', x, roofY / 2, zb - 0.02, 0.06, roofY - 0.1, 0.05);
     // posts
     const bays = Math.max(2, Math.round(W / 5.5));
+    const zMid = (roofFront + zb) / 2 - 0.1;
     for (let i = 0; i <= bays; i++) {
       const x = -W / 2 + (W * i) / bays;
       B.box('steel', x, roofY / 2, roofFront - 0.12, 0.14, roofY, 0.14);
       B.box('steel', x, roofY / 2, zb - 0.1, 0.14, roofY, 0.14);
-      // cross beam under the roof
-      B.box('steel', x, roofY - 0.12, (roofFront + zb) / 2 - 0.1, 0.1, 0.18, roofFront - zb);
+      // cross beam under the roof + a warm under-canopy LED bar beneath it
+      B.box('steel', x, roofY - 0.12, zMid, 0.1, 0.18, roofFront - zb);
+      B.box('warm', x, roofY - 0.235, zMid, 0.045, 0.025, roofFront - zb - 0.8);
       colliders.push(...postCollider(b, x, roofFront - 0.12));
     }
-    // roof slab + fascia + LED line
-    B.box('panel', 0, roofY + 0.11, (roofFront + zb) / 2 - 0.1, W + 0.6, 0.22, roofFront - zb + 0.5);
+    // eave beams (front / back)
+    B.box('steel', 0, roofY - 0.05, roofFront - 0.12, W + 0.2, 0.12, 0.12);
+    B.box('steel', 0, roofY - 0.05, zb - 0.1, W + 0.2, 0.12, 0.12);
+    // tan tensile roof: one peaked membrane per bay, king pole at each peak
+    const peak = 1.35;
+    for (let i = 0; i < bays; i++) {
+      const x0 = -W / 2 + (W * i) / bays;
+      const x1 = -W / 2 + (W * (i + 1)) / bays;
+      B.add('tent', membrane(x0 - 0.05, x1 + 0.05, zb - 0.35, roofFront + 0.35, roofY + 0.02, peak, lowDetail ? 6 : 10));
+      const xc = (x0 + x1) / 2;
+      B.cyl('steel', xc, roofY + peak + 0.2, zMid, 0.035, 0.035, 0.5, 6);
+    }
+    // lit fascia band along the front edge + LED lines
     B.box('black', 0, roofY - 0.05, roofFront + 0.05, W + 0.6, 0.62, 0.08);
+    B.plane('fascia', 0, roofY - 0.05, roofFront + 0.095, W + 0.6, 0.5, 1, (W + 0.6) / 4, 1);
     B.box('led', 0, roofY - 0.37, roofFront + 0.1, W + 0.5, 0.035, 0.03);
-    B.box('led', 0, roofY + 0.24, roofFront + 0.1, W + 0.5, 0.025, 0.03);
+    // roller shutter down to the counter top + its housing (only visible while the bar is closed)
+    const shTop = roofY - 0.3,
+      shBot = 1.13,
+      shZ = COUNTER_FRONT_Z + 0.09;
+    B.plane('shutter', 0, (shTop + shBot) / 2, shZ, W - 1.2, shTop - shBot, 1, W / 1.6, (shTop - shBot) / 3.2);
+    B.box('shutter', 0, shTop + 0.17, shZ - 0.12, W - 1.1, 0.34, 0.3);
 
     // counter
     const cl = W - 1.4;
@@ -289,6 +322,9 @@ export function buildBars(bars: BarDef[], lowDetail: boolean): BuiltBars {
     // stacked kegs behind the bench
     for (let i = 0; i < 3; i++) B.cyl('chrome', -benchHalf + 0.5 + i * 0.6, 0.3, zb + 0.3, 0.2, 0.2, 0.6, 12);
 
+    // warm wash from the under-canopy LEDs on the back wall above the fridges + the LED line itself
+    B.plane('glow', 0, 2.62, zb + 0.115, W - 0.4, 1.5, 1);
+    B.box('warm', 0, roofY - 0.08, zb + 0.16, W - 0.3, 0.03, 0.03);
     // price boards on the back wall (above the fridges)
     const bw = Math.min(3.0, W * 0.16);
     for (const sx of [-1, 1]) {
@@ -365,6 +401,7 @@ export function buildBars(bars: BarDef[], lowDetail: boolean): BuiltBars {
   }
 
   // merge each bucket into a single mesh
+  const meshes = new Map<BucketId, THREE.Mesh>();
   for (const [k, arr] of all) {
     const geo = mergeGeometries(arr, false);
     for (const g of arr) g.dispose();
@@ -375,10 +412,12 @@ export function buildBars(bars: BarDef[], lowDetail: boolean): BuiltBars {
     mesh.matrixAutoUpdate = false;
     mesh.updateMatrix();
     if (k === 'glow' || k === 'glass') mesh.renderOrder = 2;
-    if (k === 'steel' || k === 'panel' || k === 'deck' || k === 'top') {
+    if (k === 'steel' || k === 'panel' || k === 'deck' || k === 'top' || k === 'tent') {
       mesh.castShadow = true;
       mesh.receiveShadow = true;
     }
+    if (k === 'shutter') mesh.visible = false;
+    meshes.set(k, mesh);
     group.add(mesh);
   }
 
@@ -390,14 +429,46 @@ export function buildBars(bars: BarDef[], lowDetail: boolean): BuiltBars {
   bulbs.computeBoundingSphere();
   group.add(bulbs);
 
-  // faint warm emissive = light from the fridges and the counter falling on the staff
-  const staffMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, emissive: '#3a1a12', emissiveIntensity: 0.8 });
+  // the bar's own light (pendants, fridges, under-canopy LEDs) falls on the staff: a share of
+  // their albedo is added as emission so they read in their true colours instead of dim brown
+  const staffMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.75 });
+  staffMat.onBeforeCompile = (sh) => {
+    sh.fragmentShader = sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += diffuseColor.rgb * vec3(0.62, 0.52, 0.44);');
+  };
   const staffMesh = new THREE.InstancedMesh(staffGeometry(), staffMat, Math.max(1, staffInfo.length));
   staffMesh.name = 'bars-staff';
   staffMesh.count = staffInfo.length;
   staffMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   staffMesh.frustumCulled = false;
   group.add(staffMesh);
+
+  // open / closed: lights, staff, shutters (original values restored on re-open)
+  const lit = {
+    front: (mats.front as THREE.MeshStandardMaterial).emissiveIntensity,
+    fridge: (mats.fridge as THREE.MeshStandardMaterial).emissiveIntensity,
+    board: (mats.board as THREE.MeshStandardMaterial).emissiveIntensity,
+    tent: (mats.tent as THREE.MeshStandardMaterial).emissiveIntensity,
+    sign: (mats.sign as THREE.MeshBasicMaterial).color.clone(),
+    fascia: (mats.fascia as THREE.MeshBasicMaterial).color.clone(),
+    led: (mats.led as THREE.MeshBasicMaterial).color.clone(),
+    warm: (mats.warm as THREE.MeshBasicMaterial).color.clone(),
+  };
+  const setOpen = (open: boolean) => {
+    const k = open ? 1 : 0;
+    (mats.front as THREE.MeshStandardMaterial).emissiveIntensity = lit.front * (open ? 1 : 0.02);
+    (mats.fridge as THREE.MeshStandardMaterial).emissiveIntensity = lit.fridge * (open ? 1 : 0.03);
+    (mats.board as THREE.MeshStandardMaterial).emissiveIntensity = lit.board * (open ? 1 : 0.03);
+    (mats.tent as THREE.MeshStandardMaterial).emissiveIntensity = lit.tent * (open ? 1 : 0.04);
+    (mats.sign as THREE.MeshBasicMaterial).color.copy(lit.sign).multiplyScalar(open ? 1 : 0.05);
+    (mats.fascia as THREE.MeshBasicMaterial).color.copy(lit.fascia).multiplyScalar(open ? 1 : 0.12);
+    (mats.led as THREE.MeshBasicMaterial).color.copy(lit.led).multiplyScalar(open ? 1 : 0.02);
+    (mats.warm as THREE.MeshBasicMaterial).color.copy(lit.warm).multiplyScalar(open ? 1 : 0.03);
+    const glow = meshes.get('glow');
+    if (glow) glow.visible = open;
+    const sh = meshes.get('shutter');
+    if (sh) sh.visible = !open;
+    staffMesh.visible = k === 1;
+  };
 
   return {
     group,
@@ -408,7 +479,50 @@ export function buildBars(bars: BarDef[], lowDetail: boolean): BuiltBars {
     bulbCount: bulbMatrices.length,
     textures: Object.values(textures),
     materials: [...Object.values(mats), staffMat],
+    setOpen,
   };
+}
+
+/**
+ * Peaked tensile membrane over one bay (local x0..x1, z0..z1, eave height, peak rise): a
+ * square cone y = eave + peak·(1 − r)², r = max(|u|, |v|), so the fabric sags between the
+ * edges and rises steeply to the king pole — the classic festival tent roof.
+ */
+function membrane(x0: number, x1: number, z0: number, z1: number, eave: number, peak: number, seg: number): THREE.BufferGeometry {
+  const n = seg + 1;
+  const pos = new Float32Array(n * n * 3);
+  const uv = new Float32Array(n * n * 2);
+  for (let j = 0; j < n; j++) {
+    for (let i = 0; i < n; i++) {
+      const u = i / seg,
+        v = j / seg;
+      const r = Math.max(Math.abs(2 * u - 1), Math.abs(2 * v - 1));
+      const k = (j * n + i) * 3;
+      pos[k] = x0 + (x1 - x0) * u;
+      pos[k + 1] = eave + peak * (1 - r) * (1 - r);
+      pos[k + 2] = z0 + (z1 - z0) * v;
+      uv[(j * n + i) * 2] = u;
+      uv[(j * n + i) * 2 + 1] = v;
+    }
+  }
+  const idx: number[] = [];
+  for (let j = 0; j < seg; j++) {
+    for (let i = 0; i < seg; i++) {
+      const a = j * n + i,
+        b = a + 1,
+        c = a + n,
+        d = c + 1;
+      // split along the diagonal that follows the cone's creases
+      if ((i < seg / 2) === (j < seg / 2)) idx.push(a, c, d, a, d, b);
+      else idx.push(a, c, b, b, c, d);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g.toNonIndexed();
 }
 
 const tmpV = new THREE.Vector3();

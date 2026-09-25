@@ -7,7 +7,7 @@ import { debugState } from '../debug/debugState';
 import { AudioFlow } from './AudioFlow';
 import { BarMenu } from './BarMenu';
 import { openEnded, openHelp, openOnboarding } from './Cards';
-import { CAMERA_MODES, cameraRig, player, type CameraLike, type CamMode } from './contracts';
+import { CAMERA_MODES, cameraRig, player, tryCall, type CameraLike, type CamMode } from './contracts';
 import { h, isTypingTarget, store } from './dom';
 import { installGrain } from './grain';
 import { Hud } from './Hud';
@@ -18,10 +18,13 @@ import { openAudioMenu, openCameraSheet, openCrowd, openMoments, openPositions, 
 import { PerceptionUI } from './PerceptionUI';
 import { PhotoPanel } from './PhotoPanel';
 import { PiP } from './PiP';
+import { prefs, savePref } from './settings';
 import { Toasts } from './Toasts';
 
 const LOCK_MODES = new Set(['first', 'third', 'free', 'photo']);
 const DIGIT_MODES: Record<string, CamMode> = { Digit1: 'first', Digit2: 'third', Digit3: 'free', Digit4: 'flyover', Digit5: 'showcam', Digit6: 'photo' };
+/** play / skip / mute: also active while a panel is open */
+const MEDIA_KEYS = new Set(['KeyK', 'KeyJ', 'KeyL', 'KeyM']);
 /** shortcuts still active in photo mode */
 const PHOTO_KEYS = new Set(['KeyO', 'KeyH', 'KeyF', 'KeyK', 'KeyJ', 'KeyL', 'KeyM', ...Object.keys(DIGIT_MODES)]);
 
@@ -48,7 +51,18 @@ export class UI {
   private cinemaExitTimer = 0;
   private volume = 0.85;
   private muted = false;
-  private lastPoke = 0;
+  /** the show bar stays visible until this performance.now() time */
+  private hudUntil = 0;
+  private resumeEligible = false;
+  private resumeSince = 0;
+  /** reduce-flashing limiter state */
+  private flashDamp = 1;
+  private flashSlow = 0;
+  private baseExposure = -1;
+  private baseBloom = -1;
+  private wroteExposure = -1;
+  private wroteBloom = -1;
+  private coachTimer = 0;
   private externalPrompt = false;
   private externalLabel: string | null = null;
   private nearest: Interactable | null = null;
@@ -67,8 +81,17 @@ export class UI {
     this.touch = app.device.touch;
     this.autostart = app.params.has('autostart');
     installGrain();
-    this.root = h('div', { id: 'ui', class: 'pre' });
+    // phones / tablets get the touch layout (slim show bar, thumb controls above it)
+    let coarse = false;
+    try {
+      coarse = matchMedia('(pointer: coarse)').matches;
+    } catch {
+      /* old browsers */
+    }
+    this.root = h('div', { id: 'ui', class: `pre${this.touch && (app.device.mobile || coarse) ? ' touch' : ''}` });
     parent.appendChild(this.root);
+    this.applyStoredQuality();
+    this.setReduceFlashing(prefs.reduceFlashing, false);
     if (!this.autostart) {
       this.landing = new Landing(this.root, app.device.mobile);
       this.landing.enterBtn.addEventListener('click', () => void this.enter());
@@ -121,13 +144,27 @@ export class UI {
     window.addEventListener('pointermove', (e) => {
       if (e.pointerType === 'mouse' && !app.input.pointerLocked) this.poke();
     });
+    // mouse look sensitivity / invert Y: capture phase runs before Input's own listener; the
+    // correction is additive, so Input's += movement ends up as (sensitivity * movement)
+    window.addEventListener(
+      'mousemove',
+      (e) => {
+        if (!app.input.pointerLocked) return;
+        const s = prefs.lookSensitivity;
+        const sy = prefs.invertY ? -s : s;
+        if (s !== 1) app.input.look.x += (s - 1) * e.movementX;
+        if (sy !== 1) app.input.look.y += (sy - 1) * e.movementY;
+      },
+      true,
+    );
+    // tap detection uses event timestamps (robust against slow frames)
     window.addEventListener('pointerdown', (e) => {
-      if (e.pointerType !== 'mouse') this.tapStart = { x: e.clientX, y: e.clientY, t: performance.now(), id: e.pointerId };
+      if (e.pointerType !== 'mouse') this.tapStart = { x: e.clientX, y: e.clientY, t: e.timeStamp, id: e.pointerId };
     });
     window.addEventListener('pointerup', (e) => {
       if (e.pointerType === 'mouse' || e.pointerId !== this.tapStart.id) return;
       const moved = Math.hypot(e.clientX - this.tapStart.x, e.clientY - this.tapStart.y);
-      if (moved < 12 && performance.now() - this.tapStart.t < 300) this.onTap();
+      if (moved < 14 && e.timeStamp - this.tapStart.t < 450) this.onTap();
     });
     app.canvas.addEventListener('click', () => {
       this.tryLock();
@@ -157,6 +194,7 @@ export class UI {
       app.governor.enabled = false;
       if (app.quality.level !== q) app.setQuality(q as QualityLevel);
     }
+    if (prefs.fov >= 50) tryCall(this.rig(), 'setBaseFov', prefs.fov);
     const crowd = app.get('crowd') as unknown as { setPopulated?(on: boolean): void; setCount?(n: number): void } | undefined;
     const cm = store.get('dq26.crowd');
     if (!app.params.has('mode') && !app.params.has('filmed') && (cm === 'filmed' || cm === 'tribe')) crowd?.setPopulated?.(cm === 'tribe');
@@ -183,14 +221,61 @@ export class UI {
     this.landing?.hide();
     this.landing = null;
     this.app.input.uiCapture = this.layers.anyOpen;
-    this.root.classList.remove('pre');
+    // the HUD stays hidden ('pre') behind the audio chooser and the welcome card
     await this.audio.resolve();
     const choice = await openOnboarding(this);
+    this.root.classList.remove('pre');
     this.entered = true;
-    if (choice === 'start' || this.app.params.has('play')) void this.play();
-    else this.toast(this.touch ? 'Explore freely — tap ▶ in the show bar to start the Endshow' : 'Explore freely — press K to start the Endshow', 3600, 'play');
+    const start = choice === 'start' || this.app.params.has('play');
+    if (start) void this.play();
+    if (this.touch) {
+      if (!start) this.toast('Explore freely — tap ▶ in the show bar to start the Endshow', 3600, 'play');
+    } else {
+      // pointer lock hides the cursor: say how to get the show controls back
+      this.toast(start ? 'Esc frees the mouse for the show controls · K pause · J / L skip 10 s' : 'Explore freely — press K to start the Endshow · Esc frees the mouse', 6500, 'keyboard');
+    }
     this.tryLock();
-    this.poke();
+    // keep the show bar up for a while so first-time viewers see where the controls are
+    this.poke(7500);
+    if (this.touch) this.coach();
+  }
+
+  /** one-time labels under the toolbar icons (touch devices have no hover tooltips) */
+  private coach(): void {
+    if (store.get('dq26.coach') === '1') return;
+    store.set('dq26.coach', '1');
+    this.root.classList.add('coach');
+    clearTimeout(this.coachTimer);
+    const off = () => {
+      this.root.classList.remove('coach');
+      window.removeEventListener('pointerdown', early, true);
+    };
+    // stays until the first touch after 2.5 s, or 9 s at most
+    const shownAt = performance.now();
+    const early = () => {
+      if (performance.now() - shownAt > 2500) off();
+    };
+    window.addEventListener('pointerdown', early, true);
+    this.coachTimer = window.setTimeout(off, 9000);
+  }
+
+  /** a stored quality choice is applied before the world is built (no double build) */
+  private applyStoredQuality(): void {
+    const app = this.app;
+    const q = store.get('dq26.quality');
+    if (app.ready || app.params.get('quality') || !q || q === 'auto' || !(q in QUALITY_PRESETS)) return;
+    app.governor.enabled = false;
+    if (app.quality.level === q) return;
+    app.quality = { ...QUALITY_PRESETS[q as QualityLevel] };
+    app.camera.far = app.quality.drawDistance;
+    app.camera.updateProjectionMatrix();
+  }
+
+  /** photosensitivity option: other systems read app.reduceFlashing; the UI also limits flash peaks */
+  setReduceFlashing(on: boolean, save = true): void {
+    if (save) savePref('reduceFlashing', on);
+    else prefs.reduceFlashing = on;
+    (this.app as unknown as { reduceFlashing?: boolean }).reduceFlashing = on;
   }
 
   // ---------------------------------------------------------------------------------------
@@ -338,7 +423,7 @@ export class UI {
       if (this.lastCamMode && this.lastCamMode !== 'photo') this.prevCamMode = this.lastCamMode as CamMode;
       this.enterPhotoUi();
     } else if (mode !== 'photo' && this.photo.open) this.exitPhotoUi();
-    if (!initial && mode !== this.lastCamMode && mode !== 'photo') {
+    if (!initial && mode !== this.lastCamMode && mode !== 'photo' && !this.layers.modalOpen) {
       const m = CAMERA_MODES.find((x) => x.id === mode);
       if (m) this.toast(`${m.label} — ${m.hint}`, 1800, m.icon);
     }
@@ -411,7 +496,8 @@ export class UI {
     p.teleport(spot);
     if (this.photo.open) this.togglePhoto(false, 'first');
     else if (this.camMode() !== 'first') cameraRig(this.app)?.setMode?.('first');
-    this.toast(`You are now at: ${spot.label}`, 2000, 'pin');
+    if (spot.id.startsWith('bar_')) this.toast(`${spot.label} — walk up to the counter and ${this.touch ? 'tap “Order a drink”' : 'press E'} to order`, 3400, 'cup');
+    else this.toast(`You are now at: ${spot.label}`, 2000, 'pin');
     this.tryLock();
   }
 
@@ -532,17 +618,17 @@ export class UI {
     this.app.input.requestPointerLock();
   }
 
-  /** show the HUD (resets the auto-hide timer) */
-  poke(): void {
-    this.lastPoke = performance.now();
+  /** show the HUD (resets the auto-hide timer; holdMs = how long it stays at least) */
+  poke(holdMs = 3000): void {
+    this.hudUntil = Math.max(this.hudUntil, performance.now() + holdMs);
   }
 
   private onTap() {
-    this.poke();
+    this.poke(this.touch ? 4000 : 3000);
     if (this.cinema && this.touch) {
       this.cinemaExit.classList.add('show');
       clearTimeout(this.cinemaExitTimer);
-      this.cinemaExitTimer = window.setTimeout(() => this.cinemaExit.classList.remove('show'), 3000);
+      this.cinemaExitTimer = window.setTimeout(() => this.cinemaExit.classList.remove('show'), 3500);
     }
   }
 
@@ -567,8 +653,10 @@ export class UI {
       if (own[e.code] === top || (e.key === '?' && top === 'help')) {
         this.layers.close(top);
         e.preventDefault();
+        return;
       }
-      return;
+      // media keys keep working while a panel (not a modal card) is open
+      if (!(this.layers.kindOf(top) === 'panel' && MEDIA_KEYS.has(e.code))) return;
     }
     if (this.photo.open && !PHOTO_KEYS.has(e.code)) return;
     let handled = true;
@@ -652,17 +740,22 @@ export class UI {
     }
     // auto-hide the show bar while the show plays and nobody touches the mouse
     const now = performance.now();
-    const keep = !playing || !this.entered || this.layers.anyOpen || this.hud.hovering || now - this.lastPoke < 3000;
+    const keep = !playing || !this.entered || this.layers.anyOpen || this.hud.hovering || now < this.hudUntil;
     this.hud.setAway(!keep);
 
-    // click-to-resume hint (desktop pointer lock)
+    // click-to-resume hint (desktop pointer lock): bottom centre, fades after a few seconds
     const locked = this.app.input.pointerLocked;
     if (locked !== this.lastLocked) {
       this.lastLocked = locked;
       if (!locked) this.poke();
     }
-    const showResume = this.canLock() && !locked && !this.cinema;
-    this.hud.setResume(showResume, this.photo.open ? 'Click the scene to look around · Esc to adjust the photo' : 'Click to look around');
+    const eligible = this.canLock() && !locked && !this.cinema;
+    if (eligible && !this.resumeEligible) this.resumeSince = now;
+    this.resumeEligible = eligible;
+    const showResume = eligible && !this.hud.hovering && now - this.resumeSince < 4500;
+    this.hud.setResume(showResume, this.photo.open ? 'Click the scene to look around · Esc to adjust the photo' : 'Click the scene to look around');
+
+    this.limitFlashes(ctx.dt);
 
     // watchdog: the embedded video can be unavailable (region, embedding, network)
     const tr = this.app.clock.track;
@@ -676,5 +769,35 @@ export class UI {
 
     // roll fallback for photo mode when the rig has no setRoll
     if (this.photo.open && this.photo.fallbackRoll !== 0) this.app.camera.rotation.z = this.photo.fallbackRoll;
+  }
+
+  /**
+   * Reduce flashing: an automatic-exposure limiter on top of whatever the show systems do.
+   * Strobes, blinders and pyro / firework flashes (LightEnv) pull the exposure down instantly and
+   * it recovers over ~0.6 s, so bursts read as one dimmed pulse instead of a 12 Hz flicker.
+   * Tracks external edits (debug menu) of the base values; restores them when switched off.
+   */
+  private limitFlashes(dt: number): void {
+    const pf = this.app.postfx;
+    if (!prefs.reduceFlashing) {
+      if (this.baseExposure >= 0) {
+        if (pf.exposure === this.wroteExposure) pf.exposure = this.baseExposure;
+        if (pf.bloomStrength === this.wroteBloom) pf.bloomStrength = this.baseBloom;
+        this.baseExposure = this.baseBloom = -1;
+        this.flashDamp = 1;
+      }
+      return;
+    }
+    if (this.baseExposure < 0 || pf.exposure !== this.wroteExposure) this.baseExposure = pf.exposure;
+    if (this.baseBloom < 0 || pf.bloomStrength !== this.wroteBloom) this.baseBloom = pf.bloomStrength;
+    const env = this.app.env;
+    const f = Math.min(4, env.flashIntensity) + env.strobe * 1.5;
+    // only sudden rises are damped: steady light (burning flames, long washes) keeps its level
+    this.flashSlow += (f - this.flashSlow) * (1 - Math.exp(-dt / 1.5));
+    const spike = Math.max(0, f - this.flashSlow * 0.7);
+    const target = 1 / (1 + 0.6 * spike);
+    this.flashDamp = target < this.flashDamp ? target : this.flashDamp + (target - this.flashDamp) * (1 - Math.exp(-dt / 0.6));
+    pf.exposure = this.wroteExposure = this.baseExposure * this.flashDamp;
+    pf.bloomStrength = this.wroteBloom = this.baseBloom * (0.55 + 0.25 * this.flashDamp);
   }
 }

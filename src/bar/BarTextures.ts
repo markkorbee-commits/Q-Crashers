@@ -92,7 +92,7 @@ export function signTexture(): THREE.CanvasTexture {
   // small caption
   g.font = `600 22px ${BODY}`;
   g.fillStyle = '#ff6a4a';
-  g.fillText('DRINKS  ·  WATER  ·  COINS', W / 2, H - 50);
+  g.fillText('DRINKS  ·  WATER  ·  CASHLESS', W / 2, H - 50);
   return tex(c);
 }
 
@@ -127,7 +127,7 @@ export function menuBoardTexture(): THREE.CanvasTexture {
   g.font = `500 20px ${BODY}`;
   g.fillStyle = '#a39b92';
   g.textAlign = 'right';
-  g.fillText('CASHLESS · PAY WITH YOUR BRACELET · € 2 CUP DEPOSIT', W - 40, 70);
+  g.fillText('CASHLESS · PAY WITH YOUR BRACELET · RECYCLE TOKEN OR +€ 2 PER CUP', W - 40, 70);
 
   const price = (x: number, y: number, n: number) => {
     g.fillStyle = n === 0 ? '#7fd08a' : '#fff';
@@ -252,30 +252,123 @@ export function fridgeTexture(): THREE.CanvasTexture {
   return tex(c);
 }
 
-/** Backlit red counter front with vertical slats (repeats along the counter). */
+/**
+ * Counter front: dark timber cladding (vertical boards) with a thin red LED line under the
+ * counter top and a warm kick-plate glow (repeats along the counter). Used as map + emissive map:
+ * only the LED line and the kick glow are bright enough to emit.
+ */
 export function counterFrontTexture(): THREE.CanvasTexture {
   const [c, g] = canvas(256, 256);
   const W = c.width,
     H = c.height;
-  const lg = g.createLinearGradient(0, 0, 0, H);
-  lg.addColorStop(0, '#3a0000');
-  lg.addColorStop(0.18, '#c40800');
-  lg.addColorStop(0.55, '#ff2a0a');
-  lg.addColorStop(0.85, '#b00600');
-  lg.addColorStop(1, '#2a0000');
-  g.fillStyle = lg;
+  g.fillStyle = '#17120f';
   g.fillRect(0, 0, W, H);
-  // slats
+  const rng = new Rng(31);
+  // boards with grain
   for (let x = 0; x < W; x += 32) {
-    g.fillStyle = 'rgba(0,0,0,0.55)';
-    g.fillRect(x, 0, 5, H);
-    g.fillStyle = 'rgba(255,190,150,0.25)';
-    g.fillRect(x + 5, 0, 2, H);
+    const v = rng.range(18, 34);
+    g.fillStyle = `rgb(${v + 6},${v},${v - 4})`;
+    g.fillRect(x + 2, 0, 29, H);
+    for (let i = 0; i < 14; i++) {
+      g.fillStyle = `rgba(0,0,0,${rng.range(0.08, 0.22)})`;
+      g.fillRect(x + 2 + rng.range(0, 27), 0, rng.range(0.6, 1.6), H);
+    }
+    g.fillStyle = 'rgba(0,0,0,0.75)';
+    g.fillRect(x, 0, 2, H);
   }
-  // top & bottom rails
+  // red LED line under the top rail (the only strongly emissive part)
   g.fillStyle = '#0a0a0c';
-  g.fillRect(0, 0, W, 14);
+  g.fillRect(0, 0, W, 16);
+  const led = g.createLinearGradient(0, 16, 0, 40);
+  led.addColorStop(0, 'rgba(255,40,16,1)');
+  led.addColorStop(0.18, 'rgba(255,30,10,0.55)');
+  led.addColorStop(1, 'rgba(255,30,10,0)');
+  g.fillStyle = led;
+  g.fillRect(0, 16, W, 24);
+  g.fillStyle = '#ff3a1a';
+  g.fillRect(0, 16, W, 3);
+  // kick plate + warm spill from the floor strip
+  g.fillStyle = '#0a0a0c';
   g.fillRect(0, H - 18, W, 18);
+  const kick = g.createLinearGradient(0, H - 44, 0, H - 18);
+  kick.addColorStop(0, 'rgba(255,170,90,0)');
+  kick.addColorStop(1, 'rgba(255,170,90,0.35)');
+  g.fillStyle = kick;
+  g.fillRect(0, H - 44, W, 26);
+  return tex(c, true, true);
+}
+
+/** Red fascia band along the roof edge with white "BAR · DRINKS · WATER" lettering (repeats). */
+export function fasciaTexture(): THREE.CanvasTexture {
+  const [c, g] = canvas(1024, 128);
+  const W = c.width,
+    H = c.height;
+  const bg = g.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0, '#8e0a1c');
+  bg.addColorStop(0.5, '#c8102e');
+  bg.addColorStop(1, '#7a0818');
+  g.fillStyle = bg;
+  g.fillRect(0, 0, W, H);
+  g.fillStyle = 'rgba(0,0,0,0.55)';
+  g.fillRect(0, 0, W, 8);
+  g.fillRect(0, H - 8, W, 8);
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.font = `700 64px ${DISPLAY}`;
+  g.fillStyle = '#fff6ee';
+  g.shadowColor = 'rgba(255,220,200,0.6)';
+  g.shadowBlur = 8;
+  g.fillText('BAR', W * 0.25, H / 2 + 3);
+  g.font = `600 34px ${BODY}`;
+  g.fillText('DRINKS  ·  WATER', W * 0.72, H / 2 + 2);
+  return tex(c, true, true);
+}
+
+/** Tensile membrane underside: warm light from the under-canopy LEDs, brightest at the peak. */
+export function canopyGlowTexture(): THREE.CanvasTexture {
+  const [c, g] = canvas(128, 128);
+  const rg = g.createRadialGradient(64, 64, 4, 64, 64, 80);
+  rg.addColorStop(0, '#ffd9a6');
+  rg.addColorStop(0.35, '#c8925a');
+  rg.addColorStop(0.75, '#5a3a1e');
+  rg.addColorStop(1, '#2a1a0e');
+  g.fillStyle = rg;
+  g.fillRect(0, 0, 128, 128);
+  // seams of the membrane panels
+  g.strokeStyle = 'rgba(40,24,12,0.35)';
+  g.lineWidth = 1.5;
+  for (const [x0, y0, x1, y1] of [
+    [0, 0, 128, 128],
+    [128, 0, 0, 128],
+    [64, 0, 64, 128],
+    [0, 64, 128, 64],
+  ]) {
+    g.beginPath();
+    g.moveTo(x0, y0);
+    g.lineTo(x1, y1);
+    g.stroke();
+  }
+  return tex(c);
+}
+
+/** Corrugated roller shutter (bars closed in "As filmed" mode). */
+export function shutterTexture(): THREE.CanvasTexture {
+  const [c, g] = canvas(128, 256);
+  const W = c.width,
+    H = c.height;
+  for (let y = 0; y < H; y += 8) {
+    const lg = g.createLinearGradient(0, y, 0, y + 8);
+    lg.addColorStop(0, '#6d7076');
+    lg.addColorStop(0.5, '#9a9ea5');
+    lg.addColorStop(1, '#45484d');
+    g.fillStyle = lg;
+    g.fillRect(0, y, W, 8);
+  }
+  const rng = new Rng(12);
+  for (let i = 0; i < 60; i++) {
+    g.fillStyle = `rgba(30,24,18,${rng.range(0.05, 0.18)})`;
+    g.fillRect(rng.range(0, W), rng.range(0, H), rng.range(4, 30), rng.range(1, 3));
+  }
   return tex(c, true, true);
 }
 

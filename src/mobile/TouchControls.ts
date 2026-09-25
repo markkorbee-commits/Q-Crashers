@@ -1,6 +1,7 @@
 import type { CameraMode, CameraRig } from '../camera/CameraRig';
 import type { App } from '../core/App';
 import type { PlayerController } from '../player/PlayerController';
+import { prefs } from '../ui/settings';
 import './touch.css';
 
 type Group = 'walk' | 'fly' | 'watch';
@@ -71,9 +72,13 @@ export class TouchControls {
   private primaryTouch = true;
   private safe = { l: 0, r: 0, t: 0, b: 0 };
   private probe!: HTMLElement;
+  /** px the controls sit above the bottom edge (clear of the touch show bar; CSS --tc-lift) */
+  private lift = 0;
+  /** hidden by the overlay UI (cinema, menus): swipes only look around, nothing walks */
+  private hidden = false;
   /** joystick radius in CSS px (knob travel) */
   readonly radius = 56;
-  /** swipe-look speed multiplier (1 = right half of the screen is ~110 degrees) */
+  /** swipe-look speed multiplier (1 = right half of the screen is ~110 degrees); × the viewer's setting */
   lookSpeed = 1;
 
   constructor(private app: App, private parent: HTMLElement) {}
@@ -117,11 +122,33 @@ export class TouchControls {
     this.onResize();
     if (store.get(HINTS_KEY)) this.hideHints();
     else setTimeout(() => this.hideHints(), 14000);
+    // follow the overlay UI: cinema / menus / landing hide the thumb controls (CSS), and any
+    // held joystick or button is released so nothing keeps walking behind a menu
+    const ui = document.getElementById('ui');
+    if (ui) {
+      const sync = () => {
+        const c = ui.classList;
+        const hide = c.contains('pre') || c.contains('cinema') || c.contains('layer-open');
+        if (hide !== this.hidden) {
+          this.hidden = hide;
+          this.releaseAll();
+        }
+        if (c.contains('touch') !== this.lastTouchLayout) {
+          this.lastTouchLayout = c.contains('touch');
+          this.onResize();
+        }
+      };
+      new MutationObserver(sync).observe(ui, { attributes: true, attributeFilter: ['class'] });
+      sync();
+    }
   }
+
+  private lastTouchLayout = false;
 
   /** hide / show all touch UI (e.g. for a cinema mode) */
   setVisible(on: boolean): void {
     this.el?.classList.toggle('tc-hidden', !on);
+    this.hidden = !on;
     if (!on) this.releaseAll();
   }
 
@@ -241,11 +268,11 @@ export class TouchControls {
   private onDown = (e: PointerEvent): void => {
     if (e.pointerType === 'mouse' || e.target !== this.app.canvas || this.group === 'watch') return;
     e.preventDefault();
-    if (e.clientX < window.innerWidth * 0.5 && this.joyId === null) {
+    if (e.clientX < window.innerWidth * 0.5 && this.joyId === null && !this.hidden) {
       this.joyId = e.pointerId;
       const R = this.radius + 8;
       this.ox = Math.min(Math.max(e.clientX, this.safe.l + R), window.innerWidth * 0.5);
-      this.oy = Math.min(Math.max(e.clientY, this.safe.t + R), window.innerHeight - this.safe.b - R);
+      this.oy = Math.min(Math.max(e.clientY, this.safe.t + R), window.innerHeight - this.safe.b - this.lift - R * 0.6);
       this.joy.classList.remove('is-idle');
       this.joy.style.transform = `translate(${this.ox}px, ${this.oy}px)`;
       this.stick(e.clientX, e.clientY);
@@ -264,10 +291,10 @@ export class TouchControls {
       this.stick(e.clientX, e.clientY);
     } else if (e.pointerId === this.lookId) {
       e.preventDefault();
-      const s = (1700 / Math.max(320, window.innerWidth)) * this.lookSpeed;
+      const s = (1700 / Math.max(320, window.innerWidth)) * this.lookSpeed * prefs.touchLook;
       const input = this.app.input;
       input.look.x += (e.clientX - this.lastX) * s;
-      input.look.y += (e.clientY - this.lastY) * s;
+      input.look.y += (e.clientY - this.lastY) * s * (prefs.invertY ? -1 : 1);
       if (Math.abs(e.clientX - this.lastX) > 2) {
         this.hintLook.classList.add('is-gone');
         this.markHintsUsed();
@@ -351,15 +378,16 @@ export class TouchControls {
     this.safe.r = parseFloat(cs.paddingRight) || 0;
     this.safe.b = parseFloat(cs.paddingBottom) || 0;
     this.safe.l = parseFloat(cs.paddingLeft) || 0;
+    this.lift = parseFloat(getComputedStyle(this.el).getPropertyValue('--tc-lift')) || 0;
     if (this.joyId === null) this.placeGhost();
     const portrait = window.innerHeight > window.innerWidth * 1.05;
     this.portrait.classList.toggle('is-shown', portrait && this.primaryTouch && !store.get(PORTRAIT_KEY));
   };
 
-  /** faint resting joystick bottom-left, showing where to put the thumb */
+  /** faint resting joystick bottom-left (above the show bar), showing where to put the thumb */
   private placeGhost(): void {
     this.ox = this.safe.l + 96;
-    this.oy = window.innerHeight - this.safe.b - 100;
+    this.oy = window.innerHeight - this.safe.b - this.lift - (this.lift ? 76 : 100);
     this.joy.style.transform = `translate(${this.ox}px, ${this.oy}px)`;
   }
 }

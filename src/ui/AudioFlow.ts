@@ -50,34 +50,63 @@ export class AudioFlow {
       this.afterSwitch(app.sources.kind);
       return;
     }
+    const rem = this.remembered;
+    const usable = (rem === 'youtube' && !IS_ARTIFACT) || rem === 'synth' || rem === 'silent';
+    // immediate feedback while the audio file is looked for: the chooser (options wait for the
+    // search) or, for a remembered choice, a small status card
+    const chooser = usable ? null : this.openChooser(true, true);
+    if (usable) this.openSearching();
     let found = false;
     try {
       found = await app.sources.autoDetect();
     } catch (e) {
       console.warn('[ui] audio auto-detect failed', e);
     }
+    this.ui.layers.close('searching', true);
     if (found) {
       this.afterSwitch('file');
       this.ui.toast('Endshow audio found — perfectly synced', 2800, 'music');
       return;
     }
-    const rem = this.remembered;
-    if ((rem === 'youtube' && !IS_ARTIFACT) || rem === 'synth' || rem === 'silent') {
+    if (usable) {
       const ok = await this.use(rem, undefined, true);
       if (ok) return;
+      await this.openChooser(true);
+      return;
     }
-    await this.openChooser(true);
+    this.setDetecting(false);
+    await chooser;
+  }
+
+  /** small modal while the Endshow audio file is looked for (remembered source) */
+  private openSearching() {
+    const card = h(
+      'div',
+      { class: 'card glass strong rule-top searching', 'aria-label': 'Preparing the audio' },
+      h('div', { class: 'search-row' }, h('span', { class: 'spinner' }), h('span', null, h('b', null, 'Looking for the Endshow audio…'), h('small', null, 'Checking this page for a local copy of the official audio'))),
+    );
+    this.ui.layers.open('searching', card, { kind: 'modal', dismissible: false });
+  }
+
+  private chooserCard: HTMLElement | null = null;
+
+  private setDetecting(on: boolean) {
+    const card = this.chooserCard;
+    if (!card) return;
+    card.classList.toggle('detecting', on);
+    card.querySelectorAll<HTMLButtonElement>('.option').forEach((b) => (b.disabled = on));
+    if (!on) card.querySelector('.search-row')?.remove();
   }
 
   /** the source chooser card (initial = shown right after entering; must pick one) */
-  openChooser(initial: boolean): Promise<void> {
+  openChooser(initial: boolean, detecting = false): Promise<void> {
     const ui = this.ui;
     return new Promise<void>((resolve) => {
       this.chooserResolve = resolve;
       const option = (kind: SourceKind, ico: string, title: string, sub: string, tag?: string, rec = false) => {
-        const b = h('button', { class: 'option', type: 'button', 'data-kind': kind }, h('span', { class: 'oi', html: icon(ico) }), h('span', null, h('b', null, title), h('span', null, sub)), tag ? h('span', { class: `tag ${rec ? 'rec' : ''}` }, tag) : h('span'));
+        const b = h('button', { class: 'option', type: 'button', 'data-kind': kind }, h('span', { class: 'oi', html: icon(ico) }), h('span', { class: 'ot' }, h('b', null, title), h('span', null, sub)), tag ? h('span', { class: `tag ${rec ? 'rec' : ''}` }, tag) : h('span'));
         b.addEventListener('click', async () => {
-          if (this.busy) return;
+          if (this.busy || b.disabled) return;
           if (kind === 'file') {
             this.pickFile();
             return;
@@ -96,20 +125,23 @@ export class AudioFlow {
       const rem = this.remembered;
       const card = h(
         'div',
-        { class: 'card glass strong rule-top', 'aria-label': 'Choose the audio source' },
+        { class: 'card glass strong rule-top chooser', 'aria-label': 'Choose the audio source' },
         h('div', { class: 'kicker' }, initial ? 'Before you enter' : 'Audio source'),
         h('h3', null, 'How do you want to hear the Endshow?'),
-        h('p', null, 'The whole show is synchronised to the music. Pick a source — you can switch any time from the top bar.'),
+        h('p', { class: 'intro' }, 'The whole show is synchronised to the music. Pick a source — you can switch any time from the top bar.'),
+        detecting ? h('div', { class: 'search-row' }, h('span', { class: 'spinner' }), h('span', null, h('b', null, 'Looking for the Endshow audio…'), h('small', null, 'A local copy of the official audio is used automatically'))) : null,
         h(
           'div',
           { class: 'options' },
           option('file', 'upload', 'Load the Endshow audio file', 'Your copy of the official Endshow audio (MP3, M4A, WAV…). Or drop it anywhere on this page.', rem === 'file' ? 'Last used' : 'Best', true),
           ...(IS_ARTIFACT ? [] : [option('youtube', 'broadcast', 'Play with the official video', 'Official broadcast as synced picture-in-picture — doubles as a live accuracy reference.', 'Online')]),
-          option('synth', 'synth', 'Rehearsal track (synthesized)', 'A generated track that follows the show’s tempo map. Works offline.'),
+          option('synth', 'synth', 'Rehearsal track (synthesized)', 'A generated track that follows the show’s tempo map. Works offline.', 'Offline'),
           option('silent', 'mute', 'Silent', 'Visual show only, driven by a silent clock.'),
         ),
         h('p', { class: 'note', html: `${icon('info')}<span>No music is bundled with this fan tribute — copyrighted audio is never redistributed.</span>` }),
       );
+      this.chooserCard = card;
+      if (detecting) this.setDetecting(true);
       ui.layers.open('chooser', card, { kind: 'modal', dismissible: !initial, onClose: () => this.finishChooser(true) });
     });
   }
@@ -117,6 +149,7 @@ export class AudioFlow {
   private finishChooser(fromClose = false) {
     const r = this.chooserResolve;
     this.chooserResolve = null;
+    this.chooserCard = null;
     if (!fromClose && this.ui.layers.isOpen('chooser')) this.ui.layers.close('chooser', true);
     r?.();
   }
