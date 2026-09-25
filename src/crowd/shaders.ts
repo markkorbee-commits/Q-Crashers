@@ -231,6 +231,10 @@ Pose personPose(Person P) {
   float jit = (vnoise(P.pos.xz * 0.11) - 0.5) * 0.12;
   float b = uBeat.x - delay * bps - jit;
   float bp = fract(b);
+  // some people move in halfT time (every 2nd kick, bigger), most on every kick
+  float halfT = step(0.72, hh(sd, 26.0));
+  float b2 = b * 0.5;
+  float bpH = mix(bp, fract(b2), halfT);
   float kickOn = uBeat.z;
   float kick = kickOn * exp(-bp / bps * 11.0);
   float ph = hh(sd, 6.0) * TAU;
@@ -327,11 +331,11 @@ Pose personPose(Person P) {
   }
 
   // jump: airborne between kicks, land (compressed) on the kick
-  float s = clamp((bp - 0.1) / 0.78, 0.0, 1.0);
+  float s = clamp((bpH - 0.1 * (1.0 - halfT) - 0.05 * halfT) / mix(0.78, 0.6, halfT), 0.0, 1.0);
   float hop = 4.0 * s * (1.0 - s);
-  float hj = (0.12 + 0.17 * e) * inten * (zone == 0 ? 1.25 : 1.0);
+  float hj = (0.12 + 0.17 * e) * inten * (zone == 0 ? 1.25 : 1.0) * (1.0 + 0.5 * halfT);
   lift += wJ * hj * hop;
-  drop += wJ * 0.09 * (1.0 - smoothstep(0.0, 0.14, bp));
+  drop += wJ * 0.09 * (1.0 - smoothstep(0.0, 0.14, bpH));
   float tuck = wJ * sin(PI * s);
   xL += vec3(20.0, 0.0, 38.0) * D2R * tuck;
   xR += vec3(20.0, 0.0, 38.0) * D2R * tuck;
@@ -342,7 +346,7 @@ Pose personPose(Person P) {
   if (which < 0.5) xL += st3; else xR += st3;
   drop += wS * 0.05 * (0.5 + 0.5 * cos(TAU * bp));
   lean += wS * 9.0 * D2R;
-  // hakken: fast heel kicks on the half beats
+  // hakken: fast heel kicks on the halfT beats
   float hb2 = fract(b * 2.0);
   float wh = mod(floor(b * 2.0), 2.0);
   float kk = sin(PI * hb2);
@@ -351,7 +355,7 @@ Pose personPose(Person P) {
   drop += wK * 0.035 * (1.0 - kk);
   twist += wK * 9.0 * D2R * (wh * 2.0 - 1.0) * kk;
   // hardstyle bounce: lowest on the kick
-  float bnc = (0.5 + 0.5 * cos(TAU * bp)) * kickOn + (1.0 - kickOn) * (0.5 + 0.5 * sin(TAU * st * 0.5 + ph)) * 0.4;
+  float bnc = (0.5 + 0.5 * cos(TAU * bpH)) * kickOn + (1.0 - kickOn) * (0.5 + 0.5 * sin(TAU * st * 0.5 + ph)) * 0.4;
   drop += wB * (0.035 + 0.05 * e) * inten * bnc;
   lean += wB * 4.0 * D2R * bnc;
   headP += wB * 7.0 * D2R * bnc;
@@ -753,7 +757,7 @@ ${
   performer
     ? `  if (vSlot == S_LANTERN_L || vSlot == S_LANTERN_R) {
     float fl = 0.85 + 0.15 * sin(uClock.y * 23.0 + vW.x * 7.0) * sin(uClock.y * 7.3 + vW.z);
-    emit = vec3(1.0, 0.86, 0.55) * 7.0 * vGlow * fl;
+    emit = vec3(1.0, 0.86, 0.55) * 5.0 * vGlow * fl;
   }`
     : ''
 }

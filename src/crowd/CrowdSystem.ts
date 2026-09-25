@@ -4,7 +4,7 @@ import { clamp, hash32, hashN } from '../core/rng';
 import type { FrameContext, QualitySettings, System } from '../core/types';
 import { buildFlagAtlas, buildSilhouetteAtlas } from './atlas';
 import { Choreo, describeMood } from './choreo';
-import { M, MOOD_CHANNELS, paletteColors, WIND_DIR } from './constants';
+import { M, paletteColors, WIND_DIR } from './constants';
 import {
   buildFlagGeometry,
   buildImpostorGeometry,
@@ -35,8 +35,9 @@ import {
  * plus everyone who WAS there on 27 June 2026 (MC, fire troupe, pianist, crew).
  *
  * Rendering (≤ 7 draw calls for the whole module):
- *   near   articulated low-poly bodies (~330 tris incl. optional accessory slots), GPU skinned
- *   mid    ~70-tri prism bodies with the same skeleton and per-vertex lighting
+ *   near   articulated low-poly bodies (440-tri body + optional cap / hat / hair / bandana / cape
+ *          slots), rigid segments GPU-skinned in the vertex shader
+ *   mid    80-tri prism bodies with the same skeleton and per-vertex lighting
  *   far    camera-facing impostors from a procedurally drawn silhouette atlas (8 poses × 4 bodies)
  *   flags  poles + waving cloth attached to the carrier's hand (same pose code as the bodies)
  *   lights phone screens / flashlights / lighters (additive sprites in the hands)
@@ -52,7 +53,7 @@ const MID_D = 82;
 const DEFAULT_COUNT = 45000;
 const MAX_COUNT = 65000;
 
-const SILENCE_SKY = [
+const SKY_KEYS = [
   // t, zenith (sRGB), twilight low (sRGB) — design-bible §8.3
   [0, '#0a2a4e', '#c99a68'],
   [120, '#06183a', '#a8805e'],
@@ -103,6 +104,7 @@ export class CrowdSystem implements System {
   private visChunk = new Int32Array(0);
   private visDist = new Float32Array(0);
   private readonly bins = new Int32Array(512);
+  private chunkLod = new Uint8Array(0);
   private lastCam = new THREE.Vector3(1e9, 0, 0);
   private lastDir = new THREE.Vector3();
   private tmpV = new THREE.Vector3();
@@ -173,7 +175,7 @@ export class CrowdSystem implements System {
       };
     }
     this.queues = this.findQueues();
-    for (const s of SILENCE_SKY) this.sky.push({ t: s[0], z: new THREE.Color(s[1]), w: new THREE.Color(s[2]) });
+    for (const s of SKY_KEYS) this.sky.push({ t: s[0], z: new THREE.Color(s[1]), w: new THREE.Color(s[2]) });
 
     this.root.name = 'crowd';
     this.crowdGroup.name = 'crowd-tribe';
@@ -397,6 +399,7 @@ export class CrowdSystem implements System {
     this.order = new Int32Array(layout.chunks.length);
     this.dist = new Float32Array(layout.chunks.length);
     this.visChunk = new Int32Array(layout.chunks.length);
+    this.chunkLod = new Uint8Array(layout.chunks.length).fill(2);
     this.visDist = new Float32Array(layout.chunks.length);
     this.lastCam.set(1e9, 0, 0);
     this.buildMs = performance.now() - t0;
@@ -541,12 +544,20 @@ export class CrowdSystem implements System {
       const d = dist[k];
       const s = ch.start;
       const e = s + ch.count;
-      if (d < NEAR_D && nn + ch.count <= nearBudget) {
+      // hysteresis: a chunk keeps its finer LOD for 3 m past the threshold (no flicker at borders)
+      const ci = order[k];
+      const prev = this.chunkLod[ci];
+      const nearD = prev === 0 ? NEAR_D + 3 : NEAR_D;
+      const midD = prev <= 1 ? MID_D + 4 : MID_D;
+      if (d < nearD && nn + ch.count <= nearBudget) {
         for (let i = s; i < e; i++) an[nn++] = i;
-      } else if (d < MID_D && nm + ch.count <= midBudget) {
+        this.chunkLod[ci] = 0;
+      } else if (d < midD && nm + ch.count <= midBudget) {
         for (let i = s; i < e; i++) am[nm++] = i;
+        this.chunkLod[ci] = 1;
       } else {
         for (let i = s; i < e; i++) af[nfar++] = i;
+        this.chunkLod[ci] = 2;
       }
     }
     this.commit(this.idx.near, this.meshes!.near, nn);
@@ -625,6 +636,7 @@ export class CrowdSystem implements System {
 
   stats(): Record<string, number | string> {
     const L = this.layout;
+    if (!this.enabled) return { mode: 'disabled', total: 0, near: 0, mid: 0, far: 0, flags: 0, drawCalls: 0 };
     return {
       mode: this.populated ? 'tribe' : 'as filmed',
       total: this.populated ? (L?.count ?? 0) : 0,
@@ -680,4 +692,3 @@ function softClamp(c: THREE.Color, max: number): void {
   c.multiplyScalar(k / m);
 }
 
-void MOOD_CHANNELS;
