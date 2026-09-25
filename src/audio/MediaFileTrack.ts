@@ -252,9 +252,36 @@ export class MediaFileTrack implements AudioTrack {
   }
 }
 
-/** Probe candidate URLs (HEAD) and return the first that exists. */
+/** MIME type (with codec) the browser must support to play a candidate file, by extension. */
+const PLAY_TYPES: Record<string, string> = {
+  mp4: 'audio/mp4; codecs="mp4a.40.2"',
+  m4a: 'audio/mp4; codecs="mp4a.40.2"',
+  webm: 'audio/webm; codecs="opus"',
+  opus: 'audio/ogg; codecs="opus"',
+  ogg: 'audio/ogg',
+  mp3: 'audio/mpeg',
+  wav: 'audio/wav',
+};
+
+/** Can this browser decode the file (by extension)? Unknown extensions are tried anyway. */
+export function canPlayFile(url: string): boolean {
+  const ext = (url.split('?')[0].split('.').pop() ?? '').toLowerCase();
+  const type = PLAY_TYPES[ext];
+  if (!type) return true;
+  try {
+    return new Audio().canPlayType(type) !== '';
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Probe candidate URLs (HEAD) and return the first that exists AND is decodable by this browser
+ * (e.g. open-source Chromium builds lack AAC, so an Opus/WebM copy is preferred there).
+ */
 export async function findAudioFile(candidates: string[]): Promise<string | null> {
   for (const url of candidates) {
+    if (!canPlayFile(url)) continue;
     try {
       const res = await fetch(url, { method: 'HEAD', cache: 'no-store' });
       const type = res.headers.get('content-type') ?? '';

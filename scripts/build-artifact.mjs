@@ -32,14 +32,22 @@ const page = [title, ...metas, ...fonts, ...styles, ...preloads, body, ...script
 fs.writeFileSync(path.join(out, 'index.html'), page);
 for (const m of html.matchAll(/<link rel="stylesheet"[^>]*href="\.\/([^"]+\.css)"[^>]*>/g)) fs.rmSync(path.join(out, m[1]), { force: true });
 
-// audio: publish only the web-friendly AAC file (every browser plays it; artifact files must be < 15 MB)
+// audio: publish the AAC (MP4) + Opus (WebM) copies only — each < 15 MB (artifact limit); the app picks what the browser decodes
 const audioDir = path.join(out, 'assets', 'audio');
 if (fs.existsSync(audioDir)) {
   for (const f of fs.readdirSync(audioDir)) {
-    if (!/^endshow-2026\.m4a$|\.analysis\.json$/.test(f)) fs.rmSync(path.join(audioDir, f), { force: true });
+    if (!/^endshow-2026\.(m4a|webm)$|\.analysis\.json$/.test(f)) fs.rmSync(path.join(audioDir, f), { force: true });
   }
   const m4a = path.join(audioDir, 'endshow-2026.m4a');
-  if (fs.existsSync(m4a) && fs.statSync(m4a).size > 15 * 1024 * 1024) throw new Error('endshow-2026.m4a is larger than the 15 MB artifact file limit');
+  if (fs.existsSync(m4a)) {
+    if (fs.statSync(m4a).size > 15 * 1024 * 1024) throw new Error('endshow-2026.m4a is larger than the 15 MB artifact file limit');
+    // artifacts serve .mp4 but not .m4a (same MP4 container): rename and list it first in the show file
+    fs.renameSync(m4a, path.join(audioDir, 'endshow-2026.mp4'));
+    const showPath = path.join(out, 'show', 'endshow-2026.json');
+    const show = JSON.parse(fs.readFileSync(showPath, 'utf8'));
+    show.meta.audio.src = ['./assets/audio/endshow-2026.mp4', './assets/audio/endshow-2026.webm'];
+    fs.writeFileSync(showPath, JSON.stringify(show));
+  }
 }
 
 const files = [];
