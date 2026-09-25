@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { Polyline, basisZ, frameY, gradientY, plate, ring, spike, surface, tube, v2, v3, type V3 } from './geom';
-import { HEAD } from './layout';
-import { PAL, segs, type Kit, type PartBuckets } from './kit';
+import { PAL, segs, type Kit } from './kit';
 import { BULB } from './shading';
 
 /**
@@ -133,7 +132,6 @@ export function buildHead(k: Kit): HeadResult {
 
   // ------------------------------------------------------------------ upper skull shell
   const rim = makeRim(nRim, -5.6, 0, 0, ARC_Z);
-  const tmp = v3();
   const skull = surface(rim.length - 1, nPsi, (u, v, o) => {
     const r = rim[Math.round(u * (rim.length - 1))];
     skullPoint(r, v, o);
@@ -710,5 +708,3 @@ function mergeTwo(a: THREE.BufferGeometry, b: THREE.BufferGeometry): THREE.Buffe
   return g;
 }
 
-export const HEAD_INFO = HEAD;
-export type { PartBuckets };

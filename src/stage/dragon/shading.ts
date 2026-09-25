@@ -187,8 +187,6 @@ export interface PatchOpts {
   lava?: boolean;
   /** emissive pixel-canvas stripes (wing membranes) */
   membrane?: boolean;
-  /** use the vertex fx channel to add LED-coloured emissive (edge lights on plates) */
-  fxLed?: boolean;
   /** cheaper lighting (no light pools, no rim light) for mobile GPUs */
   lite?: boolean;
 }
@@ -205,7 +203,16 @@ export function patchStandard(mat: THREE.MeshStandardMaterial, U: CrownUniforms,
 varying vec3 vCrownPos;
 varying float vCrownFx;
 attribute float fx;
-${o.membrane ? 'attribute vec3 memb; varying vec3 vMemb;' : ''}`,
+${o.membrane ? 'attribute vec3 memb; varying vec3 vMemb; uniform float uTime;' : ''}`,
+      )
+      .replace(
+        '#include <begin_vertex>',
+        o.membrane
+          ? `#include <begin_vertex>
+// the printed skin breathes in the evening breeze (cosmetic idle motion, real time)
+transformed += objectNormal * (sin(uTime * 0.9 + position.x * 0.16 + position.y * 0.11) * 0.1
+  + sin(uTime * 1.7 - position.y * 0.23) * 0.04) * sin(3.14159 * memb.x) * smoothstep(0.0, 4.0, memb.y);`
+          : '#include <begin_vertex>',
       )
       .replace(
         '#include <project_vertex>',
@@ -225,7 +232,7 @@ ${o.membrane ? 'attribute vec3 memb; varying vec3 vMemb;' : ''}`,
       '#include <lights_physical_pars_fragment>',
       `#include <lights_physical_pars_fragment>
 ${WASH_PARS}
-${o.membrane || o.fxLed ? LED_GLSL + 'uniform float uWings;' : ''}
+${o.membrane ? LED_GLSL + 'uniform float uWings;' : ''}
 ${o.membrane ? 'varying vec3 vMemb;' : ''}`,
     );
     fs = fs.replace('#include <lights_fragment_begin>', `#include <lights_fragment_begin>\n${WASH_APPLY}`);
@@ -275,13 +282,6 @@ iblIrradiance *= uEnvTint;`,
   totalEmissiveRadiance += diffuseColor.rgb * (0.04 + 0.85 * uWings) * mix(1.0, 0.72, smoothstep(3.0, 18.0, vMemb.y));
   // printed fabric lets some of the back light (sky, fireworks behind the stage) shine through
   totalEmissiveRadiance += diffuseColor.rgb * uRim * 0.35;
-}`;
-    }
-    if (o.fxLed) {
-      emissive += `
-{
-  float e = smoothstep(0.5, 1.0, vCrownFx);
-  if (e > 0.0) totalEmissiveRadiance += crownLed(vCrownPos.y * 1.3 + abs(vCrownPos.x) * 0.4, 0.0, sign(vCrownPos.x), 3.0) * e * uWings * 3.0;
 }`;
     }
     if (emissive) fs = fs.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n${emissive}`);
