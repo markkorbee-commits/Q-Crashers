@@ -62,26 +62,31 @@ function tree(kind: 'poplar' | 'round' | 'willow', detail: number): THREE.Buffer
     c.translate(x, y, z);
     parts.push(c);
   };
+  // windbreak trees are feathered almost to the ground (side branches + understorey): every species
+  // carries a low skirt mass so a belt reads as one canopy wall, not lollipops on sticks
   if (kind === 'poplar') {
     // Lombardy-poplar windbreak: tall column of foliage, rounded top (unit height 1)
-    parts.push(trunk(0.35, 0.02));
-    blob(11, 0.15, 0.22, 0, 0.36, 0, 0.18);
-    blob(12, 0.14, 0.24, 0.01, 0.58, 0.01, 0.18);
-    blob(13, 0.11, 0.2, -0.01, 0.8, 0, 0.16);
+    parts.push(trunk(0.2, 0.02));
+    blob(10, 0.2, 0.17, 0.02, 0.2, 0, 0.3);
+    blob(11, 0.17, 0.22, 0, 0.4, 0, 0.2);
+    blob(12, 0.155, 0.24, 0.01, 0.62, 0.01, 0.2);
+    blob(13, 0.12, 0.19, -0.01, 0.83, 0, 0.18);
   } else if (kind === 'round') {
     // ash / oak-like round crown made of overlapping masses
-    parts.push(trunk(0.42, 0.03));
+    parts.push(trunk(0.3, 0.03));
+    blob(20, 0.32, 0.17, 0.03, 0.24, -0.02, 0.3);
     for (let i = 0; i < 4; i++) {
       const a = (i / 4) * Math.PI * 2 + 0.4;
-      blob(21 + i, 0.27, 0.22, Math.cos(a) * 0.17, 0.58 + (i % 2) * 0.08, Math.sin(a) * 0.17, 0.22);
+      blob(21 + i, 0.28, 0.22, Math.cos(a) * 0.17, 0.5 + (i % 2) * 0.08, Math.sin(a) * 0.17, 0.24);
     }
-    blob(29, 0.26, 0.2, 0, 0.8, 0, 0.2);
+    blob(29, 0.26, 0.2, 0, 0.78, 0, 0.22);
   } else {
     // willow: broad, low, drooping masses
-    parts.push(trunk(0.3, 0.04));
-    blob(31, 0.4, 0.26, 0, 0.5, 0, 0.24);
-    blob(33, 0.3, 0.2, 0.14, 0.7, -0.08, 0.22);
-    blob(34, 0.28, 0.18, -0.16, 0.62, 0.1, 0.22);
+    parts.push(trunk(0.22, 0.04));
+    blob(30, 0.38, 0.2, 0, 0.22, 0, 0.3);
+    blob(31, 0.42, 0.28, 0, 0.5, 0, 0.24);
+    blob(33, 0.3, 0.2, 0.14, 0.72, -0.08, 0.22);
+    blob(34, 0.28, 0.18, -0.16, 0.64, 0.1, 0.22);
   }
   const m = mergeGeometries(parts.map((g) => (g.index ? g.toNonIndexed() : g)));
   return m;
@@ -150,14 +155,35 @@ export class Vegetation {
     this.buildRibbons();
   }
 
-  /** deterministic placement: dense in the site belts, sparser in the forest patches */
+  /**
+   * deterministic placement: the site belts on a jittered grid tight enough that the crowns overlap
+   * into one canopy mass (spacing below the crown diameter, widened only when the quality budget
+   * cannot hold them — the crowns then grow to close the gaps), the forest patches sparser
+   */
   private place(): void {
     const rng = new Rng(777);
-    const polys: { poly: [number, number][]; spacing: number; near: boolean }[] = [
-      ...TREE_BELTS.map((poly) => ({ poly, spacing: 4.4, near: true })),
-      ...FORESTS.map((poly) => ({ poly, spacing: 7.5, near: false })),
-    ];
-    for (const { poly, spacing, near } of polys) {
+    const beltArea = TREE_BELTS.reduce((s, p) => s + polygonArea(p), 0);
+    const beltSpacing = Math.max(3.3, Math.sqrt(beltArea / Math.max(1, this.maxTrees * 0.72)));
+    const beltScale = Math.min(1.5, beltSpacing / 3.3);
+    const pick = (x: number, z: number, near: boolean, grow: number) => {
+      const r = rng.next();
+      const sp = r < 0.45 ? 0 : r < 0.8 ? 1 : 2;
+      // canopy 15–22 m (bible §6.7), willows lower along the wet edges
+      const h = sp === 0 ? rng.range(17, 22) : sp === 1 ? rng.range(15, 19.5) : rng.range(12.5, 16);
+      this.placements.push({ x, z, h, s: rng.range(0.95, 1.2) * grow, rot: rng.range(0, Math.PI * 2), tint: rng.next(), sp, near });
+    };
+    for (const poly of TREE_BELTS) {
+      const b = polygonBounds(poly);
+      for (let gz = b.z0 + beltSpacing / 2; gz < b.z1; gz += beltSpacing)
+        for (let gx = b.x0 + beltSpacing / 2; gx < b.x1; gx += beltSpacing) {
+          const x = gx + rng.range(-0.38, 0.38) * beltSpacing;
+          const z = gz + rng.range(-0.38, 0.38) * beltSpacing;
+          if (!inPolygon(poly, x, z)) continue;
+          pick(x, z, true, beltScale);
+        }
+    }
+    for (const poly of FORESTS) {
+      const spacing = 7.5;
       const b = polygonBounds(poly);
       const area = polygonArea(poly);
       const n = Math.floor(area / (spacing * spacing));
@@ -168,10 +194,7 @@ export class Vegetation {
         const x = rng.range(b.x0, b.x1);
         const z = rng.range(b.z0, b.z1);
         if (!inPolygon(poly, x, z)) continue;
-        const r = rng.next();
-        const sp = r < 0.45 ? 0 : r < 0.8 ? 1 : 2;
-        const h = sp === 0 ? rng.range(17, 24) : sp === 1 ? rng.range(13, 19) : rng.range(10, 14);
-        this.placements.push({ x, z, h, s: rng.range(0.85, 1.2), rot: rng.range(0, Math.PI * 2), tint: rng.next(), sp, near });
+        pick(x, z, false, 1.15);
         placed++;
       }
     }

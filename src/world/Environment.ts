@@ -48,6 +48,7 @@ uniform vec3 uZenith;
 uniform vec3 uHorizonSE;
 uniform vec3 uHorizonNW;
 uniform vec3 uTwilight;
+uniform vec3 uTwilightWarm;
 uniform vec3 uFogColor;
 uniform vec3 uCloudDark;
 uniform vec3 uCloudLit;
@@ -82,28 +83,29 @@ void main() {
   float azSun = dot( dxz, sxz );           // 1 towards the twilight, -1 towards the stage
   float sunSide = azSun * 0.5 + 0.5;
 
-  // --- clear-sky gradient (Rayleigh-ish, blue hour)
-  vec3 horizon = mix( uHorizonSE, uHorizonNW, pow( sunSide, 1.6 ) );
-  float zen = pow( clamp( eh, 0.0, 1.0 ), 0.42 );
+  // --- clear-sky gradient (blue hour → night): colours are the graded-video targets of design-bible
+  //     §8.3, keyframed over show time on the CPU (teal-navy at the start, near-black from t ≈ 600)
+  vec3 horizon = mix( uHorizonSE, uHorizonNW, pow( sunSide, 2.6 ) );
+  float zen = pow( clamp( eh, 0.0, 1.0 ), 0.5 );
   vec3 col = mix( horizon, uZenith, zen );
-  // twilight arc: bright band low over the NW, warm at its core
-  float arc = pow( max( azSun, 0.0 ), 3.0 );
-  col += uTwilight * arc * exp( - eh / 0.075 ) * 1.4;
-  col += uTwilight * vec3( 1.25, 0.8, 0.45 ) * pow( max( azSun, 0.0 ), 10.0 ) * exp( - eh / 0.025 ) * 0.9;
-  // earth shadow + faint belt of Venus over the SE (anti-solar) horizon
+  // twilight arc: a teal band low over the NW (behind the audience), warm only at its core
+  float arc = pow( max( azSun, 0.0 ), 2.5 );
+  col += uTwilight * arc * exp( - eh / 0.09 );
+  col += uTwilightWarm * pow( max( azSun, 0.0 ), 8.0 ) * exp( - eh / 0.028 );
+  // earth shadow over the SE (anti-solar) horizon: slightly darker, no pink belt (sun already −4°)
   float anti = pow( max( - azSun, 0.0 ), 2.0 );
-  col *= 1.0 - anti * 0.28 * ( 1.0 - smoothstep( 0.0, 0.09, eh ) );
-  col += vec3( 0.010, 0.004, 0.012 ) * anti * smoothstep( 0.05, 0.1, eh ) * ( 1.0 - smoothstep( 0.1, 0.22, eh ) ) * uLevel;
-  // light pollution / distant festival areas: warm glow just above the horizon (mostly +X = other stages)
-  float lp = exp( - eh / 0.035 );
-  col += vec3( 0.030, 0.016, 0.008 ) * lp * ( 0.35 + 0.65 * smoothstep( -0.2, 0.9, d.x ) ) * ( 0.6 + 0.4 * uLevel );
+  col *= 1.0 - anti * 0.22 * ( 1.0 - smoothstep( 0.0, 0.09, eh ) );
+  // light pollution / distant festival areas: faint warm glow hugging the horizon (mostly +X = other stages)
+  float lp = exp( - eh / 0.02 );
+  col += vec3( 0.0035, 0.0022, 0.0012 ) * lp * ( 0.3 + 0.7 * smoothstep( -0.2, 0.9, d.x ) );
 
-  // --- moon: disc (96 % lit, low and warm), aureole
+  // --- moon: warm disc (96 % lit, low: #F2DCC0) with a faint pinkish aureole (#D7CAE4, f113)
   float md = dot( d, uMoonDir );
   float ang = acos( clamp( md, -1.0, 1.0 ) );
-  vec3 moonCol = vec3( 1.0, 0.80, 0.58 );
-  float aure = exp( - ang / 0.018 ) * 0.25 + exp( - ang / 0.11 ) * 0.05 * ( 0.6 + uHaze );
-  vec3 glow = moonCol * aure * uMoonI * 0.18;
+  vec3 moonCol = vec3( 1.0, 0.81, 0.59 );
+  vec3 haloCol = vec3( 0.87, 0.76, 1.0 );
+  float aure = exp( - ang / 0.011 ) * 0.28 + exp( - ang / 0.07 ) * 0.018 * ( 0.6 + uHaze );
+  vec3 glow = haloCol * aure * uMoonI;
   float moonR = 0.0056;
   float disc = 1.0 - smoothstep( moonR * 0.86, moonR, ang );
   vec3 moonDisc = vec3( 0.0 );
@@ -116,7 +118,8 @@ void main() {
     float lit = smoothstep( -0.06, 0.1, dot( n, uSunDir ) );
     float maria = 0.72 + 0.28 * texture2D( tNoise, q * 0.18 + 0.5 ).r;
     float limb = 0.75 + 0.25 * z;
-    moonDisc = moonCol * disc * lit * maria * limb * uMoonI;
+    // peak ≈ 4.5 scene-linear: bright but below the tone curve's white path, so the disc stays warm
+    moonDisc = moonCol * disc * lit * maria * limb * 4.5 * uMoonI;
   }
 
   // --- clouds on a deck ~1.8 km up
@@ -130,23 +133,25 @@ void main() {
     cover = smoothstep( thr - 0.02, thr + 0.34, f );
     float thick = smoothstep( thr + 0.05, thr + 0.5, f );
     cover *= smoothstep( 0.004, 0.06, e ) * 0.94;
-    // lighting: twilight from the NW, show from below over the stage, moon edges
+    // lighting: faint twilight from the NW, show from below only right over the stage, thin moon rims
     vec3 lit = mix( uCloudDark, uCloudLit, pow( sunSide, 2.2 ) );
     lit *= 1.0 - thick * 0.45;
     cloudCol = lit;
-    float nearStage = pow( max( dot( d, uStageDir ), 0.0 ), 5.0 );
-    cloudAdd += uShowCol * ( 0.25 + 0.75 * nearStage ) * ( 0.5 + 0.5 * thick );
-    float nearMoon = exp( - ang / 0.09 );
-    cloudAdd += moonCol * nearMoon * ( 1.0 - thick ) * 0.08 * uMoonI;
+    float nearStage = pow( max( dot( d, uStageDir ), 0.0 ), 12.0 );
+    cloudAdd += uShowCol * nearStage * ( 0.4 + 0.6 * thick );
+    float nearMoon = exp( - ang / 0.05 );
+    cloudAdd += moonCol * nearMoon * ( 1.0 - thick ) * 0.03 * uMoonI;
     cloudAdd += uFlashCol * pow( max( dot( d, uFlashDir ), 0.0 ), 3.0 ) * ( 0.6 + 0.8 * thick );
     // distant lightning inside the storm clouds: a broad lobe + a hot core
     float lc = max( dot( d, uLightning.xyz ), 0.0 );
     cloudAdd += vec3( 0.72, 0.78, 1.0 ) * uLightning.w * ( pow( lc, 10.0 ) * 0.5 + pow( lc, 60.0 ) * 2.0 ) * ( 0.35 + thick );
   }
-  // clear-sky contributions from the show / flashes / lightning (haze glow)
+  // clear-sky contributions from the show / flashes / lightning: kept tight around the source and low,
+  // so the haze glow never washes the whole dome (the field haze itself is drawn by the fx volumes)
   float hazeK = 0.35 + 0.65 * uHaze;
-  vec3 add = uShowCol * pow( max( dot( d, uStageDir ), 0.0 ), 8.0 ) * 0.35 * hazeK;
-  add += uFlashCol * pow( max( dot( d, uFlashDir ), 0.0 ), 6.0 ) * 0.25 * hazeK;
+  float lowK = 1.0 - smoothstep( 0.08, 0.35, eh );
+  vec3 add = uShowCol * pow( max( dot( d, uStageDir ), 0.0 ), 24.0 ) * 0.14 * hazeK * lowK;
+  add += uFlashCol * pow( max( dot( d, uFlashDir ), 0.0 ), 10.0 ) * 0.2 * hazeK;
   add += vec3( 0.7, 0.75, 1.0 ) * uLightning.w * pow( max( dot( d, uLightning.xyz ), 0.0 ), 16.0 ) * exp( - eh / 0.1 ) * 0.35;
 
   col = col * uLevel + add;
@@ -174,6 +179,7 @@ uniform sampler2D tNoise;
 uniform float uTime;
 uniform float uCover;
 uniform float uVis;
+uniform float uPlanetVis;
 uniform float uPx;
 uniform mat3 uSidereal;
 varying vec3 vCol;
@@ -193,7 +199,7 @@ void main() {
   // magnitude -> brightness; extinction near the horizon
   float b = pow( 2.512, - aMag ) * ( 1.0 - cl ) * smoothstep( 0.0, 0.12, e );
   float tw = 0.8 + 0.2 * sin( uTime * ( 7.0 + aSeed * 9.0 ) + aSeed * 40.0 );
-  vI = b * uVis * mix( tw, 1.0, aKind );
+  vI = b * ( aKind > 0.5 ? uPlanetVis : uVis ) * mix( tw, 1.0, aKind );
   vCol = aKind > 0.5 ? vec3( 1.0, 0.96, 0.86 ) : mix( vec3( 0.8, 0.88, 1.0 ), vec3( 1.0, 0.9, 0.75 ), fract( aSeed * 3.7 ) );
   gl_PointSize = uPx * ( aKind > 0.5 ? 3.2 : 2.2 );
 }
@@ -213,6 +219,42 @@ void main() {
 
 interface SkyUniforms {
   [k: string]: THREE.IUniform;
+}
+
+/**
+ * Sky colour keyframes over show time (design-bible §8.3 graded-video targets, converted to
+ * scene-linear through the inverse of the PostFX Lottes curve). Interpolated geometrically, so the
+ * sky darkens smoothly: teal-navy at 22:33, near-black from t ≈ 600 s.
+ */
+const SKY_T = [0, 120, 400, 800, 1300];
+type RGB = [number, number, number];
+const SKY_KEYS: Record<'zen' | 'se' | 'nw' | 'teal' | 'warm', RGB[]> = {
+  // zenith: #0A2A4E → #06183A → #030A1E → #02060F → #010204
+  zen: [[0.0034, 0.0258, 0.0848], [0.0024, 0.0119, 0.0551], [0.0017, 0.0057, 0.0242], [0.0016, 0.0047, 0.0123], [0.0012, 0.0025, 0.0049]],
+  // horizon over the stage (SE): #0E2D4A → #081E3C → navy → #020206 → #010104 (red kept low: no lavender)
+  se: [[0.005, 0.03, 0.0782], [0.0031, 0.0166, 0.0577], [0.002, 0.004, 0.025], [0.0016, 0.002, 0.0068], [0.001, 0.0012, 0.0028]],
+  // horizon behind the audience (NW) above the glow: #1F4A6B → … → #050A14
+  nw: [[0.0134, 0.0668, 0.1433], [0.0057, 0.0276, 0.069], [0.0037, 0.0157, 0.0382], [0.0027, 0.0109, 0.026], [0.002, 0.0069, 0.0159]],
+  // teal twilight arc 3–10° (added; about half the physical #5E8C9A → #122838, never seen on camera)
+  teal: [[0.08, 0.2, 0.22], [0.05, 0.14, 0.17], [0.018, 0.07, 0.1], [0.008, 0.03, 0.05], [0.004, 0.014, 0.025]],
+  // warm core of the glow 0–3° (added; #C99A68 → #7A6450 → gone)
+  warm: [[0.5, 0.26, 0.1], [0.25, 0.13, 0.06], [0.09, 0.055, 0.03], [0.02, 0.014, 0.01], [0.004, 0.003, 0.002]],
+};
+const ZEN_B0 = SKY_KEYS.zen[0][2];
+
+/** geometric interpolation of a keyframed colour at show time t (no allocation) */
+function skyKey(key: keyof typeof SKY_KEYS, t: number, out: THREE.Color): THREE.Color {
+  const K = SKY_KEYS[key];
+  let i = 0;
+  while (i < SKY_T.length - 2 && t > SKY_T[i + 1]) i++;
+  const s = smoothstep(SKY_T[i], SKY_T[i + 1], t);
+  const a = K[i],
+    b = K[i + 1];
+  return out.setRGB(
+    Math.exp(lerp(Math.log(a[0]), Math.log(b[0]), s)),
+    Math.exp(lerp(Math.log(a[1]), Math.log(b[1]), s)),
+    Math.exp(lerp(Math.log(a[2]), Math.log(b[2]), s)),
+  );
 }
 
 export class EnvironmentSystem implements System {
@@ -294,6 +336,7 @@ export class EnvironmentSystem implements System {
       uHorizonSE: v3('#000000'),
       uHorizonNW: v3('#000000'),
       uTwilight: v3('#000000'),
+      uTwilightWarm: v3('#000000'),
       uFogColor: { value: new THREE.Color() },
       uCloudDark: v3('#000000'),
       uCloudLit: v3('#000000'),
@@ -347,7 +390,8 @@ export class EnvironmentSystem implements System {
       tNoise: { value: this.noise },
       uTime: { value: 0 },
       uCover: { value: 0.5 },
-      uVis: { value: 1 },
+      uVis: { value: 0 },
+      uPlanetVis: { value: 1 },
       uPx: { value: 1 },
       uSidereal: { value: this.sidereal },
     };
@@ -390,14 +434,20 @@ export class EnvironmentSystem implements System {
     dirFromAzAlt(lerp(EPHEM.sun.az[0], EPHEM.sun.az[1], p), sunAlt, U.uSunDir.value);
     const moonAlt = lerp(EPHEM.moon.alt[0], EPHEM.moon.alt[1], p);
     dirFromAzAlt(lerp(EPHEM.moon.az[0], EPHEM.moon.az[1], p), moonAlt, U.uMoonDir.value);
-    // sky luminance falls ~0.3 mag per degree of solar depression; floor keeps the June night blue
-    const level = Math.max(0.16, Math.pow(10, 0.21 * (sunAlt - EPHEM.sun.alt[0])));
+    // sky colours: keyframed graded-video targets (bible §8.3); level = zenith relative to t0
+    skyKey('zen', t, U.uZenith.value);
+    skyKey('se', t, U.uHorizonSE.value);
+    skyKey('nw', t, U.uHorizonNW.value);
+    skyKey('teal', t, U.uTwilight.value);
+    skyKey('warm', t, U.uTwilightWarm.value);
+    const level = U.uZenith.value.b / ZEN_B0;
     this.level = level;
 
-    // --- atmos cues (sky tint / stars / lightning / cloud cover)
+    // --- atmos cues (sky tint / stars / lightning / cloud cover). No stars were visible on the night
+    //     (FACT, bible §8.2): stars only if a cue asks for them; Venus / Jupiter stay (NW twilight)
     let tintAmt = 0,
-      starVis = 1,
-      cover = 0.48,
+      starVis = 0,
+      cover = 0.3,
       lightningAmt = 0.35 + 0.45 * smoothstep(0.55, 1, p);
     this.tint.setRGB(1, 1, 1);
     const cues = this.app.show.active('atmos', t, this.cueBuf);
@@ -418,38 +468,33 @@ export class EnvironmentSystem implements System {
       }
     }
 
-    // --- base colours (scene-referred linear)
+    // --- clouds: a thin, broken deck ahead of the storm — dark against the sky, faintly lit from the NW
     const L = level;
-    U.uZenith.value.setRGB(0.006, 0.02, 0.17);
-    U.uHorizonSE.value.setRGB(0.012, 0.05, 0.2);
-    U.uHorizonNW.value.setRGB(0.03, 0.11, 0.2);
-    const tw = 0.55 + 0.45 * level; // the twilight arc fades slower than the rest of the sky
-    U.uTwilight.value.setRGB(0.05 * tw, 0.11 * tw, 0.1 * tw);
-    U.uCloudDark.value.setRGB(0.012, 0.028, 0.1);
-    U.uCloudLit.value.setRGB(0.06, 0.12, 0.34);
-    U.uLevel.value = L;
+    U.uCloudDark.value.copy(U.uZenith.value).multiplyScalar(0.6);
+    U.uCloudLit.value.copy(U.uHorizonNW.value).multiplyScalar(0.85);
+    U.uLevel.value = 1;
     U.uCover.value = cover;
     U.uTime.value = t;
-    U.uMoonI.value = 14 * (0.85 + 0.15 * smoothstep(7.5, 9, moonAlt));
+    U.uMoonI.value = 0.9 + 0.1 * smoothstep(7.5, 9, moonAlt);
     U.uHaze.value = clamp(env.haze, 0, 1.5);
     U.uTint.value.copy(this.tint);
     U.uTintAmt.value = tintAmt;
     // sky radiance for glossy world materials (damp concrete, lake)
     const W = worldUniforms;
-    W.uWSkyZen.value.copy(U.uZenith.value).multiplyScalar(L);
-    W.uWSkyHor.value.copy(U.uHorizonSE.value).multiplyScalar(L);
-    W.uWSkyHorNW.value.copy(U.uHorizonNW.value).multiplyScalar(L);
-    this.tmpC.copy(U.uTwilight.value).multiplyScalar(0.8 * L);
+    W.uWSkyZen.value.copy(U.uZenith.value);
+    W.uWSkyHor.value.copy(U.uHorizonSE.value);
+    W.uWSkyHorNW.value.copy(U.uHorizonNW.value);
+    this.tmpC.copy(U.uTwilight.value).multiplyScalar(0.5);
     W.uWSkyHorNW.value.add(this.tmpC);
     W.uWSunDir.value.copy(U.uSunDir.value);
     W.uWMoonDir.value.copy(U.uMoonDir.value);
-    W.uWMoonI.value = U.uMoonI.value * (1 - cover * 0.6);
+    W.uWMoonI.value = 12 * (1 - cover * 0.6);
 
-    // show light on haze / cloud undersides over the stage
+    // show light on haze / cloud undersides over the stage (tight lobe, see the sky shader)
     const cam = ctx.camera.position;
     this.tmpV.set(0, 22, -12).sub(cam).normalize();
     U.uStageDir.value.copy(this.tmpV);
-    const show = clamp(env.stageIntensity * 0.5 + env.audienceWash * 0.3, 0, 3) * 0.05 + env.strobe * 0.05;
+    const show = clamp(env.stageIntensity * 0.5 + env.audienceWash * 0.3, 0, 3) * 0.04 + env.strobe * 0.04;
     U.uShowCol.value.copy(env.stageColor).multiplyScalar(show);
     // pyro / firework flashes light the haze and the cloud deck
     const fi = env.flashIntensity;
@@ -463,8 +508,9 @@ export class EnvironmentSystem implements System {
     // distant lightning over the W horizon (storm front arriving from the west) — deterministic
     const li = this.lightningAt(t, lightningAmt, U.uLightning.value as THREE.Vector4);
 
-    // --- fog colour: dark haze over the polder, lit by flashes / strobes
-    this.fog.color.setRGB(0.0066 * L + 0.001, 0.028 * L + 0.002, 0.085 * L + 0.004);
+    // --- fog colour: dark haze over the polder = the horizon over the stage, lit by flashes / strobes
+    const se = U.uHorizonSE.value as THREE.Color;
+    this.fog.color.setRGB(se.r * 0.95 + 0.0008, se.g * 0.95 + 0.001, se.b * 0.95 + 0.0015);
     if (fi > 0) {
       this.fog.color.r += env.flashColor.r * 0.0004 * fk;
       this.fog.color.g += env.flashColor.g * 0.0004 * fk;
@@ -478,15 +524,16 @@ export class EnvironmentSystem implements System {
     this.fog.density = this.fogBase * (0.75 + 0.45 * clamp(env.haze, 0, 1.5));
     (this.app.scene.background as THREE.Color).copy(this.fog.color);
 
-    // --- lights
-    const hl = 0.35 + 0.65 * L;
-    this.hemi.color.setRGB(0.2 * hl, 0.34 * hl, 0.72 * hl);
-    this.hemi.groundColor.setRGB(0.045 * hl, 0.035 * hl, 0.025 * hl);
+    // --- lights (sky ambient follows the sky; the moon keeps a floor of cool-warm fill)
+    const hl = 0.3 + 0.7 * Math.pow(L, 0.7);
+    this.hemi.color.setRGB(0.16 * hl, 0.3 * hl, 0.64 * hl);
+    this.hemi.groundColor.setRGB(0.04 * hl, 0.032 * hl, 0.024 * hl);
     this.hemi.intensity = 0.34;
     this.moonLight.position.copy(U.uMoonDir.value).multiplyScalar(500);
     this.moonLight.intensity = 0.14 * smoothstep(0, 1, 1 - cover * 0.6);
     this.twilightLight.position.copy(this.sunDir).setY(0.18).normalize().multiplyScalar(500);
-    this.twilightLight.intensity = 0.25 * tw * L + 0.02;
+    const tw = U.uTwilight.value.b / SKY_KEYS.teal[0][2];
+    this.twilightLight.intensity = 0.22 * tw + 0.015;
     // flash and lightning also light the whole scene a little
     if (fi > 0) {
       this.hemi.color.r += env.flashColor.r * 0.002 * fk;
@@ -499,8 +546,9 @@ export class EnvironmentSystem implements System {
     const S = this.starU;
     S.uTime.value = t;
     S.uCover.value = cover;
-    // stars emerge as the sky darkens: only the brightest at 22:40, more by 23:00
+    // stars only when a cue asks (none were visible on the night); planets low in the NW twilight
     S.uVis.value = starVis * 6 * (0.35 + 0.65 * smoothstep(1, 0.2, L));
+    S.uPlanetVis.value = 3.5;
     S.uPx.value = Math.max(1, this.app.renderer.getPixelRatio());
     // sidereal rotation about the celestial pole relative to the 22:53 catalogue epoch
     const ang = ((t - 780) / 86164) * Math.PI * 2;

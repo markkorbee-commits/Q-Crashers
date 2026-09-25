@@ -2,15 +2,15 @@ import * as THREE from 'three';
 import { Rng } from '../core/rng';
 import type { Collider2D } from '../core/types';
 import { GeoBuilder, lin } from './geom';
-import { ARM, BACKSTAGE_Z, CAM_PEN, DECKING, FOH, PILLAR, PILLARS, PREMIUM, terrainHeight, WATER_Y } from './site';
+import { ARM, BACKSTAGE_Z, CAM_PEN, DECKING, PILLAR, PILLARS, PREMIUM, TERRACE, terrainHeight, WATER_Y } from './site';
 import { canvasTexture, makeCanvas } from './tex';
 import { patchWorldMaterial } from './worldLights';
 
 /**
- * Man-made field structures: crowd barriers (pillar rings, camera pen, FOH ring, queue lanes), Heras
- * perimeter / backstage fences with black scrim banners, the FOH / press tower,
- * the camera pen and riser on the axis, the RED entrance gates, and the Exclusive RED Experience
- * deck over the lake. Everything is instanced or merged per material. The front-of-stage and arm
+ * Man-made field structures: crowd barriers (FOH platform ring), Heras perimeter / backstage fences
+ * with black scrim banners, the low FOH / camera platform on the axis, the RED entrance gates, the
+ * photo terrace on the decking and the Exclusive RED Experience deck over the lake. Everything is
+ * instanced or merged per material. The front-of-stage and arm
  * crowd barriers belong to the MainStage (src/stage/deck/Deck.ts barrierRuns), which lays them on
  * the terrain together with the stage outline.
  */
@@ -86,19 +86,14 @@ export function buildStructures(scene: THREE.Object3D, lowDetail: boolean): Stru
   // ------------------------------------------------------------------ crowd barrier panels (2.5 m)
   const crowd: THREE.Matrix4[] = [];
   {
-    // pillar rings (≈ 8.2 m square around each plinth, gate towards the aisle side)
+    // the pillar plinths carry their own bronze lattice railing (pillars.ts); only the collider here
     for (const p of PILLARS) {
-      for (const loop of rectLoop(p.x, p.z, PILLAR.fence, PILLAR.fence)) crowd.push(...panelsAlong(loop, 2.5));
       colliders.push({ kind: 'box', minX: p.x - PILLAR.fence / 2, maxX: p.x + PILLAR.fence / 2, minZ: p.z - PILLAR.fence / 2, maxZ: p.z + PILLAR.fence / 2, tag: 'pillar' });
     }
-    // camera pen and riser on the axis
-    for (const loop of rectLoop(CAM_PEN.x, CAM_PEN.z, CAM_PEN.w, CAM_PEN.d)) crowd.push(...panelsAlong(loop, 2.5));
-    colliders.push({ kind: 'box', minX: CAM_PEN.x - CAM_PEN.w / 2, maxX: CAM_PEN.x + CAM_PEN.w / 2, minZ: CAM_PEN.z - CAM_PEN.d / 2, maxZ: CAM_PEN.z + CAM_PEN.d / 2, tag: 'campen' });
+    // crowd barrier ring around the FOH / camera platform (1 m clearance, gate at the back)
+    for (const loop of rectLoop(CAM_PEN.x, CAM_PEN.z, CAM_PEN.w + 2, CAM_PEN.d + 2, 2.5)) crowd.push(...panelsAlong(loop, 2.5));
+    colliders.push({ kind: 'box', minX: CAM_PEN.x - CAM_PEN.w / 2 - 1, maxX: CAM_PEN.x + CAM_PEN.w / 2 + 1, minZ: CAM_PEN.z - CAM_PEN.d / 2 - 1, maxZ: CAM_PEN.z + CAM_PEN.d / 2 + 1, tag: 'campen' });
     // the piano riser (+ its railing and collider) is built by the crowd module's props (src/crowd/props.ts)
-    // FOH ring
-    const fw = FOH.x1 - FOH.x0 + 4,
-      fd = FOH.z1 - FOH.z0 + 4;
-    for (const loop of rectLoop(0, (FOH.z0 + FOH.z1) / 2, fw, fd, 2.5)) crowd.push(...panelsAlong(loop, 2.5));
   }
   const crowdGeo = crowdBarrierGeometry(lowDetail);
   addInst(crowdGeo, metal, crowd, 'crowd-barriers');
@@ -165,103 +160,132 @@ export function buildStructures(scene: THREE.Object3D, lowDetail: boolean): Stru
     addInst(g, mat, [...herasScrim, ...herasBare], 'heras-scrim');
   }
 
-  // ------------------------------------------------------------------ FOH / press tower
+  // ------------------------------------------------------------------ FOH / camera platform on the axis
+  // (design-bible §5.11, photo P: a low fenced deck with the camera operator — nothing tall on the axis)
   {
     const b = new GeoBuilder();
-    const y0 = terrainHeight(0, (FOH.z0 + FOH.z1) / 2);
-    const tube = 0.05;
-    const xs = [FOH.x0, -5.33, -2.67, 0, 2.67, 5.33, FOH.x1];
-    const zs = [FOH.z0, FOH.z0 + 2.5, FOH.z0 + 5, FOH.z0 + 7.5, FOH.z1];
-    const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y0 + y, z);
-    for (const x of xs) for (const z of zs) b.beam(V(x, 0, z), V(x, FOH.roof, z), tube, galv, true);
-    for (const y of [0.25, FOH.deck1, 3.2, FOH.deck2, 7.6, FOH.roof - 0.1]) {
-      for (const z of zs) b.beam(V(FOH.x0, y, z), V(FOH.x1, y, z), tube, galv, true);
-      for (const x of xs) b.beam(V(x, y, FOH.z0), V(x, y, FOH.z1), tube, galv, true);
+    const { x: cx, z: cz, w: W, d: D, deckY } = CAM_PEN;
+    const yp = terrainHeight(cx, cz);
+    const top = yp + deckY;
+    const x0 = cx - W / 2,
+      x1 = cx + W / 2,
+      z0 = cz - D / 2,
+      z1 = cz + D / 2;
+    // stage deck (plywood on scaffold) with a black skirt, two steps at the back
+    b.box(W, 0.1, D, cx, top - 0.05, cz, lin('#2c2824'));
+    b.box(W, deckY - 0.1, D - 0.1, cx, yp + (deckY - 0.1) / 2, cz, blackCloth);
+    for (let k = 0; k < 2; k++) b.box(2.4, (deckY / 3) * (k + 1), 0.35, cx, yp + (deckY / 6) * (k + 1), z1 + 0.52 - k * 0.35, lin('#1e1c1a'));
+    // aluminium railing 1.1 m on three sides + the back beside the steps
+    const railY = [top + 1.1, top + 0.55];
+    const rail = (ax: number, az: number, bx: number, bz: number) => {
+      for (const y of railY) b.beam(new THREE.Vector3(ax, y, az), new THREE.Vector3(bx, y, bz), y > top + 1 ? 0.05 : 0.035, alu, true);
+      const len = Math.hypot(bx - ax, bz - az);
+      const n = Math.max(1, Math.round(len / 1.6));
+      for (let k = 0; k <= n; k++) {
+        const t = k / n;
+        b.beam(new THREE.Vector3(ax + (bx - ax) * t, top, az + (bz - az) * t), new THREE.Vector3(ax + (bx - ax) * t, top + 1.1, az + (bz - az) * t), 0.045, alu, true);
+      }
+    };
+    rail(x0, z0, x1, z0);
+    rail(x0, z0, x0, z1);
+    rail(x1, z0, x1, z1);
+    // back rail with the opening over the steps (in line with the barrier-ring gate)
+    rail(x1, z1, cx + 1.3, z1);
+    rail(cx - 1.3, z1, x0, z1);
+    // camera operator's tripod camera (front of the deck, filming the stage) and a jib base
+    const tri = new THREE.Vector3(cx + 1.0, top + 1.45, z0 + 1.2);
+    for (let k = 0; k < 3; k++) {
+      const a = (k / 3) * Math.PI * 2;
+      b.beam(new THREE.Vector3(tri.x + Math.cos(a) * 0.5, top, tri.z + Math.sin(a) * 0.5), tri, 0.03, lin('#222'), true);
     }
-    // diagonal bracing on the back and the sides
-    for (let i = 1; i < xs.length; i++) b.beam(V(xs[i - 1], FOH.deck1, FOH.z1), V(xs[i], FOH.deck2, FOH.z1), tube, galv, true);
-    for (const x of [FOH.x0, FOH.x1]) for (let j = 1; j < zs.length; j++) b.beam(V(x, 0.25, zs[j - 1]), V(x, FOH.deck1 + 2, zs[j]), tube, galv, true);
-    // decks (plywood) and roof
-    const ply = lin('#3a3530');
-    b.box(FOH.x1 - FOH.x0 + 0.3, 0.12, FOH.z1 - FOH.z0 + 0.3, 0, y0 + FOH.deck1, (FOH.z0 + FOH.z1) / 2, ply);
-    b.box(FOH.x1 - FOH.x0 + 0.3, 0.12, FOH.z1 - FOH.z0 + 0.3, 0, y0 + FOH.deck2, (FOH.z0 + FOH.z1) / 2, ply);
-    // front railings
-    for (const y of [FOH.deck1, FOH.deck2]) {
-      b.beam(V(FOH.x0, y + 1.05, FOH.z0 - 0.05), V(FOH.x1, y + 1.05, FOH.z0 - 0.05), 0.045, alu, true);
-      b.beam(V(FOH.x0, y + 0.55, FOH.z0 - 0.05), V(FOH.x1, y + 0.55, FOH.z0 - 0.05), 0.035, alu, true);
-    }
-    // stairs on the +X side
-    for (let k = 0; k < 10; k++) b.box(1.1, 0.06, 0.32, FOH.x1 + 0.8, y0 + 0.12 + k * 0.11, FOH.z1 - 0.4 - k * 0.3, galv);
-    for (let k = 0; k < 14; k++) b.box(1.1, 0.06, 0.3, FOH.x1 + 0.8, y0 + FOH.deck1 + 0.32 * (k + 1), FOH.z0 + 0.6 + k * 0.62, galv);
-    // desks: sound (ground deck) and light/pyro/laser (upper deck), road cases, followspots, camera
+    b.box(0.26, 0.28, 0.55, tri.x, tri.y + 0.18, tri.z - 0.08, lin('#0d0d0d'));
+    // FOH control: low desks (sound / light / pyro / laser) facing the stage, road cases behind
     const desk = lin('#141417');
-    for (const [x, w] of [[-4.5, 2.4], [-1.2, 2.0], [2.2, 2.6], [5.4, 1.4]] as [number, number][]) {
-      b.box(w, 0.9, 1.0, x, y0 + FOH.deck1 + 0.45, FOH.z0 + 1.6, desk);
-      b.box(w * 0.96, 0.08, 0.9, x, y0 + FOH.deck1 + 0.93, FOH.z0 + 1.55, lin('#222226'));
+    for (const [x, w] of [[-5.0, 2.0], [3.8, 2.2]] as [number, number][]) {
+      b.box(w, 0.85, 0.9, cx + x, top + 0.425, cz + 0.4, desk);
+      b.box(w * 0.96, 0.06, 0.8, cx + x, top + 0.88, cz + 0.36, lin('#222226'));
     }
-    for (const [x, w] of [[-5, 2.0], [-2.4, 1.6], [0.2, 1.6], [2.8, 2.2]] as [number, number][]) {
-      b.box(w, 0.9, 1.0, x, y0 + FOH.deck2 + 0.45, FOH.z0 + 2.4, desk);
-    }
-    for (let k = 0; k < 8; k++) b.box(0.6, 1.2, 0.8, -7 + k * 1.9, y0 + FOH.deck1 + 0.6, FOH.z1 - 0.8, lin('#101012'));
-    // followspots (long cans on stands) at the upper-deck front, aimed at the stage
-    for (const x of [-6.2, 5.9]) {
-      b.beam(V(x, FOH.deck2, FOH.z0 + 0.9), V(x, FOH.deck2 + 1.2, FOH.z0 + 0.9), 0.08, galv, true);
-      b.beam(V(x, FOH.deck2 + 1.45, FOH.z0 + 1.6), V(x, FOH.deck2 + 1.3, FOH.z0 + 0.1), 0.34, lin('#1a1a1c'), true);
-    }
-    // press camera on a tripod (the Endshow photo was taken from about here)
-    b.beam(V(0.6, FOH.deck2, FOH.z0 + 0.8), V(0.6, FOH.deck2 + 1.45, FOH.z0 + 0.8), 0.04, galv, true);
-    b.box(0.2, 0.16, 0.3, 0.6, y0 + FOH.deck2 + 1.52, FOH.z0 + 0.7, lin('#0c0c0c'));
-    addMesh(b.build(), metal, 'foh-scaffold');
-
-    // black scrim + roof canvas (cloth material)
-    const cloth = patchWorldMaterial(new THREE.MeshStandardMaterial({ color: '#0f0f11', roughness: 0.92, side: THREE.DoubleSide }), { key: 'cloth' });
-    const c = new GeoBuilder();
-    const W = FOH.x1 - FOH.x0,
-      D = FOH.z1 - FOH.z0;
-    const zc = (FOH.z0 + FOH.z1) / 2;
-    // back wall (full height) and side walls (upper level + lower level half height)
-    c.box(W, FOH.roof - 0.3, 0.02, 0, y0 + (FOH.roof - 0.3) / 2 + 0.3, FOH.z1 + 0.06, blackCloth);
-    for (const x of [FOH.x0 - 0.06, FOH.x1 + 0.06]) {
-      c.box(0.02, FOH.roof - FOH.deck2 - 0.3, D, x, y0 + (FOH.deck2 + FOH.roof - 0.3) / 2, zc, blackCloth);
-      c.box(0.02, FOH.deck2 - 0.4, D, x, y0 + (FOH.deck2 + 0.4) / 2 - 0.1, zc, blackCloth);
-    }
-    // front skirt under deck 1 and the upper-deck fascia banner
-    c.box(W, FOH.deck1 - 0.1, 0.02, 0, y0 + FOH.deck1 / 2, FOH.z0 - 0.08, blackCloth);
-    c.box(W + 0.4, 0.9, 0.04, 0, y0 + FOH.roof - 0.45, FOH.z0 - 0.3, lin('#5b0a15'));
-    // pitched roof (slight fall to the back)
-    const roof = new THREE.BoxGeometry(W + 1.6, 0.18, D + 1.8);
-    const rm = new THREE.Matrix4().compose(V(0, FOH.roof + 0.25, zc), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), 0.06), new THREE.Vector3(1, 1, 1));
-    c.add(roof, rm, lin('#0b0b0c'));
-    addMesh(c.build(), cloth, 'foh-cloth');
-    colliders.push({ kind: 'box', minX: FOH.x0 - 2, maxX: FOH.x1 + 2, minZ: FOH.z0 - 2, maxZ: FOH.z1 + 2, tag: 'foh' });
-
-    // desk screens (emissive): consoles glowing blue-white under the roof
+    for (let k = 0; k < 5; k++) b.box(0.6, 0.9, 0.8, cx - 5.4 + k * 1.3 + (k > 2 ? 3.2 : 0), top + 0.45, z1 - 0.6, lin('#101012'));
+    addMesh(b.build(), metal, 'foh-platform');
+    // desk screens (emissive, dimmed show mode)
     const scr = new GeoBuilder();
-    const W_FOH = FOH.x1 - FOH.x0;
-    for (const [x, w] of [[-4.5, 2.4], [-1.2, 2.0], [2.2, 2.6]] as [number, number][]) scr.box(w * 0.5, 0.4, 0.02, x, y0 + FOH.deck1 + 1.25, FOH.z0 + 1.95, lin('#9fc4ff'), -0.0);
-    for (const [x, w] of [[-5, 2.0], [-2.4, 1.6], [0.2, 1.6], [2.8, 2.2]] as [number, number][]) scr.box(w * 0.7, 0.45, 0.02, x, y0 + FOH.deck2 + 1.25, FOH.z0 + 2.75, lin('#c8dcff'));
-    // warm LED work strips under both decks' ceilings (dimmed show mode) + desk lamps
-    for (const y of [FOH.deck2 - 0.25, FOH.roof - 0.35]) scr.box(W_FOH - 1, 0.05, 0.08, 0, y0 + y, FOH.z0 + 0.6, lin('#ff9a40'));
-    for (const x of [-4.5, -1.2, 2.2, -5, -2.4, 0.2, 2.8]) scr.box(0.12, 0.06, 0.12, x, y0 + (x > -5.1 && [-5, -2.4, 0.2, 2.8].includes(x) ? FOH.deck2 : FOH.deck1) + 1.45, FOH.z0 + 1.7, lin('#ffd9a0'));
-    const screenMat = new THREE.MeshBasicMaterial({ vertexColors: true, color: new THREE.Color(1.4, 1.4, 1.4) });
+    for (const [x, w] of [[-5.0, 2.0], [3.8, 2.2]] as [number, number][]) {
+      const m = new THREE.Matrix4().compose(new THREE.Vector3(cx + x, top + 1.12, cz + 0.62), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -0.35), new THREE.Vector3(w * 0.55, 0.36, 0.02));
+      scr.add(GeoBuilder.unit('box'), m, lin('#8fb4ee'));
+    }
+    const screenMat = new THREE.MeshBasicMaterial({ vertexColors: true, color: new THREE.Color(0.7, 0.7, 0.7) });
     addMesh(scr.build(), screenMat, 'foh-screens');
   }
 
-  // ------------------------------------------------------------------ camera pen + riser on the axis
+  // ------------------------------------------------------------------ photo terrace (Exclusive RED Experience)
+  // open scaffold deck at Y 5 over the back edge of the decking (bible §6.3), wide bays so the field
+  // cameras below it (hero cam (0, 1.8, 172)) look through, rails only on the front, stairs at both ends
   {
+    const T = TERRACE;
     const b = new GeoBuilder();
-    // (piano riser: see src/crowd/props.ts)
-    // stage-camera on a tripod + a small jib base in the pen
-    const yp = terrainHeight(CAM_PEN.x, CAM_PEN.z);
-    const tri = new THREE.Vector3(CAM_PEN.x + 1.5, yp + 1.5, CAM_PEN.z);
-    for (let k = 0; k < 3; k++) {
-      const a = (k / 3) * Math.PI * 2;
-      b.beam(new THREE.Vector3(tri.x + Math.cos(a) * 0.55, yp, tri.z + Math.sin(a) * 0.55), tri, 0.035, lin('#222'), true);
+    const zc = (T.z0 + T.z1) / 2;
+    const D = T.z1 - T.z0;
+    const g = (x: number, z: number) => terrainHeight(x, z);
+    const deckTop = T.deckY;
+    // steel deck on beams: timber top + a dark fascia
+    b.box(T.x1 - T.x0, 0.12, D, 0, deckTop - 0.06, zc, lin('#4a3a2c'));
+    b.box(T.x1 - T.x0, 0.4, 0.12, 0, deckTop - 0.32, T.z0 + 0.06, lin('#1a1a1c'));
+    b.box(T.x1 - T.x0, 0.4, 0.12, 0, deckTop - 0.32, T.z1 - 0.06, lin('#1a1a1c'));
+    for (const x of [-24, -12, 0, 12, 24]) b.box(0.2, 0.36, D, x, deckTop - 0.3, zc, lin('#2a2a2d'));
+    // columns: wide bays (no column within 6 m of the axis), X-bracing only in the outer bays
+    const cols = [-30, -18, -6.5, 6.5, 18, 30];
+    for (const x of cols)
+      for (const z of [T.z0 + 0.25, T.z1 - 0.25]) {
+        b.beam(new THREE.Vector3(x, g(x, z), z), new THREE.Vector3(x, deckTop - 0.5, z), 0.22, lin('#2c2d31'));
+      }
+    for (let i = 1; i < cols.length; i++) {
+      if (Math.abs(cols[i - 1] + cols[i]) < 1) continue; // central bay open
+      for (const z of [T.z0 + 0.25, T.z1 - 0.25]) {
+        const ya = g(cols[i - 1], z) + 0.4;
+        b.beam(new THREE.Vector3(cols[i - 1], ya, z), new THREE.Vector3(cols[i], deckTop - 0.6, z), 0.08, galv);
+        b.beam(new THREE.Vector3(cols[i], ya, z), new THREE.Vector3(cols[i - 1], deckTop - 0.6, z), 0.08, galv);
+      }
     }
-    b.box(0.3, 0.3, 0.55, tri.x, tri.y + 0.2, tri.z - 0.1, lin('#0d0d0d'));
-    b.box(0.6, 0.5, 0.6, CAM_PEN.x - 2.5, yp + 0.25, CAM_PEN.z + 1, lin('#18181a'));
-    b.box(1.1, 0.75, 0.7, CAM_PEN.x - 0.8, yp + 0.37, CAM_PEN.z + 1.3, lin('#131315'));
-    addMesh(b.build(), metal, 'axis-riser');
+    // balustrade: posts + top/mid rails along the front and the back, glass infill (front)
+    const rails = (z: number) => {
+      for (const y of [deckTop + 1.1, deckTop + 0.1]) b.beam(new THREE.Vector3(T.x0, y, z), new THREE.Vector3(T.x1, y, z), 0.06, alu, true);
+      for (let x = T.x0; x <= T.x1 + 0.01; x += 2) b.beam(new THREE.Vector3(x, deckTop, z), new THREE.Vector3(x, deckTop + 1.1, z), 0.05, alu, true);
+    };
+    rails(T.z0 + 0.1);
+    rails(T.z1 - 0.1);
+    // stairs down at both ends (solid stepped timber mass, running outwards along X)
+    const steps = Math.round((deckTop - g(T.x1, zc)) / 0.18);
+    for (const s of [-1, 1]) {
+      for (let k = 0; k < steps; k++) {
+        const t0 = k / steps,
+          t1 = (k + 1) / steps;
+        const xa = s * (T.x1 + T.stair * t0),
+          xb = s * (T.x1 + T.stair * t1);
+        const gy = g((xa + xb) / 2, zc);
+        const y = deckTop - (deckTop - gy) * t1;
+        b.box(Math.abs(xb - xa), Math.max(0.05, y - gy), D, (xa + xb) / 2, (y + gy) / 2, zc, lin(k % 2 ? '#3f3226' : '#46382a'));
+      }
+      // stair handrails
+      for (const z of [T.z0 + 0.1, T.z1 - 0.1]) {
+        const a = new THREE.Vector3(s * T.x1, deckTop + 1.0, z);
+        const e = new THREE.Vector3(s * (T.x1 + T.stair), g(s * (T.x1 + T.stair), z) + 1.0, z);
+        b.beam(a, e, 0.05, alu, true);
+      }
+    }
+    addMesh(b.build(), metal, 'photo-terrace');
+    // glass balustrade infill on the front (faint reflective panes)
+    const glass = new THREE.Mesh(
+      new THREE.PlaneGeometry(T.x1 - T.x0, 0.95),
+      new THREE.MeshStandardMaterial({ color: '#9fb4c0', transparent: true, opacity: 0.12, roughness: 0.05, metalness: 0.2, depthWrite: false }),
+    );
+    glass.position.set(0, deckTop + 0.6, T.z0 + 0.1);
+    glass.name = 'terrace-glass';
+    scene.add(glass);
+    drawables.push(glass);
+    // colliders: front and back of the terrace + stairs (entered from the ends only)
+    const reach = T.x1 + T.stair;
+    colliders.push({ kind: 'box', minX: -reach, maxX: reach, minZ: T.z0 - 0.35, maxZ: T.z0 + 0.15, tag: 'terrace' });
+    colliders.push({ kind: 'box', minX: -reach, maxX: reach, minZ: T.z1 - 0.15, maxZ: T.z1 + 0.35, tag: 'terrace' });
   }
 
   // ------------------------------------------------------------------ entrance gates (E1 back-right main, E2 back-left)
@@ -313,9 +337,9 @@ export function buildStructures(scene: THREE.Object3D, lowDetail: boolean): Stru
     // railings along the front (towards the field) and sides
     for (let x = PREMIUM.x0; x < PREMIUM.x1; x += 2.5) b.box(0.05, 1.1, 0.05, x, deckY + 0.55, PREMIUM.z0 + 4, alu);
     b.box(PREMIUM.x1 - PREMIUM.x0, 0.05, 0.05, (PREMIUM.x0 + PREMIUM.x1) / 2, deckY + 1.1, PREMIUM.z0 + 4, alu);
-    // ramps from the decking
+    // ramps from the decking (behind the photo terrace)
     for (const x of [-26, -10, 22, 40]) {
-      const a = new THREE.Vector3(x, terrainHeight(x, DECKING.z1 - 3) + 0.1, DECKING.z1 - 3);
+      const a = new THREE.Vector3(x, terrainHeight(x, DECKING.z1) + 0.1, DECKING.z1);
       const c2 = new THREE.Vector3(x, deckY, PREMIUM.z0 + 4.5);
       b.beam(a, c2, 0.1, wood);
       b.box(2.4, 0.15, c2.z - a.z, x, (a.y + c2.y) / 2, (a.z + c2.z) / 2, wood);

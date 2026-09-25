@@ -21,14 +21,20 @@ export function dirFromAzAlt(azDeg: number, altDeg: number, out = new THREE.Vect
   return out.set(-0.819152 * e - 0.573576 * n, Math.sin(h), -0.573576 * e + 0.819152 * n).normalize();
 }
 
-/** Endshow run: Sat 27 Jun 2026 22:40 → 23:06 CEST (event-context §4.3, INFERENCE ±20 min). */
+/**
+ * Endshow run: Sat 27 Jun 2026, t0 = 22:32:45 CEST → 22:59:06 (design-bible §8.1, INFERENCE ±2 min:
+ * moon pixel in drone frame f004 + the EXIF time of the official photo).
+ */
 export const SHOW_LENGTH = 1581;
-/** ephemeris (PyEphem, apparent, site 52.4401 N 5.7575 E) at show start / end — FACT (computed) */
+/**
+ * ephemeris at show start / end — FACT (computed): PyEphem 4.2.1, site 52.4401 N 5.7575 E,
+ * elevation 0, pressure 0 (no refraction), 20:32:45 → 20:59:06 UTC (design-bible §8.2)
+ */
 export const EPHEM = {
-  sun: { az: [319.3, 324.85], alt: [-3.56, -7.14] },
-  moon: { az: [162.99, 168.64], alt: [7.79, 8.71], phase: 0.9575 },
-  venus: { az: [282.54, 287.56], alt: [12.73, 8.87], mag: -3.98 },
-  jupiter: { az: [298.06, 303.18], alt: [5.04, 1.74], mag: -1.66 },
+  sun: { az: [317.8, 323.31], alt: [-3.99, -6.54] },
+  moon: { az: [161.45, 167.08], alt: [7.37, 8.4], phase: 0.9573 },
+  venus: { az: [281.16, 286.18], alt: [13.74, 9.84], mag: -3.98 },
+  jupiter: { az: [296.67, 301.76], alt: [5.87, 2.35], mag: -1.66 },
 };
 
 /** bright stars (az, alt, mag) at 22:53 CEST (show middle) — FACT (PyEphem catalogue, mag < 3) */
@@ -59,24 +65,39 @@ export const PILLARS: { x: number; z: number; row: number; side: -1 | 1 }[] = PI
   { x: -PILLAR_X, z, row, side: -1 as const },
   { x: PILLAR_X, z, row, side: 1 as const },
 ]);
-/** pillar build dimensions (stage-canonical: 3.2 m shaft, ≈14.5 m total, ≈5 m plinth; oar2/delio photos) */
+/**
+ * pillar build dimensions (design-bible §5.10 + the official Endshow photo P and frame f113):
+ * 8.4 m plinth deck (Y 0.4) inside a dark bronze lattice railing, stepped pedestal to Y 2.7,
+ * slim 2.6 m square shaft to Y 8.8, plain 3.4 m capital to Y 9.6 (no pinnacles), a 0.6 m neck, then
+ * the crystal lantern: glowing inverted glass pyramid Y 10.2 → 11.7 (girdle Ø 3.0 m, turned 45° to
+ * the shaft, bright point at the bottom apex), a metal crown band, and a tall dark metal hood with
+ * mullions to Y 13.9, finial to 14.5.
+ */
 export const PILLAR = {
-  plinth: 5.0,
-  plinthH: 0.45,
+  deck: 8.4,
+  deckH: 0.4,
   fence: 8.5,
-  shaft: 3.0,
-  baseTop: 1.5,
+  pedestal: 3.3,
+  pedestalTop: 2.45,
+  shaft: 2.6,
+  baseTop: 2.73,
   shaftTop: 8.8,
-  capTop: 9.65,
-  lanternBottom: 9.95,
-  girdle: 11.05,
-  girdleTop: 11.3,
-  crystalTop: 12.5,
-  top: 12.8,
-  crystalR: 1.2,
+  capital: 3.4,
+  capTop: 9.6,
+  lanternBottom: 10.2,
+  girdle: 11.7,
+  girdleTop: 11.9,
+  crystalTop: 13.9,
+  top: 14.5,
+  crystalR: 1.5,
 };
-/** lantern centre height (light source for the fake lighting) */
+/** lantern light centre (inside the glowing lower glass; also the laser mirror height 11.2) */
 export const LANTERN_Y = 11.2;
+/**
+ * height registered as the 'pillars_top' anchor: the lighting rig and laser rig read the capital
+ * as (anchor Y − 3.2), i.e. the bible's crystal tip 12.8 over the capital top 9.6
+ */
+export const PILLAR_ANCHOR_Y = PILLAR.capTop + 3.2;
 
 /** front-of-stage barrier line (design-bible §5.4 / §6.4: Z +3, photo pit behind it) */
 export const PIT_Z = 3;
@@ -97,14 +118,37 @@ export const BACKSTAGE_Z = -6;
 export const ARM_BARRIER_X = 90;
 
 /**
- * FOH / press tower: the Endshow photo (delio, EXIF 22:41) was shot from the axis at Z ≈ 150, ≈ 6 m up,
- * with an unobstructed view over the aisle (stage-analysis §3.3, INFERENCE) — no tall FOH stands
- * between the pillar rows. ASSUMPTION: that camera position is the upper deck of the RED FOH tower,
- * which stands on the axis behind the road on the decking.
+ * FOH / camera platform on the axis (design-bible §5.11 / §6.4: X ±6.4, Z 87–93, deck Y 0.5, 1.1 m
+ * railing, camera operator on a tripod — FACT photo P). On the empty-grounds Endshow night this low
+ * platform is the only FOH position between the pillar rows: nothing tall stands on the axis, so the
+ * official photo (0, 6.8, 168) and the hero field camera (0, 1.8, 172) see the whole aisle.
  */
-export const FOH = { x0: -8, x1: 8, z0: 150, z1: 160, deck1: 1.1, deck2: 5.6, roof: 9.6 };
-/** FOH / camera platform on the axis (design-bible §5: Z 87–93, 12.8 m wide, 1.2 m barriers) */
-export const CAM_PEN = { x: 0, z: 90, w: 12.8, d: 6 };
+export const CAM_PEN = { x: 0, z: 90, w: 12.8, d: 6, deckY: 0.5 };
+/**
+ * "Exclusive RED Experience" photo terrace at the back edge of the decking (design-bible §6.3:
+ * X ±30, Z 166…172, deck Y 5, INFERENCE) — the official Endshow photo P was taken from its front
+ * rail at (0, 6.8, 168). Open scaffold deck with a glass balustrade, stairs at both ends. The deck
+ * stops 0.5 m short of the lake edge so the hero field camera (0, 1.8, 172) stays at ground level
+ * behind it (its view: the aisle under the deck's front edge).
+ */
+export const TERRACE = { x0: -30, x1: 30, z0: 166, z1: 171.5, deckY: 5, stair: 7.5 };
+
+/**
+ * Walkable height of the photo terrace (deck + the two end stairs running outwards along X), or
+ * null outside it. Walkers enter the stairs from the ends (|X| 30 → 37.5); the front and back edges
+ * are closed by the balustrade colliders (structures.ts).
+ */
+export function terraceHeight(x: number, z: number): number | null {
+  const T = TERRACE;
+  if (z < T.z0 || z > T.z1) return null;
+  const ax = Math.abs(x);
+  if (ax <= T.x1) return T.deckY;
+  if (ax <= T.x1 + T.stair) {
+    const g = terrainHeight(x, z);
+    return g + (T.deckY - g) * (1 - (ax - T.x1) / T.stair);
+  }
+  return null;
+}
 /** piano riser on the axis (design-bible §5: Z 57–61; JDX piano + laser source in Domitor Draconis) */
 export const RISER = { x: 0, z: 59, w: 6, d: 4, h: 0.9 };
 
