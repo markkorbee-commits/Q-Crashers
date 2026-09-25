@@ -40,6 +40,8 @@ export const SLOT = {
   MIC: 9,
   CAMERA: 10,
   CTRL: 11,
+  /** short-hair cap shell over the skull (every non-buzz head without cap / hat) */
+  HAIRCAP: 12,
 } as const;
 
 /** mood channels (uniform uMood[5] = 20 floats). Values are shares of the crowd 0..1. */

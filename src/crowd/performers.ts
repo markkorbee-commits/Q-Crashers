@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { clamp, hash32, lerp, smoothstep } from '../core/rng';
+import type { ShowEngine } from '../show/ShowEngine';
 import { BOTTOM, HAIR, HEAD, newLook, packLook, PRINT, PROP, TOP, type Look } from './constants';
 
 /**
@@ -14,7 +15,85 @@ import { BOTTOM, HAIR, HEAD, newLook, packLook, PRINT, PROP, TOP, type Look } fr
  *  - Tribe mode only: security in hi-vis in the pit, facing the crowd.
  * Everything is a pure function of show time; poses are computed on the CPU (≤ 40 instances) and
  * uploaded as instance attributes to the same GPU-skinned body as the crowd.
+ *
+ * Timing comes from the show file (docs/show-format.md, crowd cues): `crowd` / `performer` cues with
+ * `p.who` = mc | troupe | lead | aerialist | strap | pedestal | pianist | tube | dj set the windows,
+ * `crowd` / `mood` cues with state `jump` are the MC's hype windows. Choreography inside a window
+ * is authored relative to its start, so retiming the show moves the performers with it. Without
+ * such cues the 2026 Endshow defaults below apply.
  */
+
+interface Win {
+  t0: number;
+  t1: number;
+}
+
+/** show-time windows of the performers (defaults = the 2026 Endshow as filmed) */
+export class PerfTiming {
+  mc: Win = { t0: 332, t1: 498 };
+  troupe: Win = { t0: 642, t1: 733 };
+  lead: Win = { t0: 641, t1: 734 };
+  pedestal: Win = { t0: 640, t1: 735 };
+  aerial: Win = { t0: 679, t1: 704 };
+  strap: Win = { t0: 676, t1: 706 };
+  pianist: Win = { t0: 880, t1: 1098 };
+  tubeHi: Win = { t0: 885, t1: 936 };
+  tubeLo: Win = { t0: 876, t1: 1098 };
+  dj: Win[] = [
+    { t0: 938, t1: 1098 },
+    { t0: 1470, t1: 1561 },
+  ];
+  /** MC hype windows (crowd jump moods) */
+  hype: Win[] = [
+    { t0: 330.3, t1: 341 },
+    { t0: 415.4, t1: 440 },
+    { t0: 502.1, t1: 523.8 },
+  ];
+  /** did the show file provide the performer windows (vs the built-in defaults) */
+  fromShow = false;
+
+  /** read the windows from the compiled show (defaults without a show file / performer cues) */
+  load(show: ShowEngine | null): void {
+    const d = new PerfTiming();
+    this.mc = d.mc;
+    this.troupe = d.troupe;
+    this.lead = d.lead;
+    this.pedestal = d.pedestal;
+    this.aerial = d.aerial;
+    this.strap = d.strap;
+    this.pianist = d.pianist;
+    this.tubeHi = d.tubeHi;
+    this.tubeLo = d.tubeLo;
+    this.dj = d.dj;
+    this.hype = d.hype;
+    this.fromShow = false;
+    if (!show || !show.file) return;
+    const dj: Win[] = [];
+    const hype: Win[] = [];
+    for (const c of show.all('crowd')) {
+      const w = { t0: c.t, t1: c.t + c.dur };
+      if (c.fx === 'mood' && c.p.state === 'jump') hype.push(w);
+      if (c.fx !== 'performer') continue;
+      this.fromShow = true;
+      const who = String(c.p.who ?? '');
+      if (who === 'dj') dj.push(w);
+      else if (who === 'tube') {
+        if (typeof c.p.level === 'number' && c.p.level < 0.5) this.tubeLo = w;
+        else this.tubeHi = w;
+      } else if (who === 'mc') this.mc = w;
+      else if (who === 'troupe') this.troupe = w;
+      else if (who === 'lead') this.lead = w;
+      else if (who === 'pedestal') this.pedestal = w;
+      else if (who === 'strap') this.strap = w;
+      else if (who === 'pianist') this.pianist = w;
+      else if (who === 'aerialist') this.aerial = w;
+    }
+    if (dj.length) this.dj = dj;
+    if (hype.length) this.hype = hype;
+  }
+}
+
+const inWin = (t: number, w: Win) => t > w.t0 && t < w.t1;
 
 const D = Math.PI / 180;
 
@@ -121,23 +200,32 @@ class Path {
   }
 }
 
+/**
+ * The MC's walk (authored in 2026 show time, shifted with the 'mc' window). He works the deck
+ * UPSTAGE of the pyro line (flame heads at z −0.4, gerbs −0.85, comets −1.1: ≥ 3 m safety distance,
+ * as a pyro operator would demand) and steps back next to the booth for the anthem drops.
+ */
 const MC_PATH = new Path([
   { t: 332, x: 0, z: -7.2 },
-  { t: 338, x: 0, z: -1.6 },
-  { t: 350, x: -9, z: -1.2 },
-  { t: 362, x: -12.5, z: -1.6 },
-  { t: 376, x: 3, z: -1.1 },
-  { t: 389, x: 13.5, z: -1.5 },
-  { t: 402, x: 6, z: -1.0 },
-  { t: 414, x: 0.5, z: -1.0 },
-  { t: 430, x: -1.5, z: -1.2 },
-  { t: 444, x: -14.5, z: -1.8 },
-  { t: 461, x: -4, z: -1.2 },
-  { t: 475, x: 8, z: -1.2 },
-  { t: 489, x: 12, z: -1.5 },
-  { t: 494, x: 7, z: -3.5 },
+  { t: 338, x: 0, z: -3.6 },
+  { t: 350, x: -9, z: -3.5 },
+  { t: 362, x: -12.5, z: -3.8 },
+  { t: 376, x: 3, z: -3.4 },
+  { t: 389, x: 13.5, z: -3.7 },
+  { t: 402, x: 6, z: -3.4 },
+  { t: 409, x: 2.5, z: -4.4 },
+  { t: 414, x: 1.2, z: -5.0 },
+  { t: 430, x: -1.4, z: -5.0 },
+  { t: 441, x: -3.5, z: -4.4 },
+  { t: 452, x: -13.5, z: -3.8 },
+  { t: 465, x: -4, z: -3.5 },
+  { t: 478, x: 8, z: -3.5 },
+  { t: 489, x: 12, z: -3.8 },
+  { t: 494, x: 7, z: -5.0 },
   { t: 498, x: 1.5, z: -7.2 },
 ]);
+const MC_T0 = 332;
+const TROUPE_T0 = 642;
 
 type Mode = 'both' | 'filmed' | 'tribe';
 
@@ -181,6 +269,8 @@ export class Performers {
   crewVisible = 0;
   /** the MC is on stage (for the follow spot) */
   mcOn = false;
+  /** show windows (from the show file when it provides them) */
+  readonly timing = new PerfTiming();
   private pose = newPose();
   private fr: PerfFrame = { visible: false, x: 0, y: 0, z: 0, yaw: 0, glow: 0 };
   private pp = { x: 0, z: 0, dist: 0, speed: 0, dx: 0, dz: 0 };
@@ -264,12 +354,13 @@ export class Performers {
   update(t: number, rt: number, beat: number, bpm: number, lookUp: number, populated: boolean): void {
     this.visibleCount = 0;
     this.crewVisible = 0;
-    this.mcOn = t > 332 && t < 498;
+    const T = this.timing;
+    this.mcOn = inWin(t, T.mc);
     let lanternOn = 0;
-    this.pedestal = t > 640 && t < 735 ? 1 : 0;
-    this.strap = t > 676 && t < 706 ? 1 : 0;
+    this.pedestal = inWin(t, T.pedestal) ? 1 : 0;
+    this.strap = inWin(t, T.strap) ? 1 : 0;
     // piano light tube: white glow for the piano intro, dim otherwise
-    this.pianoTube = t > 885 && t < 936 ? 1 : t > 876 && t < 1098 ? 0.25 : 0.06;
+    this.pianoTube = inWin(t, T.tubeHi) ? 1 : inWin(t, T.tubeLo) ? 0.25 : 0.06;
     for (let i = 0; i < this.count; i++) {
       const pf = this.perfs[i];
       const p = resetPose(this.pose);
@@ -287,7 +378,8 @@ export class Performers {
         if (pf.mode !== 'both' || pf.name.endsWith('cam') || pf.name === 'terrace') this.crewVisible++;
       }
     }
-    this.lantern.w = lanternOn * 0.55;
+    // the other bearers' lanterns: a faint warm fill on the deck (each bearer's own are lit per body)
+    this.lantern.w = lanternOn * 0.14;
   }
 
   private evalOne(pf: Perf, i: number, t: number, rt: number, beat: number, bpm: number, lookUp: number, p: CPose, f: PerfFrame): void {
@@ -295,10 +387,12 @@ export class Performers {
     const kick = Math.exp(-(bp * 60) / Math.max(60, bpm) * 11);
     const name = pf.name;
     const ph = (pf.seed % 1000) / 159.2;
+    const T = this.timing;
     if (name === 'mc') {
-      if (t < 332 || t > 498) return;
+      if (!inWin(t, T.mc)) return;
       const pp = this.pp;
-      MC_PATH.at(t, pp);
+      const tm = t - T.mc.t0 + MC_T0;
+      MC_PATH.at(tm, pp);
       f.visible = true;
       f.x = pp.x;
       f.z = pp.z;
@@ -306,12 +400,15 @@ export class Performers {
       const moving = clamp(pp.speed / 0.8, 0, 1);
       const walkYaw = Math.atan2(pp.dx, pp.dz);
       f.yaw = moving > 0.15 ? lerp(0, walkYaw, 0.55 * moving) : 0.15 * Math.sin(t * 0.3);
-      if (t < 339 || t > 493) f.yaw = walkYaw;
+      if (tm < 339 || tm > 493) f.yaw = walkYaw;
+      // white follow spot from the FOH tower while he performs
+      f.glow = -0.9 * smoothstep(MC_T0 + 4, MC_T0 + 7, tm) * (1 - smoothstep(493, 497, tm));
       walk(p, pp.dist / 1.45, moving);
       // mic at the mouth (left hand)
       setArm(p.armL, 58, -14, 142, 10);
       // right arm: hype gestures — up on drops, pointing / waving to the crowd otherwise
-      const drop = (t > 415.4 && t < 440) || (t > 502.1 && t < 523.8) || (t > 330.3 && t < 341);
+      let drop = false;
+      for (let h = 0; h < T.hype.length && !drop; h++) drop = inWin(t, T.hype[h]);
       const point = 0.5 + 0.5 * Math.sin(t * 0.9 + 1.3);
       setArm(p.armR, 12 - 20 * moving * Math.sin((pp.dist / 1.45) * Math.PI * 2), 10, 20, 0);
       if (drop) {
@@ -324,42 +421,44 @@ export class Performers {
     }
     if (name.startsWith('dancer')) {
       const k = pf.k;
-      const enter = 642 + k * 0.6;
-      const exit = 725 + (DANCERS - k) * 0.5;
-      if (t < enter || t > exit + 8) return;
+      // choreography authored in 2026 show time, shifted with the 'troupe' window
+      const tt = t - T.troupe.t0 + TROUPE_T0;
+      const enter = TROUPE_T0 + k * 0.6;
+      const exit = TROUPE_T0 + (T.troupe.t1 - T.troupe.t0) - 8 + (DANCERS - k) * 0.5;
+      if (tt < enter || tt > exit + 8) return;
       f.visible = true;
       f.glow = 1;
-      // ring around the pedestal, slowly processing
-      const ring0 = (k / DANCERS) * Math.PI * 2;
-      const rot = Math.max(0, Math.min(t, 700) - 650) * 0.035 + Math.max(0, t - 715) * 0.02;
-      const th = ring0 + rot;
-      const rx = 7.2 * Math.cos(th);
-      const rz = -2.5 + 1.75 * Math.sin(th);
-      const pe = smoothstep(enter, enter + 7, t) * (1 - smoothstep(exit, exit + 7, t));
+      // a tight ritual horseshoe around the lead on her pedestal (0, −2), open to the audience
+      // (f066, f069–f071): ~7 m wide, 2 m deep, ≥ 1.2 m behind the pyro line; it breathes / sways
+      const sway = 0.1 * Math.sin((tt - enter) * 0.21 + k) * (tt < 700 || tt > 716 ? 1 : 0.2);
+      const th = ((-14 + (208 * k) / (DANCERS - 1)) * Math.PI) / 180 + sway;
+      const rx = 3.6 * Math.cos(th);
+      const rz = -2.1 - 2.0 * Math.sin(th);
+      const pe = smoothstep(enter, enter + 7, tt) * (1 - smoothstep(exit, exit + 7, tt));
       f.x = lerp(0, rx, pe);
       f.z = lerp(-7.5, rz, pe);
       f.y = 1.9;
-      const moving = t < enter + 7 || t > exit ? 1 : t < 700 ? 0.35 : t > 715 ? 0.25 : 0;
-      const walkYaw = t > exit ? Math.atan2(-rx, -7.5 - rz) : t < enter + 7 ? Math.atan2(rx, rz + 7.5) : Math.atan2(-7.2 * Math.sin(th), 1.75 * Math.cos(th));
-      const faceIn = Math.atan2(-rx, -2.5 - rz);
-      f.yaw = moving > 0.5 ? walkYaw : t > 700 && t < 715 ? faceIn : lerp(faceIn, 0, 0.5);
-      walk(p, t * 0.9 + k * 0.37, moving);
+      const moving = tt < enter + 7 || tt > exit ? 1 : 0;
+      const walkYaw = tt > exit ? Math.atan2(-rx, -7.5 - rz) : Math.atan2(rx, rz + 7.5);
+      const faceIn = Math.atan2(-rx, -2 - rz);
+      f.yaw = moving > 0.5 ? walkYaw : tt > 700 && tt < 715 ? faceIn : lerp(faceIn, 0, 0.6);
+      walk(p, tt * 0.9 + k * 0.37, moving);
       // lantern waves passing around the ring (canon)
-      const wave = 0.5 + 0.5 * Math.sin((t / 3.75) * Math.PI * 2 - th * 2);
+      const wave = 0.5 + 0.5 * Math.sin((tt / 3.75) * Math.PI * 2 - th * 2);
       setArm(p.armR, 25 + 135 * wave, 18, 25, -20);
       setArm(p.armL, 25 + 135 * (1 - wave), 18, 25, -20);
       p.spine[0] += (18 - 26 * wave) * D;
-      if (t > 700 && t < 709.2) {
+      if (tt > 700 && tt < 709.2) {
         // anticipation: kneel, lanterns low towards the lead dancer
-        dropLegs(p, 0.48 * smoothstep(700, 703, t));
+        dropLegs(p, 0.48 * smoothstep(700, 703, tt));
         setArm(p.armR, 45, 20, 20, 0);
         setArm(p.armL, 45, 20, 20, 0);
         p.spine[0] += 25 * D;
-      } else if (t >= 709.2 && t < 716) {
+      } else if (tt >= 709.2 && tt < 716) {
         // burning wings: leap up, both lanterns overhead
         setArm(p.armR, 168, 28, 12, 0);
         setArm(p.armL, 168, 28, 12, 0);
-        p.off[1] += 0.25 * Math.max(0, Math.sin((t - 709.2) * 2.4)) * (1 - smoothstep(710.5, 712, t));
+        p.off[1] += 0.25 * Math.max(0, Math.sin((tt - 709.2) * 2.4)) * (1 - smoothstep(710.5, 712, tt));
         p.spine[0] -= 12 * D;
       } else {
         // tribal stomp on the percussion
@@ -375,7 +474,8 @@ export class Performers {
       return;
     }
     if (name === 'lead') {
-      if (t < 641 || t > 734) return;
+      if (!inWin(t, T.lead)) return;
+      const tt = t - T.troupe.t0 + TROUPE_T0;
       f.visible = true;
       f.x = 0;
       f.z = -2;
@@ -386,7 +486,7 @@ export class Performers {
       p.spine[2] -= 10 * D * und;
       p.spine[0] -= 6 * D + 4 * D * Math.sin(t * 0.8);
       p.off[0] += 0.05 * und;
-      if (t > 709.2 && t < 716) {
+      if (tt > 709.2 && tt < 716) {
         setArm(p.armL, 150, 62, 10, 0);
         setArm(p.armR, 150, 62, 10, 0);
         p.head[0] -= 0.4;
@@ -401,13 +501,14 @@ export class Performers {
       return;
     }
     if (name === 'aerialist') {
-      if (t < 679 || t > 704) return;
+      const A = T.aerial;
+      if (!inWin(t, A)) return;
       f.visible = true;
-      const up = smoothstep(679, 684, t) * (1 - smoothstep(699, 704, t));
+      const up = smoothstep(A.t0, A.t0 + 5, t) * (1 - smoothstep(A.t1 - 5, A.t1, t));
       f.x = 0;
       f.z = -6.8;
       f.y = 1.9 + 2.2 * up;
-      f.yaw = (t - 679) * 0.7;
+      f.yaw = (t - A.t0) * 0.7;
       setArm(p.armL, 176, 4, 6, 0);
       setArm(p.armR, 176, 4, 6, 0);
       const split = up * (0.6 + 0.4 * Math.sin(t * 0.7));
@@ -418,12 +519,14 @@ export class Performers {
       return;
     }
     if (name === 'pianist') {
-      if (t < 880 || t > 1098) return;
+      if (!inWin(t, T.pianist)) return;
       f.visible = true;
       f.x = 0;
       f.z = 60.25;
       f.y = 0.6;
       f.yaw = Math.PI;
+      // white key light for the piano reveal (f094), a softer one for the rest of the track
+      f.glow = -(inWin(t, T.tubeHi) ? 0.5 + 1.4 * smoothstep(T.tubeHi.t0, T.tubeHi.t0 + 2, t) : 0.5);
       // seated at the bench, hands running over the keys
       p.off[1] -= 0.4;
       p.legL[0] += 86 * D;
@@ -437,13 +540,15 @@ export class Performers {
       setArm(p.armR, 52, 9 - 9 * run, 58, -18);
       p.spine[0] += (10 + 5 * Math.sin(t * 0.7)) * D;
       p.spine[1] += 7 * D * run;
-      const hit = Math.max(0, Math.exp(-((t - 886) % 6.66) * 2));
+      const ph6 = (((t - T.tubeHi.t0 - 1) % 6.66) + 6.66) % 6.66;
+      const hit = Math.exp(-ph6 * 2);
       p.head[0] += 0.1 + 0.18 * hit;
       p.head[1] += 0.12 * run;
       return;
     }
     if (name === 'dj') {
-      const on = (t > 938 && t < 1098) || (t > 1470 && t < 1561);
+      let on = false;
+      for (let w = 0; w < T.dj.length && !on; w++) on = inWin(t, T.dj[w]);
       if (!on) return;
       f.visible = true;
       f.x = 0.4;
@@ -458,17 +563,17 @@ export class Performers {
       return;
     }
     if (name === 'deckcam') {
-      const mcOn = t > 336 && t < 493;
-      const dnOn = t > 648 && t < 728;
+      const mcOn = t > T.mc.t0 + 4 && t < T.mc.t1 - 5;
+      const dnOn = t > T.troupe.t0 + 6 && t < T.troupe.t1 - 5;
       if (!mcOn && !dnOn) return;
       f.visible = true;
       f.y = 1.9;
       if (mcOn) {
         const pp = this.pp;
-        MC_PATH.at(t - 1.2, pp);
+        MC_PATH.at(t - T.mc.t0 + MC_T0 - 1.2, pp);
         const side = pp.x > 0 ? -1 : 1;
         f.x = pp.x + side * 3.2;
-        f.z = pp.z + 1.6;
+        f.z = pp.z + 1.0;
         f.yaw = Math.atan2(pp.x - f.x, pp.z - f.z);
         walk(p, pp.dist / 1.2, clamp(pp.speed / 0.8, 0, 1));
       } else {

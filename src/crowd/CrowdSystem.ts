@@ -1,12 +1,13 @@
 import * as THREE from 'three';
 import type { App } from '../core/App';
 import { clamp, hash32, hashN } from '../core/rng';
-import type { FrameContext, QualitySettings, System } from '../core/types';
+import type { FrameContext, QualityLevel, QualitySettings, System } from '../core/types';
 import { buildFlagAtlas, buildSilhouetteAtlas } from './atlas';
 import { Choreo, describeMood } from './choreo';
 import { M, paletteColors, WIND_DIR } from './constants';
 import {
   buildFlagGeometry,
+  buildHeroGeometry,
   buildImpostorGeometry,
   buildMidGeometry,
   buildNearGeometry,
@@ -34,24 +35,57 @@ import {
  * CrowdSystem ('crowd') — the Defqon.1 Tribe the 2026 Endshow never had (design-bible §9),
  * plus everyone who WAS there on 27 June 2026 (MC, fire troupe, pianist, crew).
  *
- * Rendering (≤ 7 draw calls for the whole module):
- *   near   articulated low-poly bodies (440-tri body + optional cap / hat / hair / bandana / cape
- *          slots), rigid segments GPU-skinned in the vertex shader
+ * Rendering (≤ 8 draw calls for the whole module):
+ *   hero   smooth ~2.8k-tri bodies (hair caps, mitten hands, shoes) for the ~100 nearest people
+ *   near   smooth ~0.7k-tri bodies + optional cap / hat / hair / bandana / cape slots, up to ~15 m
  *   mid    80-tri prism bodies with the same skeleton and per-vertex lighting
  *   far    camera-facing impostors from a procedurally drawn silhouette atlas (8 poses × 4 bodies)
  *   flags  poles + waving cloth attached to the carrier's hand (same pose code as the bodies)
  *   lights phone screens / flashlights / lighters (additive sprites in the hands)
  *   performers (CPU-posed, same body shader) + props (piano riser, white grand piano, pedestal …)
  * Per-person data lives in 3 float textures; each LOD draws an index list refreshed by chunked
- * frustum/LOD bucketing every few frames (8 m chunks, the only per-instance CPU work).
+ * frustum/LOD bucketing every few frames (8 m chunks; per person only in the nearest chunks).
  * All animation is a pure function of show time + the tempo grid → seek/pause safe.
  */
 
 const TEX_W = 256;
-const NEAR_D = 34;
-const MID_D = 82;
 const DEFAULT_COUNT = 45000;
 const MAX_COUNT = 65000;
+
+/**
+ * LOD budgets per quality level. The headcount is decoupled from the detailed-LOD budgets: extra
+ * people only go to the far impostors (2 tris each), so High shows the full 45,000-strong Tribe.
+ *   hero  smooth ~2.8k-tri bodies for the nearest people (within heroR m)
+ *   near  ~0.7k-tri bodies up to nearR m
+ *   mid   ~110-tri bodies (chunks up to midR m)
+ *   far   impostors
+ * Near-range people are ranked by distance, so the nearest always get the finest mesh.
+ * Worst-case crowd triangles (all budgets full, incl. phones + flags): ultra ~1.8M, high ~1.09M,
+ * medium ~0.72M, mobile ~0.33M.
+ */
+interface LodBudget {
+  heroN: number;
+  heroR: number;
+  nearN: number;
+  nearR: number;
+  midN: number;
+  midR: number;
+  /** headcount cap of the preset (all LODs) */
+  head: number;
+}
+const LOD: Record<QualityLevel, LodBudget> = {
+  ultra: { heroN: 150, heroR: 8, nearN: 1000, nearR: 20, midN: 4000, midR: 70, head: 65000 },
+  high: { heroN: 100, heroR: 7, nearN: 500, nearR: 15, midN: 2400, midR: 55, head: 45000 },
+  medium: { heroN: 60, heroR: 6, nearN: 340, nearR: 12, midN: 1600, midR: 45, head: 26000 },
+  mobile: { heroN: 30, heroR: 5, nearN: 150, nearR: 10, midN: 800, midR: 36, head: 11000 },
+};
+const CAND_MAX = 16384;
+const CAND_BINS = 128;
+
+/** viewpoints where no flag carrier should stand right in front of the camera (x, z, radius) */
+const FLAG_FREE: [number, number, number][] = [
+  [6, 32, 5.5], [0, 5.5, 5], [-4, 74, 5.5], [-70, 40, 5.5], [70, 40, 5.5], [0, 45, 5], [0, 118, 5], [4.6, 64.2, 5], [4, 146, 5],
+];
 
 const SKY_KEYS = [
   // t, zenith (sRGB), twilight low (sRGB) — design-bible §8.3
@@ -83,8 +117,13 @@ export class CrowdSystem implements System {
   private texLook: THREE.DataTexture | null = null;
   private atlas!: THREE.Texture;
   private flagTex!: THREE.Texture;
-  private meshes: { near: THREE.Mesh; mid: THREE.Mesh; far: THREE.Mesh } | null = null;
-  private idx!: { near: THREE.InstancedBufferAttribute; mid: THREE.InstancedBufferAttribute; far: THREE.InstancedBufferAttribute };
+  private meshes: { hero: THREE.Mesh; near: THREE.Mesh; mid: THREE.Mesh; far: THREE.Mesh } | null = null;
+  private idx!: {
+    hero: THREE.InstancedBufferAttribute;
+    near: THREE.InstancedBufferAttribute;
+    mid: THREE.InstancedBufferAttribute;
+    far: THREE.InstancedBufferAttribute;
+  };
   private flagMesh!: THREE.Mesh;
   private flagGeo!: THREE.InstancedBufferGeometry;
   private lightsMesh!: THREE.Mesh;
@@ -94,7 +133,7 @@ export class CrowdSystem implements System {
   private propsMesh!: THREE.Mesh;
   private perf!: Performers;
   private choreo = new Choreo();
-  private tris = { near: 0, mid: 0, far: 2, flag: 0, perf: 0 };
+  private tris = { hero: 0, near: 0, mid: 0, far: 2, flag: 0, perf: 0 };
   // bucketing state (preallocated)
   private readonly frustum = new THREE.Frustum();
   private readonly projScreen = new THREE.Matrix4();
@@ -108,7 +147,12 @@ export class CrowdSystem implements System {
   private lastCam = new THREE.Vector3(1e9, 0, 0);
   private lastDir = new THREE.Vector3();
   private tmpV = new THREE.Vector3();
-  private counts = { near: 0, mid: 0, far: 0, visible: 0 };
+  private counts = { hero: 0, near: 0, mid: 0, far: 0, visible: 0 };
+  private readonly candIdx = new Int32Array(CAND_MAX);
+  private readonly candD = new Float32Array(CAND_MAX);
+  private readonly lodBins = new Int32Array(CAND_BINS);
+  private readonly hAllow = new Int32Array(CAND_BINS);
+  private readonly nAllow = new Int32Array(CAND_BINS);
   private frame = 0;
   private cpuMs = 0;
   private rebuildTimer = 0;
@@ -141,9 +185,14 @@ export class CrowdSystem implements System {
     return this.populated ? 'tribe' : 'filmed';
   }
 
-  /** upper bound for setCount() on this device's quality preset */
+  /** LOD budgets of the current preset */
+  private get lod(): LodBudget {
+    return LOD[this.q?.level ?? 'high'] ?? LOD.high;
+  }
+
+  /** upper bound for setCount() on this device's quality preset (far impostors carry the extra people) */
   get maxCount(): number {
-    return Math.min(MAX_COUNT, this.q?.crowdCount ?? MAX_COUNT);
+    return Math.min(MAX_COUNT, Math.max(this.q?.crowdCount ?? 0, this.lod.head));
   }
 
   /** crowd size (Tribe mode), 0…65,000, capped by the quality preset */
@@ -255,6 +304,7 @@ export class CrowdSystem implements System {
       uKey: { value: new THREE.Vector4() },
       uGroups: { value: new THREE.Vector4() },
       uTube: { value: new THREE.Vector4(0.85, 0.92, 1, 0) },
+      uLumCap: { value: 0.5 },
     };
   }
 
@@ -276,9 +326,9 @@ export class CrowdSystem implements System {
     return g;
   }
 
-  private lodMesh(base: THREE.BufferGeometry, mat: THREE.Material, name: string): { mesh: THREE.Mesh; idx: THREE.InstancedBufferAttribute } {
+  private lodMesh(base: THREE.BufferGeometry, mat: THREE.Material, name: string, cap = 65536): { mesh: THREE.Mesh; idx: THREE.InstancedBufferAttribute } {
     const g = this.instanced(base);
-    const idx = new THREE.InstancedBufferAttribute(new Uint16Array(65536), 1);
+    const idx = new THREE.InstancedBufferAttribute(new Uint16Array(cap), 1);
     idx.setUsage(THREE.DynamicDrawUsage);
     g.setAttribute('aIdx', idx);
     const mesh = new THREE.Mesh(g, mat);
@@ -290,21 +340,25 @@ export class CrowdSystem implements System {
   }
 
   private buildMeshes(): void {
+    const heroBase = buildHeroGeometry();
     const nearBase = buildNearGeometry();
     const midBase = buildMidGeometry();
     const farBase = buildImpostorGeometry();
+    this.tris.hero = triCount(heroBase);
     this.tris.near = triCount(nearBase);
     this.nearVerts = nearBase.getAttribute('position').count;
     this.tris.mid = triCount(midBase);
+    const hero = this.lodMesh(heroBase, this.material(bodyVertex('hero'), bodyFragment('hero')), 'crowd-hero', 2048);
     const near = this.lodMesh(nearBase, this.material(bodyVertex('near'), bodyFragment('near')), 'crowd-near');
     const mid = this.lodMesh(midBase, this.material(bodyVertex('mid'), bodyFragment('mid')), 'crowd-mid');
     const farMat = this.material(IMPOSTOR_VERT, IMPOSTOR_FRAG, { side: THREE.DoubleSide });
     const far = this.lodMesh(farBase, farMat, 'crowd-far');
+    hero.mesh.renderOrder = 1;
     near.mesh.renderOrder = 1;
     mid.mesh.renderOrder = 2;
     far.mesh.renderOrder = 3;
-    this.meshes = { near: near.mesh, mid: mid.mesh, far: far.mesh };
-    this.idx = { near: near.idx, mid: mid.idx, far: far.idx };
+    this.meshes = { hero: hero.mesh, near: near.mesh, mid: mid.mesh, far: far.mesh };
+    this.idx = { hero: hero.idx, near: near.idx, mid: mid.idx, far: far.idx };
 
     // flags
     const flagBase = buildFlagGeometry();
@@ -320,12 +374,13 @@ export class CrowdSystem implements System {
     this.lightsMesh = new THREE.Mesh(
       lightsGeo,
       new THREE.ShaderMaterial({
-        uniforms: this.u,
+        uniforms: { ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog), ...this.u },
         vertexShader: LIGHTS_VERT,
         fragmentShader: LIGHTS_FRAG,
         transparent: true,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
+        fog: true,
       }),
     );
     this.lightsMesh.name = 'crowd-phones';
@@ -335,7 +390,7 @@ export class CrowdSystem implements System {
 
     // performers & crew
     this.perf = new Performers(this.heightAt);
-    const perfBase = buildPerformerGeometry();
+    const perfBase = buildPerformerGeometry(this.q.level === 'mobile' ? 'near' : 'hero');
     this.tris.perf = triCount(perfBase);
     this.perfGeo = this.instanced(perfBase);
     const pa = (name: string, arr: Float32Array) => {
@@ -363,8 +418,10 @@ export class CrowdSystem implements System {
   /** (re)generate the crowd for the current target count / quality */
   private rebuild(): void {
     const q = this.q;
-    const n = Math.min(this.target, q.crowdCount, MAX_COUNT);
+    const n = Math.min(this.target, this.maxCount);
     const flagTarget = Math.min(q.flagCount, Math.round(n * 0.008));
+    const avoid: [number, number, number][] = FLAG_FREE.slice();
+    for (const sp of this.app.spots) if (sp.position.y < 8) avoid.push([sp.position.x, sp.position.z, 5]);
     const t0 = performance.now();
     const layout = generateLayout({
       target: n,
@@ -372,6 +429,7 @@ export class CrowdSystem implements System {
       colliders: this.app.colliders.filter((c) => c.tag !== 'piano-riser'),
       queues: this.queues,
       flagTarget,
+      flagAvoid: avoid,
     });
     this.layout = layout;
     const rows = Math.max(1, Math.ceil(layout.count / TEX_W));
@@ -416,6 +474,7 @@ export class CrowdSystem implements System {
     this.buildMs = performance.now() - t0;
   }
   private buildMs = 0;
+  private showFile: unknown = null;
   private nearVerts = 0;
   private bucketMs = 0;
 
@@ -423,7 +482,7 @@ export class CrowdSystem implements System {
     const prev = this.q;
     this.q = q;
     if (!this.app) return;
-    if (!prev || prev.crowdCount !== q.crowdCount || prev.flagCount !== q.flagCount) this.rebuild();
+    if (!prev || prev.level !== q.level || prev.crowdCount !== q.crowdCount || prev.flagCount !== q.flagCount) this.rebuild();
     this.lastCam.set(1e9, 0, 0);
   }
 
@@ -464,20 +523,18 @@ export class CrowdSystem implements System {
     if (this.testEnv) this.fakeEnv(ctx);
     this.updateLighting(t, ctx);
 
-    // --- performers (both modes), props
+    // --- performers (both modes), props — windows from the show file (re-read when it changes)
+    if (app.show.file !== this.showFile) {
+      this.showFile = app.show.file;
+      this.perf.timing.load(app.show.file ? app.show : null);
+    }
     this.perf.update(t, ctx.time, ctx.beat.beat, ctx.beat.bpm, m[M.LOOKUP], this.populated);
     for (let i = 0; i < this.perfAttrs.length; i++) this.perfAttrs[i].needsUpdate = true;
     (u.uLantern.value as THREE.Vector4).copy(this.perf.lantern);
-    // front key on the deck: set wash + a white follow spot while the MC performs
+    // set wash spilling onto the deck (follow spots / key lights are per performer, see Performers)
     const env = app.env;
     const key = u.uKey.value as THREE.Vector4;
-    const spot = this.perf.mcOn ? 0.55 : 0;
-    key.set(
-      env.stageWashColor.r * env.stageWashIntensity * 0.5 + spot * 0.85,
-      env.stageWashColor.g * env.stageWashIntensity * 0.5 + spot * 0.92,
-      env.stageWashColor.b * env.stageWashIntensity * 0.5 + spot,
-      1,
-    );
+    key.set(env.stageWashColor.r * env.stageWashIntensity * 0.5, env.stageWashColor.g * env.stageWashIntensity * 0.5, env.stageWashColor.b * env.stageWashIntensity * 0.5, 1);
     (u.uGroups.value as THREE.Vector4).set(1, this.perf.pedestal, this.perf.strap, 0);
     (u.uTube.value as THREE.Vector4).w = this.perf.pianoTube;
     const cam = ctx.camera;
@@ -542,28 +599,48 @@ export class CrowdSystem implements System {
       dist[slot] = vd[k];
     }
     const nv = nvis;
-    const nearBudget = this.q.crowdNearCount;
-    const midBudget = Math.round(this.q.crowdNearCount * 3);
+    const B = this.lod;
+    const pos = L.pos;
+    const cx = cp.x;
+    const cy = cp.y;
+    const cz = cp.z;
+    const heroR2 = B.heroR * B.heroR;
+    const nearR2 = B.nearR * B.nearR;
+    const ah = this.idx.hero.array as Uint16Array;
     const an = this.idx.near.array as Uint16Array;
     const am = this.idx.mid.array as Uint16Array;
     const af = this.idx.far.array as Uint16Array;
+    const candIdx = this.candIdx;
+    const candD = this.candD;
+    let nc = 0;
+    let nh = 0;
     let nn = 0;
     let nm = 0;
     let nfar = 0;
     for (let k = 0; k < nv; k++) {
-      const ch = chunks[order[k]];
+      const ci = order[k];
+      const ch = chunks[ci];
       const d = dist[k];
       const s = ch.start;
       const e = s + ch.count;
-      // hysteresis: a chunk keeps its finer LOD for 3 m past the threshold (no flicker at borders)
-      const ci = order[k];
+      // hysteresis: a chunk keeps its finer LOD for a few metres past the threshold (no flicker)
       const prev = this.chunkLod[ci];
-      const nearD = prev === 0 ? NEAR_D + 3 : NEAR_D;
-      const midD = prev <= 1 ? MID_D + 4 : MID_D;
-      if (d < nearD && nn + ch.count <= nearBudget) {
-        for (let i = s; i < e; i++) an[nn++] = i;
+      if (d < B.nearR + (prev === 0 ? 2 : 0)) {
+        // close chunks: everyone within nearR becomes a candidate, ranked by distance below
+        for (let i = s; i < e; i++) {
+          const dx = pos[i * 4] - cx;
+          const dy = pos[i * 4 + 1] + 1.1 - cy;
+          const dz = pos[i * 4 + 2] - cz;
+          const d2 = dx * dx + dy * dy + dz * dz;
+          if (d2 < nearR2 && nc < CAND_MAX) {
+            candIdx[nc] = i;
+            candD[nc] = d2;
+            nc++;
+          } else if (nm < B.midN) am[nm++] = i;
+          else af[nfar++] = i;
+        }
         this.chunkLod[ci] = 0;
-      } else if (d < midD && nm + ch.count <= midBudget) {
+      } else if (d < B.midR + (prev <= 1 ? 4 : 0) && nm + ch.count <= B.midN) {
         for (let i = s; i < e; i++) am[nm++] = i;
         this.chunkLod[ci] = 1;
       } else {
@@ -571,13 +648,51 @@ export class CrowdSystem implements System {
         this.chunkLod[ci] = 2;
       }
     }
+    // rank the candidates by distance (128 bins over nearR): the nearest heroN within heroR → hero,
+    // the next nearN → near, the rest mid / far — elevated or wide views never waste detail on the
+    // back of the near range while someone right in front of the camera is drawn as a prism
+    const lb = this.lodBins;
+    const hAllow = this.hAllow;
+    const nAllow = this.nAllow;
+    lb.fill(0);
+    const bs = CAND_BINS / B.nearR;
+    for (let j = 0; j < nc; j++) {
+      const bin = Math.min(CAND_BINS - 1, (Math.sqrt(candD[j]) * bs) | 0);
+      candD[j] = bin;
+      lb[bin]++;
+    }
+    let hq = B.heroN;
+    let nq = B.nearN;
+    for (let b = 0; b < CAND_BINS; b++) {
+      const cnt = lb[b];
+      const h = (b + 0.5) / bs < B.heroR ? Math.min(cnt, hq) : 0;
+      hq -= h;
+      const n = Math.min(cnt - h, nq);
+      nq -= n;
+      hAllow[b] = h;
+      nAllow[b] = n;
+    }
+    for (let j = 0; j < nc; j++) {
+      const bin = candD[j];
+      const i = candIdx[j];
+      if (hAllow[bin] > 0) {
+        hAllow[bin]--;
+        ah[nh++] = i;
+      } else if (nAllow[bin] > 0) {
+        nAllow[bin]--;
+        an[nn++] = i;
+      } else if (nm < B.midN) am[nm++] = i;
+      else af[nfar++] = i;
+    }
+    this.commit(this.idx.hero, this.meshes!.hero, nh);
     this.commit(this.idx.near, this.meshes!.near, nn);
     this.commit(this.idx.mid, this.meshes!.mid, nm);
     this.commit(this.idx.far, this.meshes!.far, nfar);
+    this.counts.hero = nh;
     this.counts.near = nn;
     this.counts.mid = nm;
     this.counts.far = nfar;
-    this.counts.visible = nn + nm + nfar;
+    this.counts.visible = nh + nn + nm + nfar;
   }
 
   private commit(attr: THREE.InstancedBufferAttribute, mesh: THREE.Mesh, n: number): void {
@@ -606,17 +721,28 @@ export class CrowdSystem implements System {
     rim.b += env.stageColor.b * si * 0.9 + env.palettePrimary.b * 0.08;
     softClamp(stage, 2.2);
     softClamp(rim, 1.8);
-    // haze scattering: the lit haze above the field acts like a coloured sky dome
+    // haze scattering: the lit haze above the field acts like a coloured sky dome (from above / the front)
     const hz = u.uHazeAmb.value as THREE.Color;
     hz.copy(stage).multiplyScalar(0.5).add(this.tmpC.copy(rim).multiplyScalar(0.25));
-    hz.multiplyScalar(0.14 * clamp(env.haze, 0, 1.2));
+    hz.multiplyScalar(0.12 * clamp(env.haze, 0, 1.2));
+    // beams sweeping the audience: moving pools, not a flood light
     const wash = u.uWashCol.value as THREE.Color;
-    wash.copy(env.stageColor).lerp(env.paletteSecondary, 0.25).multiplyScalar(env.audienceWash * (0.35 + si * 0.4));
+    wash.copy(env.stageColor).lerp(env.paletteSecondary, 0.25).multiplyScalar(env.audienceWash * (0.1 + si * 0.1));
     (u.uScreen.value as THREE.Color).setRGB(0.55, 0.62, 0.75).lerp(env.stageColor, 0.35).lerp(env.palettePrimary, 0.2);
+    // pyro / firework / strobe flashes (one weighted centre from LightEnv): directional only, soft-limited
     const fl = u.uFlashCol.value as THREE.Color;
-    fl.copy(env.flashColor).multiplyScalar(1.4);
-    (u.uFlashPos.value as THREE.Vector3).copy(env.flashPos);
-    u.uStrobe.value = clamp(env.strobe, 0, 1.5);
+    fl.copy(env.flashColor).multiplyScalar(0.8);
+    softClamp(fl, 3);
+    // LightEnv merges every flash into one weighted centre; strobes / blinders / pyro face the
+    // audience from the stage, so keep the crowd's flash on the stage side (never from behind the
+    // spectators, which would fill their backs with light)
+    const fp = u.uFlashPos.value as THREE.Vector3;
+    fp.copy(env.flashPos);
+    fp.z = Math.min(fp.z, 4);
+    fp.y = Math.max(fp.y, 6);
+    u.uStrobe.value = clamp(env.strobe, 0, 1.2);
+    // the crowd never outshines the lit set: its luminance rolls off towards ~1/3 of the set level
+    u.uLumCap.value = 0.36 + 0.14 * clamp(si / 3, 0, 1);
     // sky ambient + the last twilight behind the audience (design-bible §8.3)
     const S = this.sky;
     let i = 0;
@@ -652,6 +778,7 @@ export class CrowdSystem implements System {
       mode: this.populated ? 'tribe' : 'as filmed',
       total: this.populated ? (L?.count ?? 0) : 0,
       target: this.target,
+      hero: this.populated ? this.counts.hero : 0,
       near: this.populated ? this.counts.near : 0,
       mid: this.populated ? this.counts.mid : 0,
       far: this.populated ? this.counts.far : 0,
@@ -663,7 +790,9 @@ export class CrowdSystem implements System {
       cheer: this.choreo.cheer.toFixed(2),
       cue: this.choreo.cueState,
       zones: L ? L.zoneCounts.join('/') : '-',
-      tris: `${this.tris.near}/${this.tris.mid}/${this.tris.far}`,
+      tris: `${this.tris.hero}/${this.tris.near}/${this.tris.mid}/${this.tris.far}`,
+      crowdTris: this.populated ? this.crowdTris() : 0,
+      lod: `${this.lod.heroN}@${this.lod.heroR}m/${this.lod.nearN}@${this.lod.nearR}m/${this.lod.midN}@${this.lod.midR}m`,
       nearVerts: this.nearVerts,
       drawCalls: this.drawCalls(),
       cpuMs: this.cpuMs.toFixed(3),
@@ -672,10 +801,21 @@ export class CrowdSystem implements System {
     };
   }
 
+  /** triangles submitted for the crowd (bodies of every LOD + phone sprites + flags) */
+  private crowdTris(): number {
+    const c = this.counts;
+    const T = this.tris;
+    let n = c.hero * T.hero + c.near * T.near + c.mid * T.mid + c.far * T.far;
+    if (this.lightsMesh?.visible) n += (this.layout?.count ?? 0) * 2;
+    if (this.flagMesh?.visible) n += (this.layout?.flags.length ?? 0) * T.flag;
+    return n;
+  }
+
   /** draw calls issued by this module this frame (crowd LODs, flags, phones, performers, props) */
   private drawCalls(): number {
     let n = 2; // performers + props
     if (this.populated && this.meshes) {
+      if (this.meshes.hero.visible) n++;
       if (this.meshes.near.visible) n++;
       if (this.meshes.mid.visible) n++;
       if (this.meshes.far.visible) n++;

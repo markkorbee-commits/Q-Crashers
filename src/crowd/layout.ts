@@ -89,6 +89,8 @@ export interface LayoutInput {
   colliders: readonly Collider2D[];
   queues: readonly QueuePoint[];
   flagTarget: number;
+  /** no flag carriers within these circles (x, z, r): named viewpoints */
+  flagAvoid?: readonly (readonly [number, number, number])[];
   seed?: number;
 }
 
@@ -554,10 +556,21 @@ export function generateLayout(input: LayoutInput): CrowdLayout {
   const flags: FlagDef[] = [];
   const FW = [0.5, 1.2, 1.5, 0.8, 1.0, 0.25, 0.2, 0];
   const keys: { k: number; s: number }[] = [];
+  const avoid = input.flagAvoid ?? [];
   for (let s = 0; s < n; s++) {
     const zone = attr[s * 4 + 3];
     const w = FW[zone];
     if (w <= 0) continue;
+    // keep the default viewpoints and the pit front centre (the view of the DJ arch) clear of flags
+    const px = pos[s * 4];
+    const pz = pos[s * 4 + 2];
+    if (Math.abs(px) < 8 && pz < 14) continue;
+    let blocked = false;
+    for (let a = 0; a < avoid.length && !blocked; a++) {
+      const [ax, az, ar] = avoid[a];
+      blocked = (px - ax) * (px - ax) + (pz - az) * (pz - az) < ar * ar;
+    }
+    if (blocked) continue;
     const r = hash32(hashN(attr[s * 4 + 2], 4242)) / 4294967296;
     keys.push({ k: r / w, s });
   }

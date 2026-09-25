@@ -91,7 +91,7 @@ const TIMELINE: Key[] = [
   K(829.25, { JUMP: 0.65, FIST: 0.35, HANDS: 0.3, FLAGS: 1, LOOKUP: 0.25, INTENS: 1.2 }, 0.12),
   K(877.3, { CLAP: 0.5, HANDS: 0.2, FLAGS: 0.6, INTENS: 0.8 }, 1),
   // 6 Domitor Draconis (886–1098): hush and sit for the piano, then head-banging and hard fists
-  K(884.6, { SIT: 0.3, PHONES: 0.45, LIGHTERS: 0.75, SWAY: 0.2, FLAGS: 0.1, INTENS: 0.5 }, 3),
+  K(884.6, { SIT: 0.62, PHONES: 0.45, LIGHTERS: 0.75, SWAY: 0.2, FLAGS: 0.1, INTENS: 0.5 }, 3),
   K(933.8, { JUMP: 0.4, HANDS: 0.3, FIST: 0.2, FLAGS: 0.7, INTENS: 1.05 }, 0.2),
   K(943.4, { HEADBANG: 0.4, FIST: 0.5, BOUNCE: 0.35, JUMP: 0.12, FLAGS: 0.7, INTENS: 1 }, 1.5),
   K(1004, { HANDS: 0.3, CROUCH: 0.3, FLAGS: 0.5, INTENS: 0.9 }, 0.5),
@@ -149,7 +149,7 @@ const PRESETS: Record<string, Partial> = {
   hug: { HUG: 0.6, SWAY: 0.85, INTENS: 0.8 },
   clap: { CLAP: 0.7, INTENS: 0.9 },
   crouch: { CROUCH: 0.7, INTENS: 0.9 },
-  sit: { SIT: 0.5, PHONES: 0.3, INTENS: 0.5 },
+  sit: { SIT: 0.85, PHONES: 0.32, LIGHTERS: 0.35, INTENS: 0.5 },
   stomp: { STOMP: 0.6, HANDS: 0.2, INTENS: 0.9 },
   headbang: { HEADBANG: 0.5, FIST: 0.4, INTENS: 1 },
   pols: { POLS: 0.65, BOUNCE: 0.3, INTENS: 1 },
