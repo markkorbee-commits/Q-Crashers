@@ -1,0 +1,426 @@
+import * as THREE from 'three';
+import type { App } from '../core/App';
+import { clamp, hashN, lerp, rand01 } from '../core/rng';
+import type { BeatInfo } from '../core/types';
+import type { Cue } from '../show/ShowTypes';
+import { easeDolly, easeInOut, wobble } from '../player/motion';
+
+/** Output pose of a shot. */
+export interface ShotPose {
+  pos: THREE.Vector3;
+  look: THREE.Vector3;
+  fov: number;
+  roll: number;
+}
+
+/** World layout the shots are framed on (resolved from anchors when the show camera starts). */
+interface Layout {
+  head: THREE.Vector3;
+  stage: THREE.Vector3;
+  deckY: number;
+  foh: THREE.Vector3;
+  delays: THREE.Vector3[];
+  roofY: number;
+  wing: number;
+  fieldEnd: number;
+}
+
+type ShotKind = 'wide' | 'stage' | 'side' | 'crowd' | 'sky';
+
+/** Context of a shot slot: evaluated at the slot start so the choice is a pure function of time. */
+interface SlotMood {
+  energy: number;
+  kick: boolean;
+  fireworks: number;
+  pyro: number;
+}
+
+interface ShotDef {
+  id: string;
+  kind: ShotKind;
+  /** relative weight for a mood */
+  weight(m: SlotMood): number;
+  /** k = eased progress 0..1, v = variant 0..1, t = show time (for handheld drift) */
+  frame(L: Layout, k: number, v: number, t: number, o: ShotPose): void;
+  /** handheld / beat shake amount (m) */
+  shake?: number;
+}
+
+const side = (v: number) => (v < 0.5 ? -1 : 1);
+
+/** The automatic director's shot list (~13 framings derived from the anchor layout). */
+const SHOTS: ShotDef[] = [
+  {
+    id: 'foh_wide',
+    kind: 'wide',
+    weight: (m) => 1.1 + (1 - m.energy) * 0.6,
+    frame(L, k, v, _t, o) {
+      o.pos.set(L.foh.x + lerp(-4, 4, v), L.foh.y + 4.5, L.foh.z + 3 - 6 * k);
+      o.look.set(0, L.stage.y + 1, L.stage.z);
+      o.fov = lerp(40, 34, k);
+    },
+  },
+  {
+    id: 'front_low',
+    kind: 'stage',
+    weight: (m) => 0.6 + m.pyro * 1.6 + m.energy * 0.4 - m.fireworks * 0.4,
+    frame(L, k, v, _t, o) {
+      const s = side(v);
+      o.pos.set(s * lerp(2, 7, k), 1.15, 7.5);
+      o.look.set(L.head.x * 0.5, L.head.y - 2, L.head.z);
+      o.fov = 64;
+      o.roll = -s * 0.03;
+    },
+    shake: 0.012,
+  },
+  {
+    id: 'side_left',
+    kind: 'side',
+    weight: (m) => 0.7 + m.pyro * 0.5,
+    frame(L, k, _v, _t, o) {
+      o.pos.set(-L.wing * 0.72 + 10 * k, 7, lerp(24, 40, k));
+      o.look.set(-8, L.stage.y, L.stage.z);
+      o.fov = 44;
+    },
+  },
+  {
+    id: 'side_right',
+    kind: 'side',
+    weight: (m) => 0.7 + m.pyro * 0.5,
+    frame(L, k, _v, _t, o) {
+      o.pos.set(L.wing * 0.72 - 10 * k, 7, lerp(40, 24, k));
+      o.look.set(8, L.stage.y, L.stage.z);
+      o.fov = 44;
+    },
+  },
+  {
+    id: 'crane_crowd',
+    kind: 'crowd',
+    weight: (m) => 0.9 + m.energy * 0.5,
+    frame(L, k, v, _t, o) {
+      o.pos.set(lerp(-16, 16, v), lerp(12, 26, k), lerp(78, 58, k));
+      o.look.set(0, L.stage.y * 0.8, L.stage.z);
+      o.fov = 56;
+    },
+  },
+  {
+    id: 'aerial_drone',
+    kind: 'wide',
+    weight: (m) => 1.0 + m.fireworks * 2 + (1 - m.energy) * 0.3,
+    frame(L, k, v, _t, o) {
+      // high above the field, the pillar aisle leading into the stage (official drone framing)
+      o.pos.set(lerp(-3, 3, v), lerp(64, 54, k), lerp(L.fieldEnd + 20, L.fieldEnd - 25, k));
+      o.look.set(0, 8, 12);
+      o.fov = 48;
+    },
+  },
+  {
+    id: 'dragon_close',
+    kind: 'stage',
+    weight: (m) => 0.7 + (1 - m.energy) * 0.7 - m.fireworks * 0.3,
+    frame(L, k, v, _t, o) {
+      const s = side(v);
+      o.pos.set(L.head.x + s * lerp(-9, 9, k), L.head.y - 7, L.head.z + 36);
+      o.look.copy(L.head);
+      o.fov = lerp(24, 21, k);
+    },
+  },
+  {
+    id: 'wing_along',
+    kind: 'side',
+    weight: () => 0.55,
+    frame(L, k, v, _t, o) {
+      const s = side(v);
+      o.pos.set(s * (L.wing + 6), L.roofY * 0.62, 18 + 8 * k);
+      o.look.set(L.head.x, L.head.y - 3, L.head.z);
+      o.fov = 40;
+    },
+  },
+  {
+    id: 'pit_track',
+    kind: 'stage',
+    weight: (m) => 0.35 + m.pyro * 2.6,
+    frame(L, k, v, _t, o) {
+      const s = side(v);
+      const x = s * lerp(-34, 34, k);
+      o.pos.set(x, L.deckY + 0.6, 3.4);
+      o.look.set(x * 0.55, L.deckY + 5, -6);
+      o.fov = 60;
+    },
+    shake: 0.008,
+  },
+  {
+    id: 'crowd_pov',
+    kind: 'crowd',
+    weight: (m) => 0.7 + m.energy * 0.7,
+    frame(L, k, v, _t, o) {
+      o.pos.set(lerp(-8, 8, v), 1.9, lerp(40, 35, k));
+      o.look.set(0, L.stage.y + 2, L.stage.z);
+      o.fov = 52;
+    },
+    shake: 0.02,
+  },
+  {
+    id: 'delay_tower',
+    kind: 'crowd',
+    weight: (m) => 0.6 + m.energy * 0.2,
+    frame(L, k, v, _t, o) {
+      const d = L.delays[Math.floor(v * L.delays.length) % Math.max(1, L.delays.length)] ?? new THREE.Vector3(30, 14, 95);
+      o.pos.set(d.x, d.y + 3, d.z + 2);
+      o.look.set(lerp(-10, 10, k), L.stage.y, L.stage.z);
+      o.fov = 38;
+    },
+  },
+  {
+    id: 'reverse_stage',
+    kind: 'crowd',
+    weight: (m) => 0.25 + m.energy * 0.3,
+    frame(L, k, v, _t, o) {
+      const s = side(v);
+      o.pos.set(s * 14, L.deckY + 7, -2);
+      o.look.set(s * lerp(-10, 10, k), 1, 70);
+      o.fov = 62;
+    },
+  },
+  {
+    id: 'skyline',
+    kind: 'sky',
+    weight: (m) => 0.15 + m.fireworks * 3.5,
+    frame(L, k, v, _t, o) {
+      o.pos.set(lerp(-12, 12, v), 2.4, L.fieldEnd + 30 - 8 * k);
+      o.look.set(0, 55 + 10 * k, -40);
+      o.fov = 58;
+    },
+  },
+  {
+    id: 'orbit_high',
+    kind: 'wide',
+    weight: (m) => 0.5 + m.fireworks * 1.3 + (1 - m.energy) * 0.4,
+    frame(L, k, v, _t, o) {
+      const a = side(v) * lerp(-0.55, 0.55, k);
+      o.pos.set(Math.sin(a) * 125, 46, Math.cos(a) * 125 + 10);
+      o.look.set(0, L.stage.y, L.stage.z);
+      o.fov = 44;
+    },
+  },
+];
+
+const SHOT_BY_ID = new Map(SHOTS.map((s) => [s.id, s]));
+const CUE_LABEL = new Map(SHOTS.map((s) => [s.id, `cue:${s.id}`]));
+const FIREWORK_FX = new Set(['shell', 'salvo', 'finale', 'cake', 'comet', 'mine']);
+const PYRO_FX = new Set(['flame', 'firewall', 'dragon_breath', 'burst', 'gerb', 'jet']);
+
+/**
+ * Show camera: follows authored `camera.shot` cues when present; otherwise an automatic
+ * director cuts on bar boundaries between preset framings, choosing shot = f(show time, section
+ * energy, active fireworks / pyro). Everything is a pure function of show time (seek-safe).
+ */
+export class ShowDirector {
+  private L!: Layout;
+  private cueBuf: Cue[] = [];
+  private slotKey = -1;
+  private slotShot = 0;
+  private slotVariant = 0;
+  private slot = { start: 0, end: 1 };
+  private tmp = new THREE.Vector3();
+  private rev = -1;
+  private camCues: readonly Cue[] = [];
+  private tmp2 = new THREE.Vector3();
+  /** id of the current shot (debug / UI) */
+  current = '';
+
+  constructor(private app: App) {}
+
+  /** resolve the framing layout from the current anchors */
+  build(): void {
+    const a = this.app.anchors;
+    const head = (a.get('dragon_head')[0] ?? new THREE.Vector3(0, 28, -5)).clone();
+    const delays = a.get('delay_towers').map((p) => p.clone());
+    this.L = {
+      head,
+      stage: new THREE.Vector3(0, Math.max(10, head.y * 0.55), head.z - 2),
+      deckY: a.get('deck_front')[0]?.y ?? 2.2,
+      foh: (a.get('foh')[0] ?? new THREE.Vector3(0, 8, 110)).clone(),
+      delays,
+      roofY: Math.max(20, ...a.get('roof').map((p) => p.y)),
+      wing: Math.max(80, ...a.get('wing_tips').map((p) => Math.abs(p.x))),
+      fieldEnd: Math.max(170, ...[...delays, ...a.get('pillars_base')].map((p) => p.z)) + 30,
+    };
+    this.slotKey = -1;
+  }
+
+  /** evaluate the show camera at show time t */
+  evaluate(t: number, beat: BeatInfo, o: ShotPose): void {
+    if (!this.L) this.build();
+    o.roll = 0;
+    if (this.fromCue(t, o)) return;
+    this.auto(t, beat, o);
+  }
+
+  // --- authored cues ---------------------------------------------------------------------------
+
+  /** authored camera cues (cached per show compile; empty when the show has none) */
+  private cameraCues(): readonly Cue[] {
+    const show = this.app.show;
+    if (show.revision !== this.rev) {
+      this.rev = show.revision;
+      this.camCues = show.all('camera');
+    }
+    return this.camCues;
+  }
+
+  private fromCue(t: number, o: ShotPose): boolean {
+    const show = this.app.show;
+    if (this.cameraCues().length === 0) return false;
+    const act = show.active('camera', t, this.cueBuf);
+    let cue: Cue | null = null;
+    for (let i = act.length - 1; i >= 0; i--) if (act[i].fx === 'shot') { cue = act[i]; break; }
+    if (!cue) return false;
+    const p = cue.p;
+    const raw = clamp((t - cue.t) / Math.max(0.001, cue.dur), 0, 1);
+    const k = p.ease === 'linear' ? raw : p.ease === 'in' ? raw * raw : p.ease === 'out' ? 1 - (1 - raw) * (1 - raw) : easeInOut(raw);
+    const preset = typeof p.preset === 'string' ? SHOT_BY_ID.get(p.preset) : undefined;
+    if (preset) {
+      o.fov = 50;
+      preset.frame(this.L, k, rand01(cue.seed), t, o);
+      this.current = CUE_LABEL.get(preset.id)!;
+    } else {
+      if (!vec(p.pos, o.pos) || !vec(p.look, o.look)) return false;
+      if (vec(p.to, this.tmp)) o.pos.lerp(this.tmp, k);
+      if (vec(p.lookTo, this.tmp2)) o.look.lerp(this.tmp2, k);
+      o.fov = typeof p.fov === 'number' ? clamp(p.fov, 10, 110) : 50;
+      o.roll = typeof p.roll === 'number' ? p.roll : 0;
+      this.current = 'cue';
+    }
+    if (typeof p.fov === 'number') o.fov = clamp(p.fov, 10, 110);
+    return true;
+  }
+
+  // --- automatic director ----------------------------------------------------------------------
+
+  private auto(t: number, beat: BeatInfo, o: ShotPose): void {
+    const show = this.app.show;
+    const tempo = show.tempo;
+    const seg = tempo.segmentAt(t);
+    const secIdx = tempo.sectionIndexAt(t);
+    const sec = secIdx >= 0 ? tempo.sections[secIdx] : null;
+    const energy = sec ? sec.energy : 0.6;
+    const bpb = seg.beatsPerBar ?? 4;
+    const barLen = (60 / seg.bpm) * bpb;
+    let barsPerShot = !seg.kick ? (energy < 0.45 ? 8 : 4) : energy >= 0.85 ? 2 : energy >= 0.6 ? 4 : 8;
+    while (barsPerShot > 1 && barsPerShot * barLen > 14) barsPerShot /= 2; // slow tempi: keep shots < 14 s
+    const len = barsPerShot * barLen;
+    // an authored cue that just ended acts like a section start (no flash cut after it)
+    const s0 = Math.max(sec ? sec.start : 0, seg.start, this.lastCueEnd(t));
+    const s1 = Math.min(sec ? sec.end : show.duration, seg.end);
+    const minLen = Math.min(len, barLen) * 0.9;
+
+    // slot = bar-aligned window, merged with tiny leftovers at section / tempo boundaries
+    const idx = Math.floor((t - seg.anchor) / len);
+    let lo = seg.anchor + idx * len;
+    let hi = lo + len;
+    if (lo - s0 < minLen) {
+      lo = s0;
+      if (hi - s0 < minLen) hi += len;
+    }
+    if (s1 - lo < minLen) lo -= len;
+    if (s1 - hi < minLen) hi = s1;
+    lo = Math.max(lo, s0);
+    hi = Math.min(Math.max(hi, lo + 0.5), Math.max(s1, lo + 0.5));
+
+    const key = (secIdx + 1) * 1e7 + Math.round(lo * 1000); // unique per slot, no hashing per frame
+    if (key !== this.slotKey) {
+      this.slotKey = key;
+      this.slot.start = lo;
+      this.slot.end = hi;
+      const mood = this.mood(lo, hi, energy, seg.kick);
+      let pick = this.choose(hashN(key, 1), mood);
+      // never show the same framing twice in a row within a section: the previous slot showed
+      // either its base pick or that pick's alternate, so avoid both (pure, no recursion)
+      if (lo - len >= s0 - 1e-3) {
+        const prevLo = lo - len;
+        const prevKey = (secIdx + 1) * 1e7 + Math.round(prevLo * 1000);
+        const prevBase = this.choose(hashN(prevKey, 1), this.mood(prevLo, lo, energy, seg.kick));
+        const prevAlt = this.alternate(prevBase, prevKey);
+        if (pick === prevBase || pick === prevAlt) pick = this.alternate(pick, key);
+        while (pick === prevBase || pick === prevAlt) pick = (pick + 1) % SHOTS.length;
+      }
+      this.slotShot = pick;
+      this.slotVariant = rand01(hashN(key, 3));
+    }
+    const shot = SHOTS[this.slotShot];
+    this.current = shot.id;
+    const k = easeDolly((t - this.slot.start) / Math.max(0.001, this.slot.end - this.slot.start));
+    o.fov = 50;
+    shot.frame(this.L, k, this.slotVariant, t, o);
+    // handheld operators breathe; cameras near the stage feel the kick
+    const sh = shot.shake ?? 0;
+    if (sh > 0) {
+      o.pos.x += sh * wobble(t * 0.9, 1);
+      o.pos.y += sh * 0.7 * wobble(t * 1.1, 2) - sh * 0.4 * beat.kick * beat.energy;
+      o.roll += sh * 0.5 * wobble(t * 0.6, 3);
+    }
+  }
+
+  /** what the slot [a, b) will show: counts cues launched in (or just before) the window */
+  private mood(a: number, b: number, energy: number, kick: boolean): SlotMood {
+    const fw = countIn(this.app.show.all('fireworks'), a - 1.5, b, FIREWORK_FX);
+    const py = countIn(this.app.show.all('pyro'), a - 0.5, b, PYRO_FX);
+    const per = 6 / Math.max(1, b - a); // normalise to "per 6 seconds"
+    return { energy, kick, fireworks: Math.min(1, (fw * per) / 3), pyro: Math.min(1, (py * per) / 3) };
+  }
+
+  /** end time of the latest authored camera cue that finished at or before t (0 if none) */
+  private lastCueEnd(t: number): number {
+    const cues = this.cameraCues();
+    let end = 0;
+    for (let i = 0; i < cues.length && cues[i].t <= t; i++) if (cues[i].fx === 'shot' && cues[i].end <= t && cues[i].end > end) end = cues[i].end;
+    return end;
+  }
+
+  /** deterministic replacement for a pick that would repeat */
+  private alternate(pick: number, key: number): number {
+    return (pick + 1 + (hashN(key, 2) % (SHOTS.length - 1))) % SHOTS.length;
+  }
+
+  private choose(seed: number, m: SlotMood): number {
+    let total = 0;
+    for (const s of SHOTS) total += Math.max(0.02, s.weight(m));
+    let r = rand01(seed) * total;
+    for (let i = 0; i < SHOTS.length; i++) {
+      r -= Math.max(0.02, SHOTS[i].weight(m));
+      if (r <= 0) return i;
+    }
+    return SHOTS.length - 1;
+  }
+
+  /** ids of the preset framings (usable as `p.preset` in camera.shot cues) */
+  static get presets(): string[] {
+    return SHOTS.map((s) => s.id);
+  }
+}
+
+/** number of cues with fx in `fx` starting in [a, b) (cues sorted by start) */
+function countIn(cues: readonly Cue[], a: number, b: number, fx: Set<string>): number {
+  let lo = 0,
+    hi = cues.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (cues[mid].t < a) lo = mid + 1;
+    else hi = mid;
+  }
+  let n = 0;
+  for (let i = lo; i < cues.length && cues[i].t < b; i++) if (fx.has(cues[i].fx)) n++;
+  return n;
+}
+
+/** read [x,y,z] from a cue param */
+function vec(v: unknown, out: THREE.Vector3): boolean {
+  if (!Array.isArray(v) || v.length < 3) return false;
+  const x = Number(v[0]),
+    y = Number(v[1]),
+    z = Number(v[2]);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return false;
+  out.set(x, y, z);
+  return true;
+}
