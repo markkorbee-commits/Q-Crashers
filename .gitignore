@@ -5,5 +5,6 @@ dist/
 # Copyrighted media is never committed: supply it locally (see public/assets/audio/README.md)
 public/assets/audio/*
 !public/assets/audio/README.md
+!public/assets/audio/*.analysis.json
 .shots/
 .claude/

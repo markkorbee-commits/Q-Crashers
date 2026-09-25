@@ -46,7 +46,7 @@ export class Input {
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
     if (!this.down.has(e.code)) this.edges.add(e.code);
     this.down.add(e.code);
-    if (['Space', 'ArrowUp', 'ArrowDown', 'Tab'].includes(e.code)) e.preventDefault();
+    if (['Space', 'ArrowUp', 'ArrowDown'].includes(e.code) || (e.code === 'Tab' && this.pointerLocked)) e.preventDefault();
   };
 
   private onKeyUp = (e: KeyboardEvent) => {
@@ -67,7 +67,10 @@ export class Input {
     const req = this.el.requestPointerLock?.bind(this.el);
     try {
       const p = req?.({ unadjustedMovement: true } as any) as unknown as Promise<void> | undefined;
-      p?.catch?.(() => req?.());
+      p?.catch?.(() => {
+        const retry = req?.() as unknown as Promise<void> | undefined;
+        retry?.catch?.(() => undefined);
+      });
     } catch {
       req?.();
     }
