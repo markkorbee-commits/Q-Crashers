@@ -47,9 +47,13 @@ export const STARS: [number, number, number][] = [
 // ------------------------------------------------------------------------------------------------
 // field furniture (terrain-analysis §7/§14, stage-canonical)
 
-/** lantern pillars = the 8 RED delay towers: 2 rows × 4 (FACT floorplan `fest_delay`, stage-canonical x = ±22) */
-export const PILLAR_X = 22;
-export const PILLAR_Z = [46.5, 73.5, 100.7, 127.7];
+/**
+ * lantern pillars = the 8 RED delay towers: 2 rows × 4 (FACT floorplan `fest_delay`). Positions per
+ * design-bible §5 (camera-calibrated on drone frame f004 + the EXIF-dated Endshow photo): x = ±20,
+ * z = 36 / 69 / 102 / 135, crystal tip 12.8 m, 8.5 m fenced plinth.
+ */
+export const PILLAR_X = 20;
+export const PILLAR_Z = [36, 69, 102, 135];
 /** stable pillar order: row-major from the stage outwards, left (−X) before right (+X) */
 export const PILLARS: { x: number; z: number; row: number; side: -1 | 1 }[] = PILLAR_Z.flatMap((z, row) => [
   { x: -PILLAR_X, z, row, side: -1 as const },
@@ -59,20 +63,20 @@ export const PILLARS: { x: number; z: number; row: number; side: -1 | 1 }[] = PI
 export const PILLAR = {
   plinth: 5.0,
   plinthH: 0.45,
-  fence: 8.2,
-  shaft: 3.2,
-  baseTop: 1.7,
-  shaftTop: 10.2,
-  capTop: 11.15,
-  lanternBottom: 11.5,
-  girdle: 12.75,
-  girdleTop: 13.05,
-  crystalTop: 14.45,
-  top: 14.8,
-  crystalR: 1.32,
+  fence: 8.5,
+  shaft: 3.0,
+  baseTop: 1.5,
+  shaftTop: 8.8,
+  capTop: 9.65,
+  lanternBottom: 9.95,
+  girdle: 11.05,
+  girdleTop: 11.3,
+  crystalTop: 12.5,
+  top: 12.8,
+  crystalR: 1.2,
 };
 /** lantern centre height (light source for the fake lighting) */
-export const LANTERN_Y = 12.8;
+export const LANTERN_Y = 11.2;
 
 /** front-of-stage barrier line (stage-canonical: z = +3, photo pit z 0…3) */
 export const PIT_Z = 3;
@@ -87,10 +91,10 @@ export const ARM_TIP = { x: 88, z: 24 };
  * which stands on the axis behind the road on the decking.
  */
 export const FOH = { x0: -8, x1: 8, z0: 150, z1: 160, deck1: 1.1, deck2: 5.6, roof: 9.6 };
-/** low camera enclosure on the axis (stage-analysis §3.4: Z ≈ 88 ± 10, ≈ 11.2 m wide, 1.2 m barriers) */
-export const CAM_PEN = { x: 0, z: 88, w: 11.2, d: 5.2 };
-/** small fenced riser on the axis (stage-analysis §3.4: Z ≈ 65, ≈ 4.8 m wide) */
-export const RISER = { x: 0, z: 65, w: 4.8, d: 3.6, h: 0.9 };
+/** FOH / camera platform on the axis (design-bible §5: Z 87–93, 12.8 m wide, 1.2 m barriers) */
+export const CAM_PEN = { x: 0, z: 90, w: 12.8, d: 6 };
+/** piano riser on the axis (design-bible §5: Z 57–61; JDX piano + laser source in Domitor Draconis) */
+export const RISER = { x: 0, z: 59, w: 6, d: 4, h: 0.9 };
 
 /** paved floor (FACT: OSM grass-polygon notch + aerials) */
 export const FLOOR = { x: 44, z0: 0, z1: 113, hard1: 137 };

@@ -9,10 +9,17 @@ every fx listed for it; unknown fx/params must be ignored gracefully (never thro
 
 * `t` / `dur` are seconds of video/audio time. `life` (visual lifetime, e.g. falling firework
   stars) is added by the system through `show.registerLifetime(sys, fn)`.
-* `target`: anchor names from `src/core/Anchors.ts` (`deck_front`, `wing_left`, `wing_right`,
-  `wing_tips`, `towers_top`, `roof`, `dragon_mouth`, `pillars_top`, `delay_towers`, `foh`,
-  `fireworks_back`, `fireworks_sides`, `laser_stage`, `laser_field`, `fixtures_truss`,
-  `fixtures_floor`), or the filters `all`, `left`, `right`, `center` (applied to the system's
+* `target`: anchor names from `src/core/Anchors.ts` (defaults generated from
+  `research/terrain-layout.json` by `scripts/gen-layout.py`):
+  core — `deck_front`, `deck_back`, `wing_left`, `wing_right`, `wing_tips`, `towers_top`, `roof`,
+  `dragon_mouth`, `dragon_eyes`, `dragon_head`, `speaker_hangs`, `dj_booth`, `pillars_top`,
+  `pillars_base`, `delay_towers`, `foh`, `fireworks_back`, `fireworks_sides`, `laser_stage`,
+  `laser_field`, `fixtures_truss`, `fixtures_floor`;
+  design-bible pyro groups — `side_front` (flames along the side sections), `arm_posts` (flame
+  posts along the forward arms), `tower_torches` (two 15 m torches), `corner_fireballs`,
+  `side_rampart`, `roof_comets`, `front_comets`, `deck_gerbs`, `arm_ends` (X-fans at the arm tips),
+  `crest_comets`, `co2`, `bengal` (red flares), `mines`, `hang_glitter`, `piano` (laser source on
+  the piano riser) — or the filters `all`, `left`, `right`, `center` (applied to the system's
   default anchor). Several targets may be combined.
 * Colours (`color`, `color2`): `primary` | `secondary` | `accent` (current section palette) |
   a named colour from `src/show/colors.ts` (`red`, `deepred`, `orange`, `amber`, `gold`, `fire`,
@@ -104,7 +111,18 @@ Latest-started active `look` per group wins, cross-faded over `fade`.
 |---|---|
 | `shot` | `pos` [x,y,z], `look` [x,y,z], optional `to` / `lookTo` (move during dur), `fov`, `ease` |
 
-## atmos
+## atmos (sky / weather, rendered by the EnvironmentSystem)
 | fx | params |
 |---|---|
-| `sky` | `tint` colour, `stars` 0..1 |
+| `sky` | `tint` colour, `amount` 0..1, `stars` 0..2, `clouds` 0..1, `fade` s |
+| `lightning` | distant storm lightning in the W clouds: `intensity` 0..2 |
+| `clouds` | `cover` 0..1 |
+
+## Light-flash convention
+`app.env.addFlash(color, intensity, pos)`: ~0.5–5 per burst (the world soft-limits the total to ~18).
+
+## lights — extra params
+`look` also accepts `target` (narrow to matching positions), `tilt`, `pan`, `spread` (deg);
+`pillars` accepts `shaft`/`color2` (shaft uplight colour) and `shaftIntensity`. Position names for
+lights targets: `truss`, `floor`, `towers`, `field`, `wings`, `deck`, `roof`, `castle`, `sides`,
+`side_sections`, `corners`, `arms`, `pillars`, `foh`, `speaker_hangs`, `dragon`, `towers_top`.
