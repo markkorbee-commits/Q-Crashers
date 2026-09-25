@@ -1,5 +1,8 @@
 import type { AudioTrack } from '../audio/AudioTrack';
 
+/** longest hold at a play/seek anchor waiting for a precise audio clock to start moving (ms) */
+const START_HOLD_MAX_MS = 400;
+
 /**
  * The single source of show time. Follows the active AudioTrack and smooths coarse/jittery
  * media clocks into a monotonic, frame-accurate time. PLAY/PAUSE/SEEK/RESTART all go through here.
@@ -12,6 +15,14 @@ export class ShowClock {
   private _playing = false;
   private lastReported = -1;
   private endedFired = false;
+  /**
+   * Set by play / seek / track swap. A precise audio clock reports the anchor time until the sound
+   * actually starts (scheduling look-ahead + output latency, ~50-100 ms). Instead of letting the
+   * predicted time run ahead and slewing it back over many frames, hold at the anchor until the
+   * track time advances, then snap to it once.
+   */
+  private startPending = false;
+  private pendingSince = 0;
   onEnded: (() => void) | null = null;
   /** measured |audio - smoothed| drift (s) for the debug menu */
   drift = 0;
@@ -30,6 +41,7 @@ export class ShowClock {
     this.track = track;
     track.seek(t);
     this.rebase(t);
+    this.armStart();
     if (wasPlaying) await this.play();
   }
 
@@ -38,6 +50,7 @@ export class ShowClock {
     this._playing = true;
     this.endedFired = false;
     this.rebase(this.lastTime);
+    this.armStart();
     try {
       await this.track.play();
     } catch (e) {
@@ -61,9 +74,15 @@ export class ShowClock {
     t = this.clampT(t);
     this.track.seek(t);
     this.rebase(t);
+    this.armStart();
     this.lastTime = t;
     this.seekedFlag = true;
     this.endedFired = false;
+  }
+
+  private armStart(): void {
+    this.startPending = true;
+    this.pendingSince = performance.now();
   }
 
   restart(): void {
@@ -94,7 +113,21 @@ export class ShowClock {
         // buffering / not yet started: hold position at the reported time
         time = reported > 0 ? Math.max(reported, 0) : this.lastTime;
         this.rebase(time);
+      } else if (this.startPending && !this.track.coarseClock) {
+        if (reported > this.baseTime + 0.002 || now - this.pendingSince > START_HOLD_MAX_MS) {
+          // the audio is audibly running: continue exactly from what is heard
+          this.startPending = false;
+          time = Math.max(reported, this.baseTime);
+          this.rebase(time);
+          this.lastReported = reported;
+          this.drift = 0;
+        } else {
+          // scheduled but not yet heard: hold the picture at the anchor
+          time = this.baseTime;
+          this.basePerf = now;
+        }
       } else {
+        this.startPending = false;
         const drift = reported - predicted;
         this.drift = drift;
         const hard = this.track.coarseClock ? 0.6 : 0.25;

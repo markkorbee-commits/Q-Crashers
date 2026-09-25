@@ -16,7 +16,12 @@ export interface AppEvents {
   'perception:changed': { mode: string };
   'photo:mode': { on: boolean };
   'crowd:populated': { on: boolean; count: number };
-  'loading:progress': { label: string; progress: number };
+  /**
+   * `progress` = bar position now. Optional: the step that just started is expected to end at
+   * `next` after about `etaMs`. A UI can animate the bar towards `next` on the compositor (CSS
+   * transform transition), so it keeps moving while the main thread is busy generating content.
+   */
+  'loading:progress': { label: string; progress: number; next?: number; etaMs?: number };
 }
 
 type Handler<T> = (payload: T) => void;

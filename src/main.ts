@@ -4,7 +4,6 @@ import { BarSystem } from './bar/BarSystem';
 import { CameraRig } from './camera/CameraRig';
 import { App } from './core/App';
 import { CrowdSystem } from './crowd/CrowdSystem';
-import { DebugMenu } from './debug/DebugMenu';
 import { FireworkSystem } from './fireworks/FireworkSystem';
 import { FogSystem } from './fx/FogSystem';
 import { PerceptionSystem } from './intoxication/PerceptionSystem';
@@ -18,6 +17,34 @@ import { UI } from './ui/UI';
 import { EnvironmentSystem } from './world/Environment';
 import { GroundsSystem } from './world/Grounds';
 import { TerrainSystem } from './world/Terrain';
+
+/**
+ * The developer menu (` key or ?debug) is loaded on demand: it is a separate chunk that regular
+ * visitors never download. The first ` press loads it and then opens it.
+ */
+function installDebugMenu(app: App): void {
+  let loading: Promise<void> | null = null;
+  const load = (open: boolean) =>
+    (loading ??= import('./debug/DebugMenu')
+      .then(({ DebugMenu }) => {
+        window.removeEventListener('keydown', onKey);
+        new DebugMenu(app); // opens itself with ?debug and handles ` from now on
+        if (open && !app.params.has('debug')) window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Backquote', key: '`' }));
+      })
+      .catch((e) => {
+        loading = null;
+        console.warn('[debug] developer menu failed to load', e);
+      }));
+  const onKey = (e: KeyboardEvent) => {
+    if (e.code !== 'Backquote' || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+    const t = e.target as HTMLElement | null;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA') && (t as HTMLInputElement).type === 'text') return;
+    e.preventDefault();
+    void load(true);
+  };
+  if (app.params.has('debug')) void load(false);
+  else window.addEventListener('keydown', onKey);
+}
 
 async function boot() {
   const root = document.getElementById('app')!;
@@ -50,7 +77,7 @@ async function boot() {
   );
 
   const ui = new UI(app, root);
-  new DebugMenu(app);
+  installDebugMenu(app);
   if (app.device.touch) new TouchControls(app, root).enable();
   app.start();
   await app.init();

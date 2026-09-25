@@ -64,7 +64,7 @@ const page = await (await browser.newContext({ viewport: { width: W, height: H }
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 await page.goto(`${base}?autostart&quality=${quality}&analyze=0&nogovernor${has('nopost') ? '&nopost' : ''}`, { waitUntil: 'load', timeout: 120000 });
-await page.waitForFunction(() => window.__app && window.__app.ready, null, { timeout: 240000 });
+await page.waitForFunction(() => window.__app && window.__app.ready, null, { timeout: 900000, polling: 250 });
 await page.evaluate(() => document.getElementById('ui')?.style.setProperty('display', 'none'));
 const tmp = fs.mkdtempSync('.shots/cmp-');
 const pairs = [];
