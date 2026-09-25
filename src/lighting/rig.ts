@@ -166,6 +166,34 @@ export interface Fixture {
   seed: number;
   /** rest (home) direction used while dark */
   rest: THREE.Vector3;
+  /** look-resolution class (see classifyFixtures) */
+  cls: number;
+}
+
+/** A set of fixtures that always resolve to the same look (same group, position tag, side band). */
+export interface FixtureClass {
+  group: number;
+  tags: number;
+  /** representative x for side / centre target filters */
+  x: number;
+}
+
+/** Group fixtures into classes so looks with a `target` filter can be resolved per class. */
+export function classifyFixtures(fixtures: Fixture[]): FixtureClass[] {
+  const keys = new Map<string, number>();
+  const classes: FixtureClass[] = [];
+  for (const f of fixtures) {
+    const band = f.pos.x < -14 ? -2 : f.pos.x < -0.5 ? -1 : f.pos.x <= 0.5 ? 0 : f.pos.x <= 14 ? 1 : 2;
+    const key = `${f.group}:${f.tags}:${band}`;
+    let c = keys.get(key);
+    if (c === undefined) {
+      c = classes.length;
+      keys.set(key, c);
+      classes.push({ group: f.group, tags: f.tags, x: [-30, -6, 0, 6, 30][band + 2] });
+    }
+    f.cls = c;
+  }
+  return classes;
 }
 
 export interface Emitter {
@@ -193,6 +221,7 @@ export interface Pillar {
 
 export interface Rig {
   fixtures: Fixture[];
+  classes: FixtureClass[];
   emitters: Emitter[];
   pillars: Pillar[];
   rows: number;
@@ -308,6 +337,7 @@ export function buildRig(anchors: Anchors, density: number, own?: Map<string, TH
       cx: 0,
       seed: hash32(i * 7919 + 17) / 4294967296,
       rest: new THREE.Vector3(),
+      cls: 0,
     });
   };
   /** a row of n fixtures centred on c along a (pitch m) — one cluster */
@@ -452,7 +482,8 @@ export function buildRig(anchors: Anchors, density: number, own?: Map<string, TH
       .normalize();
   }
 
-  return { fixtures, emitters, pillars, rows, clusters: cluster, sources: RIG_SOURCES.map((n) => anchors.get(n)) };
+  const classes = classifyFixtures(fixtures);
+  return { fixtures, classes, emitters, pillars, rows, clusters: cluster, sources: RIG_SOURCES.map((n) => anchors.get(n)) };
 }
 
 function computeDiverge(fixtures: Fixture[]): void {

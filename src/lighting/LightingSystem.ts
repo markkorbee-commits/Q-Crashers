@@ -48,7 +48,12 @@ const BLINDER_FLASH = new THREE.Color('#ffd29a');
  * Draw calls: beams 1, lens flares + strobes + blinders 1, ground pools 1, haze glow 1, bodies 3.
  *
  * Cue parameters beyond docs/show-format.md (all optional):
- *  look:    tilt (deg, base elevation / fan lean), pan (deg, 'still'), spread (deg, fan / circle size)
+ *  look:    target (common convention: anchor / position names + left/right/center) narrows a look to
+ *           those fixtures — the latest matching look wins per fixture, so e.g. a 'sides' fan can run on
+ *           top of a rig-wide sky look; tilt (deg, base elevation / fan lean), pan (deg, 'still'),
+ *           spread (deg, fan / circle size)
+ *  position names: wings, deck, roof, castle, towers_top, dragon, speaker_hangs, sides, side_sections,
+ *           corners, arms, towers / delay_towers / pillars (obelisk capitals), foh, truss, floor, field
  *  pillars: shaft | color2 (shaft uplight colour, default amber #c56e46), shaftIntensity (0..1, 0.8)
  *  hit / chase / blinder / strobe: target (anchor names, group names, left/right/center), groups
  */
@@ -80,7 +85,7 @@ export class LightingSystem implements System {
   // scratch (no per-frame allocation)
   private readonly A: AimOut = { x: 0, y: 1, z: 0, dim: 0, mix: 0, tan: 0 };
   private readonly B: AimOut = { x: 0, y: 1, z: 0, dim: 0, mix: 0, tan: 0 };
-  private readonly blends: StateBlend[] = [0, 1, 2, 3].map(() => ({ from: null, to: null, k: 1 }));
+  private blends: StateBlend[] = [];
   private readonly washBlend: StateBlend = { from: null, to: null, k: 1 };
   private readonly pillarBlend: StateBlend = { from: null, to: null, k: 1 };
   private readonly hits: LightCue[] = [];
@@ -163,6 +168,8 @@ export class LightingSystem implements System {
     this.sDim = new Float32Array(n);
     this.sTan = new Float32Array(n);
     this.chaseArr = new Array(rig.pillars.length).fill(1);
+    this.blends = rig.classes.map(() => ({ from: null, to: null, k: 1 }));
+    this.idx.revision = -1; // look tracks are per fixture class: rebuild
     const radial = this.q.level === 'mobile' ? 8 : this.q.level === 'medium' ? 10 : 12;
     this.beams.build(Math.min(n, this.q.beamBudget), radial);
     this.pools.build(n);
@@ -211,8 +218,8 @@ export class LightingSystem implements System {
     const show = app.show;
     if (this.anchorsChanged()) this.rebuildRig();
     if (!this.terrain) this.terrain = (app.get('terrain') as { heightAt?(x: number, z: number): number } | undefined) ?? {};
-    if (this.idx.revision !== show.revision) this.idx.rebuild(show);
     const rig = this.rig!;
+    if (this.idx.revision !== show.revision) this.idx.rebuild(show, rig.classes);
     const t = ctx.showTime;
     const beat = ctx.beat;
     const env = app.env;
@@ -233,7 +240,7 @@ export class LightingSystem implements System {
     this.beams.material.uniforms.uNoise.value = 0.85;
 
     // ---------------------------------------------------------------- cue state
-    for (let g = 0; g < 4; g++) {
+    for (let g = 0; g < this.blends.length; g++) {
       const b = this.idx.looks[g].resolve(t, this.blends[g]);
       this.resolveCueColors(b.from);
       this.resolveCueColors(b.to);
@@ -260,7 +267,7 @@ export class LightingSystem implements System {
     const sTan = this.sTan;
     for (let i = 0; i < n; i++) {
       const f = fx[i];
-      const bl = this.blends[f.group];
+      const bl = this.blends[f.cls];
       evalLook(bl.to, f, t, beat, A);
       if (bl.to) cA.copy(bl.to.c1).lerp(bl.to.c2, A.mix);
       else cA.setRGB(1, 1, 1);
@@ -642,7 +649,12 @@ export class LightingSystem implements System {
 
   stats(): Record<string, number | string> {
     const rig = this.rig;
-    const looks = this.blends.map((b, g) => `${GROUP_NAMES[g]}:${b.to ? PRESETS[b.to.preset] : 'dark'}`).join(' ');
+    // current look of each group (its first fixture class)
+    const looks = GROUP_NAMES.map((name, g) => {
+      const ci = rig ? rig.classes.findIndex((c) => c.group === g) : -1;
+      const b = ci >= 0 ? this.blends[ci] : undefined;
+      return `${name}:${b?.to ? PRESETS[b.to.preset] : 'dark'}`;
+    }).join(' ');
     return {
       fixtures: rig?.fixtures.length ?? 0,
       emitters: rig?.emitters.length ?? 0,
@@ -654,6 +666,7 @@ export class LightingSystem implements System {
       sprites: this.nSprites,
       drawCalls: 7,
       cues: this.idx.count,
+      classes: rig?.classes.length ?? 0,
       looks,
       strobe: Number(this.strobeLevel.toFixed(2)),
       blinder: Number(this.blinderLevel.toFixed(2)),

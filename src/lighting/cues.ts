@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { ShowEngine } from '../show/ShowEngine';
 import type { Cue } from '../show/ShowTypes';
-import { G_FIELD, G_FLOOR, G_TOWERS, G_TRUSS, parseGroups, parseTargets, type TargetFilter } from './rig';
+import { matchTarget, parseGroups, parseTargets, type FixtureClass, type TargetFilter } from './rig';
 
 /**
  * Cue indexing for the lighting system. Everything here is rebuilt only when the show engine
@@ -257,7 +257,8 @@ export const BLINDER_TAIL = 1.1;
 export const STROBE_TAIL = 0.2;
 
 export class LightCueIndex {
-  readonly looks: StateTrack[] = [new StateTrack(), new StateTrack(), new StateTrack(), new StateTrack()];
+  /** one look track per fixture class (group x position tag x side band) */
+  looks: StateTrack[] = [];
   readonly wash = new StateTrack();
   readonly pillars = new StateTrack();
   readonly hits = new EventTrack(0);
@@ -267,8 +268,8 @@ export class LightCueIndex {
   revision = -1;
   count = 0;
 
-  rebuild(show: ShowEngine): void {
-    for (const t of this.looks) t.items.length = 0;
+  rebuild(show: ShowEngine, classes: readonly FixtureClass[]): void {
+    this.looks = classes.map(() => new StateTrack());
     this.wash.items.length = 0;
     this.pillars.items.length = 0;
     this.hits.items.length = 0;
@@ -281,7 +282,11 @@ export class LightCueIndex {
       this.count++;
       switch (c.fx) {
         case 'look':
-          for (const g of [G_TRUSS, G_FLOOR, G_TOWERS, G_FIELD]) if (lc.groups & (1 << g)) this.looks[g].push(lc);
+          // latest look per group wins; a look `target` narrows it to matching positions / sides
+          for (let i = 0; i < classes.length; i++) {
+            const k = classes[i];
+            if (lc.groups & (1 << k.group) && matchTarget(lc.target, k.tags, k.x)) this.looks[i].push(lc);
+          }
           break;
         case 'wash':
           this.wash.push(lc);

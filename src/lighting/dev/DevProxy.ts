@@ -142,6 +142,10 @@ export function injectTestShow(app: App): void {
   look(230, 10, 'sky', { color: 'blue', groups: ['truss', 'floor'] }); // f030: blue sky beams
   look(240, 10, 'fan', { color: 'ice', color2: 'blue', groups: ['floor', 'truss'], spread: 44 }); // f126
   cues.push({ t: 220, dur: 10, sys: 'strobe', fx: 'kick', target: ['deck', 'roof'] });
+  // targeted looks: the side sections fan white while the rest of the rig stays in a blue sky look
+  look(250, 10, 'sky', { color: 'blue' });
+  cues.push({ t: 250, dur: 10, sys: 'lights', fx: 'look', target: 'sides', p: { preset: 'fan', color: 'white' } });
+  cues.push({ t: 254, dur: 6, sys: 'lights', fx: 'look', target: ['wings', 'left'], p: { preset: 'circle', color: 'magenta' } });
   // hits, chases, blinders, strobes
   cues.push({ t: 97.6, dur: 0.6, sys: 'lights', fx: 'hit', p: { color: 'white' }, repeat: { every: 'bar', until: 104 } });
   cues.push({ t: 96, dur: 8, sys: 'strobe', fx: 'kick', target: 'deck' });
