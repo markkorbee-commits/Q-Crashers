@@ -43,50 +43,53 @@ export class DevProxy {
       m.position.set(x, y + h / 2, z);
       this.group.add(m);
     };
-    box(120, 1.9, 18, 0, 0, -9); // deck
-    box(96, 9.3, 8, 0, 0, -10); // castle wall
+    // design-bible §5 massing
+    box(74, 1.9, 14, 0, 0, -7); // central deck
+    box(74, 9.5, 8, 0, 0, -16); // castle core, facade Z -12
+    box(9, 8, 8, -2.5, 10, -9); // dragon head
     for (const s of [-1, 1]) {
-      box(5, 15.5, 5, s * 20, 0, -8);
-      box(5, 14.5, 5, s * 34, 0, -8);
-      box(5, 13.5, 5, s * 46, 0, -8);
-      box(0.9, 16, 0.9, s * 10.8, 0, -1.5); // PA truss tower
-      // side section along (±60,0)->(±88,24)
-      const len = Math.hypot(28, 24);
-      const side = new THREE.Mesh(new THREE.BoxGeometry(len, 7.5, 5), this.setMat);
-      side.position.set(s * 74, 3.75, 12 - 2.5);
-      side.rotation.y = -s * Math.atan2(24, 28);
-      this.group.add(side);
-      // wing membrane: triangle fan between the three spars
+      box(5.5, 16, 5.5, s * 14, 0, -14.75);
+      box(5.5, 14, 5.5, s * 24, 0, -14.75);
+      box(55, 9.5, 18, s * 64.5, 0, -13); // side section, front wall Z -4
+      for (const x of [48, 63, 78]) box(5, 13.5, 5, s * x, 0, -12.5);
+      box(6, 15, 6, s * 92, 0, -4); // corner tower
+      box(2, 5.9, 62, s * 93, 0, 27); // forward arm rampart
+      box(4, 12.5, 4, s * 94, 0, 58); // arm-end turret
+      box(1, 16.5, 1, s * 11, 0, -4); // PA hang towers
+      box(1, 16.5, 1, s * 31, 0, -6);
+      // wing membrane between the three finger spars, plane Z -20
       const shape = new THREE.Shape();
-      shape.moveTo(s * 7, 13);
-      shape.lineTo(s * 14, 24);
-      shape.lineTo(s * 21, 17);
-      shape.lineTo(s * 28, 26);
-      shape.lineTo(s * 34, 18);
-      shape.lineTo(s * 39, 24);
-      shape.lineTo(s * 44, 6.5);
-      shape.lineTo(s * 20, 10);
+      shape.moveTo(s * 5, 14);
+      shape.lineTo(s * 14.5, 26.5);
+      shape.lineTo(s * 20, 18.5);
+      shape.lineTo(s * 29, 28);
+      shape.lineTo(s * 34.5, 18.5);
+      shape.lineTo(s * 40.5, 26.5);
+      shape.lineTo(s * 41, 11);
+      shape.lineTo(s * 22, 12.5);
       shape.closePath();
       const wing = new THREE.Mesh(new THREE.ShapeGeometry(shape), this.wingMat);
-      wing.position.z = -13.4;
+      wing.position.z = -20.3;
       this.group.add(wing);
     }
-    box(9, 8, 8, 0, 11, -5); // dragon head
-    // lantern pillars
+    // lantern pillars (obelisks): shaft 2.6, capital 3.4 at Y 8.8-9.6, crystal Y 9.6-12.8
     for (const p of resolvePillars(app.anchors)) {
       const shaftMat = new THREE.MeshStandardMaterial({ color: 0x2c2a2a, roughness: 0.85, emissive: 0x000000 });
-      const shaft = new THREE.Mesh(new THREE.BoxGeometry(3.2, p.top.y - 3, 3.2), shaftMat);
-      shaft.position.set(p.top.x, (p.top.y - 3) / 2, p.top.z);
+      const shaft = new THREE.Mesh(new THREE.BoxGeometry(2.6, p.capitalY - 0.8, 2.6), shaftMat);
+      shaft.position.set(p.top.x, (p.capitalY - 0.8) / 2, p.top.z);
+      const cap = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.8, 3.4), this.setMat);
+      cap.position.set(p.top.x, p.capitalY - 0.4, p.top.z);
+      const plinth = new THREE.Mesh(new THREE.BoxGeometry(8.5, 0.4, 8.5), this.setMat);
+      plinth.position.set(p.top.x, 0.2, p.top.z);
       const lampMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
-      const lamp = new THREE.Mesh(new THREE.OctahedronGeometry(1.3, 0), lampMat);
-      lamp.scale.set(1, 1.5, 1);
-      lamp.position.set(p.top.x, p.top.y - 1.2, p.top.z);
-      this.group.add(shaft, lamp);
+      const lamp = new THREE.Mesh(new THREE.OctahedronGeometry(1.25, 0), lampMat);
+      lamp.scale.set(1, 1.28, 1);
+      lamp.position.set(p.top.x, (p.capitalY + p.top.y) / 2, p.top.z);
+      this.group.add(shaft, cap, plinth, lamp);
       this.shafts.push(shaftMat);
       this.lamps.push(lampMat);
     }
-    const foh = app.anchors.get('foh')[0] ?? new THREE.Vector3(0, 8, 110);
-    void foh; // no FOH proxy: the default FOH anchor sits right in front of the 'foh' spot
+    box(12.8, 0.5, 6, 0, 0, 90); // FOH / camera platform
     app.scene.add(this.group);
     // the terrain stub's 40 m placeholder block hides the rig
     const ph = app.scene.getObjectByName('placeholder-stage');

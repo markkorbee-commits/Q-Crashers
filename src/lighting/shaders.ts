@@ -79,7 +79,7 @@ void main() {
   float L = vData.y;
   float r = vData.z;
   // power spreads over the widening cross section; brighter near the lens
-  float spreadF = 0.3 / (r + 0.1) + 0.008 + exp(-along * 0.45) * 1.6 + exp(-along * 0.07) * 0.35;
+  float spreadF = 0.3 / (r + 0.1) + 0.008 + exp(-along * 0.6) * 0.9 + exp(-along * 0.07) * 0.3;
   float atten = exp(-along * uExtinct);
   // ends in the air: soft fade; ends on the ground: soft intersection with the floor
   float grounded = step(0.5, vLocal.w);
@@ -88,7 +88,7 @@ void main() {
   float ground = smoothstep(gy, gy + 2.2, vWorld.y);
   float nearF = smoothstep(0.5, 9.0, camDist);
   // haze is densest near the ground / stage and thins out with altitude
-  float haze = uHaze * (0.06 + 0.94 * exp(-max(vWorld.y - 5.0, 0.0) * 0.042));
+  float haze = uHaze * (0.03 + 0.97 * exp(-max(vWorld.y - 6.0, 0.0) * 0.058));
 #ifdef USE_NOISE
   vec3 q = vWorld * 0.026 + vec3(uTime * 0.018, uTime * 0.005, -uTime * 0.011);
   float nz = texture(tNoise, q).r * 0.6 + texture(tNoise, q * 2.9 + 0.31).r * 0.4;
@@ -97,7 +97,9 @@ void main() {
   float st = texture(tNoise, vec3(vLocal.xy * 0.42 + vLocal.z * 5.0, along * 0.005 - uTime * 0.017)).r;
   haze *= 0.5 + st;
 #endif
-  float k = chord * hg * spreadF * atten * tail * ground * nearF * haze * vData.w * uGain;
+  // the beam emerges from the lens glow instead of starting with a hard cut
+  float start = smoothstep(0.0, 0.8, along);
+  float k = chord * hg * spreadF * atten * tail * ground * nearF * haze * start * vData.w * uGain;
   gl_FragColor = vec4(vCol * k, 1.0);
 }
 `;

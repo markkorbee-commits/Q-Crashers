@@ -28,7 +28,7 @@ export const P_STILL = 11;
 const DEFAULT_SPEED = [0, 0.0625, 0.25, 0.125, 1, 0.25, 0.25, 0.125, 0.125, 0.0625, 0, 0];
 
 /** beam half-angle tangents */
-export const TAN_NARROW = Math.tan((1.05 * Math.PI) / 180);
+export const TAN_NARROW = Math.tan((1.3 * Math.PI) / 180);
 export const TAN_WIDE = Math.tan((4.6 * Math.PI) / 180);
 
 const num = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? v : d);

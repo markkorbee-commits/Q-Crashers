@@ -20,17 +20,15 @@ import {
   G_FLOOR,
   G_TOWERS,
   T_ALL,
-  T_ARM,
   T_ARMEND,
+  T_CORNER,
   T_DECK,
   T_DRAGON,
   T_FOH,
   T_PA,
   T_PILLAR,
-  T_PLINTH,
   T_ROOF,
   T_SIDE,
-  T_SIDEFLOOR,
   T_SPAR,
   T_TOWER,
   type Fixture,
@@ -44,13 +42,13 @@ import {
 const PARTICIPATION: number[] = [
   0, // dark
   T_ALL, // ambient (sparse, see below)
-  T_SPAR | T_SIDE | T_ARMEND | T_DECK | T_SIDEFLOOR | T_PILLAR | T_FOH | T_PA, // sweep
-  T_SPAR | T_SIDE | T_ARMEND | T_DECK | T_SIDEFLOOR | T_FOH | T_PILLAR | T_DRAGON, // fan
+  T_SPAR | T_SIDE | T_CORNER | T_ARMEND | T_DECK | T_PILLAR | T_FOH | T_PA, // sweep
+  T_SPAR | T_SIDE | T_CORNER | T_DECK | T_FOH | T_PILLAR | T_DRAGON | T_PA, // fan
   T_ALL, // ballyhoo
-  T_SPAR | T_ROOF | T_TOWER | T_DRAGON | T_PA | T_PILLAR | T_FOH | T_ARM, // circle
-  T_SPAR | T_ARM | T_ROOF | T_DECK | T_SIDE | T_ARMEND | T_PILLAR, // tilt_wave
-  T_SPAR | T_SIDE | T_ARMEND | T_DECK | T_PILLAR | T_FOH | T_DRAGON, // audience
-  T_SPAR | T_SIDE | T_ARMEND | T_TOWER | T_PILLAR | T_PA | T_DECK, // crosshatch
+  T_SPAR | T_ROOF | T_TOWER | T_DRAGON | T_PA | T_PILLAR | T_FOH | T_CORNER, // circle
+  T_SPAR | T_ROOF | T_DECK | T_SIDE | T_CORNER | T_ARMEND | T_PILLAR, // tilt_wave
+  T_SPAR | T_SIDE | T_CORNER | T_ARMEND | T_DECK | T_PILLAR | T_FOH | T_DRAGON | T_PA, // audience
+  T_SPAR | T_SIDE | T_CORNER | T_ARMEND | T_TOWER | T_PILLAR | T_PA | T_DECK, // crosshatch
   T_ALL, // sky
   T_ALL, // pulse
   T_ALL, // still
@@ -169,12 +167,8 @@ export function evalLook(c: LightCue | null, f: Fixture, t: number, beat: BeatIn
       let center: number;
       let lean = c.tilt !== null ? 90 - c.tilt : 16;
       if (f.tags & T_DECK) {
-        center = f.fanOut * (30 + 42 * au);
+        center = f.fanOut * (28 + 60 * au);
         spread *= 0.8;
-      } else if (f.tags & T_SIDEFLOOR) {
-        center = f.fanOut * 58;
-        spread *= 0.7;
-        lean = 10;
       } else if (g === G_TOWERS) {
         center = f.fanOut * 10;
         spread *= 0.45;
@@ -183,17 +177,24 @@ export function evalLook(c: LightCue | null, f: Fixture, t: number, beat: BeatIn
         center = 0;
         spread *= 1.3;
         lean = 24;
-      } else if (f.tags & T_PLINTH) {
-        center = f.fanOut * 8;
-      } else if (f.tags & (T_SIDE | T_ARMEND)) {
+      } else if (f.tags & T_ARMEND) {
+        // turrets on the arm ends fan across the field
+        center = 0;
+        spread *= 1.1;
+        lean = 34;
+      } else if (f.tags & (T_SIDE | T_CORNER)) {
         // low half-sunbursts fanning outwards from the side sections (f024, f080)
         center = f.fanOut * 60;
         spread *= 0.85;
       } else {
-        center = f.fanOut * (8 + 34 * au);
+        center = f.fanOut * (8 + 30 * au);
       }
-      setFan(f, center + f.ck * spread + 5 * sin(TAU * 0.5 * P + f.seed * 6), lean, o);
+      // cx grows along the fan axis: beams of a row diverge and never cross
+      setFan(f, center + f.cx * spread + 5 * sin(TAU * 0.5 * P + f.seed * 6), lean, o);
       o.mix = f.cluster & 1;
+      // the leading-edge rows are dense (1.3 m pitch): every second head makes the fan (8–12 beams
+      // per spar as in f029), the others stay parked in position
+      if (f.tags & T_SPAR && f.k & 1) dim = 0;
       break;
     }
     case P_BALLYHOO: {
@@ -225,13 +226,13 @@ export function evalLook(c: LightCue | null, f: Fixture, t: number, beat: BeatIn
       const n2 = sin(TAU * P * 0.73 + f.cluster * 1.7);
       let tx: number;
       let tz: number;
-      if (g === G_TOWERS || f.tags & T_PLINTH) {
+      if (g === G_TOWERS) {
         tx = f.pos.x - f.side * 8 + 9 * n1 + f.ck * 3;
         tz = f.pos.z + 14 * n2;
       } else if (f.tags & T_FOH) {
         tx = 24 * n1 + f.ck * 6;
         tz = f.pos.z - 26 - 18 * (0.5 + 0.5 * n2);
-      } else if (f.tags & (T_DECK | T_SIDEFLOOR)) {
+      } else if (f.tags & T_DECK) {
         // low fixtures rake the front rows
         tx = f.pos.x * 0.8 + 10 * n1 + f.ck * 2.5;
         tz = f.pos.z + 9 + 9 * (0.5 + 0.5 * n2);
@@ -262,7 +263,7 @@ export function evalLook(c: LightCue | null, f: Fixture, t: number, beat: BeatIn
       break;
     }
     case P_PULSE: {
-      setFan(f, f.fanOut * (10 + 30 * au) + f.ck * (c.spread ?? 30), c.tilt !== null ? 90 - c.tilt : 16, o);
+      setFan(f, f.fanOut * (10 + 30 * au) + f.cx * (c.spread ?? 30), c.tilt !== null ? 90 - c.tilt : 16, o);
       const since = (beat.phase * 60) / Math.max(40, beat.bpm);
       dim = 0.12 + 0.88 * Math.exp(-since * 7);
       o.mix = Math.floor(beat.bar) & 1;
@@ -270,7 +271,7 @@ export function evalLook(c: LightCue | null, f: Fixture, t: number, beat: BeatIn
     }
     case P_STILL: {
       const base = g === G_TOWERS ? 20 : g === G_FIELD ? 16 : g === G_FLOOR ? 4 : 7;
-      setAim(f, (c.pan ?? 0) + f.ck * 3 * f.out, c.tilt ?? base, o);
+      setAim(f, (c.pan ?? 0) + f.cx * 3 * f.rx, c.tilt ?? base, o);
       o.mix = f.k & 1;
       break;
     }

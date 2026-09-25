@@ -29,11 +29,12 @@ const STROBE_GAIN = 70;
 /** beam range in the air (m) */
 const RANGE = 320;
 /** reference fixture count for density 1 */
-const BASE_FIXTURES = 234;
+const BASE_FIXTURES = 316;
 
 const DEFAULT_LAMP = new THREE.Color('#4a86d8');
 const DEFAULT_SHAFT = new THREE.Color('#c56e46');
 const TUNGSTEN = new THREE.Color(1, 0.26, 0.035);
+const BLINDER_FLASH = new THREE.Color('#ffd29a');
 
 /**
  * LightingSystem ('lights'): the RED show rig.
@@ -42,8 +43,14 @@ const TUNGSTEN = new THREE.Color(1, 0.26, 0.035);
  *    side sections, deck front, lantern pillars, pillar plinths and FOH
  *  - strobes and audience blinders (sprites + env flash)
  *  - stage wash (env.stageWash*) and lantern pillar lamps (env.pillar*)
+ *  - haze glow of the set's floods (analytic gaussian haze volume in the wash colour)
  * Every value is a pure function of show time + the compiled cue list (seek / pause safe).
- * Draw calls: beams 1, pools 1, sprites 1, bodies 3.
+ * Draw calls: beams 1, lens flares + strobes + blinders 1, ground pools 1, haze glow 1, bodies 3.
+ *
+ * Cue parameters beyond docs/show-format.md (all optional):
+ *  look:    tilt (deg, base elevation / fan lean), pan (deg, 'still'), spread (deg, fan / circle size)
+ *  pillars: shaft | color2 (shaft uplight colour, default amber #c56e46), shaftIntensity (0..1, 0.8)
+ *  hit / chase / blinder / strobe: target (anchor names, group names, left/right/center), groups
  */
 export class LightingSystem implements System {
   readonly name = 'lights';
@@ -124,7 +131,7 @@ export class LightingSystem implements System {
       if (app.params.has('lightstest')) dev.injectTestShow(app);
       if (app.params.has('lightsdev')) this.dev = new dev.DevProxy(app);
     }
-    this.setQuality(app.quality);
+    // the App calls setQuality() right after init(), which builds the rig
   }
 
   setQuality(q: QualitySettings): void {
@@ -411,7 +418,6 @@ export class LightingSystem implements System {
     let strobeMax = 0;
     let strobeOn = 0;
     let blindMax = 0;
-    let blindSum = 0;
     const acc = this.acc.setRGB(0, 0, 0);
     this.flashPos.set(0, 0, 0);
     let flashW = 0;
@@ -456,7 +462,6 @@ export class LightingSystem implements System {
         if (level > 0.003) {
           this.sprites.push(SPR_BLINDER, e.pos.x, e.pos.y, e.pos.z, e.fwd.x, e.fwd.y, e.fwd.z, 0, col.r * level * BLINDER_GAIN, col.g * level * BLINDER_GAIN, col.b * level * BLINDER_GAIN, 1.2);
           blindMax = Math.max(blindMax, level);
-          blindSum += level;
           cr += col.r * level * 3;
           cg += col.g * level * 3;
           cb += col.b * level * 3;
@@ -480,9 +485,8 @@ export class LightingSystem implements System {
       env.addFlash(acc, strobe * 2.2, this.flashPos);
     }
     if (blindMax > 0) {
-      this.cT.set('#ffd29a');
       this.flashPos.set(0, 3, 2);
-      env.addFlash(this.cT, blindMax * 1.4, this.flashPos);
+      env.addFlash(BLINDER_FLASH, blindMax * 1.4, this.flashPos);
     }
     const nf = Math.max(1, n);
     env.stageIntensity = Math.min(3, env.stageIntensity + (2.6 * sumDim) / nf + blindMax * 1.2 + strobe * 0.8);
@@ -507,7 +511,7 @@ export class LightingSystem implements System {
 
   /** floor height under (x, z): stage deck, else the terrain system's heightAt (flat 0 fallback) */
   private groundAt(x: number, z: number): number {
-    if (z < 0 && z > -18 && x > -60 && x < 60) return 1.9;
+    if (z < 0 && z > -14 && x > -37 && x < 37) return 1.9;
     const h = this.terrain?.heightAt;
     return h ? h.call(this.terrain, x, z) : 0;
   }
