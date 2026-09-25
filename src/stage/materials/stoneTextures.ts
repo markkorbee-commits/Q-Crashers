@@ -78,6 +78,35 @@ export function makeStoneTextures(size: number, aniso: number, seed = 1337): Pbr
   const mortarHalf = 0.014;
   const bevel = 0.045;
 
+  // low-frequency fields at 1/4 resolution (bilinear), the per-pixel work stays small
+  const R = Math.max(16, N >> 2);
+  const lowField = (fn: (u: number, v: number) => number) => {
+    const f = new Float32Array(R * R);
+    for (let y = 0; y < R; y++) for (let x = 0; x < R; x++) f[y * R + x] = fn(x / R, y / R);
+    return f;
+  };
+  const sampleLow = (f: Float32Array, u: number, v: number) => {
+    const fx = u * R - 0.5,
+      fy = v * R - 0.5;
+    const x0 = Math.floor(fx),
+      y0 = Math.floor(fy);
+    const tx = fx - x0,
+      ty = fy - y0;
+    const xa = ((x0 % R) + R) % R,
+      xb = (xa + 1) % R,
+      ya = ((y0 % R) + R) % R,
+      yb = (ya + 1) % R;
+    const a = f[ya * R + xa],
+      b = f[ya * R + xb],
+      c = f[yb * R + xa],
+      d = f[yb * R + xb];
+    return a + (b - a) * tx + (c - a) * ty + (a - b - c + d) * tx * ty;
+  };
+  const F_large = lowField((u, v) => noise.fbm(u, v, 6, 4));
+  const F_blotch = lowField((u, v) => noise.fbm(u + 0.7, v + 0.3, 3, 3));
+  const F_mask = lowField((u, v) => noise.fbm(u + 3.1, v + 1.7, 4, 3));
+  const F_streak = lowField((u, v) => noise.fbm(u, v * 0.0625 + 0.5, 32, 2) * 0.7 + noise.fbm(u, v, 16, 1) * 0.3);
+
   let ci = 0;
   for (let py = 0; py < N; py++) {
     // metres from the TOP of the canvas == tile v from 1 down to 0; we define ym = metres from bottom
@@ -89,29 +118,26 @@ export function makeStoneTextures(size: number, aniso: number, seed = 1337): Pbr
     const dyEdge = Math.min(ym - c.y0, c.y1 - ym);
     const E = c.edges;
     const start = E[0];
+    let bi = 0;
     for (let px = 0; px < N; px++) {
       const xm = (px + 0.5) / pxPerM;
       const u = xm / STONE_TILE_M;
       // block index: position relative to first edge, wrapped into [start, start+tile)
       let xr = xm;
-      while (xr < start) xr += STONE_TILE_M;
-      while (xr >= start + STONE_TILE_M) xr -= STONE_TILE_M;
-      let bi = E.length - 1;
-      for (let i = 1; i < E.length; i++)
-        if (xr < E[i]) {
-          bi = i - 1;
-          break;
-        }
+      if (xr < start) xr += STONE_TILE_M;
+      if (xr >= start + STONE_TILE_M) xr -= STONE_TILE_M;
+      while (bi > 0 && xr < E[bi]) bi--;
+      while (bi + 1 < E.length && xr >= E[bi + 1]) bi++;
       const bx0 = E[bi];
       const bx1 = bi + 1 < E.length ? E[bi + 1] : start + STONE_TILE_M;
       const dxEdge = Math.min(xr - bx0, bx1 - xr);
-      // chipped edges: perturb the edge distance with noise
-      const chip = (noise.fbm(u, v, 48, 3) - 0.5) * 0.028;
-      const d = Math.min(dxEdge, dyEdge) + chip;
-      const large = noise.fbm(u, v, 6, 4);
-      const fine = noise.fbm(u + 0.37, v + 0.11, 64, 3);
-      const streak = noise.fbm(u * 1, v * 0.06 + 0.5, 40, 2); // vertical streaks
-      const blotch = noise.fbm(u + 0.7, v + 0.3, 3, 3);
+      let d = Math.min(dxEdge, dyEdge);
+      // chipped edges: perturb the edge distance with noise (only near an edge)
+      if (d < 0.07) d += (noise.fbm(u, v, 48, 2) - 0.5) * 0.028;
+      const large = sampleLow(F_large, u, v);
+      const fine = noise.fbm(u + 0.37, v + 0.11, 64, 2);
+      const streak = sampleLow(F_streak, u, v);
+      const blotch = sampleLow(F_blotch, u, v);
       const i4 = (py * N + px) * 4;
 
       let r: number, g: number, b: number, rough: number, metal: number, h: number;
@@ -148,7 +174,7 @@ export function makeStoneTextures(size: number, aniso: number, seed = 1337): Pbr
         metal = 0;
         h = 0.55 + 0.35 * bev + 0.1 * (large - 0.5) + 0.08 * (fine - 0.5);
         // sparse gold kintsugi veins: thin ridges masked by a low-frequency field
-        const mask = noise.fbm(u + 3.1, v + 1.7, 4, 3);
+        const mask = sampleLow(F_mask, u, v);
         if (mask > 0.6) {
           const rd = noise.ridge(u + 1.3, v + 2.9, 7, 3);
           const vein = Math.max(0, (rd - 0.9) / 0.1) * Math.min(1, (mask - 0.6) / 0.08);

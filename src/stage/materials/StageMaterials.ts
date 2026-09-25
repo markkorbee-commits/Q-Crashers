@@ -45,14 +45,22 @@ export class StageMaterials {
   readonly barrier: THREE.MeshStandardMaterial;
   readonly led: THREE.ShaderMaterial;
   private textures: THREE.Texture[] = [];
+  /** generation timings (ms) */
+  readonly ms = { env: 0, stone: 0, decor: 0 };
 
   constructor(renderer: THREE.WebGLRenderer, q: QualitySettings) {
     const aniso = Math.min(q.anisotropy, renderer.capabilities.getMaxAnisotropy());
     const texSize = q.level === 'mobile' ? 512 : 1024;
+    let t = performance.now();
     this.env = makeNightEnv(renderer);
+    this.ms.env = performance.now() - t;
+    t = performance.now();
     const stone = makeStoneTextures(texSize, aniso);
+    this.ms.stone = performance.now() - t;
+    t = performance.now();
     const grain = makeGrainTextures(q.level === 'mobile' ? 128 : 256, aniso);
     const decor = makeDecorAtlas(q.level === 'mobile' ? 512 : 1024, aniso);
+    this.ms.decor = performance.now() - t;
     const grille = makeGrilleTexture(aniso);
     this.textures.push(stone.map, stone.normalMap, stone.orm, grain.map, grain.normalMap, grain.orm, decor.map, decor.emissiveMap, decor.normalMap, grille, this.env);
 
@@ -135,15 +143,15 @@ export class StageMaterials {
 
     this.barrier = new THREE.MeshStandardMaterial({
       name: 'stage-barrier',
-      color: new THREE.Color('#9da3aa'),
+      color: new THREE.Color('#7d838a'),
       map: grain.map,
       roughnessMap: grain.orm,
-      roughness: 0.5,
+      roughness: 0.55,
       metalness: 0.85,
       envMap: this.env,
-      envMapIntensity: 1,
+      envMapIntensity: 0.7,
     });
-    patchStageShading(this.barrier, this.u, { flood: 0.5 });
+    patchStageShading(this.barrier, this.u, { flood: 0.2 });
 
     this.led = createLedMaterial();
   }

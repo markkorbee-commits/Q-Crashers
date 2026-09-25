@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Rng } from '../../core/rng';
-import { boxMinMax, decorPanel, GLOW, METAL, PAINT, type StageKit, TINT } from '../kit';
+import { boxMinMax, decorPanel, GLOW, METAL, PAINT, rod, type StageKit, TINT } from '../kit';
 import { extrude, frameShape, type Opening, paneShape, wallShape } from '../lib/gothic';
 import { armFrame, L } from '../layout';
 import { LED_KIND } from '../materials/LedMaterial';
@@ -98,6 +98,19 @@ export class SidesBuilder {
     om.scale(new THREE.Vector3(0.62, 1.05, 0.62));
     om.setPosition(base.x, cy, base.z);
     k.led.geometry(oct, om, LED_KIND.lantern, 0, 0, false);
+    // black steel frame along the crystal's edges
+    const pos = oct.attributes.position as THREE.BufferAttribute;
+    const seen = new Set<string>();
+    for (let i = 0; i < pos.count; i += 3) {
+      for (let e = 0; e < 3; e++) {
+        const a = new THREE.Vector3().fromBufferAttribute(pos, i + e);
+        const b = new THREE.Vector3().fromBufferAttribute(pos, i + ((e + 1) % 3));
+        const key = [a, b].map((v) => v.toArray().map((n) => n.toFixed(2)).join(',')).sort().join('|');
+        if (seen.has(key)) continue;
+        seen.add(key);
+        rod(k.metal, a.applyMatrix4(om), b.applyMatrix4(om), 0.06, METAL.black);
+      }
+    }
     oct.dispose();
     k.pts.roof.push(new THREE.Vector3(base.x, cy + 1.2, base.z));
   }
@@ -230,7 +243,7 @@ export class SidesBuilder {
       k.stone.add(fg, originM(), { color: TINT.trim });
       fg.dispose();
       const pg = toLocal(new THREE.ShapeGeometry(paneShape(o, k.seg), k.seg));
-      k.led.geometry(pg, originM().multiply(new THREE.Matrix4().makeTranslation(0, 0, -0.4)), LED_KIND.portal, this.rng.next());
+      k.led.geometry(pg, originM().multiply(new THREE.Matrix4().makeTranslation(0, 0, -0.4)), LED_KIND.blind, this.rng.next());
       pg.dispose();
     }
     // cornice, parapet, merlons, plinth
@@ -259,7 +272,7 @@ export class SidesBuilder {
     // flame units + fixtures on the ledge, anchors
     for (let i = 0; i < 8; i++) {
       const u = 1.6 + i * 4.8;
-      const p = toWorld(u, Y + 0.05, L.armLedge - 0.4);
+      const p = toWorld(u, Y, L.armLedge - 0.4);
       lbox(k.metal, u - 0.28, Y, L.armLedge - 0.65, u + 0.28, Y + 0.3, L.armLedge - 0.15, METAL.black);
       k.pts.deckFront.push(p);
       k.pts.fixturesFloor.push(toWorld(u + 2.4, Y + 0.3, 1.2));

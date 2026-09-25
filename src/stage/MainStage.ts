@@ -50,6 +50,7 @@ export class MainStageSystem implements System {
   private detailMeshes: THREE.Object3D[] = [];
   private kitStats = { tris: 0, ledMetres: 0, windows: 0, lamps: 0, lanterns: 0, barrier: 0 };
   private buildMs = 0;
+  private timing = { materials: 0, geometry: 0, crown: 0 };
   private lastFrame = -1;
   private hooked = false;
 
@@ -60,6 +61,8 @@ export class MainStageSystem implements System {
     const q = app.quality;
     this.mats = new StageMaterials(app.renderer, q);
     this.resolver = new LookResolver(app.show);
+    const t1 = performance.now();
+    this.timing.materials = t1 - t0;
 
     // ---- geometry --------------------------------------------------------------------------------
     const kit = createKit(RANK[q.level] >= 2 ? 2 : RANK[q.level] === 1 ? 1 : 0);
@@ -68,6 +71,8 @@ export class MainStageSystem implements System {
     new DeckBuilder(kit).build();
     new SpeakerBuilder(kit).build();
     this.buildMeshes(kit);
+    const t2 = performance.now();
+    this.timing.geometry = t2 - t1;
 
     // barrier: one instanced mesh
     const bl = barrierLayout();
@@ -88,6 +93,7 @@ export class MainStageSystem implements System {
     }
     this.root.add(this.crown.group);
     this.mats.adoptEnv(this.crown.group, app.scene);
+    this.timing.crown = performance.now() - t2;
 
     this.root.add(this.lights.group);
     app.scene.add(this.root);
@@ -135,15 +141,17 @@ export class MainStageSystem implements System {
       if (pts.length) a.set(n, pts);
     };
     const P = kit.pts;
-    // deck_front: straight line first (index 0 = deck height, read by the PlayerController)
-    set('deck_front', P.deckFront);
-    set('deck_back', P.deckBack);
-    set('towers_top', P.towersTop);
+    // ordered left -> right along the flame ring (left arm tip ... front line ... right arm tip);
+    // every deck_front point is at deck height (index 0 is read by the PlayerController)
+    const byX = (pts: THREE.Vector3[]) => [...pts].sort((p, q) => p.x - q.x || p.z - q.z);
+    set('deck_front', byX(P.deckFront));
+    set('deck_back', byX(P.deckBack));
+    set('towers_top', byX(P.towersTop));
     set('speaker_hangs', P.speakerHangs);
     set('dj_booth', [new THREE.Vector3(0, L.deckY + 0.3, L.boothZ - 1.1)]);
-    set('laser_stage', P.laserStage);
-    set('fixtures_truss', P.fixturesTruss);
-    set('fixtures_floor', P.fixturesFloor);
+    set('laser_stage', byX(P.laserStage));
+    set('fixtures_truss', byX(P.fixturesTruss));
+    set('fixtures_floor', byX(P.fixturesFloor));
     const c = this.crown.anchors();
     set('dragon_mouth', [c.dragonMouth]);
     set('dragon_eyes', [c.dragonEyes[0], c.dragonEyes[1]]);
@@ -324,6 +332,12 @@ export class MainStageSystem implements System {
       mode: this.look.mode,
       ledPattern: this.look.ledPatternX,
       buildMs: Math.round(this.buildMs),
+      buildMaterialsMs: Math.round(this.timing.materials),
+      buildGeometryMs: Math.round(this.timing.geometry),
+      buildCrownMs: Math.round(this.timing.crown),
+      texStoneMs: Math.round(this.mats.ms.stone),
+      texDecorMs: Math.round(this.mats.ms.decor),
+      envMs: Math.round(this.mats.ms.env),
       ...Object.fromEntries(Object.entries(crownStats).map(([k, v]) => [`crown.${k}`, v])),
     };
   }

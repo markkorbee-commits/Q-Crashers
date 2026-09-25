@@ -67,7 +67,7 @@ export class DeckBuilder {
       // flame unit (Magic FX Flamaniac-class box with nozzle)
       boxMinMax(k.metal, x - 0.28, Y, -0.62, x + 0.28, Y + 0.3, -0.12, METAL.black);
       cyl(k.metal, x, Y + 0.3, -0.37, 0.07, 0.06, Y + 0.48, 6, METAL.steel);
-      k.pts.deckFront.push(new THREE.Vector3(x, Y + 0.05, -0.37));
+      k.pts.deckFront.push(new THREE.Vector3(x, Y, -0.37));
     }
     for (let i = 0; i < 24; i++) {
       const x = -57.5 + i * 5;

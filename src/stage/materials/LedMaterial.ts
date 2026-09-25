@@ -20,6 +20,8 @@ export const LED_KIND = {
   dots: 7,
   /** tiny screens on DJ gear */
   screen: 8,
+  /** blind arcade: dim recessed glow (arms) */
+  blind: 9,
 } as const;
 
 /**
@@ -219,9 +221,12 @@ export function createLedMaterial(): THREE.ShaderMaterial {
         } else if (kind < 6.5) {
           float g = 1.0 - smoothstep(0.0, 0.9, length((vUv - vec2(0.5, 0.0)) * vec2(1.2, 1.6)));
           col = uPortal * (0.04 + 0.5 * g * g) * pulse;
-        } else {
+        } else if (kind < 8.5) {
           float scan = 0.85 + 0.15 * sin(vUv.y * 60.0);
           col = vec3(0.25, 0.7, 1.0) * 0.9 * scan;
+        } else {
+          float g = mix(0.9, 0.05, clamp(vUv.y * 1.3, 0.0, 1.0));
+          col = uArcade * 0.16 * g * pulse;
         }
         col += vec3(uStrobe) * 3.0 * step(kind, 0.5);
         gl_FragColor = vec4(col, 1.0);

@@ -184,10 +184,10 @@ export class CastleBuilder {
     }
 
     // DJ riser + desk with the red/gold booth banner
-    boxMinMax(k.paint, -3.4, Y, L.boothZ - 2.4, 3.4, Y + 0.3, L.boothZ + 0.6, PAINT.black);
-    boxMinMax(k.paint, -2.15, Y + 0.3, L.boothZ - 0.55, 2.15, Y + 1.35, L.boothZ + 0.55, PAINT.black);
+    boxMinMax(k.paint, -3.4, Y, L.boothZ - 2.4, 3.4, Y + 0.08, L.boothZ + 0.6, PAINT.grey);
+    boxMinMax(k.paint, -2.15, Y + 0.08, L.boothZ - 0.55, 2.15, Y + 1.35, L.boothZ + 0.55, PAINT.black);
     boxMinMax(k.paint, -2.25, Y + 1.35, L.boothZ - 0.6, 2.25, Y + 1.42, L.boothZ + 0.62, PAINT.grey);
-    decorPanel(k, 'booth', 0, Y + 0.82, L.boothZ + 0.561, 4.2, 1.05, GLOW.banner);
+    decorPanel(k, "booth", 0, Y + 0.74, L.boothZ + 0.561, 4.2, 1.1, GLOW.banner);
     // decks + mixer
     for (const x of [-1.25, -0.42, 0.42, 1.25]) {
       const w = Math.abs(x) > 1 ? 0.62 : 0.5;
@@ -278,14 +278,17 @@ export class CastleBuilder {
     boxMinMax(k.stone, xa, b.top - 0.35, z - 0.2, xb, b.top, z + 0.38, TINT.trim);
     boxMinMax(k.stone, xa, b.top, z - 0.6, xb, b.top + 0.55, z + 0.05, TINT.wall);
     this.merlons(xa, xb, b.top + 0.55, z + 0.05, 0.65);
-    // dark roof behind the parapet (seen from the drone)
+    // dark roof behind the parapet (seen from the drone) + scaffold-clad back wall closing the volume
     boxMinMax(k.stone, xa, b.top - 0.3, z - 12, xb, b.top - 0.05, z - 0.6, TINT.dark);
+    boxMinMax(k.stone, xa, Y, z - 12.3, xb, b.top - 0.3, z - 12, TINT.dark);
     // pilasters + vertical LED battens
     for (const px of b.pilasters) {
       const x = s * px;
       boxMinMax(k.stone, x - 0.32, L.terraceY, z, x + 0.32, b.top - 0.35, z + 0.34, TINT.trim);
       const st = k.led.newStrip();
       k.led.bar(new THREE.Vector3(x, L.terraceY + 0.35, z + 0.34), new THREE.Vector3(x, b.top - 0.5, z + 0.34), OUT, 0.085, st);
+      // crocketed pinnacle rising from the pilaster through the parapet
+      this.pinnacle(x, b.top + 0.55, z - 0.05, 0.5, 2.0);
     }
     // LED line under the cornice
     k.led.bar(new THREE.Vector3(xa, b.top - 0.4, z + 0.39), new THREE.Vector3(xb, b.top - 0.4, z + 0.39), OUT, 0.07);
@@ -309,10 +312,14 @@ export class CastleBuilder {
     const zf = t.frontZ;
     const zb = zf - t.depth;
     const inner = t === TOWERS[0];
+    const mid = t === TOWERS[1];
     const tiers: Opening[] = [];
     if (inner) {
       for (const o of [-0.62, 0.62]) tiers.push({ cx: x + o, y0: 7.35, w: 0.85, h: 2.4, kind: 'lancet' });
       tiers.push({ cx: x, y0: 10.35, w: 1.2, h: 2.6, kind: 'lancet' });
+    } else if (mid) {
+      // one tall traceried window (f103: the big glowing arched windows either side)
+      tiers.push({ cx: x, y0: 6.75, w: 2.3, h: 5.1, kind: 'pointed' });
     } else {
       tiers.push({ cx: x, y0: 6.9, w: 1.05, h: 2.3, kind: 'lancet' });
       for (const o of [-0.55, 0.55]) tiers.push({ cx: x + o, y0: 9.7, w: 0.72, h: 2.0, kind: 'lancet' });
@@ -322,9 +329,10 @@ export class CastleBuilder {
     // body behind
     boxMinMax(k.stone, x - hw, Y, zb, x + hw, t.body, zf - 0.5, TINT.wall);
     for (const o of tiers) {
-      this.frame(o, zf, 0.14, 0.14);
+      this.frame(o, zf, o.w > 2 ? 0.26 : 0.14, o.w > 2 ? 0.22 : 0.14);
       this.pane(o, zf, 0.28, LED_KIND.window);
       boxMinMax(k.stone, o.cx - o.w / 2 - 0.2, o.y0 - 0.2, zf, o.cx + o.w / 2 + 0.2, o.y0, zf + 0.25, TINT.trim);
+      if (o.w > 2) this.tracery(o, zf);
     }
     // side windows (applied: pane + frame on the side faces), upper tier
     for (const side of [-1, 1]) {
@@ -346,7 +354,7 @@ export class CastleBuilder {
       k.led.bar(new THREE.Vector3(cx, L.terraceY + 0.4, zf + 0.28), new THREE.Vector3(cx, t.body - 0.6, zf + 0.28), OUT, 0.08);
     }
     // string courses
-    for (const y of inner ? [6.7, 9.95] : [6.4, 9.3]) boxMinMax(k.stone, x - hw - 0.08, y, zf - 0.1, x + hw + 0.08, y + 0.28, zf + 0.3, TINT.trim);
+    for (const y of inner ? [6.7, 9.95] : mid ? [6.4] : [6.4, 9.3]) boxMinMax(k.stone, x - hw - 0.08, y, zf - 0.1, x + hw + 0.08, y + 0.28, zf + 0.3, TINT.trim);
     // cornice + parapet + merlons
     boxMinMax(k.stone, x - hw - 0.3, t.body - 0.4, zb - 0.3, x + hw + 0.3, t.body, zf + 0.35, TINT.trim);
     const py = t.body;
@@ -409,6 +417,29 @@ export class CastleBuilder {
     k.pts.towersTop.push(new THREE.Vector3(x, t.cap === 'battlement' ? top + 0.6 : t.capTop + 0.4, (zf + zb) / 2));
     k.pts.fixturesTruss.push(new THREE.Vector3(x - hw + 0.4, py + 0.7, zf - 0.2), new THREE.Vector3(x + hw - 0.4, py + 0.7, zf - 0.2));
     k.pts.laserStage.push(new THREE.Vector3(x, py + 0.8, zf - 0.6));
+  }
+
+  /** stone tracery in a large pointed window: two mullions, a transom and a rose in the head */
+  private tracery(o: Opening, zf: number): void {
+    const k = this.kit;
+    const zt = zf - 0.16;
+    const spring = o.y0 + o.h - o.w * 0.866;
+    for (const f of [-1 / 6, 1 / 6]) boxMinMax(k.stone, o.cx + f * o.w - 0.07, o.y0, zt - 0.1, o.cx + f * o.w + 0.07, spring + 0.25, zt + 0.1, TINT.trim);
+    boxMinMax(k.stone, o.cx - o.w / 2, o.y0 + (spring - o.y0) * 0.55, zt - 0.1, o.cx + o.w / 2, o.y0 + (spring - o.y0) * 0.55 + 0.12, zt + 0.1, TINT.trim);
+    const rose = new THREE.TorusGeometry(o.w * 0.24, 0.07, 6, 20);
+    k.stone.add(rose, new THREE.Matrix4().makeTranslation(o.cx, spring + o.w * 0.34, zt), { color: TINT.trim });
+    rose.dispose();
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      const r0 = o.w * 0.24;
+      rod(k.stone, new THREE.Vector3(o.cx, spring + o.w * 0.34, zt), new THREE.Vector3(o.cx + Math.cos(a) * r0, spring + o.w * 0.34 + Math.sin(a) * r0, zt), 0.06, TINT.trim);
+    }
+    // small arches over the three lights
+    for (const f of [-1 / 3, 0, 1 / 3]) {
+      const a = new THREE.TorusGeometry(o.w / 6, 0.05, 5, 10, Math.PI);
+      k.stone.add(a, new THREE.Matrix4().makeTranslation(o.cx + f * o.w, spring + 0.2, zt), { color: TINT.trim });
+      a.dispose();
+    }
   }
 
   private finial(x: number, y: number, z: number): void {
