@@ -47,7 +47,7 @@ const PARTICIPATION: number[] = [
   T_ALL, // ballyhoo
   T_SPAR | T_ROOF | T_TOWER | T_DRAGON | T_PA | T_PILLAR | T_FOH | T_CORNER, // circle
   T_SPAR | T_ROOF | T_DECK | T_SIDE | T_CORNER | T_ARMEND | T_PILLAR, // tilt_wave
-  T_SPAR | T_SIDE | T_CORNER | T_ARMEND | T_DECK | T_PILLAR | T_FOH | T_DRAGON | T_PA, // audience
+  T_SPAR | T_SIDE | T_CORNER | T_DECK | T_PILLAR | T_FOH | T_DRAGON, // audience
   T_SPAR | T_SIDE | T_CORNER | T_ARMEND | T_TOWER | T_PILLAR | T_PA | T_DECK, // crosshatch
   T_ALL, // sky
   T_ALL, // pulse
@@ -237,8 +237,8 @@ export function evalLook(c: LightCue | null, f: Fixture, t: number, beat: BeatIn
         tx = f.pos.x * 0.8 + 10 * n1 + f.ck * 2.5;
         tz = f.pos.z + 9 + 9 * (0.5 + 0.5 * n2);
       } else {
-        tx = f.pos.x * 0.5 + 16 * n1 + f.ck * 4;
-        tz = 18 + 50 * (0.5 + 0.5 * n2) + abs(f.u) * 20;
+        tx = f.pos.x * 0.6 + 22 * n1 + f.ck * 4;
+        tz = 16 + 80 * (0.5 + 0.5 * n2) + abs(f.u) * 15;
       }
       const dx = tx - f.pos.x;
       const dy = -f.pos.y;
@@ -248,6 +248,7 @@ export function evalLook(c: LightCue | null, f: Fixture, t: number, beat: BeatIn
       o.y = dy / n;
       o.z = dz / n;
       o.mix = f.k & 1;
+      if (f.tags & T_SPAR && f.k & 1) dim = 0; // dense leading-edge rows: every second head
       break;
     }
     case P_CROSSHATCH: {
