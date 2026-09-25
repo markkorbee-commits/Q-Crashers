@@ -13,6 +13,9 @@ export class LightEnv {
   stageIntensity = 0;
   /** how much of the rig points into the audience (0..1) */
   audienceWash = 0;
+  /** colour + intensity of the light washing the stage set (castle/dragon/wings), written by LightingSystem, read by MainStage */
+  stageWashColor = new THREE.Color(0.6, 0.05, 0.05);
+  stageWashIntensity = 0.4;
   /** accumulated flash from pyro / fireworks / strobes */
   flashColor = new THREE.Color(0, 0, 0);
   /** weighted centre of the current flash sources */

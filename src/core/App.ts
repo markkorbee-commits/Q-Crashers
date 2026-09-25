@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { AudioEngine } from '../audio/AudioEngine';
+import { AudioSources } from '../audio/AudioSources';
 import type { AudioTrack } from '../audio/AudioTrack';
 import { SilentTrack } from '../audio/AudioTrack';
 import { PostFX } from '../postfx/PostFX';
@@ -31,6 +32,8 @@ export class App {
   readonly camera: THREE.PerspectiveCamera;
   readonly input: Input;
   readonly audio = new AudioEngine();
+  /** music source selection (file / YouTube / synth / silent); used by the UI */
+  readonly sources: AudioSources = new AudioSources(this);
   readonly show = new ShowEngine();
   readonly anchors = new Anchors();
   readonly env = new LightEnv();
