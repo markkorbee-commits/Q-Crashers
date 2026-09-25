@@ -62,7 +62,7 @@ export const CUSTOMER_Z = 2.1;
 export function barToWorld(b: BarDef, lx: number, lz: number, out: THREE.Vector3, y = 0): THREE.Vector3 {
   const c = Math.cos(b.rotation),
     s = Math.sin(b.rotation);
-  return out.set(b.x + c * lx + s * lz, y, b.z - s * lx + c * lz);
+  return out.set(b.x + c * lx + s * lz, (b.y ?? 0) + y, b.z - s * lx + c * lz);
 }
 
 class Buckets {
@@ -199,7 +199,7 @@ export function buildBars(bars: BarDef[], lowDetail: boolean): BuiltBars {
     const W = b.width;
     const D = b.depth ?? BAR_DEPTH;
     const zb = -D / 2; // back wall
-    const base = new THREE.Matrix4().makeRotationY(b.rotation).setPosition(b.x, 0, b.z);
+    const base = new THREE.Matrix4().makeRotationY(b.rotation).setPosition(b.x, b.y ?? 0, b.z);
     const B = new Buckets(base);
     const rng = new Rng(hashString(b.id));
     const roofY = 3.35;

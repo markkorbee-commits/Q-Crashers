@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Rng } from '../core/rng';
-import { CATEGORY_LABEL, CATEGORY_ORDER, COIN_EUR, DRINKS } from './drinks';
+import { CATEGORY_LABEL, CATEGORY_ORDER, DRINKS } from './drinks';
 
 /** Procedural canvas textures for the bars (generated once at load; no downloads). */
 
@@ -127,20 +127,13 @@ export function menuBoardTexture(): THREE.CanvasTexture {
   g.font = `500 20px ${BODY}`;
   g.fillStyle = '#a39b92';
   g.textAlign = 'right';
-  g.fillText(`1 COIN = € ${COIN_EUR.toFixed(2)}   ·   COINS ONLY`, W - 40, 70);
+  g.fillText('CASHLESS · PAY WITH YOUR BRACELET · € 2 CUP DEPOSIT', W - 40, 70);
 
-  const coin = (x: number, y: number, n: number) => {
-    g.beginPath();
-    g.arc(x, y, 15, 0, Math.PI * 2);
-    g.fillStyle = '#e10600';
-    g.fill();
-    g.strokeStyle = '#ffb199';
-    g.lineWidth = 2;
-    g.stroke();
-    g.fillStyle = '#fff';
-    g.font = `700 19px ${BODY}`;
-    g.textAlign = 'center';
-    g.fillText(String(n), x, y + 7);
+  const price = (x: number, y: number, n: number) => {
+    g.fillStyle = n === 0 ? '#7fd08a' : '#fff';
+    g.font = `700 22px ${BODY}`;
+    g.textAlign = 'right';
+    g.fillText(n === 0 ? 'FREE' : `€ ${n.toFixed(2)}`, x + 30, y + 8);
   };
   const cols = [
     { x: 40, cats: CATEGORY_ORDER.slice(0, 3) },
@@ -163,7 +156,7 @@ export function menuBoardTexture(): THREE.CanvasTexture {
         g.fillStyle = '#8d857d';
         const spec = dr.abv > 0 ? `${dr.volumeMl / 10} cl · ${(dr.abv * 100).toFixed(1)}%` : `${dr.volumeMl / 10} cl`;
         g.fillText(spec, col.x + measure(g, dr.name, `600 23px ${BODY}`) + 12, y);
-        coin(col.x + 420, y - 8, dr.priceCoins);
+        price(col.x + 420, y - 8, dr.price);
         y += 32;
       }
       y += 8;

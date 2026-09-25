@@ -1,6 +1,6 @@
 import type { BarSystem } from '../bar/BarSystem';
 import { barById } from '../bar/bars';
-import { CATEGORY_LABEL, CATEGORY_ORDER, COIN_BUNDLE, COIN_EUR, DRINKS, type Drink } from '../bar/drinks';
+import { CATEGORY_LABEL, CATEGORY_ORDER, CUP_DEPOSIT_EUR, DRINKS, eur, TOPUP_EUR, type Drink } from '../bar/drinks';
 import { perception } from './contracts';
 import { h, setText } from './dom';
 import { icon } from './icons';
@@ -62,19 +62,19 @@ export class BarMenu {
     const body = this.body!;
     body.innerHTML = '';
     this.buyBtns.clear();
-    this.coinsEl = h('span', null, String(bar.coins));
-    const topUp = h('button', { class: 'btn small', type: 'button', html: `${icon('plus')}<span>Buy ${COIN_BUNDLE} coins</span>` });
+    this.coinsEl = h('span', null, eur(bar.credit));
+    const topUp = h('button', { class: 'btn small', type: 'button', html: `${icon('plus')}<span>Top up ${eur(TOPUP_EUR)}</span>` });
     topUp.addEventListener('click', () => {
-      bar.buyCoins(COIN_BUNDLE);
+      bar.topUp(TOPUP_EUR);
       this.refresh();
-      this.ui.toast(`+${COIN_BUNDLE} coins (simulated top-up, € ${(COIN_BUNDLE * COIN_EUR).toFixed(2)} — no real payment)`, 2600, 'coin');
+      this.ui.toast(`+${eur(TOPUP_EUR)} on your bracelet (simulated top-up — no real payment)`, 2600, 'coin');
     });
     body.appendChild(
       h(
         'div',
         { class: 'wallet' },
-        h('span', { class: 'coins' }, h('span', { html: icon('coin'), style: 'display:contents' }), this.coinsEl, h('small', null, 'coins')),
-        h('span', { class: 'muted small', style: 'flex:1;min-width:160px' }, `1 coin ≈ € ${COIN_EUR.toFixed(2)} · pay with coins only`),
+        h('span', { class: 'coins' }, h('span', { html: icon('coin'), style: 'display:contents' }), this.coinsEl, h('small', null, 'bracelet')),
+        h('span', { class: 'muted small', style: 'flex:1;min-width:160px' }, `Cashless Legendary Bracelet · ${eur(CUP_DEPOSIT_EUR)} cup deposit · prices 2026 estimated`),
         topUp,
       ),
     );
@@ -105,7 +105,7 @@ export class BarMenu {
         : d.category === 'water'
           ? h('small', { class: 'free' }, 'Also free at water points')
           : h('small', { class: 'free' }, 'Alcohol-free');
-    const buy = h('button', { class: 'buy', type: 'button', 'aria-label': `Order ${d.name} for ${d.priceCoins} coin${d.priceCoins > 1 ? 's' : ''}` }, `${d.priceCoins}`, h('small', null, d.priceCoins > 1 ? 'coins' : 'coin'));
+    const buy = h('button', { class: 'buy', type: 'button', 'aria-label': `Order ${d.name} for ${d.price ? eur(d.price) : 'free'}` }, d.price ? d.price.toFixed(2) : 'FREE', h('small', null, d.price ? 'EUR' : 'water'));
     buy.addEventListener('click', () => this.order(d));
     this.buyBtns.set(d.id, buy);
     return h(
@@ -120,7 +120,7 @@ export class BarMenu {
   private refresh() {
     const bar = this.bar;
     if (!bar || !this.coinsEl) return;
-    setText(this.coinsEl, String(bar.coins));
+    setText(this.coinsEl, eur(bar.credit));
     for (const d of DRINKS) {
       const b = this.buyBtns.get(d.id);
       if (b) b.disabled = !bar.canAfford(d);

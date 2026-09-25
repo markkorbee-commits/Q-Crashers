@@ -5,7 +5,7 @@ import { ALCOHOL_TIERS } from '../intoxication/education';
 import { BARS, type BarDef } from './bars';
 import { barToWorld, buildBars, CUSTOMER_Z, COUNTER_FRONT_Z, BAR_DEPTH, type BuiltBars } from './BarBuilder';
 import { fontsReady } from './BarTextures';
-import { COIN_BUNDLE, drinkById, START_COINS, type Drink } from './drinks';
+import { drinkById, eur, START_CREDIT, TOPUP_EUR, type Drink } from './drinks';
 import { HeldDrink } from './HeldDrink';
 
 export interface OrderResult {
@@ -19,7 +19,7 @@ const HYDRATION_METHODS = ['addWater', 'drinkWater', 'hydrate'] as const;
 
 /**
  * Festival bars: 3D structures (data from bars.ts), colliders, "Order a drink" interactables,
- * named spots, a coin wallet and the drink in your hand. The ordering menu itself lives in the
+ * named spots, a cashless bracelet wallet and the drink in your hand. The ordering menu itself lives in the
  * UI (src/ui/BarMenu.ts), opened through the 'bar:open' event.
  */
 export class BarSystem implements System {
@@ -28,9 +28,9 @@ export class BarSystem implements System {
   private enabled = true;
   private built: BuiltBars | null = null;
   held!: HeldDrink;
-  /** coins in the wallet (simulated; no real money) */
-  coins = START_COINS;
-  coinsBought = 0;
+  /** euro credit on the cashless bracelet (simulated; no real money) */
+  credit = START_CREDIT;
+  toppedUp = 0;
   served = 0;
   /** finished alcoholic drinks (for the responsible-drinking hint) */
   alcoholicFinished = 0;
@@ -48,6 +48,9 @@ export class BarSystem implements System {
   async init(app: App): Promise<void> {
     this.app = app;
     await fontsReady();
+    // stand on the terrain (the crest bars sit on the +5.2 m side banks)
+    const terrain = app.get('terrain') as { heightAt?: (x: number, z: number) => number } | undefined;
+    for (const b of BARS) if (b.y === undefined) b.y = terrain?.heightAt?.(b.x, b.z) ?? 0;
     this.built = buildBars(BARS, app.quality.level === 'mobile');
     app.scene.add(this.built.group);
     for (const c of this.built.colliders) app.addCollider(c);
@@ -87,13 +90,13 @@ export class BarSystem implements System {
   }
 
   canAfford(d: Drink): boolean {
-    return this.coins >= d.priceCoins;
+    return this.credit >= d.price - 1e-6;
   }
 
-  /** simulated coin top-up (no payment involved) */
-  buyCoins(n = COIN_BUNDLE): void {
-    this.coins += n;
-    this.coinsBought += n;
+  /** simulated bracelet top-up (no payment involved) */
+  topUp(n = TOPUP_EUR): void {
+    this.credit += n;
+    this.toppedUp += n;
     this.version++;
   }
 
@@ -101,8 +104,8 @@ export class BarSystem implements System {
   order(drinkId: string): OrderResult {
     const d = drinkById(drinkId);
     if (!d) return { ok: false, message: 'Unknown drink' };
-    if (!this.canAfford(d)) return { ok: false, message: `Not enough coins — ${d.name} costs ${d.priceCoins}` };
-    this.coins -= d.priceCoins;
+    if (!this.canAfford(d)) return { ok: false, message: `Not enough credit on your bracelet — ${d.name} costs ${eur(d.price)}` };
+    this.credit = Math.round((this.credit - d.price) * 100) / 100;
     this.served++;
     this.version++;
     return { ok: true, message: `${d.name} ordered`, drink: d };
@@ -250,7 +253,7 @@ export class BarSystem implements System {
       bars: BARS.length,
       staff: this.built?.staffInfo.length ?? 0,
       bulbs: this.built?.bulbCount ?? 0,
-      coins: this.coins,
+      credit: this.credit.toFixed(2),
       served: this.served,
       holding: this.holding?.name ?? '-',
     };
