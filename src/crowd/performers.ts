@@ -28,26 +28,30 @@ interface Win {
   t1: number;
 }
 
-/** show-time windows of the performers (defaults = the 2026 Endshow as filmed) */
+/**
+ * show-time windows of the performers (defaults = the 2026 Endshow as filmed, on the audio-locked
+ * timeline of scripts/retime-show.py)
+ */
 export class PerfTiming {
-  mc: Win = { t0: 332, t1: 498 };
-  troupe: Win = { t0: 642, t1: 733 };
-  lead: Win = { t0: 641, t1: 734 };
-  pedestal: Win = { t0: 640, t1: 735 };
-  aerial: Win = { t0: 679, t1: 704 };
-  strap: Win = { t0: 676, t1: 706 };
-  pianist: Win = { t0: 880, t1: 1098 };
-  tubeHi: Win = { t0: 885, t1: 936 };
-  tubeLo: Win = { t0: 876, t1: 1098 };
+  mc: Win = { t0: 332.1, t1: 498 };
+  // the troupe choreography is keyed to TROUPE_T0 (642): 641.8 lands its leap on the burning wings (709.05)
+  troupe: Win = { t0: 641.8, t1: 732.8 };
+  lead: Win = { t0: 639.5, t1: 733.6 };
+  pedestal: Win = { t0: 638.8, t1: 734.4 };
+  aerial: Win = { t0: 678.8, t1: 703.8 };
+  strap: Win = { t0: 675.8, t1: 705.8 };
+  pianist: Win = { t0: 880.4, t1: 1098.4 };
+  tubeHi: Win = { t0: 885.1, t1: 936 };
+  tubeLo: Win = { t0: 876.5, t1: 1098.4 };
   dj: Win[] = [
-    { t0: 938, t1: 1098 },
-    { t0: 1470, t1: 1561 },
+    { t0: 938.1, t1: 1098.4 },
+    { t0: 1469.5, t1: 1561 },
   ];
-  /** MC hype windows (crowd jump moods) */
+  /** MC hype windows (crowd jump moods; the show file's jump moods replace these) */
   hype: Win[] = [
-    { t0: 330.3, t1: 341 },
-    { t0: 415.4, t1: 440 },
-    { t0: 502.1, t1: 523.8 },
+    { t0: 330.37, t1: 341.1 },
+    { t0: 415.42, t1: 440 },
+    { t0: 502.13, t1: 520.71 },
   ];
   /** did the show file provide the performer windows (vs the built-in defaults) */
   fromShow = false;

@@ -13,7 +13,9 @@ What it does
    (P-centre allowance). Hardstyle kicks sweep from the click into the sub over up to ~0.1 s: flashes on
    the sub body look late (see ATTACK below and research/audio-map.md §1).
 2. Sections: every section start moves to the recommended audio time (+ the region's attack shift when it is a
-   grid time); ends follow the next start.
+   grid time); ends follow the next start. In the free-tempo parts the authored hit clusters are also matched to
+   the measured onsets (audio-map `onsets[]`, scripts/audio-onsets.py) and those hit anchors win over a section
+   anchor that contradicts them.
 3. Cues / moments / chapters: a monotone piecewise-linear warp through (authored section start -> new start)
    maps every time. Cues that sat on the authored beat grid (same track tempo) are re-snapped to the new
    grid (beat or half-beat); long cue ends and repeat `until`s are warped (and snapped) the same way;
@@ -27,6 +29,7 @@ ap.add_argument('show', nargs='?', default='public/show/endshow-2026.json')
 ap.add_argument('amap', nargs='?', default='public/show/audio-map.json')
 ap.add_argument('--dry', action='store_true')
 ap.add_argument('--report', default=None)
+ap.add_argument('--warp-out', default=None, help='write the warp anchors [[authored, audio], ...] as JSON')
 args = ap.parse_args()
 
 show = json.load(open(args.show))
@@ -162,30 +165,115 @@ for i, sec in enumerate(secs):
             target = target + attack_shift(raw['region'], raw['start'])
     pairs.append((sec['start'], round(target, 3), sec['label'], best))
 
-# monotone warp control points
-pts = [(0.0, 0.0)]
+# section-only warp (first estimate)
+def make_warp(points):
+    xa = [p[0] for p in points]
+    xb = [p[1] for p in points]
+
+    def f(t):
+        if t <= 0:
+            return t
+        i = bisect.bisect_right(xa, t) - 1
+        if i >= len(xa) - 1:
+            return xb[-1] + (t - xa[-1])
+        a0, a1, b0, b1 = xa[i], xa[i + 1], xb[i], xb[i + 1]
+        return b0 + (t - a0) * (b1 - b0) / (a1 - a0)
+    return f
+
+
+end_old = float(show['meta'].get('duration', DUR))
+sec_pts = [(a, b) for a, b, _, _ in sorted(pairs)]
+warp0 = make_warp([(0.0, 0.0)] + sec_pts + [(end_old, DUR)])
+
+# ------------------------------------------------------------------------------ hit anchors (free tempo)
+# Where the music has no steady pulse the section starts alone are not enough: the audio map sometimes put a
+# section start ON the hit that the authored section led into (e.g. Winter hit 1). Authored hit clusters
+# (pyro, fireworks, strobe/lights hits, stage pulses) are matched one-to-one, in order, to the measured strong
+# onsets (audio-map onsets[] in the free-tempo spans, plus confident impacts) and become warp anchors that
+# take precedence over conflicting section anchors.
+def is_hit(c):
+    return (c['sys'] in ('pyro', 'fireworks') or (c['sys'] in ('strobe', 'lights') and c['fx'] == 'hit')
+            or (c['sys'] == 'stage' and c['fx'] in ('pulse', 'eyes_flash')))
+
+
+hit_ts = sorted(set(round(c['t'], 3) for c in show['cues'] if is_hit(c)))
+clusters = []
+for t in hit_ts:
+    if clusters and t - clusters[-1][-1] < 0.06:
+        clusters[-1].append(t)
+    else:
+        clusters.append([t])
+cands = sorted((o['t'], max(o['low'], o['bb'])) for o in amap.get('onsets', []) if max(o['low'], o['bb']) >= 15)
+
+
+def free_at(t):
+    return not gridded_new(t)
+
+
+def sparse_at(t):
+    # isolated orchestral hits (Vivaldi, Discorecord intro, outro) vs the dense Domitor percussion / bridge
+    return t < 131.5 or t >= 1536.8
+
+
+pairs_h = []
+for ci, cl in enumerate(clusters):
+    a = cl[0]
+    r = warp0(a)
+    if not (free_at(r) or free_at(a)):
+        continue
+    best = None
+    for oi, (ot, jmp) in enumerate(cands):
+        da, dr = abs(ot - a), abs(ot - r)
+        if sparse_at(r):
+            # the strongest hit near the authored or section-warped time (weak ones only when very close)
+            if not (dr <= 1.5 or da <= 1.0) or (jmp < 20 and da > 0.5):
+                continue
+            cost = -jmp + 2 * min(da, dr)
+        else:
+            # dense percussion: the nearest hit only
+            if min(da, dr) > 0.35:
+                continue
+            cost = min(da, dr) - 0.01 * jmp
+        if best is None or cost < best[0]:
+            best = (cost, oi)
+    if best:
+        pairs_h.append((best[0], ci, best[1]))
+pairs_h.sort()
+used_c, used_o, hit_pts = set(), set(), []
+for _, ci, oi in pairs_h:
+    if ci in used_c or oi in used_o:
+        continue
+    a, b = clusters[ci][0], cands[oi][0]
+    # keep the order: no crossing with accepted anchors, and at least 0.1 s between them
+    if any((a - x) * (b - y) <= 0 or abs(b - y) < 0.1 for x, y in hit_pts):
+        continue
+    used_c.add(ci)
+    used_o.add(oi)
+    hit_pts.append((a, b))
+hit_pts.sort()
+
+# merge: hit anchors first; a section anchor stays only if it keeps the warp monotone with a sane local rate
+pts = [(0.0, 0.0)] + hit_pts + [(end_old, DUR)]
 dropped = []
 for a, b, label, _ in sorted(pairs):
-    if a <= pts[-1][0]:
+    i = bisect.bisect_left([p[0] for p in pts], a)
+    if i < len(pts) and abs(pts[i][0] - a) < 1e-6:
         continue
-    if b <= pts[-1][1] + 0.05:
+    lo, hi = pts[i - 1], pts[i]
+    ok = lo[1] < b < hi[1]
+    # next to a hit anchor (within 3 s) the local rate must stay sane, else the section start was measured ON
+    # the hit the authored section led into (the hit wins)
+    if ok and lo in hit_pts and a - lo[0] < 3:
+        ok = 0.4 <= (b - lo[1]) / (a - lo[0]) <= 2.5
+    if ok and hi in hit_pts and hi[0] - a < 3:
+        ok = 0.4 <= (hi[1] - b) / (hi[0] - a) <= 2.5
+    if ok:
+        pts.insert(i, (a, b))
+    else:
         dropped.append((label, a, b))
-        continue
-    pts.append((a, b))
-end_old = max(float(show['meta'].get('duration', DUR)), pts[-1][0] + 1)
-pts.append((end_old, max(DUR, pts[-1][1] + 1)))
 XA = [p[0] for p in pts]
 XB = [p[1] for p in pts]
-
-
-def warp(t):
-    if t <= 0:
-        return t
-    i = bisect.bisect_right(XA, t) - 1
-    if i >= len(XA) - 1:
-        return XB[-1] + (t - XA[-1])
-    a0, a1, b0, b1 = XA[i], XA[i + 1], XB[i], XB[i + 1]
-    return b0 + (t - a0) * (b1 - b0) / (a1 - a0)
+warp = make_warp(pts)
 
 
 def map_time(t, snap=True, free_unit='halfbeat'):
@@ -202,7 +290,11 @@ def map_time(t, snap=True, free_unit='halfbeat'):
     return snap_new(w, free_unit)
 
 
-exact = {a: b for a, b in pts}  # section starts map exactly (no re-snap)
+exact = {a: b for a, b in pts}  # anchors map exactly (no re-snap)
+for cl in clusters:  # every time of an anchored cluster lands on its onset
+    if cl[0] in exact:
+        for t in cl[1:]:
+            exact[t] = exact[cl[0]]
 
 
 def map_t(t, free_unit='halfbeat'):
@@ -256,12 +348,16 @@ show['cues'].sort(key=lambda c: c['t'])
 moved.sort()
 n = len(moved)
 summary = {
-    'sections': len(secs), 'matched': len(pairs), 'unmatched': unmatched, 'droppedNonMonotone': dropped,
+    'sections': len(secs), 'matched': len(pairs), 'unmatched': unmatched, 'droppedSectionAnchors': dropped,
+    'hitAnchors': [(a, b) for a, b in hit_pts],
     'tempoSegments': len(show['tempo']), 'cues': n, 'reSnapped': snapped,
     'cueShift': {'median': moved[n // 2], 'p90': moved[int(n * 0.9)], 'max': moved[-1]},
     'moved>0.5s': sum(1 for x in moved if x > 0.5), 'moved>2s': sum(1 for x in moved if x > 2),
 }
 print(json.dumps(summary, indent=1))
+
+if args.warp_out:
+    json.dump([[a, b] for a, b in pts], open(args.warp_out, 'w'))
 
 if not args.dry:
     # house format: top-level keys, arrays one compact item per line
@@ -280,7 +376,9 @@ if not args.dry:
 
 if args.report:
     rows = []
-    for a, b, label, c in sorted(pairs):
+    final = {sec['start']: ns['start'] for sec, ns in zip(secs, new_secs)}
+    for a, _, label, c in sorted(pairs):
+        b = final[a]
         if abs(b - a) >= 0.05:
             rows.append(f"| {label} | {a:.3f} | {b:.3f} | {b - a:+.3f} | {c.get('confidence', '')} | {c.get('basis', '')[:90]} |")
     with open(args.report, 'w') as f:
@@ -292,7 +390,10 @@ if args.report:
                   f" p90 {summary['cueShift']['p90']:.3f} s, max {summary['cueShift']['max']:.3f} s;"
                   f" {summary['moved>0.5s']} moved > 0.5 s, {summary['moved>2s']} > 2 s.\n"
                 + (f"* Unmatched sections (kept on the warp): {unmatched}\n" if unmatched else '')
-                + (f"* Dropped warp points (non-monotone): {dropped}\n" if dropped else '')
+                + (f"* Section anchors dropped in favour of a measured hit (the audio map had put the section start ON the"
+                   f" hit the authored section led into): {[(l, a, b) for l, a, b in dropped]}\n" if dropped else '')
+                + f"* Hit anchors (free tempo: authored hit cluster -> measured onset, `onsets[]`): "
+                + ', '.join(f"{a:g} -> {b:g}" for a, b in hit_pts) + '\n'
                 + '\n| section | authored (s) | re-timed (s) | Δ (s) | confidence | audio evidence |\n|---|---:|---:|---:|---:|---|\n'
                 + '\n'.join(rows) + '\n')
     print('report', args.report)

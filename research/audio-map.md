@@ -557,3 +557,17 @@ Notes:
 * `sectionCorrections[]` and `tempoCorrections[]`: the tables of §4 and §7 in machine-readable form.
 
 The file holds derived numbers only and no audio content. It can be committed.
+
+## Addendum (integration, 2026-09-25): kick attack phase and free-tempo onsets
+
+* **Kick attack vs. kick body (FACT, measured).** Folding the 0.3–6 kHz onset strength over every tempo segment's
+  beats puts the audible attack of the kick relative to this map's (sub-body) grid at: Discorecord −22 ms,
+  Sacred Oath −83 ms (main kick; the "kick 2" part up to 341.17 s: +24 ms), L.P.A. −8 ms, Sacred Flame −99 ms,
+  Embers −30 ms, In The Cold drop 1 +12 ms, finale −101 ms — consistent within ±5 ms inside each region. The
+  hardstyle kicks sweep from the click into the sub over up to 0.1 s; visuals synced to the sub body look late.
+  `scripts/retime-show.py` shifts the shipped tempo map to attack + 10 ms (P-centre allowance, ASSUMPTION).
+* **Free-tempo onsets (FACT, measured).** `onsets[]` lists the sharp hits (≥ 12 dB level jump within 40 ms of
+  the < 200 Hz or 100 Hz–8 kHz band) in the spans without a steady grid (`scripts/audio-onsets.py`). They pin the
+  authored hit clusters there (e.g. Winter hit 1 = 47.94 s, hit 3 = 63.79 s, corner fireballs = 100.34 s,
+  Discorecord intro hits 121.00 / 127.02 / 131.03 s, Domitor 1030.16 s).
+
