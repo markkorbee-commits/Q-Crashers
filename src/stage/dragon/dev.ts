@@ -23,6 +23,12 @@ export interface DevOpts {
   fov?: number;
   /** aim the camera at this world point */
   look?: [number, number, number];
+  /** kick pulse 0..1 */
+  pulse?: number;
+  /** pyro/firework flash colour (premultiplied), e.g. '#ff8030' */
+  flash?: string;
+  /** override the stage mode */
+  mode?: StageLook['mode'];
 }
 
 type Preset = (l: StageLook, t: number) => void;
@@ -124,7 +130,9 @@ export async function installCrownDev(app: App, o: DevOpts = {}): Promise<Record
     look.ledPhase = t * 2.5;
     look.rosetteAngle = t * 0.6;
     look.jaw = o.jaw ?? 0.6;
-    look.pulse = 0;
+    look.pulse = o.pulse ?? 0;
+    if (o.flash) look.flash.set(o.flash);
+    if (o.mode) look.mode = o.mode;
     crown.update(ctx, look);
     if (o.fov) {
       ctx.camera.fov = o.fov;

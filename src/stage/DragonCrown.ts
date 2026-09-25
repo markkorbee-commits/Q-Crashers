@@ -300,6 +300,12 @@ export class DragonCrown {
     const fire = this.tmpC2.setRGB(1.0, 0.32, 0.06).lerp(look.eyes, 0.55);
     U.uMouthCol.value.copy(fire).multiplyScalar(look.mouth * 11 + 0.3);
     U.uLava.value.copy(fire).multiplyScalar(look.mouth * 0.5 + (look.mode === 'ember' || look.mode === 'rage' ? 0.22 : 0.03));
+    if (look.mode === 'frozen') {
+      // frozen: the inner fire dies, the metal takes a cold frosty sheen
+      U.uLava.value.setRGB(0, 0, 0);
+      addScaled(U.uEnvTint.value, FROST, 0.5);
+      addScaled(U.uKey.value, FROST, 0.25);
+    }
 
     this.eyeMat.color.copy(look.eyes).multiplyScalar(Math.max(0.05, look.eyesIntensity) * 0.45);
 
@@ -380,6 +386,8 @@ export class DragonCrown {
     for (const t of this.textures) t.dispose();
   }
 }
+
+const FROST = new THREE.Color(0.55, 0.8, 1.0);
 
 function addScaled(c: THREE.Color, o: THREE.Color, s: number): THREE.Color {
   c.r += o.r * s;

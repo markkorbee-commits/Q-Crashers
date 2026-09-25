@@ -382,56 +382,97 @@ export function steelTextures(size: number, aniso: number): PbrSet {
 export function flameTexture(w: number, h: number, aniso: number): THREE.Texture {
   const [c, a] = canvas(w, h);
   const rnd = mulberry(7);
+  // ground: soot-dark crimson at the top, glowing red towards the root (the fire rises from the wrist)
   const bg = a.createLinearGradient(0, h, 0, 0);
-  bg.addColorStop(0, '#2a0a0c');
-  bg.addColorStop(0.5, '#5a1418');
-  bg.addColorStop(1, '#3a0c10');
+  bg.addColorStop(0, '#8a2016');
+  bg.addColorStop(0.35, '#5e1418');
+  bg.addColorStop(1, '#2a080c');
   a.fillStyle = bg;
   a.fillRect(0, 0, w, h);
-  const layers: { n: number; scale: number; cols: string[] }[] = [
-    { n: 22, scale: 1.0, cols: ['#6E1A1E', '#8a2420', '#1A1214'] },
-    { n: 34, scale: 0.8, cols: ['#B0382A', '#c4462c', '#1A1214'] },
-    { n: 40, scale: 0.62, cols: ['#E0662A', '#ec7a2c', '#1A1214'] },
-    { n: 36, scale: 0.45, cols: ['#F6B23A', '#ffd35a', '#3a1210'] },
+  // smoky swirls in the dark upper part
+  for (let i = 0; i < 40; i++) {
+    const x = rnd() * w;
+    const y = rnd() * h * 0.7;
+    const r = w * (0.02 + rnd() * 0.05);
+    a.strokeStyle = `rgba(${rnd() < 0.5 ? '120,30,26' : '16,6,8'},${0.35 + rnd() * 0.4})`;
+    a.lineWidth = Math.max(1.5, w / 400) * (1 + rnd() * 2);
+    const st = rnd() * Math.PI * 2;
+    wrapDraw(w, h, x, y, r * 2, (dx) => {
+      a.beginPath();
+      for (let k = 0; k <= 24; k++) {
+        const t = k / 24;
+        const ang = st + t * Math.PI * 2.4;
+        const rr = r * (1 - t * 0.75);
+        const px = x + dx + Math.cos(ang) * rr;
+        const py = y + Math.sin(ang) * rr - t * r * 0.8;
+        if (k === 0) a.moveTo(px, py);
+        else a.lineTo(px, py);
+      }
+      a.stroke();
+    });
+  }
+  // flame tongues: tall, swaying, tapering; back layers dark and tall, front layers hot and short
+  const layers: { n: number; hMin: number; hMax: number; wMul: number; base: string; tip: string; core?: string }[] = [
+    { n: 18, hMin: 0.55, hMax: 0.95, wMul: 1.2, base: '#9c2a1c', tip: '#4a0e12' },
+    { n: 26, hMin: 0.4, hMax: 0.75, wMul: 1.0, base: '#c8401e', tip: '#7a1a16' },
+    { n: 30, hMin: 0.3, hMax: 0.58, wMul: 0.85, base: '#ec7424', tip: '#b8381c', core: '#f6b23a' },
+    { n: 26, hMin: 0.16, hMax: 0.36, wMul: 0.6, base: '#ffd660', tip: '#f08a28', core: '#fff0b0' },
   ];
+  const outline = Math.max(1.2, w / 520);
   for (const L of layers) {
     for (let i = 0; i < L.n; i++) {
       const x = rnd() * w;
-      const base = h * (0.6 + rnd() * 0.5); // canvas y (down); flames rise towards y=0
-      const fh = h * (0.28 + rnd() * 0.45) * L.scale;
-      const fw = w * (0.035 + rnd() * 0.06) * (0.6 + L.scale * 0.6);
-      const lean = (rnd() - 0.5) * fw * 1.6;
-      const curl = (rnd() - 0.5) * fw * 2.2;
-      const drawFlame = (dx: number) => {
-        const bx = x + dx;
+      const base = h * (1.02 + rnd() * 0.08);
+      const fh = h * (L.hMin + rnd() * (L.hMax - L.hMin));
+      const fw = w * (0.018 + rnd() * 0.024) * L.wMul;
+      const sway = (rnd() - 0.5) * fw * 5;
+      const phase = rnd() * Math.PI * 2;
+      const curl = (rnd() - 0.5) * fw * 3;
+      const N = 18;
+      const side = (sgn: number, dx: number) => {
+        const pts: [number, number][] = [];
+        for (let k = 0; k <= N; k++) {
+          const t = k / N;
+          const cx = x + dx + sway * Math.sin(t * Math.PI * 1.3 + phase) * t + curl * t * t * t;
+          const hw = fw * Math.pow(1 - t, 0.75) * (0.75 + 0.35 * Math.sin(t * Math.PI));
+          pts.push([cx + sgn * hw, base - t * fh]);
+        }
+        return pts;
+      };
+      wrapDraw(w, h, x, base - fh / 2, Math.max(fh, fw * 6), (dx) => {
+        const left = side(-1, dx);
+        const right = side(1, dx).reverse();
         a.beginPath();
-        a.moveTo(bx - fw, base);
-        a.bezierCurveTo(bx - fw * 1.3, base - fh * 0.4, bx - fw * 0.2 + lean, base - fh * 0.6, bx + curl + lean, base - fh);
-        a.bezierCurveTo(bx + fw * 0.4 + lean, base - fh * 0.62, bx + fw * 1.4, base - fh * 0.35, bx + fw, base);
+        a.moveTo(left[0][0], left[0][1]);
+        for (const [px, py] of left) a.lineTo(px, py);
+        for (const [px, py] of right) a.lineTo(px, py);
         a.closePath();
         const g = a.createLinearGradient(0, base, 0, base - fh);
-        g.addColorStop(0, L.cols[1]);
-        g.addColorStop(0.55, L.cols[0]);
-        g.addColorStop(1, L.cols[0]);
+        g.addColorStop(0, L.base);
+        g.addColorStop(0.7, L.tip);
+        g.addColorStop(1, L.tip);
         a.fillStyle = g;
         a.fill();
-        a.lineWidth = Math.max(1.5, w / 380);
-        a.strokeStyle = L.cols[2];
+        a.lineWidth = outline;
+        a.strokeStyle = 'rgba(26,8,8,0.85)';
         a.stroke();
-      };
-      wrapDraw(w, h, x, base, fw * 2.5, (dx) => drawFlame(dx));
+        if (L.core) {
+          // hot inner core: a slimmer, shorter tongue inside
+          a.beginPath();
+          const inner = side(-1, dx).slice(0, Math.round(N * 0.6));
+          const innerR = side(1, dx).slice(0, Math.round(N * 0.6)).reverse();
+          const cxs = inner.map((p, k) => [(p[0] + innerR[innerR.length - 1 - k][0]) / 2, p[1]] as [number, number]);
+          a.moveTo(inner[0][0] * 0.5 + cxs[0][0] * 0.5, inner[0][1]);
+          for (let k = 0; k < inner.length; k++) a.lineTo(inner[k][0] * 0.45 + cxs[k][0] * 0.55, inner[k][1]);
+          for (let k = innerR.length - 1; k >= 0; k--) a.lineTo(innerR[innerR.length - 1 - k][0] * 0.45 + cxs[k][0] * 0.55, innerR[innerR.length - 1 - k][1]);
+          a.closePath();
+          a.fillStyle = L.core;
+          a.globalAlpha = 0.85;
+          a.fill();
+          a.globalAlpha = 1;
+        }
+      });
     }
-  }
-  // soot swirls
-  for (let i = 0; i < 26; i++) {
-    const x = rnd() * w;
-    const y = rnd() * h;
-    a.strokeStyle = `rgba(20,10,12,${0.3 + rnd() * 0.4})`;
-    a.lineWidth = w / 260 + rnd() * 3;
-    a.beginPath();
-    a.moveTo(x, y);
-    a.bezierCurveTo(x + (rnd() - 0.5) * w * 0.1, y - h * 0.05, x + (rnd() - 0.5) * w * 0.1, y - h * 0.1, x + (rnd() - 0.5) * w * 0.06, y - h * 0.16);
-    a.stroke();
   }
   const t = canvasTex(c, true, aniso);
   t.wrapT = THREE.ClampToEdgeWrapping;
