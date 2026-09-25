@@ -115,6 +115,17 @@ export class CameraRig implements System {
     this.enter(mode, true);
   }
 
+  /** Jump the free camera to an exact pose (QA tools, deep links). yaw 0 = looking at the stage. */
+  setFreePose(x: number, y: number, z: number, yaw: number, pitch: number, fov?: number): void {
+    if (this.mode !== 'free') this.enter('free', false);
+    this.freePos.set(x, y, z);
+    this.freeVel.set(0, 0, 0);
+    this.freeYaw = yaw;
+    this.freePitch = pitch;
+    this.blend.t = this.blend.dur;
+    if (fov) this.setBaseFov(fov);
+  }
+
   /** V key / touch button: toggle between the eye view and the third-person avatar view */
   toggleView(): void {
     this.setMode(this.mode === 'first' ? 'third' : 'first');
