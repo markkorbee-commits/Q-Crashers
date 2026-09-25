@@ -1,4 +1,5 @@
 import { SilentTrack } from '../audio/AudioTrack';
+import { IS_ARTIFACT } from '../core/target';
 import { h, store } from './dom';
 import { icon } from './icons';
 import type { UI } from './UI';
@@ -61,7 +62,7 @@ export class AudioFlow {
       return;
     }
     const rem = this.remembered;
-    if (rem === 'youtube' || rem === 'synth' || rem === 'silent') {
+    if ((rem === 'youtube' && !IS_ARTIFACT) || rem === 'synth' || rem === 'silent') {
       const ok = await this.use(rem, undefined, true);
       if (ok) return;
     }
@@ -103,7 +104,7 @@ export class AudioFlow {
           'div',
           { class: 'options' },
           option('file', 'upload', 'Load the Endshow audio file', 'Your copy of the official Endshow audio (MP3, M4A, WAV…). Or drop it anywhere on this page.', rem === 'file' ? 'Last used' : 'Best', true),
-          option('youtube', 'broadcast', 'Play with the official video', 'Official broadcast as synced picture-in-picture — doubles as a live accuracy reference.', 'Online'),
+          ...(IS_ARTIFACT ? [] : [option('youtube', 'broadcast', 'Play with the official video', 'Official broadcast as synced picture-in-picture — doubles as a live accuracy reference.', 'Online')]),
           option('synth', 'synth', 'Rehearsal track (synthesized)', 'A generated track that follows the show’s tempo map. Works offline.'),
           option('silent', 'mute', 'Silent', 'Visual show only, driven by a silent clock.'),
         ),

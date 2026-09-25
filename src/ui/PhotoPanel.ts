@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { IS_ARTIFACT } from '../core/target';
 import { cameraRig, tryCall } from './contracts';
 import { downloadBlob, h, setText } from './dom';
 import { fmtTime } from './format';
@@ -171,6 +172,21 @@ export class PhotoPanel {
     this.refreshLabels();
   }
 
+  /** full-screen preview of a captured photo (right-click / long-press to save) */
+  private showPhoto(blob: Blob): void {
+    const url = URL.createObjectURL(blob);
+    const img = h('img', { src: url, alt: 'Your Endshow photo', style: 'max-width:100%;max-height:72vh;display:block;margin:0 auto;border-radius:6px' });
+    const card = h(
+      'div',
+      { class: 'card glass strong rule-top', style: 'max-width:min(92vw,1100px)' },
+      h('div', { class: 'kicker' }, 'Photo mode'),
+      h('h3', null, 'Your shot'),
+      img,
+      h('p', { class: 'note' }, 'Right-click (or long-press on a phone) the image and choose “Save image”.'),
+    );
+    this.ui.layers.open('photo-result', card, { kind: 'modal', dismissible: true, onClose: () => URL.revokeObjectURL(url) });
+  }
+
   async capture(): Promise<void> {
     const app = this.ui.app;
     this.flash.classList.remove('go');
@@ -179,8 +195,13 @@ export class PhotoPanel {
     try {
       const blob = await app.postfx.capture();
       if (!blob) throw new Error('empty image');
-      downloadBlob(blob, `defqon1-2026-endshow-${fmtTime(app.clock.time).replace(/:/g, '-')}.png`);
-      this.ui.toast('Photo saved to your downloads', 2400, 'camera');
+      if (IS_ARTIFACT) {
+        // sandboxed page: script downloads are blocked, so show the photo to save it by hand
+        this.showPhoto(blob);
+      } else {
+        downloadBlob(blob, `defqon1-2026-endshow-${fmtTime(app.clock.time).replace(/:/g, '-')}.png`);
+        this.ui.toast('Photo saved to your downloads', 2400, 'camera');
+      }
     } catch (e) {
       this.ui.toast(`Capture failed: ${(e as Error).message}`, 3000, 'warning');
     }
