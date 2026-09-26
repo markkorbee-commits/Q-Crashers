@@ -319,7 +319,7 @@ echo $CHROME_PATH
 
 ## Stand van zaken
 
-Za 26 sep 2026, ± 21:00 (CEST).
+Za 26 sep 2026, ± 21:20 (CEST).
 
 - Alle show-content is uit de video herbouwd (per span, met cameravolgorde = de officiële montage, één shot per cut).
 - Muzieksync: steady tracks 876 hits 100 % binnen 20 ms van het grid; free-tempo delen 60 % binnen 100 ms van een
@@ -330,10 +330,13 @@ Za 26 sep 2026, ± 21:00 (CEST).
 - Grootste gat vóór ronde 4: ons veld/vloer was 3-30x te licht (video: veld bijna zwart, licht zit in lucht/rook);
   lagere exposure alleen leverde ~+3 punten (0,35 best op 32 momenten).
 - Ronde 4: witte pilaren + FOH/camerapen gemerged in `2e077b0`; lichtbalans veld + bestrating (met laserzee, lucht en
-  rook) gemerged in `4c75707`. Kasteelgevel/LED-look + mobiele draw calls (groep stage) was niet af: 4 WIP-commits
-  t/m `83c962a` staan als patch in `docs/handoff/wip/stage/`. De stand per groep staat in
-  `docs/handoff/wip/STATUS.md`; die is leidend als de cloudsessie hem bij de overdracht nog heeft ververst. De
-  opdrachten staan in `docs/handoff/findings/r4_*.md`.
+  rook) gemerged in `4c75707`. Resultaat lichtbalans (64 momenten, gemeten door die agent): 52,0 → 54,1 % ruw,
+  25,7 → 29,0 % na ijking (kleur 54,3 / licht 67,3 / vorm 42,8). Daarna nog `5c9a882` (pyro-vloerlicht op de nieuwe
+  bestrating afgestemd, +0,2 op 6 momenten). Groep stage (kasteelgevel/LED-look + mobiele draw calls) is op jouw
+  verzoek halverwege gestopt: 6 WIP-commits t/m `9e6a659` plus `uncommitted.diff` staan in `docs/handoff/wip/stage/`
+  (ongetest; eerst meten, dan houden wat winst geeft). De stand per groep staat in `docs/handoff/wip/STATUS.md`.
+  De opdrachten staan in `docs/handoff/findings/r4_*.md`, de contractverzoeken van ronde 4 in
+  `docs/handoff/findings/r4_contracts_*.txt` en het plan voor de volgende ronde in `docs/handoff/findings/r5_next.md`.
 - MC-close-ups 347-459 s volgen de MC via `camera.shot` `p.subject='mc'` (`docs/show-format-ext/core.md`).
 - Podium beloopbaar (spots `dj`, `dancers`), lege DJ-booth met CDJ-achtige set zonder merklogo's, geen DJ in de show.
 - Artifact (oude versie): https://claude.ai/artifact/8ZTMp8XW6hczruUKoiJhDi
@@ -344,14 +347,20 @@ Za 26 sep 2026, ± 21:00 (CEST).
 
 ## Open punten (prioriteit)
 
-1. Ronde 4 afronden: de stage-patch toepassen volgens `docs/handoff/wip/README.md` (tenzij `STATUS.md` hem als
-   gemerged meldt), daarna de 64-momenten meting (eerst Mac-baseline + stabiliteitscheck, stap 9) en de
-   exposure/"filmed" look vastzetten in `src/postfx` (beste waarde uit de meting).
+Het uitgewerkte plan met meetpunten en bestanden staat in `docs/handoff/findings/r5_next.md`; kort:
+
+1. Ronde 4 afronden: eerst de Mac-baseline (stap 9, met stabiliteitscheck), dan de stage-patch toepassen volgens
+   `docs/handoff/wip/README.md`, meten, houden wat winst geeft; daarna de exposure/"filmed" look vastzetten in
+   `src/postfx` (laatste meting: 1 → 57,7 %, 0,7 → 58,1 %, 0,5 → 58,2 % op 12 momenten; advies 0,7 of niets).
 2. Schermen: `screens.content` mode `'color'` rendert als vlakke felle panelen achter de MC (348, 361, 369, 447 s);
    de video toont kasteelkunst/ornamenten — render als getinte kasteel-/ornamenttextuur op gematigd niveau.
 3. Performerverlichting: MC egaal grijs belicht; video: sterk gekleurde key + tegenlicht in dichte haze (bv. 351,
    409-412 s).
-4. Dansers/troupe-shots 641-740 s nog niet tegen de video gecontroleerd (zelfde aanpak als MC: subject-shots).
+4. Dansers/troupe-shots 641-740 s: 8 momenten gecontroleerd; fout gekadreerd zijn 660,9 (video: close-up danseres
+   met waaiers op het podium), 669,5 (camera in een danseres) en 723,8 (danseres loopt naar de camera). Aanpak als bij
+   de MC: `subject` uitbreiden naar 'lead' / dansers.
+4b. Determinisme na een seek: 1243 s rendert per run anders (schone beam-storm vs witte haze); vermoedelijk
+   deeltjes/rook die van het vorige moment blijven hangen. Reproduceren en oplossen (r5_next.md §6).
 5. Contractverzoeken podium-walk: lighting rig blinder `T_BOOTH` naar (0, 4.05, -6.35), arch-spot focus via
    `stageFloorAt` (`src/world/stageWalk.ts`), near-camera fade in de beam-volume shader, CameraRig `floorAt` op
    trappen, design-bible §5.4/§5.13 maten vault/booth/podium.

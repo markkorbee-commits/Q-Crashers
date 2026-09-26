@@ -1,7 +1,7 @@
 From 83c962a831233a78c032cfa7c4e043cb024604a4 Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Sat, 26 Sep 2026 18:41:39 +0000
-Subject: [PATCH 4/4] WIP stage r4: warm FOH keys
+Subject: [PATCH 4/6] WIP stage r4: warm FOH keys
 
 ---
  src/stage/StageLights.ts | 9 ++++++---

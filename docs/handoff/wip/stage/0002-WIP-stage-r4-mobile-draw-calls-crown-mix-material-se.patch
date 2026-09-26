@@ -1,7 +1,7 @@
 From 63fee2ea4dfa95d5d5104c6e4cb2604d024b053b Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Sat, 26 Sep 2026 18:28:32 +0000
-Subject: [PATCH 2/4] WIP stage r4: mobile draw calls (crown mix material, set
+Subject: [PATCH 2/6] WIP stage r4: mobile draw calls (crown mix material, set
  mix, barrier baked, jaw LEDs in the static strip/bulb draws)
 
 ---

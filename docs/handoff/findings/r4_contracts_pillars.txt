@@ -1,0 +1,14 @@
+Suggested follow-ups in files outside my module group. The anchors are unchanged, so none of these is required.
+(1) pyro/PyroSystem.ts: the CAPITAL_HALF 1.45 / PLINTH_HALF 3.4 comment still says 'capital 3.4 m, plinth deck 8.4 m'. The capital top plate is now 2.9 m, so 1.45 is exactly its corner, and the fenced deck is 6.9 m inside a 7 m fence, so 3.4 still fits. Only the comment needs updating.
+(2) crowd/layout.ts: the pillar plinth exclusion is still a 5.75 m half-size box sized for the old 8.5 m fence; the fence is now 7.1 m, so a half-size of about 4.9 would let the crowd come closer. The FOH exclusion (|x| < 7.9, z 85.5 to 94.5) still contains the new pen (x ±7, z 87.2 to 90.4). Its comment 'X ±6.4, Z 87-93' could be updated.
+(3) world/Grounds.ts: the 'foh' spot label could read 'FOH / camera pen'. It still takes the foh, laser_field and FOH spot anchors from CAM_PEN, which I kept on purpose so no anchor moves; the physical pen is the new FOH_PEN in site.ts. The foh anchor (0, 0.5, 90) and the FOH laser stands (±5.6, 2.7, 87.4) sit inside the pen.
+(4) lighting/rig.ts: the FOH floor fixtures at foh.z − 2.7 = 87.3 sit only 0.1 m inside the pen's front barrier (87.2). Using −2.5 would centre them on the riser.
+(5) ui/MiniMap.ts: the FOH rectangle is still 12 x 8; it could become 14 x 3.2. The pillar circles are fine.
+(6) worldLights.ts / DevDaylight: with ?daylight you could also zero the lamp and spill uniforms so the ground under the pillars is not lamp-lit during daylight review.
+(7) If the lighting cues want the video's strong shaft washes, pillarShaftIntensity at 26, 920 and 1272 s now shows up as a visible cone wash on the white shafts. Nothing needs to change unless a moment looks too bright.
+
+NOT FIXED:
+The pen position cannot satisfy both photos. On day2 the pen's front edge lines up with the row-2 fence fronts (Z about 72.5), which also holds whatever the camera pose. Photo P, taken on the show night, puts it at Z about 90. I used photo P and wrote down the conflict. The finding's suggested day2 pose (0, 1.7, 75) does not fit the image: day2 is an elevated telephoto from about (0, 11-13, 141) with a horizontal field of view of about 29 degrees.
+The pen is 14 m wide, not the 18-22 m the finding suggested; both photos measure 14-15 m.
+The world lamp and spill lights (worldLights.ts, not my file) still light the ground in ?daylight mode.
+The per-moment similarity at 1272 and 1274 s is dominated by the laser and camera framing, which other modules own.

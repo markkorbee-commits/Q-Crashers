@@ -1,7 +1,7 @@
 From 2d56f99150ccefc90568c4fe0334b16f0bcd9ccd Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Sat, 26 Sep 2026 18:07:15 +0000
-Subject: [PATCH 1/4] WIP stage r4: dark castle (sky share, flash from above,
+Subject: [PATCH 1/6] WIP stage r4: dark castle (sky share, flash from above,
  narrow FOH keys, nightK), LED calibration, sunburst rosettes
 
 ---

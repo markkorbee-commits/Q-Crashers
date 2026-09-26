@@ -1,7 +1,7 @@
 From f608a33da0cbfcee2386690a1820dfbd6ab868b7 Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Sat, 26 Sep 2026 18:31:51 +0000
-Subject: [PATCH 3/4] WIP stage r4: dimmer floods/front wash, loading sub-steps
+Subject: [PATCH 3/6] WIP stage r4: dimmer floods/front wash, loading sub-steps
 
 ---
  src/stage/DragonCrown.ts            | 17 +++++++++++------
