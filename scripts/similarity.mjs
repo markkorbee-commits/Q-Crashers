@@ -4,7 +4,7 @@
  *
  *   node scripts/similarity.mjs [--frames <dir of video frames NNNNN.jpg at 4 fps>] [--port 5173] [--n 64]
  *        [--times 76.3,600.4,...] [--quality medium] [--out .shots/similarity] [--offset 0.036] [--eval "js"]
- *        [--settle 1800] [--min-frames 0]
+ *        [--settle 1800] [--min-frames 0] [--preroll 2] [--preroll-frames 6] [--no-preroll]
  *
  * For each sampled moment it renders our show paused at (video time - offset) through the Show camera, then scores
  * it against the video frame with scripts/similarity-score.py (colour layout ΔE, luminance histogram, structure).
@@ -13,6 +13,9 @@
  * --min-frames: additionally wait until the app has rendered this many frames after the seek. Some state after a
  *   seek still depends on how many frames were drawn (1047.25 scored 27.3 % and 12.1 % with the same code on the same
  *   SwiftShader box under different CPU load), so fix a frame count when comparing runs across machines.
+ * --preroll <s> (default 2; 0 or --no-preroll = off): before each moment, seek to t - s first and let the app draw
+ *   --preroll-frames frames (default 6) there, then seek to t. Whatever state survives a seek then comes from the same
+ *   lead-in for every moment, not from the previously measured moment (run order no longer leaks into a score).
  * Needs a dev server (npx vite --port <port> --strictPort) and Python with numpy + Pillow (env PYTHON, else
  * $ENDSHOW_DATA/venv/bin/python, else python3). A missing video frame stops the run before rendering (a baseline over
  * fewer moments is not comparable); --allow-missing scores the moments that have a frame and says how many were skipped.
@@ -37,6 +40,8 @@ const offset = Number(opt('offset', '0.036'));
 const n = Number(opt('n', '64'));
 const settle = Number(opt('settle', '1800'));
 const minFrames = Number(opt('min-frames', '0'));
+const preroll = args.includes('--no-preroll') ? 0 : Math.max(0, Number(opt('preroll', '2')) || 0);
+const prerollFrames = Math.max(1, Number(opt('preroll-frames', '6')) || 6);
 const DURATION = 1581;
 // evenly spread samples (avoiding the first/last seconds), or an explicit list
 const times = opt('times', '')
@@ -61,6 +66,14 @@ await page.evaluate(() => {
 if (opt('eval', '')) await page.evaluate(opt('eval', ''));
 const pairs = [];
 for (const t of times) {
+  if (preroll > 0) {
+    // lead-in: the same few frames before every moment (independent of the previous moment)
+    const fp = await page.evaluate((st) => {
+      window.__app.clock.seek(st);
+      return window.__app.frame;
+    }, Math.max(0, t - offset - preroll));
+    await page.waitForFunction((n) => window.__app.frame >= n, fp + prerollFrames, { timeout: 600000, polling: 16 });
+  }
   const f0 = await page.evaluate((st) => {
     window.__app.clock.seek(st);
     return window.__app.frame;

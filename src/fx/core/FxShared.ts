@@ -57,6 +57,7 @@ export class FxShared {
       uStageWash: { value: new THREE.Color() },
       uFlashCol: { value: app.env.flashColor },
       uFlashPos: { value: app.env.flashPos },
+      uFlashSpread2: { value: 0 },
       uNoise: { value: this.noise },
       ...this.lights.uniforms,
       uLampPos: { value: Array.from({ length: 8 }, (_, i) => new THREE.Vector4(PILLARS[i]?.x ?? 0, LANTERN_Y + 0.8, PILLARS[i]?.z ?? -999, 0)) },
@@ -83,6 +84,8 @@ export class FxShared {
     u.uMinPx.value = Math.max(1.3, this.size.y / 540 * 1.5);
     (u.uStageLight.value as THREE.Color).copy(env.stageColor).multiplyScalar(env.stageIntensity);
     (u.uStageWash.value as THREE.Color).copy(env.stageWashColor).multiplyScalar(env.stageWashIntensity * 0.6);
+    const spread = env.flashSpread;
+    u.uFlashSpread2.value = Number.isFinite(spread) ? spread * spread : 0;
     const fog = app.scene.fog;
     const amb = u.uAmbient.value as THREE.Color;
     if (fog && (fog as THREE.FogExp2).isFogExp2) {

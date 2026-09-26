@@ -5,13 +5,17 @@ import type { Cue } from '../show/ShowTypes';
 import { CueFxSystem, EmitterSet } from '../fx/core/CueFxSystem';
 import { DIST, Emitter, F, PUFF, R, apexTime, speedForHeight } from '../fx/core/Emitter';
 import { bool, fxColor, num, str } from '../fx/core/fxColors';
-import { densify, patternSteps, tiltedUp, uCoord, wingFire } from '../fx/core/placement';
+import { clusters, densify, patternSteps, tiltedUp, uCoord, wingFire } from '../fx/core/placement';
 
 const L_SMOKE = 0;
 const L_FIRE = 1;
 const L_SPARK = 2;
 
-const SOOT = new THREE.Color(0.055, 0.045, 0.04);
+/**
+ * albedo of the soot a hydrocarbon flame rolls into: dark smoke, but a flame wall at night lights
+ * its own smoke cap from below (the glowing clouds over the v1508.4-1510 wall), so it is not black
+ */
+const SOOT = new THREE.Color(0.13, 0.105, 0.09);
 const WHITE = new THREE.Color(1, 1, 1);
 const GREY = new THREE.Color(0.62, 0.62, 0.64);
 const FIRE = new THREE.Color(1.0, 0.36, 0.08);
@@ -203,8 +207,12 @@ export class PyroSystem extends CueFxSystem {
   }
 
   /**
-   * Smoke left by a row of units: a single BOX emitter over the firing units' bounding box
-   * (per-unit smoke emitters would waste instancing slots on kick-synced repeats).
+   * Smoke left by a row of units: one BOX emitter per stretch of the row (the firing units, in order
+   * along the U, cut into pieces of at most ~40 m like the row light), so a U-shaped row (deck front +
+   * side sections + arms) smokes along the U instead of filling the empty field inside it. The puffs
+   * are shared out by unit count (per-unit smoke emitters would waste instancing slots on kick-synced
+   * repeats). Self-lit in `color` (x `selfLight`, decaying over `selfDecay` s from each puff's birth)
+   * while the units burn; afterwards the show's light (rig, flashes, pyro light field) lights it.
    */
   private rowSmoke(
     out: EmitterSet,
@@ -223,46 +231,140 @@ export class PyroSystem extends CueFxSystem {
     life1: number,
     albedo: number,
     selfDecay = 0.9,
+    sizeK = 1,
   ): void {
-    const mn = new THREE.Vector3(Infinity, Infinity, Infinity);
-    const mx = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
-    let n = 0;
-    for (let u = 0; u < pts.length; u++) {
-      if (steps[u] < 0) continue;
-      mn.min(pts[u]);
-      mx.max(pts[u]);
-      n++;
+    const idx: number[] = [];
+    for (let u = 0; u < pts.length; u++) if (steps[u] >= 0) idx.push(u);
+    if (!idx.length) return;
+    idx.sort((a, b) => uCoord(pts[a]) - uCoord(pts[b]) || pts[a].z - pts[b].z);
+    const total = Math.max(1, Math.min(64, Math.round(puffs * Math.min(1, this.quality.particleScale * 1.6))));
+    // stretches of the row (at most ~40 m, a gap of more than 24 m starts a new one)
+    const segs: [number, number][] = [];
+    let s0 = 0;
+    for (let i = 1; i < idx.length; i++) {
+      const p = pts[idx[i]];
+      if (p.distanceTo(pts[idx[s0]]) > 40 || p.distanceTo(pts[idx[i - 1]]) > 24) {
+        segs.push([s0, i - 1]);
+        s0 = i;
+      }
     }
-    if (!n) return;
-    const count = Math.max(1, Math.min(64, Math.round(puffs * Math.min(1, this.quality.particleScale * 1.6))));
-    const c = mn.clone().add(mx).multiplyScalar(0.5);
-    const ext = mx.clone().sub(mn);
-    out.add(
-      new Emitter(DIST.BOX, F.SELFLIT)
-        .on(L_SMOKE)
-        .origin(c.x, c.y + yOff, c.z)
-        .axis(ext.x + 1, 1, ext.z + 1)
-        .time(t0)
-        .dir(0, 1, 0, 0.5)
-        .speed(1.0, 2.4)
-        .physics(0.65, 0.4)
-        .color(GREY, opacity)
-        .color2(this.c2.copy(color).multiplyScalar(selfLight), 0)
-        .life(life0, life1)
-        .emit(count, 0, Math.max(0.2, spreadT) / count)
-        .size(0.2 * H + 0.5, 0.45 * H + 1.5)
-        .trail(0.6, 0.35)
-        .seed(this.sub(cue, 9999))
-        .set(R.X0, selfDecay)
-        .set(R.X1, 0.22)
-        .set(R.X2, 0.8)
-        .set(R.Y0, albedo)
-        .set(R.Y2, 0.12)
-        .set(R.Y3, 1)
-        .set(R.Z0, 1)
-        .set(R.Z3, PUFF.SMOKE)
-        .window(t0, t0 + spreadT + life1 + 0.5),
-    );
+    segs.push([s0, idx.length - 1]);
+    const mn = new THREE.Vector3();
+    const mx = new THREE.Vector3();
+    const self = this.c2.copy(color).multiplyScalar(selfLight);
+    segs.forEach(([a, b], si) => {
+      mn.set(Infinity, Infinity, Infinity);
+      mx.set(-Infinity, -Infinity, -Infinity);
+      for (let k = a; k <= b; k++) {
+        mn.min(pts[idx[k]]);
+        mx.max(pts[idx[k]]);
+      }
+      const units = b - a + 1;
+      const count = Math.max(1, Math.round((total * units) / idx.length));
+      const cx = (mn.x + mx.x) * 0.5,
+        cy = (mn.y + mx.y) * 0.5,
+        cz = (mn.z + mx.z) * 0.5;
+      out.add(
+        new Emitter(DIST.BOX, F.SELFLIT)
+          .on(L_SMOKE)
+          .origin(cx, cy + yOff, cz)
+          .axis(mx.x - mn.x + 1, 1, mx.z - mn.z + 1)
+          .time(t0)
+          .dir(0, 1, 0, 0.5)
+          .speed(1.0, 2.4)
+          .physics(0.65, 0.4)
+          .color(GREY, opacity)
+          .color2(self, 0)
+          .life(life0, life1)
+          .emit(count, 0, Math.max(0.2, spreadT) / count)
+          .size((0.2 * H + 0.5) * sizeK, (0.45 * H + 1.5) * sizeK)
+          .trail(0.6, 0.35)
+          .seed(this.sub(cue, 9999 + si * 131))
+          .set(R.X0, selfDecay)
+          .set(R.X1, 0.22)
+          .set(R.X2, 0.8)
+          .set(R.Y0, albedo)
+          .set(R.Y2, 0.12)
+          .set(R.Y3, 1)
+          .set(R.Z0, 1)
+          .set(R.Z3, PUFF.SMOKE)
+          .window(t0, t0 + spreadT + life1 + 0.5),
+      );
+    });
+  }
+
+  /**
+   * The bright cloud a burning fountain row stands in while it burns: continuously renewed smoke
+   * around the lower part of the sprays, strongly self-lit in the spark colour, one BOX per stretch
+   * of the row (like rowSmoke). It is there from the ignition on (the gerb walls of v600.4 / v460.5
+   * are glowing clouds within 0.3 s) and dies with the fountains; rowSmoke is what lingers.
+   */
+  private burnCloud(out: EmitterSet, cue: Cue, pts: THREE.Vector3[], steps: number[], stagger: number, t0: number, dur: number, H: number, color: THREE.Color, glow: number, opacity: number, build: number): void {
+    const idx: number[] = [];
+    for (let u = 0; u < pts.length; u++) if (steps[u] >= 0) idx.push(u);
+    if (!idx.length) return;
+    idx.sort((a, b) => uCoord(pts[a]) - uCoord(pts[b]) || pts[a].z - pts[b].z);
+    const segs: [number, number][] = [];
+    let s0 = 0;
+    for (let i = 1; i < idx.length; i++) {
+      const p = pts[idx[i]];
+      if (p.distanceTo(pts[idx[s0]]) > 40 || p.distanceTo(pts[idx[i - 1]]) > 24) {
+        segs.push([s0, i - 1]);
+        s0 = i;
+      }
+    }
+    segs.push([s0, idx.length - 1]);
+    const psc = Math.min(1, this.quality.particleScale * 1.4);
+    const life = 1.3 + 0.03 * H;
+    const self = this.c2.copy(color).multiplyScalar(glow);
+    const mn = new THREE.Vector3();
+    const mx = new THREE.Vector3();
+    segs.forEach(([a, b], si) => {
+      mn.set(Infinity, Infinity, Infinity);
+      mx.set(-Infinity, -Infinity, -Infinity);
+      let d0 = Infinity,
+        d1 = 0;
+      for (let k = a; k <= b; k++) {
+        mn.min(pts[idx[k]]);
+        mx.max(pts[idx[k]]);
+        d0 = Math.min(d0, steps[idx[k]] * stagger);
+        d1 = Math.max(d1, steps[idx[k]] * stagger);
+      }
+      const units = b - a + 1;
+      // mobile keeps fewer, larger puffs
+      const n = Math.max(3, Math.round((4 + 1.6 * Math.min(units, 24)) * psc));
+      const sz = 1 + (1 - psc) * 0.5;
+      const ts = t0 + d0;
+      const ed = dur + (d1 - d0);
+      out.add(
+        new Emitter(DIST.BOX, F.SELFLIT | F.RAMP)
+          .on(L_SMOKE)
+          .origin((mn.x + mx.x) * 0.5, (mn.y + mx.y) * 0.5 + H * 0.28, (mn.z + mx.z) * 0.5)
+          .axis(mx.x - mn.x + 2, H * 0.35, mx.z - mn.z + 2)
+          .time(ts)
+          .dir(0, 1, 0, 0.6)
+          .speed(1.5, 4)
+          .physics(1.2, 0.8)
+          .color(GREY, opacity)
+          .color2(self, 0)
+          .life(life * 0.7, life)
+          .emit(n, ed)
+          .size((0.22 * H + 2) * sz, (0.4 * H + 3) * sz)
+          .trail(0.5, 0.35)
+          .seed(this.sub(cue, 8800 + si * 57))
+          .set(R.X0, life * 0.8)
+          .set(R.X1, 0.25)
+          .set(R.X2, 0.8)
+          // (RAMP: the cloud builds up over `build` s and clears as the fountains stop)
+          .set(R.X3, Math.max(0.12, Math.min(build, ed * 0.45)))
+          .set(R.Y0, 0.75)
+          .set(R.Y2, 0.08)
+          .set(R.Y3, 0.6)
+          .set(R.Z0, 1)
+          .set(R.Z3, PUFF.SMOKE)
+          .window(ts, ts + ed + life),
+      );
+    });
   }
 
   /**
@@ -1165,7 +1267,19 @@ export class PyroSystem extends CueFxSystem {
       this.rowLight(out, { ...cue, t: cue.t + w0 }, pts, steps, stagger, wd, 0.25, H * 0.4, col, per, 0.35 * H + 5);
     }
     if (n > 0) {
-      if (!cold) this.rowSmoke(out, cue, pts, steps, H * 0.35, H, firstCol, 1.4, 0.14, (1 + dur * 0.8) * n, cue.t + 0.3, dur + maxDelay, 6, 9, 0.7);
+      // a burning gerb wall stands in a dense cloud of its own smoke, lit brightly in the fountain's
+      // colour while it burns (v460.5 white wall, v558 pink fans, v600.4 gold-white wall, v1536 white
+      // U): the light of the big moments is carried by that cloud
+      if (!cold) {
+        // The cloud is there at once for a high-intensity wall (`intensity` > 1.5: the glare walls
+        // of v600.2) and builds up over ~3 s on a long burn (v1510-1537, v1522-1537); a short
+        // normal burst (v69, v1192) stays a row of clean fountains with a little smoke.
+        const sI = Math.min(1, Math.max(0, (intenP - 1.5) / 1.5));
+        const sL = dur >= 4 ? 0.6 : 0;
+        const sC = Math.max(sI, sL);
+        if (sC > 0) this.burnCloud(out, cue, pts, steps, stagger, cue.t, dur, H, firstCol, 4.5 * Math.sqrt(sC) * (hueKs[0] < 1 ? 0.8 : 1), 0.17 * sC, sI >= sL ? 0.12 : 3);
+        this.rowSmoke(out, cue, pts, steps, H * 0.35, H, firstCol, 1.4 * Math.min(2, Math.max(1, intenP)), 0.14, (1 + dur * 0.8) * n, cue.t + 0.3, dur + maxDelay, 6, 9, 0.7);
+      }
       cx.multiplyScalar(1 / n);
       cx.y += H * 0.5;
       out.flashes.push({
@@ -1298,14 +1412,20 @@ export class PyroSystem extends CueFxSystem {
       cx.multiplyScalar(1 / pts.length);
       cx.y += 2;
       out.flashes.push({ kind: 0, t0: cue.t, t1: cue.t + 1.2, color: color.clone(), peak: Math.min(3, 1.1 * size + 0.1 * pts.length), decay: 0.25, pos: cx, strobe: 0 });
-      const mn = new THREE.Vector3(Infinity, 0, Infinity);
-      const mx = new THREE.Vector3(-Infinity, 0, -Infinity);
-      for (const q of pts) {
-        mn.min(q);
-        mx.max(q);
+      // spatial light per group of units (> 30 m apart = separate lights): a burst on both arm ends
+      // lights the two ends, not the empty middle of the field between them
+      for (const grp of clusters(pts, 30)) {
+        const mn = new THREE.Vector3(Infinity, 0, Infinity);
+        const mx = new THREE.Vector3(-Infinity, 0, -Infinity);
+        let y = 0;
+        for (const q of grp) {
+          mn.min(q);
+          mx.max(q);
+          y += q.y;
+        }
+        mn.y = mx.y = y / grp.length + 2;
+        this.pointLight(out, 0, cue.t, cue.t + 1.2, 0.3, mn, color, Math.min(8, 2.5 * size * Math.sqrt(grp.length)), 10 + 5 * sq, mx);
       }
-      mn.y = mx.y = cx.y;
-      this.pointLight(out, 0, cue.t, cue.t + 1.2, 0.3, mn, color, Math.min(8, 2.5 * size * Math.sqrt(pts.length)), 10 + 5 * sq, mx);
     }
   }
 
