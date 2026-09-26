@@ -11,7 +11,11 @@
  *    wider multiple-scattering halo.
  *  - a sheet (scanned plane) of power P over fan angle Φ has radiance ∝ σ · P / (Φ · r · |n·v|):
  *    edge-on it becomes a glowing line/ceiling, face-on it is a faint textured veil.
- *  - σ(haze) = global haze · height profile · 3D noise (shared world-space field → coherent smoke).
+ *  - σ(haze) = global haze · height profile · stage→field gradient · 3D noise (shared world-space
+ *    field → coherent smoke). The smoke machines stand at the set: the air is thickest around the
+ *    stage and thins out over the empty field (FogSystem: field ≈ 1/3 of the stage cloud), so beams
+ *    read brightest near the set and fade on their way over the field — as in the official video.
+ *    The low-fog layer (fog.lowfog) is not part of the gradient: it covers the field itself.
  */
 
 export const HAZE_GLSL = /* glsl */ `
@@ -27,6 +31,8 @@ uniform float uFogFar;
 uniform float uFogMode;
 uniform float uFlow;
 uniform float uExt;
+uniform float uFieldHaze;
+uniform float uStageL;
 
 float hazeNoise(vec3 p) {
   float n = texture(uNoise, p * vec3(0.017, 0.028, 0.017) + uDrift).r;
@@ -39,9 +45,20 @@ float hazeProfile(float y) {
   return 0.8 * exp(-y / 34.0) + 0.2 * exp(-y / 170.0) + uLowHaze * exp(-y / 4.5);
 }
 
+// stage cloud -> thin field air (1 at the set, uFieldHaze far out over the field)
+float stageHaze(vec3 p) {
+  return mix(uFieldHaze, 1.0, exp(-max(p.z - 2.0, 0.0) / uStageL));
+}
+
+// hazeProfile with the stage -> field gradient on the air part (the low fog keeps its own extent)
+float hazeProfileAt(vec3 p) {
+  float y = max(p.y, 0.0);
+  return (0.8 * exp(-y / 34.0) + 0.2 * exp(-y / 170.0)) * stageHaze(p) + uLowHaze * exp(-y / 4.5);
+}
+
 float hazeDensity(vec3 p) {
   float puff = smoothstep(0.36, 0.68, hazeNoise(p));
-  return uHaze * hazeProfile(p.y) * mix(1.0, puff * puff * 2.4 + 0.04, uNoiseAmt);
+  return uHaze * hazeProfileAt(p) * mix(1.0, puff * puff * 2.4 + 0.04, uNoiseAmt);
 }
 
 float fogTransmit(float d) {
@@ -68,7 +85,7 @@ export const BEAM_VERT = /* glsl */ `
 attribute vec4 iA; // origin.xyz, length
 attribute vec4 iB; // dir.xyz, dash (fract) + hit (>= 1)
 attribute vec4 iC; // colour * power (rgb), width scale
-attribute vec4 iD; // direction one shutter interval earlier (motion smear), w unused
+attribute vec4 iD; // direction one shutter interval earlier (motion smear), w = visible reach (floor(m) + fade start fraction, 0 = none)
 
 uniform float uPixAng;
 uniform float uHalo;
@@ -84,6 +101,7 @@ varying float vAlong;
 varying float vLen;
 varying float vDash;
 varying float vNear;
+varying vec2 vReach;
 
 void main() {
   vec3 O = iA.xyz;
@@ -121,6 +139,7 @@ void main() {
   vAlong = along;
   vLen = L;
   vDash = fract(iB.w);
+  vReach = vec2(floor(iD.w), fract(iD.w));
   // distance from the eye to the beam axis: beams brushing past the camera fade out (no "light sabre")
   vec3 oc = cameraPosition - O;
   float dAxis = length(oc - D * clamp(dot(oc, D), 0.0, L));
@@ -144,6 +163,7 @@ varying float vAlong;
 varying float vLen;
 varying float vDash;
 varying float vNear;
+varying vec2 vReach;
 
 // logistic approximation of the normal CDF
 float ncdf(float x) { return 1.0 / (1.0 + exp(-1.702 * x)); }
@@ -174,12 +194,19 @@ void main() {
   // scanned figures break up into dashes (galvo blanking seen through the camera shutter)
   if (vDash > 0.01) {
     float d = fract(vAlong * 0.22 - uTime * 1.7);
-    col *= mix(1.0, 0.18 + 0.82 * smoothstep(0.1, 0.25, d) * (1.0 - smoothstep(0.55, 0.7, d)), vDash);
+    col *= mix(1.0, 0.04 + 0.96 * smoothstep(0.1, 0.25, d) * (1.0 - smoothstep(0.55, 0.7, d)), vDash);
   }
   // emerges from the aperture, loses power to the haze along the way (extinction), ends at the hit point
   col *= smoothstep(0.12, 0.5, vAlong) * (1.0 - smoothstep(vLen - 0.05, vLen, vAlong)) * exp(-vAlong * uExt);
+  // visible reach: the figure dissolves in the haze after 'reach' metres (compact looks near the set)
+  if (vReach.x > 0.5) col *= 1.0 - smoothstep(vReach.x * vReach.y, vReach.x, vAlong);
   col *= fogTransmit(dist) * vNear;
-  gl_FragColor = vec4(min(col, vec3(48.0)), 1.0);
+  // soft knee: a beam seen (nearly) end-on is 20-30x brighter than side-on (phase x path length); the
+  // camera / eye shows it as a bright coloured line with a flare at the source, not a white-hot bar
+  // flooding the bloom — moderate beams keep ~85 % of their level
+  float mx = max(max(col.r, col.g), col.b);
+  col *= 1.0 / (1.0 + mx * 0.2);
+  gl_FragColor = vec4(col, 1.0);
 }
 `;
 
@@ -194,6 +221,7 @@ attribute vec4 sC; // normal.xyz, kind (0 sheet fan, 1 cone, 2 low-fog layer fan
 attribute vec4 sD; // colour * power (rgb), wave amplitude (rad)
 attribute vec4 sE; // wave phase 1, wave phase 2, segment mask amount, segment phase
 attribute vec4 sF; // safety zone |x| limit, cone vertical squash, sheet height above the fog top, -
+attribute vec4 sG; // cone rings: spacing (m, 0 = none), ring phase (cycles), figure lobes (0 = circle), lobe amplitude
 
 varying vec3 vWorld;
 varying vec3 vNormal;
@@ -208,6 +236,7 @@ varying float vSegPh;
 varying float vZone;
 varying float vLift;
 varying vec3 vColor2;
+varying vec2 vRing;
 
 vec3 rayDir(float u) {
   vec3 F = sB.xyz;
@@ -220,10 +249,13 @@ vec3 rayDir(float u) {
     vec3 d = cos(a) * F + sin(a) * R;
     return normalize(d * cos(alpha) + N * sin(alpha));
   }
-  // (elliptical) cone: horizontal half-angle sB.w, the vertical aperture scaled by sF.y
+  // (elliptical) cone: horizontal half-angle sB.w, the vertical aperture scaled by sF.y; the drawn
+  // figure is a circle or, with lobes (sG.z), a spirograph rosette, rotated by sE.y
   float phi = u * 6.2831853;
+  vec2 c = vec2(cos(phi + sE.y), sin(phi + sE.y));
+  if (sG.z > 0.5) c = (c + sG.w * vec2(cos(sG.z * phi - sE.y), -sin(sG.z * phi - sE.y))) / (1.0 + sG.w);
   float th = tan(sB.w * (1.0 + amp * sin(3.0 * phi + sE.x)));
-  return normalize(F + th * (cos(phi) * R + sF.y * sin(phi) * N));
+  return normalize(F + th * (c.x * R + sF.y * c.y * N));
 }
 
 void main() {
@@ -247,6 +279,7 @@ void main() {
   vSegPh = sE.w;
   vZone = sF.x;
   vLift = sF.z;
+  vRing = sG.xy;
   // low-fog layer: the crest colour rides in the (unused) wave-phase slots
   vColor2 = sC.w > 1.5 ? sE.xyz : sD.rgb;
   gl_Position = projectionMatrix * viewMatrix * vec4(P, 1.0);
@@ -270,6 +303,7 @@ varying float vSegPh;
 varying float vZone;
 varying float vLift;
 varying vec3 vColor2;
+varying vec2 vRing;
 
 // anti-aliased family of thin lines at u*n: fades to its mean where lines get denser than pixels
 float lines(float x, float sharp) {
@@ -353,11 +387,17 @@ void main() {
   } else {
     // ---- cone shell (tunnel): the drawn circle = dense scan lines + rotating bright segments
     float t3 = tex * tex * 1.8 + 0.1;
-    float haze = uHaze * hazeProfile(vWorld.y) * t3;
+    float haze = uHaze * hazeProfileAt(vWorld) * t3;
     float I = uGainS * haze * hazePhase(c) * pow(max(vR, 4.0), -0.75) * inversesqrt(nv * nv + 0.0036);
     float l = lines(vU * 96.0, 10.0);
     float m = 0.5 + 0.5 * cos(6.2831853 * (vU * 5.0 - vSegPh));
     float pattern = (0.6 + 1.6 * l) * mix(1.0, 0.15 + 1.6 * m * m * m, vSeg);
+    if (vRing.x > 0.0) {
+      // rings scanned down the cone ("laser tunnel" circles travelling towards the audience): thin
+      // bright circles in the smoke over a faint shell; they fade in off the aperture
+      float ring = lines(vR / vRing.x - vRing.y, 16.0);
+      pattern *= (0.07 + 4.2 * ring) * smoothstep(0.8, 3.0, vR);
+    }
     pattern *= 0.88 + 0.12 * sin(uTime * 41.0 + vU * 331.0 + vR * 0.7);
     col = vColor * I * pattern;
     capI = 6.0;
@@ -385,19 +425,32 @@ void main() {
   vec3 P = pA.xyz;
   vec3 toCam = cameraPosition - P;
   float dist = max(length(toCam), 1e-3);
-  float minSize = (pB.w > 0.5 ? 2.2 : 3.2) * dist * uPixAng;
-  float size = max(pA.w, minSize);
-  // pull towards the camera so the billboard is not cut by the surface it sits on
-  P += toCam / dist * min(size * 1.1, dist * 0.5);
+  float size;
+  if (pB.w > 1.5) {
+    // lens veil: an in-camera effect, so it is drawn just in front of the lens at the same angular
+    // size (nothing in the scene can cut it)
+    float dn = 1.5;
+    size = pA.w * dn / dist;
+    P = cameraPosition - toCam / dist * dn;
+    vColor = pB.rgb;
+  } else {
+    float minSize = (pB.w > 0.5 ? 2.2 : 3.2) * dist * uPixAng;
+    size = max(pA.w, minSize);
+    // pull towards the camera so the billboard is not cut by the surface it sits on
+    P += toCam / dist * min(size * 1.1, dist * 0.5);
+    // energy conservation when clamped to the minimum pixel footprint
+    float k = pA.w / size;
+    vColor = pB.rgb * k * k;
+  }
   vec4 mv = viewMatrix * vec4(P, 1.0);
   mv.xy += position.xy * size;
   vUv = position.xy;
-  // energy conservation when clamped to the minimum pixel footprint
-  float k = pA.w / size;
-  vColor = pB.rgb * k * k;
   vKind = pB.w;
-  vDist = dist;
+  // (the lens veil is not dimmed by the air between the projector and the lens: the beam is collimated)
+  vDist = pB.w > 1.5 ? 0.0 : dist;
   gl_Position = projectionMatrix * mv;
+  // the lens veil sits on the lens: nothing in the scene may cut it
+  if (pB.w > 1.5) gl_Position.z = -0.999 * gl_Position.w;
 }
 `;
 
@@ -411,7 +464,11 @@ void main() {
   float r2 = dot(vUv, vUv);
   if (r2 > 1.0) discard;
   float I;
-  if (vKind < 0.5) {
+  if (vKind > 1.5) {
+    // lens hit: a beam straight into the camera floods the frame (veiling glare + anamorphic streak)
+    float r = sqrt(r2);
+    I = exp(-r2 * 60.0) * 3.0 + exp(-r2 * 9.0) * 0.45 + 0.1 * (1.0 - r) + exp(-abs(vUv.y) * 70.0) * (1.0 - abs(vUv.x)) * 0.7;
+  } else if (vKind < 0.5) {
     float core = exp(-r2 * 26.0);
     float glow = exp(-r2 * 5.0) * 0.28;
     float star = (exp(-abs(vUv.y) * 60.0) + exp(-abs(vUv.x) * 60.0)) * (1.0 - sqrt(r2)) * 0.22;
