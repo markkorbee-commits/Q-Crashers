@@ -32,7 +32,10 @@ listed under "Engine behaviour". Unknown params are still ignored.
   over budget never reshuffles or flickers the particles already on screen. Newborn emitters get a
   quantised share (1 / 0.75 / 0.5 / 0.35 / 0.25) from the layer's pressure (fast attack, 1.5 s
   release in show time, so a paused frame never changes) and a lower one only when they would not
-  fit. Small emitters (≤ 2 slots: a pillar-top fan, a flare, a shell's smoke) stay complete. The
+  fit. An emitter whose particles are dying out (a fountain past its emission window, a burst past
+  its first deaths) holds only the share still alive (never below 5 % on desktop, 25 % on medium,
+  50 % on mobile), so a fountain wall that just stopped does not keep the next, bigger wave thinned
+  for its whole life. Small emitters (≤ 2 slots: a pillar-top fan, a flare, a shell's smoke) stay complete. The
   instances a layer issues (slots × slot size) may reach twice the budget, so hundreds of tiny
   emitters (shell smokes of 1–5 puffs, comet tails) are all drawn; ribbon layers use slots of 16.
   A newborn that does not fit even at the lowest share (1.25 × the budget, or the slot cap) is left
@@ -53,8 +56,14 @@ listed under "Engine behaviour". Unknown params are still ignored.
 * **Site glow on smoke and haze (round 3).** `atmos.glow` (`app.env.glowColor`, `app.env.smoke`)
   lights every haze sprite in its colour in all three zones (the brightness knee rises with the
   glow's luminance, so the glow is not squashed like the rig scatter) and all smoke, CO2 and low fog.
-  Its `smoke` multiplies the stage and field haze density by (1 + 2 × smoke) and brings the veil
-  close to the camera. This completes the pink whiteout (v76) and the red smoke site (v1510–1537).
+  Its `smoke` multiplies the stage and field haze density by (1 + 2 × smoke), adds a bank of its
+  own (stage +0.22, field +0.09, sky band +0.12 per unit of smoke, so the air fills even where no
+  haze hung), lets the haze hide the set behind it (occlusion towards 0.8) and brings the veil close
+  to the camera. This completes the pink whiteout (v76) and the red smoke site (v1510–1537).
+* **Saturated smoke stays saturated (round 3).** Colours are linear: a `lowfog` in a saturated
+  colour (the red finale bank `#FF2010`) now gets only 2.5 % white instead of 12 % (which turned it
+  salmon on screen), and the haze tint of recent coloured `fog.burst` clouds may reach 96 % of
+  their colour.
 * **Smoke density.** `fog.burst` and Bengal smoke are emitted one-shot, staggered over the burn.
   Before, a continuous emitter released only dur/life of its particles, so bursts were about 3×
   thinner than authored. Plain bursts are now about 2–3× denser than before; bursts that use any

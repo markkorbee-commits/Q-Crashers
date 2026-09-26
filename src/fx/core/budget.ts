@@ -31,6 +31,13 @@ const RULES: Record<string, Rule> = {
 
 const POPS_KEEP: Record<QualityLevel, number> = { ultra: 1, high: 1, medium: 0.6, mobile: 0.4 };
 
+/**
+ * Lowest weight of an emitter whose particles are dying out (FxLayer tail weighting). Its dead
+ * instances still run the vertex shader up to their death test, so the small presets count them
+ * for more: a phone keeps close to its hard particle caps.
+ */
+const TAIL_FLOOR: Record<QualityLevel, number> = { ultra: 0.05, high: 0.05, medium: 0.25, mobile: 0.5 };
+
 export function setFxBudgetLevel(l: QualityLevel): void {
   level = l;
 }
@@ -52,4 +59,9 @@ export function layerBudget(name: string, requested: number): number {
 /** upper bound of an emitter's budget share from its kind (crackle pops on the small presets) */
 export function keepCap(flags: number): number {
   return (flags & F.POPS) !== 0 ? POPS_KEEP[level] : 1;
+}
+
+/** lowest budget weight of a dying emitter on the current preset (see FxLayer) */
+export function tailFloor(): number {
+  return TAIL_FLOOR[level];
 }

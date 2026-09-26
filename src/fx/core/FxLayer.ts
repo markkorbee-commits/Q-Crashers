@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { layerBudget, keepCap } from './budget';
+import { keepCap, layerBudget, tailFloor } from './budget';
 import { Emitter, F, R, REC_FLOATS, REC_TEXELS } from './Emitter';
 
 const SLOT_TEX_W = 256;
@@ -126,12 +126,16 @@ function setTail(e: Emitter): void {
   }
 }
 
-/** share of an emitter's particles still alive at show time t (1 until they start dying) */
+/**
+ * Budget weight of an emitter at show time t: the share of its particles still alive (1 until they
+ * start dying), never below the preset's floor (budget.ts: dead instances still cost some vertex work)
+ */
 function tailShare(e: Emitter, t: number): number {
   if (t <= e.tail0) return 1;
+  const lo = tailFloor();
   const span = e.tail1 - e.tail0;
-  if (!(span > 0.05)) return t < e.tail1 ? 1 : 0.05;
-  return Math.max(0.05, Math.min(1, (e.tail1 - t) / span));
+  if (!(span > 0.05)) return t < e.tail1 ? 1 : lo;
+  return Math.max(lo, Math.min(1, (e.tail1 - t) / span));
 }
 
 /**
