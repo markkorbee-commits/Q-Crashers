@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { App } from '../core/App';
 import { yawTowards } from '../player/spots';
-import { BOOTH, CREW_STAIRS, PODIUM, STEPS, VAULT, vaultCeiling, vaultHalfWidth } from '../stage/booth/layout';
+import { BOOTH, CREW_STAIRS, PODIUM, podiumRects, STEPS, VAULT, vaultCeiling, vaultHalfWidth } from '../stage/booth/layout';
 import { deckHardware, deckTopAt } from '../stage/deck/hardware';
 import { L } from '../stage/layout';
 import { terrainHeight } from './site';
@@ -167,14 +167,13 @@ function build(w: StageWalk): void {
   surf('crew-stairs', -C.x1, -C.x0, C.z0, C.z1, g(-C.x1, (C.z0 + C.z1) / 2), Y, 1);
   // the deck and its corner plinths
   surf('deck', -L.plinthX1, L.plinthX1, L.facadeZ, 0, Y);
-  // side steps of the podium, the podium (U around the pedestal notch)
-  surf('podium-step', -P.halfW - P.apron, -P.halfW, P.backZ, P.frontZ, P.apronY);
-  surf('podium-step', P.halfW, P.halfW + P.apron, P.backZ, P.frontZ, P.apronY);
-  surf('podium', -P.halfW, P.halfW, P.backZ, P.notchZ, P.top);
-  surf('podium', -P.halfW, -P.notchHalf, P.notchZ, P.frontZ, P.top);
-  surf('podium', P.notchHalf, P.halfW, P.notchZ, P.frontZ, P.top);
-  // grey steps up to the vault (ramp along Z: vault floor at the landing edge, podium at the foot)
-  surf('vault-steps', -STEPS.halfW, STEPS.halfW, STEPS.topZ, STEPS.botZ, VAULT.floorY, P.top, 2);
+  // side steps of the podium, the podium (U around the pedestal notch + the cheeks beside the steps)
+  surf('podium-step', -P.halfW - P.apron, -P.halfW, P.apronZ0, P.apronZ1, P.apronY);
+  surf('podium-step', P.halfW, P.halfW + P.apron, P.apronZ0, P.apronZ1, P.apronY);
+  for (const [x0, x1, z0, z1] of podiumRects()) surf('podium', x0, x1, z0, z1, P.top);
+  // grey steps up to the vault: a ramp through the nosings (the top riser at the landing edge, one
+  // tread in front of the lowest riser on the podium)
+  surf('vault-steps', -STEPS.halfW, STEPS.halfW, STEPS.topZ, STEPS.botZ + STEPS.tread, VAULT.floorY, P.top, 2);
   surf('vault-landing', -STEPS.halfW, STEPS.halfW, VAULT.frontZ, STEPS.topZ, VAULT.floorY);
   surf('vault-floor', -VAULT.span / 2, VAULT.span / 2, VAULT.backZ, VAULT.frontZ, VAULT.floorY);
   surf('dj-riser', -BOOTH.matHalfW, BOOTH.matHalfW, BOOTH.matBackZ, BOOTH.matFrontZ, VAULT.floorY + BOOTH.matH);
@@ -255,6 +254,8 @@ function build(w: StageWalk): void {
   wall('vault-back', -VAULT.outerHalf, VAULT.outerHalf, L.facadeZ - 0.4, VAULT.backZ, VAULT.floorY - 0.8, VAULT.roofApex, true);
   // the booth desk (a little inside its gear overhang so the passage beside it stays open)
   wall('booth-desk', -BOOTH.halfW + 0.13, BOOTH.halfW - 0.13, BOOTH.z - BOOTH.halfD, BOOTH.z + BOOTH.halfD, VAULT.floorY, VAULT.floorY + BOOTH.height + 0.15, true);
+  // booth monitors on their tripods beside the DJ
+  for (const s of [-1, 1]) post('booth-monitor', s * 1.8, BOOTH.djZ + 0.55, 0.3, VAULT.floorY, VAULT.floorY + 1.8);
 }
 
 // ---------------------------------------------------------------------------------------------

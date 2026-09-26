@@ -5,6 +5,7 @@ import { type ArchKind, extrude, frameShape, type Opening, paneShape, wallShape 
 import { L } from '../layout';
 import { LED_KIND } from '../materials/LedMaterial';
 import { GARLAND, type Garlands } from '../dragon/shading';
+import { PODIUM, VAULT } from '../booth/layout';
 
 /**
  * The grey gothic castle core of the 2026 RED (printed scenic flats on scaffold in reality), laid out
@@ -248,13 +249,14 @@ export class CastleBuilder {
       this.pinnacle(s * (PH + 0.35), H, z - 0.35, 0.62, 1.9);
       k.led.bar(new THREE.Vector3(s * (PH + 0.72), Y + 0.3, z - 0.1), new THREE.Vector3(s * (PH + 0.72), H - 0.3, z - 0.1), new THREE.Vector3(s, 0, 0), 0.1);
     }
-    // solid mass behind the portal piers and the niche (top 8.3, under the dragon's jaw)
+    // the porch mass beside the gold vault, lowered to the roof's eaves (booth/Vault.ts: the scaled
+    // barrel roof shows above it from the castle gallery and the drone, as in the daytime photos)
     for (const s of [-1, 1]) {
-      const a = s * (L.portalW / 2 + 0.3),
+      const a = s * VAULT.outerHalf,
         b = s * L.stairX0;
-      boxMinMax(k.stone, Math.min(a, b), Y, L.facadeZ, Math.max(a, b), H - 0.02, z - T, TINT.dark);
+      boxMinMax(k.stone, Math.min(a, b), Y, L.facadeZ, Math.max(a, b), VAULT.massTop, z - T, TINT.dark);
+      boxMinMax(k.stone, Math.min(a, b) - 0.05, VAULT.massTop, L.facadeZ, Math.max(a, b) + 0.05, VAULT.massTop + 0.16, z - T, TINT.trim);
     }
-    boxMinMax(k.stone, -L.portalW / 2 - 0.3, Y, L.facadeZ, L.portalW / 2 + 0.3, H - 0.02, z - L.portalDepth - 0.2, TINT.dark);
 
     // ---- the DJ portal: bronze-gold scroll frame, cream chevron ring, shield keystone
     this.frame(portal, z, 0.55, 0.38, TINT.wall, 'gold');
@@ -293,68 +295,13 @@ export class CastleBuilder {
     sg.dispose();
     decorPanel(k, 'emblem', 0, sy - 0.02, z + 0.535, 1.42, 1.42, GLOW.emblem);
 
-    // ---- portal niche (3 m deep): dark walls, deep glow, concentric "turbine" rings, chandelier
-    const d0 = z - T;
-    const d1 = z - L.portalDepth;
-    boxMinMax(k.paint, -L.portalW / 2, Y, d1 - 0.2, L.portalW / 2, L.portalApex, d1, PAINT.interior);
-    for (const s of [-1, 1]) boxMinMax(k.paint, s * (L.portalW / 2), Y, d1, s * (L.portalW / 2 + 0.3), L.portalApex, d0, PAINT.interior);
-    boxMinMax(k.paint, -L.portalW / 2, L.portalApex - 0.9, d1, L.portalW / 2, L.portalApex, d0, PAINT.interior);
-    this.pane({ ...portal, w: L.portalW - 0.1, h: portal.h - 0.1 }, d1 + 0.02, 0, LED_KIND.portal);
+    // LED line around the portal opening (the vault behind it, its booth and the grey steps in front:
+    // booth/Vault.ts, booth/Booth.ts, deck/Podium.ts)
     k.led.polyline(
       this.archPoints(portal, 0.14, 44).map((p) => new THREE.Vector3(p.x, p.y, z + 0.39)),
       OUT,
       0.09,
     );
-    for (const [f, zz] of [
-      [0.86, d0 - 0.35],
-      [0.72, d0 - 1.05],
-      [0.58, d0 - 1.7],
-    ] as const) {
-      const ring: Opening = { cx: 0, y0: Y + 0.02, w: L.portalW * f, h: (L.portalApex - Y) * (0.25 + 0.75 * f), kind: 'pointed' };
-      this.frame(ring, zz, 0.16, 0.14, TINT.wall, 'gold');
-      k.led.polyline(
-        this.archPoints(ring, 0.08, 30).map((p) => new THREE.Vector3(p.x, p.y, zz + 0.16)),
-        OUT,
-        0.06,
-      );
-    }
-    // downward spots in the crown of the niche
-    for (let i = 0; i < 6; i++) {
-      const x = -1.7 + (i * 3.4) / 5;
-      const g = new THREE.CylinderGeometry(0.12, 0.1, 0.3, 8);
-      k.metal.add(g, new THREE.Matrix4().makeTranslation(x, L.portalApex - 1.05, d0 - 0.5 - (i % 2) * 0.6), { color: METAL.black });
-      g.dispose();
-    }
-    const cy = L.portalApex - 1.8;
-    const cz = d1 + 0.9;
-    const ring = new THREE.TorusGeometry(0.75, 0.05, 6, 24);
-    k.gold.add(ring, new THREE.Matrix4().makeRotationX(Math.PI / 2).setPosition(0, cy, cz));
-    ring.dispose();
-    const ring2 = new THREE.TorusGeometry(0.42, 0.04, 6, 18);
-    k.gold.add(ring2, new THREE.Matrix4().makeRotationX(Math.PI / 2).setPosition(0, cy + 0.45, cz));
-    ring2.dispose();
-    rod(k.gold, new THREE.Vector3(0, cy, cz), new THREE.Vector3(0, L.portalApex - 0.9, cz), 0.04);
-    for (let i = 0; i < 12; i++) {
-      const a = (i / 12) * Math.PI * 2;
-      const p = new THREE.Vector3(Math.cos(a) * 0.75, cy + 0.14, cz + Math.sin(a) * 0.75);
-      cyl(k.gold, p.x, cy, p.z, 0.03, 0.03, cy + 0.12, 4);
-      k.led.rect(p, RIGHT, UP, 0.12, 0.2, LED_KIND.candle, (i * 0.137) % 1);
-      k.led.rect(p, OUT, UP, 0.12, 0.2, LED_KIND.candle, (i * 0.291) % 1);
-    }
-
-    // ---- DJ riser + desk (4 x 1.1 m at Z −7.5) with the red/gold booth banner
-    const bz = L.boothZ;
-    boxMinMax(k.paint, -2.6, Y, d1 + 0.05, 2.6, Y + 0.08, z - 0.2, PAINT.grey);
-    boxMinMax(k.paint, -2.0, Y + 0.08, bz - 0.55, 2.0, Y + 1.35, bz + 0.55, PAINT.black);
-    boxMinMax(k.paint, -2.1, Y + 1.35, bz - 0.6, 2.1, Y + 1.42, bz + 0.6, PAINT.grey);
-    decorPanel(k, 'booth', 0, Y + 0.74, bz + 0.561, 3.9, 1.1, GLOW.banner);
-    k.led.rect(new THREE.Vector3(0, Y + 0.74, bz + 0.575), RIGHT, UP, 3.9, 1.1, LED_KIND.panel, 3.9, 1.1);
-    for (const x of [-1.25, -0.42, 0.42, 1.25]) {
-      const w = Math.abs(x) > 1 ? 0.62 : 0.5;
-      boxMinMax(k.paint, x - w / 2, Y + 1.42, bz - 0.45, x + w / 2, Y + 1.54, bz + 0.35, PAINT.grey);
-      k.led.rect(new THREE.Vector3(x, Y + 1.555, bz - 0.1), RIGHT, new THREE.Vector3(0, 0, -1), w * 0.55, 0.18, LED_KIND.screen);
-    }
-    for (const x of [-4.4, 4.4]) this.floodCan(x, Y, z + 0.7);
 
     // ---- screen piers between portal and arches: tall flame-eye banners flanking the portal
     // (daytime photos: an orange / red banner either side of the gilt arch, deck to cornice)
@@ -364,8 +311,8 @@ export class CastleBuilder {
       decorPanel(k, s < 0 ? 'banner2' : 'banner', x, (Y + 0.35 + H - 0.55) / 2, z + 0.12, 2.0, H - 0.55 - Y - 0.35, GLOW.banner);
       k.led.rect(new THREE.Vector3(x, (Y + 0.35 + H - 0.55) / 2, z + 0.14), RIGHT, UP, 2.0, H - 0.55 - Y - 0.35, LED_KIND.panel, 2.0, H - 0.55 - Y - 0.35);
     }
-    // anchors: the DJ booth + portal-side floor fixtures
-    k.pts.fixturesFloor.push(new THREE.Vector3(-3.6, Y + 0.3, z + 1.2), new THREE.Vector3(3.6, Y + 0.3, z + 1.2));
+    // anchors: portal-side floor fixtures, at the back of the podium cheeks beside the grey steps
+    k.pts.fixturesFloor.push(new THREE.Vector3(-4.75, PODIUM.top + 0.3, z + 0.55), new THREE.Vector3(4.75, PODIUM.top + 0.3, z + 0.55));
   }
 
   // -------------------------------------------------------------------------------------------

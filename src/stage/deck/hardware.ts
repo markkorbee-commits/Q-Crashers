@@ -1,5 +1,5 @@
 import { L } from '../layout';
-import { PODIUM } from '../booth/layout';
+import { PODIUM, podiumRects } from '../booth/layout';
 
 /**
  * Deck-lip pyro / laser / fixture hardware on the bible anchor positions (terrain-layout.json
@@ -21,12 +21,12 @@ export interface DeckItem {
   h: number;
 }
 
-/** is (x, z) on the dancers' podium (the U around the pedestal notch; the side steps excluded) */
+const RECTS = podiumRects();
+
+/** is (x, z) on the dancers' podium (the U around the pedestal notch + the cheeks; side steps excluded) */
 export function onPodium(x: number, z: number): boolean {
-  const P = PODIUM;
-  const ax = Math.abs(x);
-  if (ax > P.halfW || z < P.backZ || z > P.frontZ) return false;
-  return !(ax < P.notchHalf && z > P.notchZ);
+  for (const r of RECTS) if (x >= r[0] && x <= r[1] && z >= r[2] && z <= r[3]) return true;
+  return false;
 }
 
 /** top of the stage floor a deck unit stands on: the podium riser or the deck */
@@ -60,8 +60,9 @@ export function deckHardware(): readonly DeckItem[] {
     if (Math.abs(x) < 2.5) continue;
     box('lamp', x, -2.775, 0.2, 0.175, 0.2);
   }
-  // floor wedges beside the grey steps (the inner pair gave way to the steps: the booth has its own monitors)
-  for (const x of [-5.5, 5.5]) box('wedge', x, -4.6, 0.31, 0.25, 0.36);
+  // floor wedges on the podium cheeks beside the grey steps (the inner pair gave way to the steps: the
+  // booth has its own monitors)
+  for (const x of [-4.75, 4.75]) box('wedge', x, -4.55, 0.31, 0.25, 0.36);
   cache = out;
   return out;
 }

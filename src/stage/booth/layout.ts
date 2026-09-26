@@ -42,16 +42,19 @@ export const VAULT = {
 /** grey steps in front of the portal: landing at the vault floor, risers down to the podium */
 export const STEPS = {
   halfW: 3.9,
-  /** front edge of the landing (top of the flight) */
-  topZ: -5.4,
-  /** front edge of the lowest tread (foot of the flight, on the podium) */
+  /** the top riser = front edge of the landing (Z −5 … −6 at the vault floor) */
+  topZ: -5.0,
+  /** the lowest riser (foot of the flight, on the podium) */
   botZ: -4.2,
   risers: 3,
+  /** tread depth */
+  tread: 0.4,
 } as const;
 
 /**
  * The dancers' podium: a red riser (0.3 m, black fascia) in front of the steps, U-shaped around the
- * lead dancer's pedestal, which stands on the deck at (0, −2) in the notch (crowd/props.ts).
+ * lead dancer's pedestal, which stands on the deck at (0, −2) in the notch (crowd/props.ts). Two
+ * "cheeks" run back beside the grey steps to the porch screen, so the flight is let into the podium.
  */
 export const PODIUM = {
   top: L.deckY + 0.3,
@@ -61,10 +64,27 @@ export const PODIUM = {
   /** the notch (open to the audience) that frames the lead's pedestal */
   notchHalf: 1.5,
   notchZ: -2.9,
-  /** half-height side steps along the outer flanks */
+  /** cheeks beside the grey steps: |X| halfW(steps) … halfW, back to the porch screen */
+  cheekBackZ: L.porchFrontZ - 0.02,
+  /** half-height side steps along the outer flanks (clear of the front-line lamps at Z −2.8) */
   apron: 0.35,
   apronY: L.deckY + 0.15,
+  apronZ0: -5.6,
+  apronZ1: -3.1,
 } as const;
+
+/** the podium's walkable top as rectangles [minX, maxX, minZ, maxZ] (geometry, walk map and hardware read these) */
+export function podiumRects(): [number, number, number, number][] {
+  const P = PODIUM;
+  const S = STEPS.halfW;
+  return [
+    [-P.halfW, P.halfW, P.backZ, P.notchZ],
+    [-P.halfW, -P.notchHalf, P.notchZ, P.frontZ],
+    [P.notchHalf, P.halfW, P.notchZ, P.frontZ],
+    [-P.halfW, -S, P.cheekBackZ, P.backZ],
+    [S, P.halfW, P.cheekBackZ, P.backZ],
+  ];
+}
 
 /** DJ booth desk + DJ riser inside the vault */
 export const BOOTH = {
