@@ -30,9 +30,12 @@ Engine behaviour of the show camera (no cue change, all deterministic per shot):
 * Subjects the engine can follow (round 5, `src/crowd/performers.ts` SUBJECTS): `mc`, `lead`,
   `aerialist`, `pianist`, `dancer0` … `dancer9` (the lantern bearers). Offsets are from the
   performer's feet at each moment (the lead's feet are on her pedestal top while she is on it). The
-  show validator (`scripts/validate-show.mjs`) still accepts only `mc`; until its known list is
-  extended, the troupe shots of the 2026 show are authored as fixed deck poses (the troupe stands
-  on fixed formation marks while those shots run).
+  show validator (`scripts/validate-show.mjs`) accepts all of them (round 6).
+* When to use `subject` (round 6): only when the performer moves during the shot (the MC's walks).
+  A performer who stands on a fixed mark for the whole shot (the lead on her pedestal v658–666, the
+  pyramid v738.8) is better authored as a fixed pose: the framing is identical, and the shot keeps the
+  normal long-lens / in-the-haze-cloud thinning instead of the forced full veil of subject shots
+  (measured v659: fixed pose 0.536, the same framing as a subject shot 0.495).
 * PA hangs: when a flown line array (or its truss tower) in front of the subject covers the centre
   56 % of a framing, the shot is moved sideways by the smallest step (0.5 m steps, ≤ 8 m, aim kept)
   that clears it. The offset is computed once from the shot's start pose and held for the whole shot.
