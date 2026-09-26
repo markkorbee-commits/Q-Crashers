@@ -3,9 +3,9 @@
 Every claim is tagged **FACT** (sourced or directly visible in a cited image or video), **INFERENCE** (strong
 deduction from several facts or from a measurement), **ASSUMPTION** (reasoned fill-in for the 3D build) or
 **UNKNOWN**. Source URLs are listed in §12. Reference images are in the scratchpad (never in the repo):
-`/tmp/claude-0/-home-user-Q-Crashers/de5b2351-28d0-5f9c-98e9-2fbf28f2c6ab/scratchpad/refs/stage/` (2026) and
+`<cloud-scratchpad>/refs/stage/` (2026) and
 `.../refs/stage/prev/` (earlier editions). In this document `SCR` stands for
-`/tmp/claude-0/-home-user-Q-Crashers/de5b2351-28d0-5f9c-98e9-2fbf28f2c6ab/scratchpad`.
+`<cloud-scratchpad>`.
 
 Coordinate frame: the same as `research/terrain-analysis.md`. The origin is the stage front centre at
 floor level, **+Z** points from the stage into the audience (bearing 325°), **+X** points to audience-right

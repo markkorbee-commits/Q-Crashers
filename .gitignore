@@ -10,3 +10,8 @@ public/assets/audio/*
 .claude/
 dist-artifact/
 *.whl
+__pycache__/
+# The video data dir ($ENDSHOW_DATA, default ../endshow-data) lives OUTSIDE the repo; guard against copies inside it
+endshow-data/
+*.mp4
+*.npz

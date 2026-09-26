@@ -10,12 +10,14 @@
  *        [--analysis <dir with frames_000.json ...>] (per-frame shot types -> matching camera pose)
  * The storyboard has one frame every 1581/160 s (frame i at i * 9.88125 s). Reference frames are
  * copyrighted and are NOT part of the repository: pass the folder where you keep them.
- * Needs python3 + Pillow for the final composition.
+ * Needs python3 + Pillow for the final composition (env PYTHON overrides python3).
+ * Superseded for video matching by tools/video/vcompare.mjs (the 4 fps video frames replace the storyboard).
+ * Browser/renderer: scripts/lib/browser.mjs (CHROME_PATH, RENDERER=gpu|swiftshader).
  */
-import { chromium } from 'playwright-core';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { launchBrowser, reportWebGL } from './lib/browser.mjs';
 
 const args = process.argv.slice(2);
 const opt = (n, d) => {
@@ -58,14 +60,15 @@ function poseFor(i) {
   return POSES.wide_front;
 }
 
-const exe = process.env.CHROME_PATH || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
-const browser = await chromium.launch({ executablePath: exe, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+const browser = await launchBrowser();
 const page = await (await browser.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: 1 })).newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 await page.goto(`${base}?autostart&quality=${quality}&analyze=0&nogovernor${has('nopost') ? '&nopost' : ''}`, { waitUntil: 'load', timeout: 120000 });
+await reportWebGL(page);
 await page.waitForFunction(() => window.__app && window.__app.ready, null, { timeout: 900000, polling: 250 });
 await page.evaluate(() => document.getElementById('ui')?.style.setProperty('display', 'none'));
+fs.mkdirSync('.shots', { recursive: true });
 const tmp = fs.mkdtempSync('.shots/cmp-');
 const pairs = [];
 for (const i of frames) {
@@ -98,5 +101,5 @@ for r,p in enumerate(pairs):
     d.rectangle([0,r*H,230,r*H+18],fill=(0,0,0)); d.text((4,r*H+3),f"#{p['i']} t={p['t']}s  REFERENCE | OURS",fill=(255,255,0))
 sheet.save(out,quality=88)
 `;
-execFileSync('python3', ['-c', py, JSON.stringify(pairs), out]);
+execFileSync(process.env.PYTHON || 'python3', ['-c', py, JSON.stringify(pairs), out]);
 console.log(JSON.stringify({ out, frames, errors }, null, 1));

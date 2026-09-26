@@ -8,6 +8,8 @@ muziek.
 
 Geen officieel product; niet gelieerd aan Q-dance. Muziek en video zijn niet meegeleverd (zie *Audio*).
 
+**Lokaal verder ontwikkelen (Mac, video-tools, Claude Code):** zie [`HANDOFF.md`](HANDOFF.md) en [`CLAUDE.md`](CLAUDE.md).
+
 ## Starten
 
 ```bash

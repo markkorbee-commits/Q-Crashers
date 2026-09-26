@@ -417,7 +417,7 @@ basis of each element.
 
 ## 16. Files produced (scratchpad, not committed; copyrighted or third-party data)
 
-Directory `/tmp/claude-0/-home-user-Q-Crashers/de5b2351-28d0-5f9c-98e9-2fbf28f2c6ab/scratchpad/refs/terrain/`:
+Directory `<cloud-scratchpad>/refs/terrain/`:
 
 - Official floorplan renders: `static_2026_thu_z155.png`, `static_2026_sat_overview_z155.png`,
   `static_2026_sat_red_z17.png`, `static_2025_sat_overview_z155.png`, `static_2025_sat_red_z17.png`
