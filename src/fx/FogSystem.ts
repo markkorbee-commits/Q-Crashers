@@ -60,22 +60,22 @@ export class FogSystem extends CueFxSystem {
     this.app.scene.add(fog.mesh);
   }
 
+  /** the haze sprites of the richest preset, built once; a preset draws a ranked share of them */
   private buildHaze(q: QualitySettings): void {
     this.haze?.dispose();
-    const k = q.level === 'ultra' ? 1 : q.level === 'high' ? 0.8 : q.level === 'medium' ? 0.55 : 0.35;
     const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
     this.haze = new HazeField(this.shared.uniforms, [
-      { min: V(-105, 3, -38), max: V(105, 30, 12), size: [13, 26], aspect: 0.8, count: Math.round(46 * k) },
-      { min: V(-80, 1.5, 4), max: V(80, 8, 205), size: [16, 30], aspect: 0.35, count: Math.round(64 * k) },
-      { min: V(-150, 40, -110), max: V(150, 105, 20), size: [24, 44], aspect: 0.65, count: Math.round(26 * k) },
+      { min: V(-105, 3, -38), max: V(105, 30, 12), size: [13, 26], aspect: 0.8, count: 46 },
+      { min: V(-80, 1.5, 4), max: V(80, 8, 205), size: [16, 30], aspect: 0.35, count: 64 },
+      { min: V(-150, 40, -110), max: V(150, 105, 20), size: [24, 44], aspect: 0.65, count: 26 },
     ]);
+    this.haze.setShare(hazeShare(q));
     this.app.scene.add(this.haze.mesh);
   }
 
   override setQuality(q: QualitySettings): void {
-    const changed = !this.quality || this.quality.level !== q.level;
     super.setQuality(q);
-    if (changed && this.app) this.buildHaze(q);
+    this.haze?.setShare(hazeShare(q));
   }
 
   protected override invalidate(): void {
@@ -393,8 +393,11 @@ export class FogSystem extends CueFxSystem {
       // stage into one glowing blob. The field layer is thinner with a crowd present (the bodies
       // already break up the view; the veil in front of the stage belongs to the empty field).
       const tribe = this.crowdMode() === 'tribe';
-      const stage = 0.062 * level + 0.1 * this.stageSmoke;
-      const field = (0.022 * level + 0.02 * this.stageSmoke) * (tribe ? 0.55 : 1);
+      // atmos.glow `smoke`: the site fills with smoke (pink whiteout v76, red smoke v1510-1537)
+      const siteSmoke = Math.min(1, Math.max(0, Number.isFinite(env.smoke) ? env.smoke : 0));
+      const sk = 1 + 2 * siteSmoke;
+      const stage = (0.062 * level + 0.1 * this.stageSmoke) * sk;
+      const field = (0.022 * level + 0.02 * this.stageSmoke) * (tribe ? 0.55 : 1) * sk;
       const skyD = 0.02 * level + 0.2 * this.skySmoke;
       this.haze.setDensity(stage, field, skyD);
       this.haze.setTint(this.smokeTint(t));
@@ -421,6 +424,11 @@ export class FogSystem extends CueFxSystem {
     super.dispose();
     this.haze?.dispose();
   }
+}
+
+/** share of the haze sprites a preset draws */
+function hazeShare(q: QualitySettings): number {
+  return q.level === 'ultra' ? 1 : q.level === 'high' ? 0.8 : q.level === 'medium' ? 0.55 : 0.35;
 }
 
 function evalSeg(s: LevelSeg, t: number): number {

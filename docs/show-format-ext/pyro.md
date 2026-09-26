@@ -27,9 +27,24 @@ listed under "Engine behaviour". Unknown params are still ignored.
   saturated spark colour that the camera recorded as that pale tint. Coloured sparks keep their
   hue as they cool; only gold and charcoal sparks cool to deep orange. The white-hot core is
   smaller for metal-salt colours. Tall wall gerbs (H > 14) burn out near the top of their column.
-* **Spark budget.** When a layer is over budget it uses water-filling instead of a uniform scale:
-  small emitters (a pillar-top fan, a flare) stay complete, and only the largest (a 60-unit wall)
-  thin out.
+* **Particle budget (round 3).** An emitter's share of its layer is decided on the first frame it is
+  drawn and then fixed for its life, so a layer over budget never reshuffles or flickers the
+  particles already on screen. Newborn emitters get a quantised share (1 / 0.75 / 0.5 / 0.35 /
+  0.25) from the layer's pressure (fast attack, ~1.5 s release) and a lower one only when they
+  would not fit. Small emitters (≤ 2 slots: a pillar-top fan, a flare) stay complete. A thinned
+  emitter draws a golden-ratio subset of its particles; directions, phases and timing always come
+  from the recorded count, so a thinned sphere is still a sphere and a thinned fountain still emits
+  evenly. After a seek every share is decided again (the paused picture does not depend on what
+  was on screen before). Budgets per preset live in `src/fx/core/budget.ts`: fw-stars ×1.3 and
+  fw-smoke ×1.5 on desktop; mobile caps fw-stars at 15k and pyro sparks at 12k particles, and spark
+  ribbons use 2 trail segments. Crackle pops keep ~60 % (medium) / ~40 % (mobile) of their pops per
+  star. The layer stats show `<layer>.keep` (share given to newborns now) and `<layer>.changes`
+  (emergency re-thinning of emitters on screen; normally absent).
+* **Site glow on smoke and haze (round 3).** `atmos.glow` (`app.env.glowColor`, `app.env.smoke`)
+  lights every haze sprite in its colour in all three zones (the brightness knee rises with the
+  glow's luminance, so the glow is not squashed like the rig scatter) and all smoke, CO2 and low fog.
+  Its `smoke` multiplies the stage and field haze density by (1 + 2 × smoke) and brings the veil
+  close to the camera. This completes the pink whiteout (v76) and the red smoke site (v1510–1537).
 * **Smoke density.** `fog.burst` and Bengal smoke are emitted one-shot, staggered over the burn.
   Before, a continuous emitter released only dur/life of its particles, so bursts were about 3×
   thinner than authored. Plain bursts are now about 2–3× denser than before; bursts that use any
