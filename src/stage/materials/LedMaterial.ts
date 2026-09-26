@@ -73,6 +73,10 @@ export function createLedMaterial(): THREE.ShaderMaterial {
         uContentCol: { value: new THREE.Color(1, 0.3, 0.1) },
         /** content colour of the side-section panels (per-zone screen colours) */
         uContentColS: { value: new THREE.Color(1, 0.3, 0.1) },
+        /** second colour of a colour look: the recesses of the castle print */
+        uContentCol2: { value: new THREE.Color(0.1, 0.15, 0.6) },
+        /** castle print levels: x lit faces (x content colour), y recesses (x second colour) */
+        uArtLevel: { value: new THREE.Vector2(0.85, 0.035) },
         uContentMix: { value: 0 },
         uContentGain: { value: 1 },
         // side sections (|x| > 37.5) take their own LED colours
@@ -173,6 +177,10 @@ const LED_FRAG = /* glsl */ `
       uniform float uContent;
       uniform vec3 uContentCol;
       uniform vec3 uContentColS;
+      /** second colour of a colour look (recesses of the castle print) */
+      uniform vec3 uContentCol2;
+      /** x lit print level, y recess level of the castle print (colour / pulse looks) */
+      uniform vec2 uArtLevel;
       uniform vec2 uSide;
       // 0 castle core .. 1 side sections (set in main before the panel content is evaluated)
       float gSideW = 0.0;
@@ -254,20 +262,111 @@ const LED_FRAG = /* glsl */ `
 
       float fbm2(vec2 p) { return vnoise(p) * 0.55 + vnoise(p * 2.03 + 7.1) * 0.3 + vnoise(p * 4.1 + 3.3) * 0.15; }
 
+      // ---- castle print art (the colour looks) -------------------------------------------------------
+      // The real set has no LED video walls (design bible 5.1): a colour look colours the printed castle.
+      // So the colour / pulse panels show that print instead of a flat fill: ashlar stone lit from below,
+      // an arcade of round arches at the foot, a framed banner with mirrored ornament scrolls (video 348.25
+      // red scroll print, 447 / 725.5 lit stone with arches), with dark joints / openings.
+
+      // one tapering log-spiral scroll stroke around c (r0..r1), in normalised banner units; aa = px size
+      float scroll(vec2 q, vec2 c, float r0, float r1, float dir, float aa) {
+        vec2 d = q - c;
+        d.x *= dir;
+        float r = max(length(d), 1e-3);
+        float s = fract(log(r) * 1.1 - atan(d.y, d.x) * 0.15915494);
+        float w = aa * 1.3 / r;
+        float band = 1.0 - smoothstep(0.17 - w, 0.17 + w, abs(s - 0.5));
+        band = mix(band, 0.34, smoothstep(0.08, 0.2, w));
+        return band * smoothstep(r0, r0 * 1.5, r) * (1.0 - smoothstep(r1 * 0.75, r1, r));
+      }
+
+      // x = lit print level (0..~1.2), y = recess share (joints, openings, banner field) for the 2nd colour
+      vec2 castleArt(vec2 p, vec2 size, float seed) {
+        float fw = max(fwidth(p.x), fwidth(p.y));
+        float far = smoothstep(0.02, 0.09, fw);
+        // ashlar courses (staggered blocks, per-block shade, grain), joints fade to their mean far away
+        float ch = 0.62;
+        float row = floor(p.y / ch);
+        float bl = 1.05 + 0.45 * h11(row * 3.1 + seed * 7.0);
+        float bx = (p.x + h11(row * 1.7 + seed) * bl) / bl;
+        vec2 f = vec2(fract(bx) * bl, fract(p.y / ch) * ch);
+        vec2 e = min(f, vec2(bl, ch) - f);
+        float jw = 0.045 + fw * 0.7;
+        float joint = mix(smoothstep(jw * 0.5, jw * 1.5, min(e.x, e.y)), 0.85, far);
+        float shade = 0.5 + 0.5 * h21(vec2(floor(bx), row) + seed * 3.0);
+        float grain = 0.82 + 0.18 * vnoise(p * vec2(5.0, 8.0) + seed * 11.0);
+        // uplit from the deck floods: bright foot fading into the dark top
+        float up = mix(1.0, 0.28, smoothstep(0.0, size.y * 0.95, p.y));
+        float lit = joint * shade * grain * up;
+        float rec = 1.0 - joint;
+        // arcade at the foot: round arches, dark openings with a faint glow at their sill
+        float aw = size.x * 0.34;
+        float ax = abs(abs(p.x - size.x * 0.5) - size.x * 0.24);
+        float spring = 0.35 + aw * 1.1;
+        vec2 ad = vec2(ax, max(p.y - spring, 0.0));
+        float open = (1.0 - smoothstep(aw * 0.5 - 0.03, aw * 0.5, length(ad))) * step(0.35, p.y);
+        float ring = (1.0 - smoothstep(aw * 0.5 + 0.1, aw * 0.5 + 0.17, length(ad))) * step(0.3, p.y) * (1.0 - open);
+        lit = mix(lit, 0.95 * up, ring * 0.6);
+        lit = mix(lit, 0.05 + 0.18 * (1.0 - smoothstep(0.35, 1.0, p.y)), open);
+        rec = mix(rec, 0.5, open);
+        // cornice band above the arcade
+        float cy = spring + aw * 0.5 + 0.35;
+        float cor = step(cy, p.y) * step(p.y, cy + 0.22);
+        lit = mix(lit, 0.9 * up * (0.75 + 0.25 * step(0.5, fract(p.x / 0.18))), cor);
+        // framed banner with mirrored ornament scrolls in the upper part
+        float by0 = cy + 0.45;
+        float by1 = size.y - 0.3;
+        float bw = size.x * 0.8;
+        float bh = max(by1 - by0, 0.5);
+        vec2 b = vec2(p.x - size.x * 0.5, p.y - by0);
+        // scalloped (swallowtail) bottom edge
+        float scal = 0.18 * abs(fract(b.x / bw * 2.0 + 0.5) - 0.5) * 2.0;
+        float inB = step(abs(b.x), bw * 0.5) * step(scal, b.y) * step(b.y, bh);
+        vec2 q = vec2(abs(b.x), b.y) / bw;
+        float R = bh / bw;
+        float aa = fw / bw;
+        float orn = scroll(q, vec2(0.24, 0.22 * R), 0.02, 0.2, 1.0, aa);
+        orn = max(orn, scroll(q, vec2(0.16, 0.5 * R), 0.02, 0.17, -1.0, aa));
+        orn = max(orn, scroll(q, vec2(0.26, 0.78 * R), 0.02, 0.19, 1.0, aa));
+        // the vine linking the scrolls + an arc band across the top
+        float vx = 0.2 + 0.1 * sin(q.y / R * 12.566 + 1.2);
+        float vw = 0.03 + aa;
+        orn = max(orn, (1.0 - smoothstep(vw * 0.5, vw, abs(q.x - vx))) * step(0.08 * R, q.y) * step(q.y, 0.92 * R));
+        float arc = abs(length(vec2(q.x, q.y - 0.62 * R)) - (0.38 * R));
+        orn = max(orn, (1.0 - smoothstep(0.02, 0.02 + vw, arc)) * step(0.62 * R, q.y));
+        orn = mix(orn, 0.3, far * 0.6);
+        // gilt frame lines
+        float fr = min(bw * 0.5 - abs(b.x), bh - b.y);
+        float frame = (1.0 - smoothstep(0.035, 0.06 + fw, fr)) + (1.0 - smoothstep(0.015, 0.03 + fw, abs(fr - 0.11)));
+        float banner = 0.14 + 0.95 * orn + 0.7 * clamp(frame, 0.0, 1.0);
+        float bUp = mix(1.0, 0.55, smoothstep(0.0, bh, b.y));
+        lit = mix(lit, banner * bUp, inB);
+        rec = mix(rec, 0.25 * (1.0 - orn), inB);
+        return vec2(lit, rec);
+      }
+
       // procedural LED content on a panel; p = local metres (x from the left edge, y from the bottom), size = w,h
       vec3 panelContent(vec2 p, vec2 size) {
         float m = uContent;
         vec2 c = p - size * 0.5;
         vec3 col = mix(uContentCol, uContentColS, gSideW);
-        if (m < 1.5) {
-          return col * 1.2;
+        float seed = floor(vWP.x * 0.5) * 0.37 + floor(vWP.z * 0.25) * 0.11;
+        if (m < 1.5 || m > 8.5) {
+          // colour / pulse: the castle print lit in the content colour, recesses in the 2nd colour
+          vec2 art = castleArt(p, size, seed);
+          float env = m < 1.5 ? 1.0 : 0.35 + 1.1 * exp(-fract(uBeat) * 5.0);
+          return (col * art.x * uArtLevel.x + uContentCol2 * art.y * uArtLevel.y) * env;
         } else if (m < 2.5) {
-          // fire rising from the bottom
-          float n = fbm2(vec2(p.x * 1.4, p.y * 0.9 - uTime * 2.2));
+          // fire: the castle print under flickering fire light rising from the deck (video 656 / 705:
+          // the pale stone and stairs under a warm red-orange light, never a picture of flames)
+          vec2 art = castleArt(p, size, seed);
+          float n = fbm2(vec2(p.x * 0.9, p.y * 0.55 - uTime * 1.7));
           float hgt = p.y / size.y;
-          float heat = clamp(n * 1.5 - hgt * 1.05 + 0.25, 0.0, 1.0);
-          vec3 fire = mix(vec3(0.35, 0.01, 0.0), mix(vec3(1.0, 0.25, 0.01), vec3(1.0, 0.62, 0.14), heat), heat);
-          return fire * (0.12 + 1.7 * heat * heat);
+          float heat = clamp(n * 1.35 - hgt * 0.95 + 0.3, 0.0, 1.0);
+          vec3 fire = mix(vec3(0.45, 0.03, 0.005), mix(vec3(1.0, 0.24, 0.02), vec3(1.0, 0.55, 0.16), heat), heat);
+          // the cue colour tints the light (level-free: its hue only)
+          fire = mix(fire, col / max(max(col.r, max(col.g, col.b)), 1e-3), 0.3);
+          return fire * art.x * (0.3 + 1.2 * heat) * uArtLevel.x * 2.0 + vec3(0.25, 0.02, 0.0) * art.y * uArtLevel.y;
         } else if (m < 3.5) {
           // ice: slow crystalline cells + glints
           vec2 q = p * 1.6;
@@ -319,7 +418,7 @@ const LED_FRAG = /* glsl */ `
           float spark = step(0.8, r) * (1.0 - smoothstep(0.05, 0.14, length(f + (vec2(h21(i + 3.1), h21(i + 7.7)) - 0.5) * 0.6)));
           return mix(vec3(1.0, 0.45, 0.05), vec3(1.0, 0.9, 0.5), r) * spark * 2.5 + vec3(0.25, 0.03, 0.0) * (1.0 - p.y / size.y);
         }
-        return col * (0.15 + 1.4 * exp(-fract(uBeat) * 5.0));
+        return col * 0.5;
       }
 
       void main() {
@@ -442,7 +541,9 @@ const LED_FRAG = /* glsl */ `
           vec2 f = fract(p / 0.05);
           float grid = smoothstep(0.0, 0.2, f.x) * smoothstep(1.0, 0.8, f.x) * smoothstep(0.0, 0.2, f.y) * smoothstep(1.0, 0.8, f.y);
           grid = mix(grid, 0.6, clamp(fwidth(p.x / 0.05) - 0.4, 0.0, 1.0));
-          col = panelContent(p, size) * (0.35 + 0.65 * grid) * pulse * uContentGain;
+          // the castle print (colour / pulse looks) keeps a softer grid so its stone and scrolls read
+          float gridK = uContent < 1.5 || uContent > 8.5 ? 0.45 : 0.65;
+          col = panelContent(p, size) * (1.0 - gridK + gridK * grid) * pulse * uContentGain;
         }
         col += vec3(uStrobe) * 3.0 * step(kind, 0.5) * uRegion.z;
         col *= regG * mix(uSide.x, uSide.y, smoothstep(-6.0, 6.0, vWP.x));
