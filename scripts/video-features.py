@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Per-frame features of the official Endshow video (local file, never committed) for show reconstruction.
 
-    python3 scripts/video-features.py <video.mp4> <out.npz> [--fps 25] [--w 192]
+    python3 scripts/video-features.py <video.mp4> <out.npz> [--fps 25] [--w 192] [--ss start] [--t duration]
 
 Decodes the video at low resolution and stores, per frame: luma (mean and a 4x4 grid), dark fraction,
 white-hot fraction, fire fraction (saturated bright red..yellow), 12 hue bins of saturated bright pixels,
@@ -12,6 +12,8 @@ import sys, subprocess, shutil
 import numpy as np
 
 src, out = sys.argv[1], sys.argv[2]
+ss = float(sys.argv[sys.argv.index('--ss') + 1]) if '--ss' in sys.argv else 0.0
+dur = float(sys.argv[sys.argv.index('--t') + 1]) if '--t' in sys.argv else 0.0
 fps = int(sys.argv[sys.argv.index('--fps') + 1]) if '--fps' in sys.argv else 25
 W = int(sys.argv[sys.argv.index('--w') + 1]) if '--w' in sys.argv else 192
 H = W * 9 // 16
@@ -19,7 +21,8 @@ ffmpeg = shutil.which('ffmpeg')
 if not ffmpeg:
     import imageio_ffmpeg
     ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
-proc = subprocess.Popen([ffmpeg, '-v', 'error', '-i', src, '-vf', f'fps={fps},scale={W}:{H}:flags=area', '-f', 'rawvideo',
+seek = (['-ss', str(ss)] if ss else []) + (['-t', str(dur)] if dur else [])
+proc = subprocess.Popen([ffmpeg, '-v', 'error', *seek, '-i', src, '-vf', f'fps={fps},scale={W}:{H}:flags=area', '-f', 'rawvideo',
                          '-pix_fmt', 'rgb24', '-'], stdout=subprocess.PIPE, bufsize=10 ** 8)
 FB = W * H * 3
 CH = 250
@@ -72,5 +75,5 @@ while True:
     if n % 5000 < CH:
         print(f'{n / fps:7.1f} s', flush=True)
 proc.wait()
-np.savez_compressed(out, fps=fps, **{k: np.concatenate(v) for k, v in feats.items()})
+np.savez_compressed(out, fps=fps, t0=ss, **{k: np.concatenate(v) for k, v in feats.items()})
 print(f'{n} frames -> {out}')
