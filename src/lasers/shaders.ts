@@ -357,8 +357,9 @@ void main() {
     // Embers v1139-1160: bright rolling waves and dark gaps, never an evenly lit floor)
     float I = uGainS * uLowHaze * (0.015 + 0.5 * crest + 3.6 * crest * crest) * (0.55 + 1.3 * streak) * (0.55 + 0.45 * hazePhase(c))
       * pow(max(vR, 6.0), -0.55) / max(nv, 0.25) * exp(-vLift / 1.3) * edgeU;
-    // deep scan colour in the troughs, the second colour on the lit crests
-    col = mix(vColor, vColor2, smoothstep(0.12, 0.6, crest)) * I;
+    // deep scan colour in the troughs and on most of the swell, the second colour only on the brightest
+    // crests (v1145: a saturated deep-blue sea with pale-blue highlights)
+    col = mix(vColor, vColor2, smoothstep(0.3, 0.9, crest)) * I;
     capI = 2.2;
   } else if (vMode < 0.5) {
     // ---- a scanned sheet ("liquid sky"). Single scattering in a thin plane: radiance ∝ 1/|n.v| (the
