@@ -74,6 +74,37 @@ Also in round 5:
 - **Wing print.** The printed inferno on the wing membranes is uplit in the wing LED hue with a 35 %
   warm share, so a blue / cyan look (In The Cold) no longer shows glowing orange membranes.
 
+### Round 6: masks, strobes, festoons, portal key (engine change, no cue change needed)
+
+Checked side by side with the official video (Show camera, Mac GPU); default 64 moments 61.0 / 39.4 %
+→ 61.2 / 39.7 % (raw / calibrated), no part down.
+
+- **Crown masks keep the crown lit.** A `mask` of `crown` or `wings` makes the crown the look: its LED
+  outlines stay lit at the wing-glow level (0.35 + 0.65 · `wings`) even when `screens.content` is `off`
+  (before, content `off` blacked out every LED line and only the orange print glowed). While no content
+  is alive, the isolated crown's LEDs take the state's `rosettes` colour instead of the section palette;
+  a `crownColor` still wins (video 1320.75–1323.5: pink / red wing outlines and the throat, nothing else).
+- **Masks darken the dragon's inner fire.** The lava cracks of the neck, back and wing arms follow the
+  dragon's LED level (the arms also the wings'), so `mask: 'wings'` leaves no glowing neck or arms and
+  `mask: 'dragon'` no glowing arms. The dragon's real uplight follows the dragon's wash share (25 %
+  under `wings`).
+- **Strobes and a dimmed set.** The white light of the lighting system's strobes on the print, on the
+  castle battens and in the FOH keys is scaled by the state's `master`: a set dimmed to a silhouette
+  (`master` 0.2, video 1267.9: only the lamp strings strobe) keeps its stone dark behind the flashes. At
+  `master` 1 nothing changes.
+- **`castleColor` takes the arcade.** The glowing arcade in the ground-floor recesses takes a castle
+  colour override at 85 % (video 338: `castleColor` blue reads as a blue castle, not magenta arches).
+- **Festoon bulbs.** Wing strings 0.24 m (was 0.15), castle / side strings 0.2 m (was 0.14–0.15), a wider
+  glare halo, a white-hot core and an HDR gain of 7 (was 3.2): the wing strings read as bright white points
+  (video 582.75, 1268), not as pin-pricks.
+- **Wing print.** The print's own uplight is 0.28 (was 0.42) × `wings` with a 20 % warm share (was 35 %):
+  the membranes read darker than the LED spars and strokes (video 338, 1322.5).
+- **Portal key.** The wash-driven part of the two FOH keys on the portal is 3.5× brighter and 50 % tungsten
+  (was 30 %); their constant work-light part is unchanged, so a dark look keeps a dark castle (video 656 /
+  705: the portal, the stairs and the walls beside it under a bright warm key; 705 scores 0.30 → 0.39).
+- **Seek-exact wings.** The membranes' breeze runs on show time, not wall-clock time (a seek now gives
+  the same wing image; before, up to 98/255 differed at 1463 between seek orders).
+
 ## `stage.state`: new params
 
 Like every other `stage.state` value, the new params are cross-faded over the cue's `fade`. A param
@@ -88,9 +119,9 @@ region isolation holds for the whole fade. A dragon-only fade-in therefore never
 | `battens` | 0..2 | 1 | LED battens and pixel dots only (castle and sides). Windows, lamps and lanterns are unaffected. Example: `battens: 0, windows: 1, windowColor: white` gives white window bars and nothing else. |
 | `dragon` | 0..2 | 1 | The dragon's LED lines and pixel dots (head, neck, body). The eyes (`eyesIntensity`) and the mouth (`mouth`) keep their own controls. |
 | `wingLed` | 0..2 | 1 | The wing LED lines: spars, top edges, blades, finial outlines, rosette rings and the membrane feather strokes. The printed-skin uplight stays on `wings`. |
-| `mask` | `all` \| `center` \| `crown` \| `wings` \| `dragon` | `all` | Hard isolation, applied over the numeric levels. `center`: side sections dark. `crown`: castle and sides dark, dragon and wings lit. `wings`: castle, sides and dragon LEDs dark, and the dragon's wash cut to 25 %. `dragon`: only the dragon. Castle, sides, wing LEDs, wing glow (`wings`), rosettes, and the wash and reflections on the wings are all set to 0. |
+| `mask` | `all` \| `center` \| `crown` \| `wings` \| `dragon` | `all` | Hard isolation, applied over the numeric levels. `center`: side sections dark. `crown`: castle and sides dark, dragon and wings lit. `wings`: castle, sides and dragon LEDs dark, and the dragon's wash cut to 25 %. `dragon`: only the dragon. Castle, sides, wing LEDs, wing glow (`wings`), rosettes, and the wash and reflections on the wings are all set to 0. Round 6: under `crown` / `wings` the crown's LEDs stay lit without screen content (at 0.35 + 0.65 · `wings`, in the `rosettes` colour unless `crownColor` is given), and the dragon's lava glow follows its LED level. |
 | `side` | `left` \| `right` \| `both` | `both` | Per-side isolation (round 4). `left` keeps only the audience-left half (x < 0) of the set's emitters lit, `right` only the right half: castle and side-section LEDs and panels, decor glow, virtual floods and FOH wash, the wing / dragon LED lines and dots, the membrane strokes and print glow, and the rosette suns. The seam is soft over the centre (±6 m), so the dragon's head reads half lit. The eyes, the mouth, the festoons and the lighting system's wash on the crown are not affected. Fades like every other state value. |
-| `castleColor` | colour | none | LED colour of the castle core (battens, secondary colour, and the pilasters, which lean white). Also re-tints the castle floods at 50 % and, while a `screens.content` cue is alive, the castle's LED panels at 85 % (per-zone screen colours, round 4). Example: a blue castle under a red content colour. |
+| `castleColor` | colour | none | LED colour of the castle core (battens, secondary colour, and the pilasters, which lean white). Also re-tints the castle floods at 50 %, the glowing ground-floor arcade at 85 % (round 6) and, while a `screens.content` cue is alive, the castle's LED panels at 85 % (per-zone screen colours, round 4). Example: a blue castle under a red content colour. |
 | `sidesColor` | colour | = castle colour | LED colour of the side sections. The side floods ("floor lights") take it at 100 %, the side-section LED panels at 85 %. |
 | `crownColor` | colour | none | LED colour of the dragon **and** the wings (overrides the `screens.content` colour on the crown only). |
 | `wingColor` | colour | = crown colour | LED colour of the wings only. |

@@ -16,6 +16,13 @@ const _c = new THREE.Color();
 const FLASH_MIN_Y = 36;
 /** tungsten follow-spot tint of the FOH keys */
 const WARM_KEY = new THREE.Color(1.0, 0.62, 0.34);
+/**
+ * FOH key: gain of its wash-driven part and its tungsten share (round 6: the portal close-ups 656 / 705 show
+ * the portal, the stairs and the walls beside it under a bright warm key; the constant work-light part
+ * stays low so a dark look keeps a dark castle, video 1438.5)
+ */
+const KEY_GAIN = 3.5;
+const KEY_WARM = 0.5;
 
 /**
  * The few REAL lights aimed at the set (everything else is the virtual flood field + emissives):
@@ -96,15 +103,18 @@ export class StageLights {
           break;
         }
         case 'center':
+          // the dragon's own uplight: it follows the dragon's wash share (mask 'wings' leaves the dragon
+          // a dark silhouette between the lit wings, video 1322.5)
           l.color.copy(wash).lerp(look.led, 0.45 * E);
-          l.intensity = (50 * E + 120 * wi) * (0.5 + 0.7 * look.energy) * (1 + look.pulse);
+          l.intensity = (50 * E + 120 * wi) * (0.5 + 0.7 * look.energy) * (1 + look.pulse) * look.dragonWash;
           break;
         case 'front':
           // FOH keys on the portal: they follow the castle level (a dark-castle look keeps them low);
           // the wash colour warmed by the tungsten of the follow spots (video 650 / 705: the portal,
           // the stairs and the troupe under a warm orange-red key, not a pure saturated wash)
-          l.color.copy(wash).lerp(look.castleLed2, (rig.side > 0 ? 0.25 : 0.1) * E).lerp(WARM_KEY, 0.3);
-          l.intensity = (42 * E + 115 * wi) * (0.6 + 0.5 * look.energy) * (1 + 0.6 * look.pulse + look.strobe * 2) * (0.1 + 0.9 * Math.min(1.3, look.castleGain));
+          l.color.copy(wash).lerp(look.castleLed2, (rig.side > 0 ? 0.25 : 0.1) * E).lerp(WARM_KEY, KEY_WARM);
+          // (strobes flash the portal only as far as the set is lit: a dimmed set stays a silhouette)
+          l.intensity = (42 * E + 115 * KEY_GAIN * wi) * (0.6 + 0.5 * look.energy) * (1 + 0.6 * look.pulse + look.strobe * 2 * look.master) * (0.1 + 0.9 * Math.min(1.3, look.castleGain));
           break;
         case 'base':
           // low lights on the castle base: they belong to the castle (region level / colour)

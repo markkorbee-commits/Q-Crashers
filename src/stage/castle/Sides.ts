@@ -4,7 +4,7 @@ import { boxMinMax, cyl, decorDisc, decorPanel, GLOW, METAL, PAINT, prismX, rod,
 import { extrude, frameShape, type Opening, paneShape, wallShape } from '../lib/gothic';
 import { armX, ground, L, ledgeTop, rampartTop } from '../layout';
 import { LED_KIND } from '../materials/LedMaterial';
-import { GARLAND, type Garlands } from '../dragon/shading';
+import { GARLAND, GARLAND_BULB, type Garlands } from '../dragon/shading';
 
 const OUT = new THREE.Vector3(0, 0, 1);
 const UP = new THREE.Vector3(0, 1, 0);
@@ -30,7 +30,7 @@ export function addSideGarlands(g: Garlands): void {
   const y = L.wallTop - 0.55;
   for (const s of [-1, 1]) {
     let u = 0;
-    for (let i = 0; i + 1 < pil.length; i++) u = g.swag(new THREE.Vector3(s * pil[i], y, z), new THREE.Vector3(s * pil[i + 1], y, z), 0.75, GARLAND.sides, 0.9, 0.15, u);
+    for (let i = 0; i + 1 < pil.length; i++) u = g.swag(new THREE.Vector3(s * pil[i], y, z), new THREE.Vector3(s * pil[i + 1], y, z), 0.75, GARLAND.sides, 0.9, GARLAND_BULB.set, u);
   }
 }
 

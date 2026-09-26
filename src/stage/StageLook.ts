@@ -141,6 +141,12 @@ export interface StageLookEx extends StageLook {
   /** 0..1 emitter level of the audience-left (x < 0) / right half (state param `side`) */
   sideL: number;
   sideR: number;
+  /**
+   * minimum LED level of the crown (dragon + wing LED lines) while a `mask` isolates it (crown / wings):
+   * the isolated crown IS the look, so its outlines stay lit when `screens.content` is off (video
+   * 1320.75-1323.5: only the wing outlines + the throat); already scaled by the emitter level
+   */
+  crownLedFloor: number;
   /** 0..1 how much the side-section virtual floods take `sidesLed` instead of the lighting wash */
   sidesFloodTint: number;
   /** 0..1 same for the castle core floods (castleColor override) */
@@ -200,6 +206,7 @@ export function createStageLookEx(): StageLookEx {
     wingLed2: new THREE.Color('#2a60ff'),
     sideL: 1,
     sideR: 1,
+    crownLedFloor: 0,
     sidesFloodTint: 0,
     castleFloodTint: 0,
     garland: new THREE.Vector3(0, 0, 0),

@@ -10,6 +10,7 @@ import {
   createEnvMap,
   createGarlandMaterial,
   GARLAND,
+  GARLAND_BULB,
   Garlands,
   createRosetteGlowMaterial,
   ROSETTE_R,
@@ -161,7 +162,7 @@ export class DragonCrown {
     t1 = performance.now();
     const body = buildBody(kit);
     const { wings, membrane } = buildWings(kit);
-    for (const w of wings) for (const g of w.garlands) this.garlands.string(g, GARLAND.wings, 0.85, 0.15);
+    for (const w of wings) for (const g of w.garlands) this.garlands.string(g, GARLAND.wings, 0.85, GARLAND_BULB.wings);
     this.stat.bodyWingMs = Math.round(performance.now() - t1);
     await step('merging the crown', 0.85);
     t1 = performance.now();
@@ -345,7 +346,9 @@ export class DragonCrown {
     const U = this.U;
     const cam = ctx.camera;
     U.uPixel.value = (2 * Math.tan(THREE.MathUtils.degToRad(cam.fov) * 0.5)) / Math.max(200, typeof window !== 'undefined' ? window.innerHeight : 720);
-    U.uTime.value = ctx.time;
+    // the membranes' breeze runs on SHOW time (a pure function of the show: a seek gives the same image;
+    // round 6 found wall-clock motion as seek residue of up to ~60/255 on the wing art at 1463)
+    U.uTime.value = ctx.showTime;
     U.uShowT.value = ctx.showTime;
     U.uPoolAmt.value = look.mode === 'dormant' ? 0 : 0.4;
     // practicals (constant glows) follow the look's emitter level: 0 in blackouts
@@ -365,7 +368,8 @@ export class DragonCrown {
     U.uSide.value.set(look.sideL, look.sideR);
     U.uDragonWash.value = look.dragonWash;
     U.uBeat.value = ctx.beat.beat;
-    U.uLedI.value = Math.max(0, look.ledIntensity);
+    // (a crown-isolating mask keeps the crown's outlines lit without screen content: crownLedFloor)
+    U.uLedI.value = Math.max(0, look.ledIntensity, look.crownLedFloor);
     // festoons: HDR level per group (not tied to the master level: a cue may light them in a blackout)
     U.uGarl.value.copy(look.garland);
     U.uGarlCol.value.copy(look.garlandColor);
@@ -514,7 +518,7 @@ export class DragonCrown {
 const FROST = new THREE.Color(0.55, 0.8, 1.0);
 /** warm share of the wing print's uplights (tungsten-ish), mixed into the wing LED hue */
 const PRINT_WARM = new THREE.Color(1.0, 0.72, 0.5);
-const PRINT_WARM_SHARE = 0.35;
+const PRINT_WARM_SHARE = 0.2;
 /** colour uniforms of the wash rig / emitters switched off by the dev `?daylight` view */
 const DAY_OFF = ['uWashA', 'uWashB', 'uKey', 'uRim', 'uFlash', 'uAmbient', 'uMouthCol', 'uLava', 'uRosette', 'uEyes'] as const;
 
