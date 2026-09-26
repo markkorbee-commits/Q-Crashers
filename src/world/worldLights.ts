@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { LightEnv } from '../core/LightEnv';
+import type { FlashBucket, LightEnv } from '../core/LightEnv';
 import { LANTERN_Y, PILLARS } from './site';
 
 /**
@@ -10,7 +10,12 @@ import { LANTERN_Y, PILLARS } from './site';
  *   - the 8 pillar lanterns (full GGX, so damp concrete shows the lantern reflections)
  *   - the pillar uplight spill at each plinth (diffuse)
  *   - the stage as one broad soft source (colour = app.env.stageColor × stageIntensity)
- *   - the current pyro / firework flash (app.env.flashColor at app.env.flashPos)
+ *   - the current pyro / firework flashes as two AREA lights (stage side / field side, app.env
+ *     flashStage / flashField): the softening radius grows with the spread of the sources, so a gerb
+ *     wall across both side sections lights the whole field instead of a hot spot at its centre
+ *   - the bounce of big flashes off the smoke and haze: a broad ambient term around the flash centre
+ *     (video 600.4 s: the whole field and the tree belts turn gold under the gerb wall)
+ *   - the site-wide coloured glow of `atmos.glow` cues (app.env.glowColor): red smoke, flame walls
  * All materials share ONE uniform set, updated once per frame (after every show system ran).
  */
 
@@ -22,8 +27,17 @@ export const worldUniforms = {
   uWSpillCol: { value: PILLARS.map(() => new THREE.Vector3()) },
   uWStage: { value: new THREE.Vector4(0, 16, -12, 900) },
   uWStageCol: { value: new THREE.Vector3() },
+  /** stage-side flash: xyz centre, w = softening radius² (400 + spread²) */
   uWFlash: { value: new THREE.Vector4(0, 40, -20, 400) },
   uWFlashCol: { value: new THREE.Vector3() },
+  /** field-side flash (delay towers, FOH, bursts over the audience) */
+  uWFlash2: { value: new THREE.Vector4(0, 40, 60, 400) },
+  uWFlashCol2: { value: new THREE.Vector3() },
+  /** flash bounce off smoke / haze: xyz centre, w = 1 / falloff radius² */
+  uWAmbPos: { value: new THREE.Vector4(0, 15, 0, 1 / (230 * 230)) },
+  uWAmbCol: { value: new THREE.Vector3() },
+  /** site-wide coloured glow (atmos.glow), irradiance */
+  uWGlowCol: { value: new THREE.Vector3() },
   uWTime: { value: 0 },
   /** sky radiance for glossy reflections (written by the EnvironmentSystem) */
   uWSkyZen: { value: new THREE.Color(0.004, 0.03, 0.12) },
@@ -52,11 +66,70 @@ const SPILL_GAIN = 90;
 const STAGE_GAIN = 5200;
 /** fireworks / pyro flashes on the grounds: aerial shells burst 60–150 m up, so the field gets a
  *  modest share (photo P: silhouetted pillars and a dim red floor under a full crackle canopy) */
-const FLASH_GAIN = 1100;
+const FLASH_GAIN = 3000;
+/**
+ * Pyro light is burning metal (≈ 2000–2500 K) and the camera is balanced for the LEDs: on the video a
+ * gold gerb wall lights the ground deep ORANGE (measured on the field at v600.25: linear G/R ≈ 0.25,
+ * B/R ≈ 0.05), not beige. The flash light on the grounds is warped towards its dominant channel,
+ * c' = max · (c / max)^WARM (gold 1 : 0.67 : 0.33 → 1 : 0.37 : 0.06; white stays white, red stays
+ * red). The flash colour itself stays the pyro module's.
+ */
+const FLASH_WARM = 2.5;
 /** flash saturation for the grounds (a dense finale must not light the floor like a studio) */
 const WORLD_FLASH_K = 7;
+/**
+ * Bounce of the flashes off the smoke / haze cloud (irradiance per unit of compressed flash, before
+ * the haze factor). Tuned on the official video: 600.4 s (gold gerb wall: field, banks and tree belts
+ * gold), 1509 s (flame wall: the whole site orange), 76 s (pink gerb fans). Small single flashes stay
+ * almost direct-only (the bounce grows with F / (F + 2)).
+ */
+const BOUNCE_GAIN = 1.6;
+/** half-strength radius (m) of the bounce around the flash centre (+ the spread of the sources) */
+const BOUNCE_R = 110;
+/** multiple scattering in a coloured smoke cloud saturates its light further (gold → orange, pink → red) */
+const BOUNCE_WARM = 3;
+/** atmos.glow irradiance per unit of env.glowColor */
+const GLOW_GAIN = 6;
 
 const tmp = new THREE.Color();
+
+/** c' = k · max · (c / max)^p per channel (see FLASH_WARM), written to out */
+function warm(r: number, g: number, b: number, p: number, k: number, out: { r: number; g: number; b: number }): void {
+  const m = Math.max(r, g, b);
+  if (!(m > 0)) {
+    out.r = out.g = out.b = 0;
+    return;
+  }
+  out.r = m * Math.pow(Math.max(0, r) / m, p) * k;
+  out.g = m * Math.pow(Math.max(0, g) / m, p) * k;
+  out.b = m * Math.pow(Math.max(0, b) / m, p) * k;
+}
+const warmOut = { r: 0, g: 0, b: 0 };
+
+/**
+ * Light of the flashes bounced off the smoke / haze cloud this frame (irradiance colour, saturated):
+ * compressed like the direct flash, growing with F / (F + 2) so single small flashes stay direct-only.
+ */
+export function flashBounce(env: LightEnv, out: THREE.Color): THREE.Color {
+  const F = env.flashIntensity;
+  if (!(F > 0)) return out.setRGB(0, 0, 0);
+  const haze = Math.min(1.2, Math.max(0, env.haze));
+  const k = BOUNCE_GAIN * flashCompression(F, WORLD_FLASH_K) * (F / (F + 2)) * (0.45 + 0.55 * haze);
+  const c = env.flashColor;
+  warm(c.r, c.g, c.b, BOUNCE_WARM, k, warmOut);
+  return out.setRGB(warmOut.r, warmOut.g, warmOut.b);
+}
+const bounceC = new THREE.Color();
+
+function setFlash(b: FlashBucket, k: number, pos: THREE.Vector4, col: THREE.Vector3): void {
+  const fl = FLASH_GAIN * k;
+  const c = b.color;
+  warm(c.r, c.g, c.b, FLASH_WARM, fl, warmOut);
+  col.set(warmOut.r, warmOut.g, warmOut.b);
+  const s = b.spread;
+  // area light: a wall of sources softens the near hot spot and carries further (1/(d² + R²))
+  pos.set(b.pos.x, b.pos.y, b.pos.z, 400 + 0.8 * s * s);
+}
 
 /**
  * Soft-knee compression of the accumulated flash energy (factor applied to env.flashColor, which is
@@ -76,8 +149,11 @@ export function pillarChase(env: LightEnv, i: number): number {
   return typeof v === 'number' && Number.isFinite(v) ? Math.max(0, v) : 1;
 }
 
-/** write this frame's show light state into the shared uniforms (call after all emitters ran) */
-export function updateWorldLights(env: LightEnv, time: number): void {
+/**
+ * write this frame's show light state into the shared uniforms (call after all emitters ran).
+ * `flashScale` < 1 softens the flash light on the grounds (photosensitivity setting).
+ */
+export function updateWorldLights(env: LightEnv, time: number, flashScale = 1): void {
   const u = worldUniforms;
   u.uWTime.value = time;
   for (let i = 0; i < N; i++) {
@@ -97,9 +173,18 @@ export function updateWorldLights(env: LightEnv, time: number): void {
   u.uWStageCol.value.x += sb;
   u.uWStageCol.value.y += sb;
   u.uWStageCol.value.z += sb;
-  const fl = FLASH_GAIN * flashCompression(env.flashIntensity, WORLD_FLASH_K);
-  u.uWFlashCol.value.set(env.flashColor.r * fl, env.flashColor.g * fl, env.flashColor.b * fl);
-  u.uWFlash.value.set(env.flashPos.x, env.flashPos.y, env.flashPos.z, 400);
+  // flashes: the total is compressed once, both buckets share the factor
+  const k = flashCompression(env.flashIntensity, WORLD_FLASH_K) * flashScale;
+  setFlash(env.flashStage, k, u.uWFlash.value, u.uWFlashCol.value);
+  setFlash(env.flashField, k, u.uWFlash2.value, u.uWFlashCol2.value);
+  // bounce off the lit smoke around the flash centre (falls to a quarter at BOUNCE_R + spread)
+  flashBounce(env, bounceC);
+  u.uWAmbCol.value.set(bounceC.r * flashScale, bounceC.g * flashScale, bounceC.b * flashScale);
+  const sp = env.flashSpread;
+  const r = BOUNCE_R + sp;
+  u.uWAmbPos.value.set(env.flashPos.x, Math.max(8, env.flashPos.y), env.flashPos.z, 1 / (r * r));
+  const g = env.glowColor;
+  u.uWGlowCol.value.set(g.r * GLOW_GAIN, g.g * GLOW_GAIN, g.b * GLOW_GAIN);
 }
 
 const PARS = /* glsl */ `
@@ -110,6 +195,11 @@ uniform vec4 uWStage;
 uniform vec3 uWStageCol;
 uniform vec4 uWFlash;
 uniform vec3 uWFlashCol;
+uniform vec4 uWFlash2;
+uniform vec3 uWFlashCol2;
+uniform vec4 uWAmbPos;
+uniform vec3 uWAmbCol;
+uniform vec3 uWGlowCol;
 uniform float uWTime;
 uniform vec3 uWSkyZen;
 uniform vec3 uWSkyHor;
@@ -162,6 +252,22 @@ const APPLY = /* glsl */ `
     wl.direction = L * inversesqrt( d2 );
     wl.color = uWFlashCol / ( d2 + uWFlash.w );
     RE_Direct( wl, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, wm, reflectedLight );
+    if ( dot( uWFlashCol2, vec3( 1.0 ) ) > 0.0 ) {
+      lp = ( viewMatrix * vec4( uWFlash2.xyz, 1.0 ) ).xyz;
+      L = lp - geometryPosition;
+      d2 = dot( L, L );
+      wl.direction = L * inversesqrt( d2 );
+      wl.color = uWFlashCol2 / ( d2 + uWFlash2.w );
+      RE_Direct( wl, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, wm, reflectedLight );
+    }
+    // lit smoke / haze overhead and the site glow: soft sky-weighted fill (no direction, no specular)
+    vec3 upV = ( viewMatrix * vec4( 0.0, 1.0, 0.0, 0.0 ) ).xyz;
+    float wlHemi = 0.55 + 0.45 * dot( geometryNormal, upV );
+    vec3 ac = ( viewMatrix * vec4( uWAmbPos.xyz, 1.0 ) ).xyz - geometryPosition;
+    vec3 gc = ( viewMatrix * vec4( 0.0, 10.0, 50.0, 1.0 ) ).xyz - geometryPosition;
+    float wlAf = 1.0 / ( 1.0 + dot( ac, ac ) * uWAmbPos.w );
+    vec3 wlAmb = uWAmbCol * ( wlAf * wlAf ) + uWGlowCol / ( 1.0 + dot( gc, gc ) * 4e-6 );
+    reflectedLight.indirectDiffuse += wlAmb * wlHemi * BRDF_Lambert( material.diffuseColor );
   }
 }
 `;

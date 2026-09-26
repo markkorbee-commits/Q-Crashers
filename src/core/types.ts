@@ -39,7 +39,10 @@ export interface QualitySettings {
   shadows: boolean;
   /** reserved (see `shadows`) */
   shadowMapSize: number;
-  /** total crowd members (all LODs) */
+  /**
+   * Tribe-mode headcount of the preset (all LODs; the crowd module's per-level cap, shown in the
+   * Graphics menu). Most of it is 2-triangle far impostors.
+   */
   crowdCount: number;
   /** crowd members rendered with the detailed mesh near the camera */
   crowdNearCount: number;
@@ -48,7 +51,7 @@ export interface QualitySettings {
   particleScale: number;
   /** maximum simultaneously drawn moving-head beams */
   beamBudget: number;
-  /** maximum simultaneously drawn laser beams */
+  /** maximum simultaneously drawn laser beams (design-bible §7.4: 640 / 400 / 200 / 96) */
   laserBudget: number;
   /** haze sheets, beam haze noise, god rays */
   volumetrics: boolean;

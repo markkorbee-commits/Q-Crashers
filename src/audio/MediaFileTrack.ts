@@ -292,8 +292,20 @@ export function canPlayFile(url: string): boolean {
  * Probe candidate URLs (HEAD) and return the first that exists AND is decodable by this browser
  * (e.g. open-source Chromium builds lack AAC, so an Opus/WebM copy is preferred there).
  */
+/**
+ * Preference among the formats a browser can play: the smallest good-quality encodings first
+ * (AAC 14.6 MB, Opus 14.3 MB), MP3 (25 MB) and WAV last, whatever order the show file lists them in.
+ */
+const FORMAT_RANK: Record<string, number> = { m4a: 0, mp4: 0, aac: 0, webm: 1, opus: 2, ogg: 3, mp3: 4, flac: 5, wav: 6 };
+
+function formatRank(url: string): number {
+  const ext = (url.split('?')[0].split('.').pop() ?? '').toLowerCase();
+  return FORMAT_RANK[ext] ?? 3.5;
+}
+
 export async function findAudioFile(candidates: string[]): Promise<string | null> {
-  for (const url of candidates) {
+  const ordered = candidates.map((url, i) => ({ url, i })).sort((a, b) => formatRank(a.url) - formatRank(b.url) || a.i - b.i);
+  for (const { url } of ordered) {
     if (!canPlayFile(url)) continue;
     try {
       const res = await fetch(url, { method: 'HEAD', cache: 'no-store' });

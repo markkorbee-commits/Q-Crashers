@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 /**
  * Headless screenshot / QA harness.
- * Usage: node scripts/shot.mjs "<query string>" out.png [--size 1280x720] [--wait 4000] [--mobile] [--frames 20] [--eval "js"]
+ * Usage: node scripts/shot.mjs "<query string>" out.png [--size 1280x720] [--wait 4000] [--mobile] [--frames 20] [--eval "js"] [--budget]
+ *   --budget  exit code 2 when draw calls / triangles exceed the per-level budgets of docs/performance.md
+ *             (desktop presets: ≤ 150 calls, ≤ 3 M triangles; mobile: ≤ 110 calls, ≤ 0.8 M triangles)
  * Example: node scripts/shot.mjs "autostart&t=300&cam=0,2,120,0,0.1&quality=high" .shots/stage.png
  * Requires the dev server (npm run dev) on http://localhost:5173 unless --base is given.
  * Prints console errors and a perf/stat summary (from window.__app) as JSON.
@@ -47,6 +49,28 @@ await page.waitForFunction(() => window.__app && window.__app.ready, null, { tim
 const loadMs = Date.now() - t0;
 if (evalJs) await page.evaluate(evalJs).catch((e) => errors.push('eval: ' + e.message));
 await page.waitForTimeout(wait);
+// measured frame times over the last ~2 s (the governor's fps needs 45 frames: on a software
+// renderer it still shows its initial 60)
+const measured = await page
+  .evaluate(
+    () =>
+      new Promise((res) => {
+        const d = [];
+        let last = performance.now();
+        const t0 = last;
+        const tick = (now) => {
+          d.push(now - last);
+          last = now;
+          if (now - t0 < 2000 && d.length < 120) requestAnimationFrame(tick);
+          else {
+            d.sort((a, b) => a - b);
+            res({ frames: d.length, medianMs: +d[d.length >> 1].toFixed(1), maxMs: +d[d.length - 1].toFixed(1) });
+          }
+        };
+        requestAnimationFrame(tick);
+      }),
+  )
+  .catch(() => null);
 fs.mkdirSync(path.dirname(out), { recursive: true });
 await page.screenshot({ path: out, timeout: 240000 });
 const stats = await page.evaluate(() => {
@@ -64,5 +88,15 @@ const stats = await page.evaluate(() => {
     programs: a.renderer.info.programs ? a.renderer.info.programs.length : null, load: a.loadTimings ?? null, gpuPrep: a.gpuPrep ?? null, systems: sys,
   };
 }).catch((e) => ({ error: e.message }));
+if (stats && measured) stats.measured = measured;
+const BUDGET = { mobile: { calls: 110, triangles: 800000 }, desktop: { calls: 150, triangles: 3000000 } };
+let over = [];
+if (has('budget') && stats && !stats.error) {
+  const b = stats.quality === 'mobile' ? BUDGET.mobile : BUDGET.desktop;
+  if (stats.calls > b.calls) over.push(`draw calls ${stats.calls} > ${b.calls}`);
+  if (stats.triangles > b.triangles) over.push(`triangles ${stats.triangles} > ${b.triangles}`);
+  stats.budget = over.length ? over : 'ok';
+}
 console.log(JSON.stringify({ url, out, loadMs, errors: errors.slice(0, 30), stats }, null, 1));
 await browser.close();
+if (over.length) process.exit(2);

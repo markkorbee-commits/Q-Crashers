@@ -45,7 +45,11 @@ export class AudioSources {
    * project's local audio file(s) listed in the show file.
    */
   async autoDetect(): Promise<boolean> {
-    await this.loadShippedAnalysis();
+    // A show whose tempo map was measured offline from this very audio (every segment 'analyzed')
+    // needs no shipped analysis: probing the default locations would only log two 404s per visit.
+    const shippedUrl = this.app.show.file.meta.audio.analysis;
+    if (typeof shippedUrl === 'string' && shippedUrl) await this.loadShippedAnalysis([shippedUrl]);
+    else if (!this.tempoMeasured()) await this.loadShippedAnalysis();
     const meta = this.app.show.file.meta.audio;
     const url = await findAudioFile(meta.src);
     if (!url) {

@@ -110,6 +110,11 @@ export interface ShowFile {
       youtubeId?: string;
       /** audio time = show time + offset */
       offset?: number;
+      /**
+       * URL of a shipped analysis JSON for these files (AudioAnalyzer format). When absent, the
+       * default locations are probed only if the tempo map was not measured offline.
+       */
+      analysis?: string;
     };
     credits?: string;
   };

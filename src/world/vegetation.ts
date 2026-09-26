@@ -8,13 +8,21 @@ import { patchWorldMaterial } from './worldLights';
  * Trees: the deciduous windbreak belts on the outer bank slopes and behind the stage (FACT OSM
  * 66342521 / 66340386, canopy 15–22 m = ASSUMPTION: poplar, willow, ash typical for Flevoland),
  * the other forest patches around the site, and far polder windbreaks as cheap silhouette ribbons.
- * Three instanced species meshes (3 draw calls) + one merged ribbon mesh.
+ * Three instanced species meshes + one merged ribbon mesh. Distance LOD: the forest patches beyond
+ * FAR_R from the field centre use a 4x lighter canopy (icosphere detail 0); they are night
+ * silhouettes 170 m+ away from every spot, so the site belts keep the full-detail crowns.
  */
+
+/** trees farther than this (m) from the field centre (0, 60) use the light canopy */
+const FAR_R = 170;
 
 interface Species {
   name: string;
   geo: THREE.BufferGeometry;
+  /** light geometry for far trees (same as geo on low-detail presets) */
+  farGeo: THREE.BufferGeometry;
   mesh?: THREE.InstancedMesh;
+  farMesh?: THREE.InstancedMesh;
   share: number;
 }
 
@@ -132,20 +140,23 @@ float tNoise( vec3 x ) {
 export class Vegetation {
   readonly group = new THREE.Group();
   private species: Species[] = [];
-  private placements: { x: number; z: number; h: number; s: number; rot: number; tint: number; sp: number; near: boolean }[] = [];
+  private placements: { x: number; z: number; h: number; s: number; rot: number; tint: number; sp: number; near: boolean; far: boolean }[] = [];
   private material: THREE.MeshStandardMaterial;
   private ribbon?: THREE.Mesh;
   count = 0;
   triangles = 0;
 
+  /** far trees get their own light meshes (not on low-detail presets: same geometry, no extra draws) */
+  private readonly split: boolean;
+
   constructor(private maxTrees: number, lowDetail: boolean) {
     this.group.name = 'vegetation';
+    this.split = !lowDetail;
     const detail = lowDetail ? 0 : 1;
-    this.species = [
-      { name: 'poplar', geo: tree('poplar', detail), share: 0.45 },
-      { name: 'round', geo: tree('round', detail), share: 0.35 },
-      { name: 'willow', geo: tree('willow', detail), share: 0.2 },
-    ];
+    this.species = (['poplar', 'round', 'willow'] as const).map((name, i) => {
+      const geo = tree(name, detail);
+      return { name, geo, farGeo: detail > 0 ? tree(name, 0) : geo, share: [0.45, 0.35, 0.2][i] };
+    });
     this.material = patchWorldMaterial(
       new THREE.MeshStandardMaterial({ color: '#ffffff', vertexColors: true, roughness: 0.95, metalness: 0 }),
       { lamps: false, key: 'tree', edit: leafyEdges },
@@ -170,7 +181,7 @@ export class Vegetation {
       const sp = r < 0.45 ? 0 : r < 0.8 ? 1 : 2;
       // canopy 15–22 m (bible §6.7), willows lower along the wet edges
       const h = sp === 0 ? rng.range(17, 22) : sp === 1 ? rng.range(15, 19.5) : rng.range(12.5, 16);
-      this.placements.push({ x, z, h, s: rng.range(0.95, 1.2) * grow, rot: rng.range(0, Math.PI * 2), tint: rng.next(), sp, near });
+      this.placements.push({ x, z, h, s: rng.range(0.95, 1.2) * grow, rot: rng.range(0, Math.PI * 2), tint: rng.next(), sp, near, far: this.split && Math.hypot(x, z - 60) > FAR_R });
     };
     for (const poly of TREE_BELTS) {
       const b = polygonBounds(poly);
@@ -202,48 +213,79 @@ export class Vegetation {
     this.placements.sort((a, b) => Number(b.near) - Number(a.near) || Math.hypot(a.x, a.z - 60) - Math.hypot(b.x, b.z - 60));
   }
 
+  /** instances per species (near, far) among the first n placements */
+  private counts(n: number): { near: number[]; far: number[] } {
+    const near = [0, 0, 0],
+      far = [0, 0, 0];
+    for (let i = 0; i < n; i++) {
+      const t = this.placements[i];
+      if (t.far) far[t.sp]++;
+      else near[t.sp]++;
+    }
+    return { near, far };
+  }
+
   private build(): void {
     const n = Math.min(this.placements.length, this.maxTrees);
-    const per = [0, 0, 0];
-    for (let i = 0; i < n; i++) per[this.placements[i].sp]++;
+    const per = this.counts(n);
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const s = new THREE.Vector3();
     const p = new THREE.Vector3();
     const c = new THREE.Color();
     const idx = [0, 0, 0];
+    const fidx = [0, 0, 0];
     this.species.forEach((sp, si) => {
-      const mesh = new THREE.InstancedMesh(sp.geo, this.material, Math.max(1, per[si]));
+      const mesh = new THREE.InstancedMesh(sp.geo, this.material, Math.max(1, per.near[si]));
       mesh.name = `trees-${sp.name}`;
-      mesh.count = per[si];
+      mesh.count = per.near[si];
       sp.mesh = mesh;
       this.group.add(mesh);
+      if (!this.split) return;
+      const far = new THREE.InstancedMesh(sp.farGeo, this.material, Math.max(1, per.far[si]));
+      far.name = `trees-${sp.name}-far`;
+      far.count = per.far[si];
+      far.visible = far.count > 0;
+      sp.farMesh = far;
+      this.group.add(far);
     });
     for (let i = 0; i < n; i++) {
       const t = this.placements[i];
       const sp = this.species[t.sp];
+      const target = t.far ? sp.farMesh! : sp.mesh!;
+      const ix = t.far ? fidx : idx;
       const y = terrainHeight(t.x, t.z) - 0.3;
       p.set(t.x, y, t.z);
       q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, t.rot);
       const w = t.h * (t.sp === 0 ? 0.85 : 0.95) * t.s;
       s.set(w, t.h, w);
       m.compose(p, q, s);
-      sp.mesh!.setMatrixAt(idx[t.sp], m);
+      target.setMatrixAt(ix[t.sp], m);
       // late-June foliage after the heatwave: dark green, some yellowing; night makes them near-black
       const g0 = t.sp === 0 ? '#3a4a2a' : t.sp === 1 ? '#34462c' : '#4a5634';
       c.set(g0).offsetHSL((t.tint - 0.5) * 0.03, (t.tint - 0.5) * 0.1, (t.tint - 0.5) * 0.06);
-      sp.mesh!.setColorAt(idx[t.sp], c);
-      idx[t.sp]++;
+      target.setColorAt(ix[t.sp], c);
+      ix[t.sp]++;
     }
-    let tris = 0;
     for (const sp of this.species) {
-      sp.mesh!.instanceMatrix.needsUpdate = true;
-      if (sp.mesh!.instanceColor) sp.mesh!.instanceColor.needsUpdate = true;
-      sp.mesh!.computeBoundingSphere();
-      tris += (sp.geo.getAttribute('position').count / 3) * sp.mesh!.count;
+      for (const mesh of [sp.mesh, sp.farMesh]) {
+        if (!mesh) continue;
+        mesh.instanceMatrix.needsUpdate = true;
+        if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+        mesh.computeBoundingSphere();
+      }
     }
     this.count = n;
-    this.triangles = tris;
+    this.triangles = this.treeTriangles();
+  }
+
+  private treeTriangles(): number {
+    let tris = 0;
+    for (const sp of this.species) {
+      tris += (sp.geo.getAttribute('position').count / 3) * (sp.mesh?.count ?? 0);
+      tris += (sp.farGeo.getAttribute('position').count / 3) * (sp.farMesh?.count ?? 0);
+    }
+    return tris;
   }
 
   /**
@@ -316,17 +358,23 @@ export class Vegetation {
     this.ribbon = new THREE.Mesh(g, mat);
     this.ribbon.name = 'far-windbreaks';
     this.group.add(this.ribbon);
-    this.triangles += pos.length / 9;
+    this.ribbonTris = pos.length / 9;
+    this.triangles += this.ribbonTris;
   }
+  private ribbonTris = 0;
 
   setBudget(maxTrees: number): void {
     const n = Math.min(this.placements.length, maxTrees);
-    const per = [0, 0, 0];
-    for (let i = 0; i < n; i++) per[this.placements[i].sp]++;
+    const per = this.counts(n);
     // instances were written in placement order per species, so shrinking count keeps the nearest
     this.species.forEach((sp, si) => {
-      if (sp.mesh) sp.mesh.count = Math.min(per[si], sp.mesh.instanceMatrix.count);
+      if (sp.mesh) sp.mesh.count = Math.min(per.near[si], sp.mesh.instanceMatrix.count);
+      if (sp.farMesh) {
+        sp.farMesh.count = Math.min(per.far[si], sp.farMesh.instanceMatrix.count);
+        sp.farMesh.visible = sp.farMesh.count > 0;
+      }
     });
     this.count = n;
+    this.triangles = this.treeTriangles() + this.ribbonTris;
   }
 }

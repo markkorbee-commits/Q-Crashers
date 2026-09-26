@@ -46,6 +46,37 @@ function installDebugMenu(app: App): void {
   else window.addEventListener('keydown', onKey);
 }
 
+/**
+ * A failed start (show file unreachable, a system throwing outside its guarded init, no GPU memory)
+ * must never leave the visitor on a frozen loading bar: show what happened and offer a retry.
+ */
+function showFatal(err: unknown): void {
+  console.error('[boot] start failed', err);
+  const msg = err instanceof Error ? err.message : String(err);
+  const box = document.createElement('div');
+  box.className = 'fatal';
+  box.setAttribute('role', 'alert');
+  box.style.cssText =
+    'position:fixed;inset:0;z-index:100000;margin:0;max-width:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;background:#050508;color:#e8e2dc;font:15px/1.5 system-ui,sans-serif;text-align:center';
+  const h = document.createElement('h1');
+  h.textContent = 'DEFQON.1 2026 — THE ENDSHOW EXPERIENCE';
+  h.style.cssText = 'font-size:18px;letter-spacing:.12em;margin:0;color:#ff3b2f';
+  const p1 = document.createElement('p');
+  p1.textContent = 'The experience could not start.';
+  p1.style.margin = '0';
+  const p2 = document.createElement('p');
+  p2.textContent = msg;
+  p2.style.cssText = 'margin:0;max-width:560px;opacity:.7;font-size:13px;word-break:break-word';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.textContent = 'Retry';
+  btn.style.cssText = 'margin-top:8px;padding:10px 28px;border-radius:999px;border:1px solid #ff3b2f;background:#ff3b2f;color:#fff;font:600 14px system-ui,sans-serif;letter-spacing:.08em;cursor:pointer';
+  btn.addEventListener('click', () => location.reload());
+  box.append(h, p1, p2, btn);
+  document.body.appendChild(box);
+  btn.focus();
+}
+
 async function boot() {
   const root = document.getElementById('app')!;
   let app: App;
@@ -80,7 +111,13 @@ async function boot() {
   installDebugMenu(app);
   if (app.device.touch) new TouchControls(app, root).enable();
   app.start();
-  await app.init();
+  try {
+    await app.init();
+  } catch (e) {
+    app.stop();
+    showFatal(e);
+    return;
+  }
   ui.onReady();
 }
 

@@ -5,8 +5,9 @@ import type { FrameContext, QualitySettings, System } from '../core/types';
 import { resolveColor } from '../show/colors';
 import type { Cue } from '../show/ShowTypes';
 import { dirFromAzAlt, EPHEM, showProgress, STARS } from './site';
-import { cloudNoiseTexture } from './tex';
-import { flashCompression, fogGlsl, installHeightFog, updateWorldLights, worldUniforms, type HeightFogConfig } from './worldLights';
+import { TimeSlicer } from '../core/yieldTo';
+import { cloudNoiseTextureAsync } from './tex';
+import { flashBounce, flashCompression, fogGlsl, installHeightFog, updateWorldLights, worldUniforms, type HeightFogConfig } from './worldLights';
 
 /**
  * Blue-hour sky of Sat 27 June 2026, 22:40–23:06 CEST over Biddinghuizen (event-context §4.3/§4.4):
@@ -43,6 +44,7 @@ uniform vec3 uStageDir;
 uniform vec3 uFlashDir;
 uniform vec3 uFlashCol;
 uniform vec3 uShowCol;
+uniform vec3 uGlowCol;     // site glow (atmos.glow) + flash bounce off the smoke: a broad low dome
 uniform vec4 uLightning;   // dir xyz, intensity
 uniform vec3 uZenith;
 uniform vec3 uHorizonSE;
@@ -59,6 +61,7 @@ uniform float uCover;
 uniform float uTime;
 uniform float uMoonI;
 uniform float uHaze;
+uniform float uSmoke;
 ${fogGlsl(fog)}
 
 float cloudField( vec2 p ) {
@@ -142,6 +145,7 @@ void main() {
     float nearMoon = exp( - ang / 0.05 );
     cloudAdd += moonCol * nearMoon * ( 1.0 - thick ) * 0.03 * uMoonI;
     cloudAdd += uFlashCol * pow( max( dot( d, uFlashDir ), 0.0 ), 3.0 ) * ( 0.6 + 0.8 * thick );
+    cloudAdd += uGlowCol * ( 0.5 + 0.9 * thick ) * ( 0.4 + 0.6 * exp( - eh / 0.3 ) );
     // distant lightning inside the storm clouds: a broad lobe + a hot core
     float lc = max( dot( d, uLightning.xyz ), 0.0 );
     cloudAdd += vec3( 0.72, 0.78, 1.0 ) * uLightning.w * ( pow( lc, 10.0 ) * 0.5 + pow( lc, 60.0 ) * 2.0 ) * ( 0.35 + thick );
@@ -152,6 +156,8 @@ void main() {
   float lowK = 1.0 - smoothstep( 0.08, 0.35, eh );
   vec3 add = uShowCol * pow( max( dot( d, uStageDir ), 0.0 ), 24.0 ) * 0.14 * hazeK * lowK;
   add += uFlashCol * pow( max( dot( d, uFlashDir ), 0.0 ), 10.0 ) * 0.2 * hazeK;
+  // the whole smoke-filled air over the site glows in the fire / smoke colour, strongest low down
+  add += uGlowCol * ( 0.3 + 0.7 * exp( - eh / 0.2 ) ) * hazeK;
   add += vec3( 0.7, 0.75, 1.0 ) * uLightning.w * pow( max( dot( d, uLightning.xyz ), 0.0 ), 16.0 ) * exp( - eh / 0.1 ) * 0.35;
 
   col = col * uLevel + add;
@@ -161,6 +167,8 @@ void main() {
 
   // atmos cue tint
   col = mix( col, col * uTint * 1.6, uTintAmt );
+  // a smoke-filled site (atmos.glow smoke): the lit smoke veils the sky too, most of all low down
+  col = mix( col, uFogColor * ( 0.7 + 0.3 * exp( - eh / 0.25 ) ), uSmoke * ( 0.55 + 0.35 * exp( - eh / 0.3 ) ) );
 
   // below the horizon: the dark polder under haze (matches the height fog on distant terrain)
   vec3 land = worldFogTintC( d, uFogColor );
@@ -170,6 +178,8 @@ void main() {
 }
 `;
 }
+
+const num = (v: unknown, d: number): number => (typeof v === 'number' && Number.isFinite(v) ? v : d);
 
 const STAR_VERT = /* glsl */ `
 attribute float aMag;
@@ -280,6 +290,9 @@ export class EnvironmentSystem implements System {
   private readonly tmpC = new THREE.Color();
   private readonly tint = new THREE.Color(1, 1, 1);
   private readonly cueBuf: Cue[] = [];
+  private readonly glowBuf: Cue[] = [];
+  private readonly glowC = new THREE.Color();
+  private readonly bounceC = new THREE.Color();
   private readonly sidereal = new THREE.Matrix3();
   private readonly poleAxis = dirFromAzAlt(0, 52.44);
   private readonly rotM = new THREE.Matrix4();
@@ -287,7 +300,7 @@ export class EnvironmentSystem implements System {
   private level = 1;
   private stats_ = { level: 0, sunAlt: 0, moonAlt: 0, cover: 0, lightning: 0 };
 
-  init(app: App): void {
+  async init(app: App): Promise<void> {
     this.app = app;
     this.q = app.quality;
     const p0 = 0.5;
@@ -313,7 +326,7 @@ export class EnvironmentSystem implements System {
     this.twilightLight = new THREE.DirectionalLight('#6fb4c8', 0.22);
     app.scene.add(this.hemi, this.moonLight, this.twilightLight, this.moonLight.target, this.twilightLight.target);
 
-    this.noise = cloudNoiseTexture(this.q.level === 'mobile' ? 256 : 512);
+    this.noise = await cloudNoiseTextureAsync(this.q.level === 'mobile' ? 256 : 512, new TimeSlicer(12));
     this.buildSky();
     this.buildStars();
     // env-driven values must be read after every show system wrote app.env this frame
@@ -330,6 +343,7 @@ export class EnvironmentSystem implements System {
       uFlashDir: { value: new THREE.Vector3(0, 1, 0) },
       uFlashCol: { value: new THREE.Color(0, 0, 0) },
       uShowCol: { value: new THREE.Color(0, 0, 0) },
+      uGlowCol: { value: new THREE.Color(0, 0, 0) },
       uLightning: { value: new THREE.Vector4(1, 0.05, 0.4, 0) },
       // scene-referred values tuned for the Lottes curve of the postfx (mid 0.18 → 0.19, toe ~x^1.5)
       uZenith: v3('#000000'),
@@ -347,6 +361,7 @@ export class EnvironmentSystem implements System {
       uTime: { value: 0 },
       uMoonI: { value: 1 },
       uHaze: { value: 0.6 },
+      uSmoke: { value: 0 },
     };
     const mat = new THREE.ShaderMaterial({
       uniforms: this.skyU,
@@ -360,6 +375,7 @@ export class EnvironmentSystem implements System {
     });
     this.sky = new THREE.Mesh(new THREE.SphereGeometry(10, 48, 24), mat);
     this.sky.name = 'sky';
+    this.sky.userData.noFocus = true; // camera-centred dome: never an autofocus target
     this.sky.frustumCulled = false;
     this.sky.renderOrder = 1e6; // last among opaques: early-z skips everything already covered
     this.app.scene.add(this.sky);
@@ -414,16 +430,55 @@ export class EnvironmentSystem implements System {
   }
 
   update(ctx: FrameContext): void {
+    // the site glow is written first in the frame (this system updates first), so the stage,
+    // lights, fog and crowd can read app.env.glowColor in their own update
+    this.app.env.smoke = this.glowAt(ctx.showTime, this.app.env.glowColor);
     if (!this.enabled) return;
     // keep sky + stars centred on the camera (they are drawn at the far plane anyway)
     this.sky.position.copy(ctx.camera.position);
     this.stars.position.copy(ctx.camera.position);
   }
 
+  /**
+   * `atmos.glow` cues → site-wide coloured ambient light (premultiplied by amount), a pure function
+   * of show time: the orange light of a flame wall, the red smoke cloud over the whole site.
+   * Params: `color`, `amount` 0..2 (default 0.6), `fade` s in (default 0.3), `out` s fade-out at the
+   * end of dur (default 0.8), `flicker` 0..1 (fire light breathing, default 0), `smoke` 0..1 (the
+   * site fills with smoke: denser height fog in the glow colour, default 0). Returns the smoke level.
+   */
+  private glowAt(t: number, out: THREE.Color): number {
+    out.setRGB(0, 0, 0);
+    let smoke = 0;
+    const cues = this.app.show.active('atmos', t, this.glowBuf);
+    for (let i = 0; i < cues.length; i++) {
+      const c = cues[i];
+      if (c.fx !== 'glow') continue;
+      const fin = Math.max(0.01, num(c.p.fade, 0.3));
+      const fout = Math.max(0.01, num(c.p.out, 0.8));
+      const kin = clamp((t - c.t) / fin, 0, 1);
+      const kout = clamp((c.t + c.dur - t) / fout, 0, 1);
+      let k = kin * kin * (3 - 2 * kin) * kout * kout * (3 - 2 * kout);
+      const fl = clamp(num(c.p.flicker, 0), 0, 1);
+      if (fl > 0) {
+        const n = 0.5 + 0.25 * Math.sin(t * 13.1 + c.seed) + 0.15 * Math.sin(t * 7.3 + 1.3) + 0.1 * Math.sin(t * 23.7 + 0.4);
+        k *= 1 - fl * 0.6 * clamp(n, 0, 1);
+      }
+      smoke = Math.max(smoke, clamp(num(c.p.smoke, 0), 0, 1) * k);
+      const a = clamp(num(c.p.amount, 0.6), 0, 2) * k;
+      if (a <= 0) continue;
+      resolveColor(c.p.color ?? 'primary', this.app.palette, this.glowC, 'primary');
+      out.r += this.glowC.r * a;
+      out.g += this.glowC.g * a;
+      out.b += this.glowC.b * a;
+    }
+    return smoke;
+  }
+
   /** after all systems: read app.env (flashes, haze, stage light) and the atmos cues */
   private lateUpdate(ctx: FrameContext): void {
     const env = this.app.env;
-    updateWorldLights(env, ctx.showTime);
+    // photosensitivity: the whole-field flash response is halved (the emitters scale their own share)
+    updateWorldLights(env, ctx.showTime, this.app.reduceFlashing ? 0.5 : 1);
     if (!this.enabled) return;
     const t = ctx.showTime;
     const p = showProgress(t);
@@ -504,6 +559,10 @@ export class EnvironmentSystem implements System {
       U.uFlashDir.value.copy(this.tmpV);
       U.uFlashCol.value.copy(env.flashColor).multiplyScalar(0.02 * fk);
     } else U.uFlashCol.value.setRGB(0, 0, 0);
+    // lit smoke over the site: the atmos glow + the bounce of big flashes (see worldLights)
+    const glow = env.glowColor;
+    const bc = flashBounce(env, this.bounceC);
+    U.uGlowCol.value.setRGB(glow.r * 0.05 + bc.r * 0.012, glow.g * 0.05 + bc.g * 0.012, glow.b * 0.05 + bc.b * 0.012);
 
     // distant lightning over the W horizon (storm front arriving from the west) — deterministic
     const li = this.lightningAt(t, lightningAmt, U.uLightning.value as THREE.Vector4);
@@ -516,12 +575,21 @@ export class EnvironmentSystem implements System {
       this.fog.color.g += env.flashColor.g * 0.0004 * fk;
       this.fog.color.b += env.flashColor.b * 0.0004 * fk;
     }
+    // the haze itself takes the colour of the lit smoke (distant trees / terrain glow with the site);
+    // with `smoke` the air is full of it and the veil is as bright as the light it scatters
+    const sm = clamp(env.smoke, 0, 1);
+    const gk = 0.03 + 0.4 * sm;
+    this.fog.color.r += glow.r * gk + bc.r * 0.006;
+    this.fog.color.g += glow.g * gk + bc.g * 0.006;
+    this.fog.color.b += glow.b * gk + bc.b * 0.006;
+    U.uSmoke.value = sm;
     const sb = env.strobe * 0.01;
     this.fog.color.r += sb;
     this.fog.color.g += sb;
     this.fog.color.b += sb;
     U.uFogColor.value.copy(this.fog.color);
-    this.fog.density = this.fogBase * (0.75 + 0.45 * clamp(env.haze, 0, 1.5));
+    // atmos.glow `smoke`: the site fills with smoke (red smoke v1510–1537, pink whiteout v76)
+    this.fog.density = this.fogBase * (0.75 + 0.45 * clamp(env.haze, 0, 1.5)) * (1 + 7 * env.smoke);
     (this.app.scene.background as THREE.Color).copy(this.fog.color);
 
     // --- lights (sky ambient follows the sky; the moon keeps a floor of cool-warm fill)
@@ -541,6 +609,10 @@ export class EnvironmentSystem implements System {
       this.hemi.color.b += env.flashColor.b * 0.002 * fk;
     }
     if (li > 0) this.hemi.color.addScalar(li * 0.05);
+    // site glow on everything lit by the sky dome (set, props without the world-light patch)
+    this.hemi.color.r += glow.r * 0.3 + bc.r * 0.05;
+    this.hemi.color.g += glow.g * 0.3 + bc.g * 0.05;
+    this.hemi.color.b += glow.b * 0.3 + bc.b * 0.05;
 
     // --- stars / planets
     const S = this.starU;

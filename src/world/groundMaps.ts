@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Rng } from '../core/rng';
 import { DECKING, FLOOR, ROAD, ROAD_W, TOILETS, WATER_POINTS, FIRST_AID, BEACH } from './site';
-import { dataTexture } from './tex';
+import { dataTexture, type Slicer } from './tex';
 
 /**
  * Site surface masks painted with Canvas2D in world coordinates (non-tiling), packed into one RGBA
@@ -15,7 +15,7 @@ export const SITE_RECT = { x0: -320, z0: -260, w: 640, h: 640 };
 
 type Paint = (g: CanvasRenderingContext2D) => void;
 
-export function buildSiteMask(size: number): THREE.DataTexture {
+export async function buildSiteMask(size: number, slicer?: Slicer): Promise<THREE.DataTexture> {
   const S = size;
   const k = S / SITE_RECT.w;
   const mk = (): [HTMLCanvasElement, CanvasRenderingContext2D] => {
@@ -66,9 +66,11 @@ export function buildSiteMask(size: number): THREE.DataTexture {
     line(g, [[-137, 94], [-150, 60], [-152, -30]], 6, 0.85);
   };
   // --- B: wear, dirt, gravel, sand
+  // B is softened afterwards with a separable box blur on the channel (a canvas `filter: blur()` blurs
+  // every one of the ~100 fills separately: ~1.5 s of the load on a desktop, 4x that on a phone)
+  const blurB = Math.max(1, Math.round(1.5 * k));
   const paintB: Paint = (g) => {
     const rng = new Rng(4242);
-    g.filter = `blur(${Math.max(1, Math.round(1.5 * k))}px)`;
     // trampled strip at the foot of both banks and in front of the bars on the crests
     rect(g, -52, 0, -44, 110, 0.55);
     rect(g, 44, 0, 52, 110, 0.55);
@@ -103,26 +105,46 @@ export function buildSiteMask(size: number): THREE.DataTexture {
       g.ellipse(x, z, rng.range(2, 7), rng.range(2, 9), rng.range(0, Math.PI), 0, Math.PI * 2);
       g.fill();
     }
-    g.filter = 'none';
   };
   const paintA: Paint = (g) => {
     rect(g, DECKING.x0, DECKING.z0, DECKING.x1, DECKING.z1, 1);
   };
 
-  const chans = [paintR, paintG, paintB, paintA].map((paint) => {
-    const [c, g] = mk();
-    paint(g);
-    return g.getImageData(0, 0, c.width, c.height).data;
-  });
   const out = new Uint8Array(S * S * 4);
-  for (let i = 0, n = S * S; i < n; i++) {
-    out[i * 4] = chans[0][i * 4];
-    out[i * 4 + 1] = chans[1][i * 4];
-    out[i * 4 + 2] = chans[2][i * 4];
-    out[i * 4 + 3] = chans[3][i * 4];
+  const paints = [paintR, paintG, paintB, paintA];
+  for (let ch = 0; ch < 4; ch++) {
+    const [c, g] = mk();
+    paints[ch](g);
+    const src = g.getImageData(0, 0, c.width, c.height).data;
+    for (let i = 0, n = S * S; i < n; i++) out[i * 4 + ch] = src[i * 4];
+    c.width = c.height = 0; // release the canvas backing store now
+    if (slicer) await slicer.maybeYield();
   }
+  // Gaussian-like softening of the wear mask: 3 box passes (radius ≈ σ) along X and Z
+  boxBlurChannel(out, S, 2, Math.max(1, Math.round(blurB * 0.9)), 3);
+  if (slicer) await slicer.maybeYield();
   const t = dataTexture(out, S, S, { repeat: false, mips: true, aniso: 4 });
   return t;
+}
+
+/** in-place separable box blur of one channel of an RGBA8 image (running sums, O(n) per pass) */
+function boxBlurChannel(px: Uint8Array, S: number, ch: number, r: number, passes: number): void {
+  const line = new Float32Array(S);
+  const w = 1 / (2 * r + 1);
+  for (let p = 0; p < passes; p++) {
+    for (let axis = 0; axis < 2; axis++) {
+      for (let a = 0; a < S; a++) {
+        // gather the line (row a for axis 0, column a for axis 1)
+        for (let b = 0; b < S; b++) line[b] = px[((axis === 0 ? a * S + b : b * S + a) << 2) + ch];
+        let acc = 0;
+        for (let b = -r; b <= r; b++) acc += line[Math.min(S - 1, Math.max(0, b))];
+        for (let b = 0; b < S; b++) {
+          px[((axis === 0 ? a * S + b : b * S + a) << 2) + ch] = Math.round(acc * w);
+          acc += line[Math.min(S - 1, b + r + 1)] - line[Math.max(0, b - r)];
+        }
+      }
+    }
+  }
 }
 
 function gray(v: number): string {
