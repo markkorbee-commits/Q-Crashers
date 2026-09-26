@@ -14,6 +14,8 @@ const RANK: Record<QualitySettings['level'], number> = { mobile: 0, medium: 1, h
 const _c = new THREE.Color();
 /** minimum height (m) of the pyro / firework flash light over the set */
 const FLASH_MIN_Y = 36;
+/** tungsten follow-spot tint of the FOH keys */
+const WARM_KEY = new THREE.Color(1.0, 0.62, 0.34);
 
 /**
  * The few REAL lights aimed at the set (everything else is the virtual flood field + emissives):
@@ -98,9 +100,10 @@ export class StageLights {
           l.intensity = (50 * E + 120 * wi) * (0.5 + 0.7 * look.energy) * (1 + look.pulse);
           break;
         case 'front':
-          // FOH keys on the portal: they follow the castle level (a dark-castle look keeps them low)
-          // and take the wash colour (no white work light on the set)
-          l.color.copy(wash).lerp(look.castleLed2, (rig.side > 0 ? 0.25 : 0.1) * E);
+          // FOH keys on the portal: they follow the castle level (a dark-castle look keeps them low);
+          // the wash colour warmed by the tungsten of the follow spots (video 650 / 705: the portal,
+          // the stairs and the troupe under a warm orange-red key, not a pure saturated wash)
+          l.color.copy(wash).lerp(look.castleLed2, (rig.side > 0 ? 0.25 : 0.1) * E).lerp(WARM_KEY, 0.3);
           l.intensity = (42 * E + 115 * wi) * (0.6 + 0.5 * look.energy) * (1 + 0.6 * look.pulse + look.strobe * 2) * (0.1 + 0.9 * Math.min(1.3, look.castleGain));
           break;
         case 'base':
