@@ -180,3 +180,32 @@ export function tiltedUp(x: number, deg: number, out: THREE.Vector3, lean = 0): 
   const s = Math.abs(x) < 0.5 ? 0 : Math.sign(x);
   return out.set(Math.sin(a) * s, Math.cos(a), lean).normalize();
 }
+
+/**
+ * Groups of points that lie together (single linkage: a point joins a group when it is within
+ * `gap` m of any member), in the order of their first member. Lights over far-apart targets (a burst
+ * on both arm ends, X ±94) are pushed per group instead of one segment across the empty field.
+ * Build-time only (allocates).
+ */
+export function clusters(pts: THREE.Vector3[], gap: number): THREE.Vector3[][] {
+  const n = pts.length;
+  const id = new Int32Array(n).fill(-1);
+  const g2 = gap * gap;
+  let k = 0;
+  for (let i = 0; i < n; i++) {
+    if (id[i] >= 0) continue;
+    id[i] = k;
+    const stack = [i];
+    while (stack.length) {
+      const a = stack.pop() as number;
+      for (let j = 0; j < n; j++) if (id[j] < 0 && pts[a].distanceToSquared(pts[j]) <= g2) {
+        id[j] = k;
+        stack.push(j);
+      }
+    }
+    k++;
+  }
+  const out: THREE.Vector3[][] = Array.from({ length: k }, () => []);
+  for (let i = 0; i < n; i++) out[id[i]].push(pts[i]);
+  return out;
+}

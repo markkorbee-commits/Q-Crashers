@@ -24,6 +24,8 @@ uniform vec3 uStageLight;
 uniform vec3 uStageWash;
 uniform vec3 uFlashCol;
 uniform vec3 uFlashPos;
+// RMS distance² (m²) of this frame's flash sources from uFlashPos (LightEnv.flashSpread²)
+uniform float uFlashSpread2;
 
 // pyro light field (FxLights.ts): line-segment sources A..B, xyz + reach (A.w), colour * intensity
 #define FX_MAX_LIGHTS 12
@@ -177,8 +179,12 @@ vec3 kneeC(vec3 L, float k, float slope) {
 vec3 envLight(vec3 p) {
   vec3 q = (p - vec3(0.0, 12.0, -10.0)) * vec3(0.011, 0.028, 0.02);
   float stageF = 1.0 / (1.0 + dot(q, q) * 1.5);
+  // flash term: the centroid of spread-out sources (a burst on both arm ends, X ±94) is not a source
+  // itself — every source is at least ~spread away from a point near the centroid, so the falloff
+  // uses d² + spread² (smoke in the middle of the field stays dark, smoke at a source stays lit
+  // through the pyro light field)
   vec3 df = p - uFlashPos;
-  float flashF = 1.0 / (1.0 + dot(df, df) * (1.0 / 4900.0));
+  float flashF = 1.0 / (1.0 + (dot(df, df) + uFlashSpread2) * (1.0 / 4900.0));
   vec3 L = uAmbient + (uStageLight * 0.6 + uStageWash * 0.35) * stageF + uFlashCol * flashF * 0.3;
   // smoke drifting past a lantern crystal glows in its colour (the puffing crystals of v146 / v206)
   for (int i = 0; i < 8; i++) {

@@ -21,6 +21,8 @@ export class EmitterSet {
   lastFrame = 0;
   /** show time of the cue (prefetched sets are kept until their cue has started) */
   cueT = 0;
+  /** the lights were derived from the flashes (no authored light): they saturate earlier */
+  derived = false;
   /** false while the set was only prefetched */
   used = false;
   add(e: Emitter): Emitter {
@@ -80,12 +82,21 @@ export abstract class CueFxSystem implements System {
   private readonly flashI = new Float32Array(512);
   private readonly lightBuf: LightSpec[] = new Array(256);
   private readonly lightI = new Float32Array(256);
+  /** 1 = the light was derived from a flash (CueFxSystem.deriveLights) */
+  private readonly lightD = new Uint8Array(256);
   private lightN = 0;
   private lightSum = 0;
+  private lightSumD = 0;
   /** total flash intensity above which additional flashes are compressed logarithmically */
   protected flashCap = 2.5;
   /** same for the spatial pyro light (a wall of 60 fountains is brighter than two, not 30x) */
   protected lightCap = 9;
+  /**
+   * true: every light of the system (authored + flash-derived) shares one cap of 0.3 x lightCap
+   * (fireworks: their row / flare lights and the lights derived from shell breaks together must not
+   * light the site like a flame wall)
+   */
+  protected sharedLightCap = false;
   /** systems without authored lights (fireworks) light the smoke / floor from their flashes */
   protected flashLightGain = 0.3;
   cpuMs = 0;
@@ -136,6 +147,7 @@ export abstract class CueFxSystem implements System {
     this.activeCues = cues.length;
     this.flashSum = 0;
     this.lightSum = 0;
+    this.lightSumD = 0;
     this.lightN = 0;
     let expanded = 0;
     for (let ci = 0; ci < cues.length; ci++) {
@@ -172,12 +184,15 @@ export abstract class CueFxSystem implements System {
         }
       }
       const li = set.lights;
+      const der = set.derived ? 1 : 0;
       for (let k = 0; k < li.length; k++) {
         const I = flashAt(li[k], t);
         if (I > 0.002 && this.lightN < this.lightBuf.length) {
           this.lightBuf[this.lightN] = li[k];
+          this.lightD[this.lightN] = der;
           this.lightI[this.lightN++] = I;
-          this.lightSum += I;
+          if (der) this.lightSumD += I;
+          else this.lightSum += I;
         }
       }
     }
@@ -188,12 +203,25 @@ export abstract class CueFxSystem implements System {
     const calm = (this.app as unknown as { reduceFlashing?: boolean }).reduceFlashing ? 0.4 : 1;
     for (let k = 0; k < this.flashN; k++) this.app.env.addFlash(this.flashBuf[k].color, this.flashI[k] * kf * calm, this.flashBuf[k].pos);
     this.flashN = 0;
-    // derived (flash) lights of systems without authored light saturate early: a barrage of glitter
-    // mines must not light the ground like a flame wall
-    const capL = this.lightCap * (this.derivedOnly ? 0.3 : 1);
-    const kl = (this.lightSum > capL ? (capL * (1 + Math.log(this.lightSum / capL))) / this.lightSum : 1) * (calm < 1 ? 0.6 : 1);
+    // derived (flash) lights saturate early: a barrage of glitter shells must not light the ground
+    // like a flame wall; authored lights (flame / fountain / comet rows, flares) use the full cap
+    const capL = this.lightCap;
+    const capD = this.lightCap * 0.3;
+    const sA = this.lightSum;
+    const sD = this.lightSumD;
+    const calmL = calm < 1 ? 0.6 : 1;
+    let kl: number;
+    let kd: number;
+    if (this.sharedLightCap) {
+      const sT = sA + sD;
+      kl = kd = (sT > capD ? (capD * (1 + Math.log(sT / capD))) / sT : 1) * calmL;
+    } else {
+      kl = (sA > capL ? (capL * (1 + Math.log(sA / capL))) / sA : 1) * calmL;
+      kd = (sD > capD ? (capD * (1 + Math.log(sD / capD))) / sD : 1) * calmL;
+    }
     const lights = this.shared.lights;
-    for (let k = 0; k < this.lightN; k++) lights.add(this.lightBuf[k], this.lightI[k] * kl);
+    for (let k = 0; k < this.lightN; k++) lights.add(this.lightBuf[k], this.lightI[k] * (this.lightD[k] ? kd : kl));
+    this.lightSum = sA + sD;
     for (let i = 0; i < layers.length; i++) layers[i].commit(dt, t);
     // the frame that already built alive cues synchronously (a seek) does no background work
     if (expanded === 0) this.prefetch(t);
@@ -243,14 +271,10 @@ export abstract class CueFxSystem implements System {
    */
   private deriveLights(set: EmitterSet): void {
     if (set.lights.length || !set.flashes.length || this.flashLightGain <= 0) return;
+    set.derived = true;
     for (const f of set.flashes) {
       set.lights.push({ ...f, peak: f.peak * this.flashLightGain, a: f.pos, b: f.pos, radius: 12 + 0.2 * Math.max(0, f.pos.y) });
     }
-  }
-
-  /** true for systems whose light comes only from their flashes (fireworks) */
-  private get derivedOnly(): boolean {
-    return this.sys === 'fireworks';
   }
 
   /**
