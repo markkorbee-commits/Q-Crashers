@@ -376,6 +376,10 @@ export class DragonCrown {
     U.uPhase.value = look.ledPhase;
     U.uPulse.value = Math.max(0, Math.min(1, look.pulse));
     U.uWings.value = look.wings;
+    // the wing print's uplights take the wing LED hue (a warm share keeps the print legible)
+    const wl = look.wingLed;
+    const wm = Math.max(wl.r, wl.g, wl.b, 1e-4);
+    U.uPrintTint.value.setRGB(wl.r / wm, wl.g / wm, wl.b / wm).lerp(PRINT_WARM, PRINT_WARM_SHARE);
     U.uRosette.value.copy(look.rosettes).multiplyScalar(E);
     U.uMouth.value = look.mouth;
     U.uEyes.value.copy(look.eyes).multiplyScalar(look.eyesIntensity);
@@ -508,6 +512,9 @@ export class DragonCrown {
 }
 
 const FROST = new THREE.Color(0.55, 0.8, 1.0);
+/** warm share of the wing print's uplights (tungsten-ish), mixed into the wing LED hue */
+const PRINT_WARM = new THREE.Color(1.0, 0.72, 0.5);
+const PRINT_WARM_SHARE = 0.35;
 /** colour uniforms of the wash rig / emitters switched off by the dev `?daylight` view */
 const DAY_OFF = ['uWashA', 'uWashB', 'uKey', 'uRim', 'uFlash', 'uAmbient', 'uMouthCol', 'uLava', 'uRosette', 'uEyes'] as const;
 

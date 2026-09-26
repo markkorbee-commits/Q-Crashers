@@ -673,9 +673,7 @@ export class LookResolver {
     // ---- 5. app.env: wash, flash, strobe --------------------------------------------------------------
     out.wash.copy(env.stageWashColor);
     out.washIntensity = env.stageWashIntensity;
-    const fi = env.flashIntensity;
-    out.flash.copy(env.flashColor);
-    if (fi > 3) out.flash.multiplyScalar(3 / fi);
+    stageFlash(env, out.flash);
     out.strobe = clamp(env.strobe, 0, 1);
     out.pulse = Math.max(out.pulse, out.strobe * 0.6);
     // master level (blackouts) scales the shared fields the crown reads as well; the pixel LEDs also
@@ -794,6 +792,22 @@ export class LookResolver {
 }
 
 const newScratch = newVals();
+
+/**
+ * Share of the pyro / firework flash (app.env) that reaches the set: shells burst 60-150 m up and the
+ * pyro fires away from the set, so the printed castle and the crown only catch a fraction of it (round 5,
+ * Mac GPU: video 264.75 / 1438.5 / 1047.25 keep a dark set under bursts and gerbs; 0.45 measured best,
+ * 0 loses the pyro-lit set of 876)
+ */
+export const STAGE_FLASH_SHARE = 0.45;
+
+/** the flash colour the set receives this frame (env colour soft-capped at intensity 3, x the set's share) */
+export function stageFlash(env: LightEnv, out: THREE.Color): THREE.Color {
+  const fi = env.flashIntensity * STAGE_FLASH_SHARE;
+  out.copy(env.flashColor).multiplyScalar(STAGE_FLASH_SHARE);
+  if (fi > 3) out.multiplyScalar(3 / fi);
+  return out;
+}
 
 /** index of the latest cue with c.t <= t in a start-sorted list (-1 when none) */
 function latestIndex(s: Cue[], t: number): number {

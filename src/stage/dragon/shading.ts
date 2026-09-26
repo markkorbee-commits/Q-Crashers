@@ -31,6 +31,12 @@ export interface CrownUniforms {
   uPhase: THREE.IUniform<number>;
   uPulse: THREE.IUniform<number>;
   uWings: THREE.IUniform<number>;
+  /**
+   * colour of the wing print's own uplights (the wing LED hue with a warm share): the printed inferno
+   * reads red-orange under a red look and goes dark under a blue / green one (a red print under blue
+   * light), instead of glowing orange in every look
+   */
+  uPrintTint: THREE.IUniform<THREE.Color>;
   uEyes: THREE.IUniform<THREE.Color>;
   uMouth: THREE.IUniform<number>;
   uRosette: THREE.IUniform<THREE.Color>;
@@ -97,6 +103,7 @@ export function createUniforms(): CrownUniforms {
     uPhase: { value: 0 },
     uPulse: { value: 0 },
     uWings: { value: 0.5 },
+    uPrintTint: { value: new THREE.Color(1, 1, 1) },
     uEyes: { value: new THREE.Color('#ff5a00') },
     uMouth: { value: 0.2 },
     uRosette: { value: new THREE.Color('#8a2cff') },
@@ -331,7 +338,7 @@ diffuseColor.rgb *= mix(${nk}, 1.0, uDay);`,
       '#include <lights_physical_pars_fragment>',
       `#include <lights_physical_pars_fragment>
 ${WASH_PARS}
-${o.membrane ? LED_GLSL + 'uniform float uWings;' : ''}
+${o.membrane ? LED_GLSL + 'uniform float uWings;\nuniform vec3 uPrintTint;' : ''}
 ${o.membrane ? 'varying vec3 vMemb;' : ''}`,
     );
     fs = fs.replace('#include <lights_fragment_begin>', `#include <lights_fragment_begin>\n${WASH_APPLY}`);
@@ -384,7 +391,7 @@ iblIrradiance *= uEnvTint * max(crownWashReg(), 0.03);`,
   // saturated print, brightest at the lower edge, falling off towards the scalloped top. Kept below
   // the blades / spars (video 1047.25, 1389.5: the skin reads as a dim red-orange ground under the
   // lit blades and the printed suns, never as a glowing orange sheet)
-  vec3 print = crownAlb * crownAlb * ${(o.printGain ?? 1.9).toFixed(3)};
+  vec3 print = crownAlb * crownAlb * uPrintTint * ${(o.printGain ?? 1.9).toFixed(3)};
   totalEmissiveRadiance += print * (0.03 * uEmit + 0.42 * uWings) * em * mix(1.15, 0.4, smoothstep(3.0, 18.0, vMemb.y)) * (1.0 - uDay);
   // printed fabric lets some of the back light (sky, fireworks behind the stage) shine through
   totalEmissiveRadiance += crownAlb * uRim * ${(0.35 * (o.printGain ?? 1.9) / 1.9).toFixed(3)};
