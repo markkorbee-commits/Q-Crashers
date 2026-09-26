@@ -149,6 +149,8 @@ const WHITE = new THREE.Color(1, 1, 1);
 const COLD_BLUE = new THREE.Color('#1e3cff');
 const VIOLET = new THREE.Color('#8a2bff');
 const RUNE_GOLD = new THREE.Color('#ffb640');
+/** how far a castle / side colour override re-colours that zone's LED panels */
+const ZONE_PANEL = 0.85;
 const _c = new THREE.Color();
 const _c2 = new THREE.Color();
 
@@ -592,6 +594,12 @@ export class LookResolver {
     out.sidesLed2.copy(out.castleLed2).lerp(_c.copy(cur.sidesCol).multiplyScalar(0.55), sw);
     out.castleFloodTint = 0.5 * cw;
     out.sidesFloodTint = Math.max(0.5 * cw, sw);
+    // per-zone screen colours: a region colour override also takes that zone's LED panels (video
+    // 338: castleColor blue -> blue window / panel bars on the castle while the content is orange)
+    // (only while a content cue is alive: contentColor is re-set from the cue every frame then)
+    if (out.content > 0 && cw > 0) out.contentColor.lerp(cur.castleCol, ZONE_PANEL * cw);
+    out.contentColorS.copy(out.contentColor);
+    if (out.content > 0 && sw > 0) out.contentColorS.lerp(cur.sidesCol, ZONE_PANEL * sw);
 
     // ---- colours of the castle-only emitters --------------------------------------------------------
     // crystal lanterns on the ramparts / arm posts: the "side sections" colour of the look (the show's

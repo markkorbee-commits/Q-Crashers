@@ -119,8 +119,10 @@ vec3 stageFlood(vec3 wp, vec3 n) {
   acc = mix(acc, mix(uFloodTintC, uFloodTintS, sw) * dot(acc, vec3(0.3, 0.59, 0.11)) * 1.4, tw);
   // level 1 = the dark default set; 2 = a fully flood-lit castle (~2.8x)
   float rg = mix(uRegionF.x, uRegionF.y, sw);
-  acc *= rg <= 1.0 ? 0.06 + 0.94 * rg : pow(rg, 1.5);
-  acc += uFront * max(dot(n, vec3(0.0, 0.2425, 0.9701)), 0.0) * min(0.3 + 0.7 * rg, 1.3);
+  // (a masked-out castle, level 0, keeps only a trace of the floods / FOH wash: masks 'crown' /
+  // 'wings' / 'dragon' leave it a dark silhouette as in the footage)
+  acc *= rg <= 1.0 ? 0.03 + 0.97 * rg : pow(rg, 1.5);
+  acc += uFront * max(dot(n, vec3(0.0, 0.2425, 0.9701)), 0.0) * min(0.08 + 0.92 * rg, 1.3);
   acc += uBack * max(dot(n, vec3(0.0, 0.9285, -0.3714)), 0.0);
   vec3 fd = uFlashPos - wp;
   float fl = length(fd);

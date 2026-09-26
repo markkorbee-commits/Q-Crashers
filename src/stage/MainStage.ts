@@ -25,7 +25,7 @@ const RANK: Record<QualitySettings['level'], number> = { mobile: 0, medium: 1, h
 
 const CANDLE = new THREE.Color('#ffb45a');
 /** LED colour uniforms switched off by the dev `?daylight` view */
-const LED_COLOURS = ['uLed', 'uLed2', 'uAccent', 'uLedS', 'uLed2S', 'uAccentS', 'uWin', 'uArcade', 'uLamp', 'uLantern', 'uCandle', 'uPortal', 'uContentCol'] as const;
+const LED_COLOURS = ['uLed', 'uLed2', 'uAccent', 'uLedS', 'uLed2S', 'uAccentS', 'uWin', 'uArcade', 'uLamp', 'uLantern', 'uCandle', 'uPortal', 'uContentCol', 'uContentColS'] as const;
 
 /**
  * Castle emitter calibration against the official Endshow footage: the castle is a dark printed set
@@ -538,6 +538,7 @@ export class MainStageSystem implements System {
     l.uContent.value = look.content;
     l.uContentMix.value = look.contentMix;
     (l.uContentCol.value as THREE.Color).copy(look.contentColor).multiplyScalar(2.2);
+    (l.uContentColS.value as THREE.Color).copy(look.contentColorS).multiplyScalar(2.2);
     // every panel content mode (incl. the absolute fire / ice / ember looks) follows the master level;
     // under 'ember' the castle panels stay low so only the dragon reads
     l.uContentGain.value = M * (1 - 0.8 * look.ember);

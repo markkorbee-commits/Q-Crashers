@@ -143,7 +143,9 @@ export class DragonCrown {
     patchStandard(membraneMat, U, { key: 'membrane', membrane: true, lite, nightK: 0.53, printGain: 0.75 });
     // the white spiky crown ring round each printed sun (daytime photos): painted white metal
     const rosetteMat = new THREE.MeshStandardMaterial({ color: '#e9ebef', metalness: 0.45, roughness: 0.4, envMap: env, envMapIntensity: 1.0 });
-    patchStandard(rosetteMat, U, { key: 'rosette', lite });
+    // at night the ring is a grey silhouette round the lit sun (video 338 / 1047.25: gold sunbursts,
+    // no white rims); the daytime view keeps the white paint
+    patchStandard(rosetteMat, U, { key: 'rosette', lite, nightK: 0.4 });
     const stripMat = createStripMaterial(U);
     const bulbMat = createBulbMaterial(U);
     const glowMat = createRosetteGlowMaterial(U);
@@ -391,10 +393,10 @@ export class DragonCrown {
     // the metal takes a glint, not a floodlight (video 1438.5: a full canopy over a dark red dragon;
     // round 3 had ~6x the flash colour as irradiance and lit the crown white-orange on every burst)
     const flash = look.flash;
-    U.uFlash.value.copy(flash).multiplyScalar(1.6);
-    addScaled(addScaled(U.uRim.value.setRGB(0.06, 0.08, 0.18), flash, 1.0), look.led, 0.35 * U.uLedI.value);
+    U.uFlash.value.copy(flash).multiplyScalar(0.3);
+    addScaled(addScaled(U.uRim.value.setRGB(0.06, 0.08, 0.18), flash, 0.22), look.led, 0.35 * U.uLedI.value);
     // the env map carries the rig's hot fixture spots: dim them with the practicals
-    addScaled(addScaled(U.uEnvTint.value.setRGB(0.3, 0.34, 0.46).multiplyScalar(0.2 + 0.8 * E), look.wash, wi * 0.9), flash, 0.5);
+    addScaled(addScaled(U.uEnvTint.value.setRGB(0.3, 0.34, 0.46).multiplyScalar(0.2 + 0.8 * E), look.wash, wi * 0.9), flash, 0.25);
     addScaled(U.uAmbient.value.setRGB(0.015, 0.018, 0.03), look.led, 0.05 * U.uLedI.value);
     // inner fire: throat point light + lava cracks
     // throat light: pale pink-red (the mouth interior glows pink / white, not orange), lava stays fiery

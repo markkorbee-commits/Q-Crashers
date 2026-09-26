@@ -71,6 +71,8 @@ export function createLedMaterial(): THREE.ShaderMaterial {
         uStrobe: { value: 0 },
         uContent: { value: 0 },
         uContentCol: { value: new THREE.Color(1, 0.3, 0.1) },
+        /** content colour of the side-section panels (per-zone screen colours) */
+        uContentColS: { value: new THREE.Color(1, 0.3, 0.1) },
         uContentMix: { value: 0 },
         uContentGain: { value: 1 },
         // side sections (|x| > 37.5) take their own LED colours
@@ -168,6 +170,9 @@ const LED_FRAG = /* glsl */ `
       uniform float uStrobe;
       uniform float uContent;
       uniform vec3 uContentCol;
+      uniform vec3 uContentColS;
+      // 0 castle core .. 1 side sections (set in main before the panel content is evaluated)
+      float gSideW = 0.0;
       uniform float uContentMix;
       uniform float uContentGain;
       uniform vec3 uLedS;
@@ -250,7 +255,7 @@ const LED_FRAG = /* glsl */ `
       vec3 panelContent(vec2 p, vec2 size) {
         float m = uContent;
         vec2 c = p - size * 0.5;
-        vec3 col = uContentCol;
+        vec3 col = mix(uContentCol, uContentColS, gSideW);
         if (m < 1.5) {
           return col * 1.2;
         } else if (m < 2.5) {
@@ -323,6 +328,7 @@ const LED_FRAG = /* glsl */ `
         float pulse = 1.0 + uPulse * 1.2;
         // region: castle core (|x| < 37.5) vs side sections / arms
         float sideW = smoothstep(37.3, 38.3, abs(vWP.x));
+        gSideW = sideW;
         float regG = mix(uRegion.x, uRegion.y, sideW);
         if (kind < 0.5 || (kind > 6.5 && kind < 7.5)) {
           // pixel batten or dots

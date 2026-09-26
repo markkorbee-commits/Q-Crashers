@@ -92,7 +92,7 @@ export class StageLights {
           _c.copy(look.flash);
           const m = Math.max(_c.r, _c.g, _c.b);
           if (m > 1e-4) l.color.copy(_c).multiplyScalar(1 / m);
-          l.intensity = Math.min(3, flashI) * 420;
+          l.intensity = Math.min(3, flashI) * 260;
           break;
         }
         case 'center':
