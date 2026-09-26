@@ -180,14 +180,14 @@ cd ~/Projects/Q-Crashers
 tools/video/prepare-data.sh --ss 400 --dur 30
 ```
 
-Dan de volledige voorbereiding, met als controle het aantal frames (verwacht 6324):
+Dan de volledige voorbereiding, met als controle het aantal frames (verwacht 6325):
 
 ```zsh
 tools/video/prepare-data.sh
 ls "$ENDSHOW_DATA/f4" | wc -l
 ```
 
-Dit maakt uit de video: `f4/` (6324 frames, 4 per seconde, 480x270; frame `NNNNN.jpg` = video-tijd `NNNNN/4` s),
+Dit maakt uit de video: `f4/` (6325 frames, 4 per seconde, 480x270; frame `NNNNN.jpg` = video-tijd `NNNNN/4` s),
 `features.npz` (parallel in zoveel stukken als de Mac kernen heeft), `spans/` (werkbestanden per showdeel),
 `cuts.json` en `signals/`. Aan het eind vergelijkt het script de cutlijst en signaaltabellen met de versie in de repo
 (`research/video-timeline/data/`); die vastgelegde versie blijft de referentie. Drie mogelijke uitkomsten:
@@ -319,7 +319,7 @@ echo $CHROME_PATH
 
 ## Stand van zaken
 
-Zo 27 sep 2026, ± 00:50 (CEST), lokaal op de MacBook Pro (M4 Max, GPU-render).
+Zo 27 sep 2026, ± 00:40 (CEST), lokaal op de MacBook Pro (M4 Max, GPU-render).
 
 - Stap 1-9 zijn op de Mac uitgevoerd (video + mp3 met kloppende checksums, cutlijst identiek aan de referentie).
 - Gelijkenis op de Mac-GPU (64 momenten, `--settle 500 --min-frames 30`), per moment in
@@ -332,6 +332,7 @@ Zo 27 sep 2026, ± 00:50 (CEST), lokaal op de MacBook Pro (M4 Max, GPU-render).
   | + Show-camera-exposure 0,5 (`SHOWCAM_EXPOSURE`) | 57,5 % | 34,0 % | 55,6 / 71,3 / 48,7 |
   | + ronde 5 (schermen, performers, pyro, atmosfeer) | 61,0 % | 39,4 % | 59,8 / 76,2 / 50,1 |
   | + ronde 6 (show/sync, camera, pyro, licht, stage) | 65,5 % | 46,4 % | 65,3 / 79,6 / 54,0 |
+  | meetinstrument gecorrigeerd: exacte frametijden + seeds los van de bestandspositie (zelfde code) | 64,7 % | 46,5 % | 63,7 / 79,4 / 53,8 |
 
 - Ronde 5 (findings `docs/handoff/findings/r5_*.md`): schermen tonen kasteelprint i.p.v. vlakke panelen; MC met
   gekleurde key + backlight, close-ups houden de haze, troupe-choreografie en -shots 641-740 s herzien; pyro met
@@ -343,6 +344,11 @@ Zo 27 sep 2026, ± 00:50 (CEST), lokaal op de MacBook Pro (M4 Max, GPU-render).
   7 → 61 %); roze waaiers 558 s; kadrering van de zwakste momenten (camera); maskers, garlands, FOH-key (stage);
   witte gerb-licht, rook-flits (pyro); backlight/arch-glow (licht). Samengevoegd showbestand: camera-cues van de
   cameragroep, overige cues van de showgroep (op cue-niveau samengevoegd).
+
+- Meetinstrument (27 sep, 00:40): de referentieframes `f4` toonden video-tijd k/4 + 0,12 s (ffmpeg `fps=4` houdt het
+  laatste bronframe per slot); nu `fps=4:round=up` (exact, `f4/.timing`). Cue-seeds hangen niet meer af van de
+  positie in het showbestand (samenvoegen of een cue toevoegen gooit de rest niet meer om). Nieuwe baseline:
+  `similarity-mac-r7.json`; per moment niet vergelijkbaar met eerdere baselines.
 
 Eerdere stand (cloud, vóór de overdracht):
 

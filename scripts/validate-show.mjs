@@ -202,7 +202,7 @@ function scanExtProse(md, fileSys) {
  * not know, so every one of them degrades gracefully). Anything not listed here is an error.
  */
 const EXT_ENUM = {
-  'lasers.look.preset': ['chevron'],
+  'lasers.look.preset': ['chevron', 'trees'],
   'pyro.burst.type': ['bengal'],
   // crowd states the crowd module implements beyond the documented list ("losse polsjes", pre-drop crouch …)
   'crowd.mood.state': ['pols', 'crouch', 'clap', 'stomp', 'sit', 'headbang'],

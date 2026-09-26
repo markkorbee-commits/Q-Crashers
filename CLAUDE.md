@@ -54,7 +54,7 @@ needed; PyAV is not installed either: decode with ffmpeg as `scripts/video-featu
   venv Python when the current one lacks numpy/Pillow, so `python3 tools/video/sheet.py ...` works from any shell.
   Other numpy scripts (`scripts/similarity-score.py`, `scripts/video-features.py`, `scripts/audio-onsets.py`): run them
   with `"$PYTHON"`. `scripts/check-sync.py`, `tools/video/split.py` and `merge.py` need only the standard library.
-- Frames: `ls "$ENDSHOW_DATA/f4" | wc -l` = 6324. The tools stop with `video frames dir not found` instead of
+- Frames: `ls "$ENDSHOW_DATA/f4" | wc -l` = 6325 and `cat "$ENDSHOW_DATA/f4/.timing"` = round-up (frames made before 27 Sep 2026 were 0.12 s late: re-run `tools/video/extract-frames.sh`). The tools stop with `video frames dir not found` instead of
   producing black video halves.
 
 ## Commands
@@ -94,7 +94,7 @@ Nothing in it is ever committed.
 | Path | Made by | What |
 |---|---|---|
 | `video/endshow.mp4` | the user (Google Drive) | the official video, 1920x1080, 25 fps, 1581.19 s |
-| `f4/NNNNN.jpg` | `tools/video/extract-frames.sh` | 4 fps 480x270 frames; **index = round(video_s × 4)**, 00000 = 0.00 s, 6324 frames |
+| `f4/NNNNN.jpg` | `tools/video/extract-frames.sh` | 4 fps 480x270 frames; **index = round(video_s × 4)**, 00000 = 0.00 s, 6325 frames; exact since 27 Sep 2026 (`fps=4:round=up`, `f4/.timing`) |
 | `features.npz` | `scripts/video-features.py` in parallel chunks + `tools/video/combine.py` | 25 fps per-frame luma/grid/dark/white/fire/hue/hdist |
 | `cuts.json`, `signals/NN.txt` | `tools/video/signals.py`, checked by `tools/video/check-derived.py` | cut list + per-0.5 s signal tables; always equal to the committed reference in `research/video-timeline/data/` (on a small drift the reference is installed and the local numbers are kept as `cuts.local.json`, `signals.local/`) |
 | `spans/NN.json`, `spans/index.json`, `spans/source.json` | `tools/video/split.py` (never overwrites without `--force`) | per-span cue files for the span workflow + provenance (show sha256 at split time); `tools/video/merge.py` merges + validates and refuses stale spans |
@@ -129,7 +129,9 @@ Contact sheets: `python3 tools/video/sheet.py <name>.jpg <t0> <t1> <step> [cols]
    A change counts only if the `normalised` score on the default 64 moments improves by >= 1.0 point, or the mean of
    the 10 worst moments by >= 2 points, without a part (colour/light/shape) dropping by more than 1 point. Stop a line
    of work after two consecutive rounds without such a gain, and revert a change that makes the 64-moment score worse.
-4. **Timing rules**: video time → show time = video − 0.036 s. Fireworks cue `t` = LAUNCH; the break happens after
+4. **Timing rules**: video time → show time = video − 0.036 s. Frame times: `f4` frames extracted before 27 Sep 2026
+   showed video time k/4 + 0.12 s, so `vX` times in older notes read from sheets can be ~0.12 s early (features.npz,
+   cuts and signals were always exact). Fireworks cue `t` = LAUNCH; the break happens after
    0.8 + 0.021 · height s, so place the cue so the break lands on the visible burst. Steady tracks: snap hits to the
    show's tempo grid (beat/half beat within 0.12 s). Free-tempo parts (Vivaldi, Discorecord intro, bridge, Domitor,
    outro): snap to the nearest `audio-map.json` onset within 0.15 s. Section starts/ends come from the audio: never move them.

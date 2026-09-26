@@ -14,6 +14,7 @@
  *   python       python with numpy + Pillow (default `${data}/venv/bin/python`)
  *   trailers     commit trailer lines the fixers must end their commit message with (default: none; pass the attribution
                lines your own session uses, see CLAUDE.md "Git")
+ *   branch       integrated branch the fixers fast-forward to first (default claude/defqon-endshow-experience-wi4oos)
  *   extra        optional round context appended to every prompt
  * Write the findings files first (one per group: what is wrong, evidence with video times, measurements, the files
  * the group owns and must not touch). After the run: merge each fixer's branch, re-measure (scripts/similarity.mjs),
@@ -55,7 +56,8 @@ const prompt = (g, i) => {
   const port = (A.portBase || 5400) + i
   return `
 You are a senior real-time graphics engineer fixing QA findings (round ${round}) in "Defqon.1 2026 — The Endshow Experience" (Three.js r186 / WebGL2 / TypeScript / Vite): a real-time reconstruction of the Defqon.1 2026 Endshow (empty-grounds show of Saturday 27 June 2026 after the heat cancellation; MainStage = mechanical dragon + bat wings over a gothic castle, 8 lantern-pillar delay towers). The user compares it side by side with the official video. Fix for "impressive and faithful", not merely "works". Read CLAUDE.md in your working copy first (project rules).
-WORKING COPY: your cwd is an isolated git worktree of the integrated project. First: \`pwd && git log --oneline | head -3 && ls ${D}/f4 | wc -l\` (6324 video frames expected); if node_modules is missing: \`ln -s ${R}/node_modules node_modules\` (git-ignored, never commit it); if public/assets/audio has no audio file, symlink the files from ${R}/public/assets/audio/ (git-ignored too).
+WORKING COPY: your cwd is an isolated git worktree of the integrated project, possibly created from an older commit. First: \`git merge --ff-only ${A.branch || 'claude/defqon-endshow-experience-wi4oos'} && pwd && git log --oneline | head -3 && ls ${D}/f4 | wc -l\` (6325 video frames expected); if node_modules is missing: \`ln -s ${R}/node_modules node_modules\` (git-ignored, never commit it); if public/assets/audio has no audio file, symlink the files from ${R}/public/assets/audio/ (git-ignored too).
+SCRATCH: keep your own scratch files (candidate shows, JSON probes, sheets) in ${D}/work/r${round}_${g.key}/ only (mkdir -p it), never in a shared folder: other fixers run at the same time.
 YOUR MODULE GROUP: ${g.key}. FILES YOU MAY EDIT: ${g.owned}. Everything else is read-only (other fixers edit other modules in parallel); if a finding needs a change elsewhere, describe it in contractRequests.
 FINDINGS TO FIX (fix all blockers and majors, as many minors as sensible; verify each fix with before/after renders): READ THE FULL LIST FROM ${FINDINGS}/r${round}_${g.key}.md (Read tool) before doing anything else. Paths in it are relative to $ENDSHOW_DATA = ${D} unless absolute.
 DATA DIR + PYTHON: shell variables do not persist between your Bash calls, so EVERY command below that touches the data dir starts with the prefix \`${ENV}\` (as written); never rely on a default data dir from inside the worktree.

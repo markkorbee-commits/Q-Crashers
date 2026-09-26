@@ -95,9 +95,16 @@ export class ShowEngine {
     const cues: Cue[] = [];
     let id = 0;
     const defs = this.file.cues;
+    // seeds depend only on the cue itself (sys, fx, t + occurrence among identical keys) and the instance's index
+    // within it, never on the cue's position in the file: adding or moving one cue must not re-roll the others
+    const seen = new Map<string, number>();
     for (let di = 0; di < defs.length; di++) {
       const def = defs[di];
-      const base = hashString(`${def.sys}:${def.fx}:${def.t}:${di}`);
+      const key = `${def.sys}:${def.fx}:${def.t}`;
+      const occ = seen.get(key) ?? 0;
+      seen.set(key, occ + 1);
+      const base = hashString(`${key}:${occ}`);
+      let k = 0;
       for (const inst of this.expand(def)) {
         const partial = {
           id: id,
@@ -107,7 +114,7 @@ export class ShowEngine {
           fx: def.fx,
           targets: inst.targets,
           p: inst.p,
-          seed: hashN(base, inst.step, id),
+          seed: hashN(base, inst.step, k++),
           step: inst.step,
         };
         const lf = this.lifetimes.get(def.sys);

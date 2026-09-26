@@ -8,10 +8,14 @@
 # Smoke test (~6 s): tools/video/extract-frames.sh --ss 400 --dur 30   (frames 01600-01719)
 #
 # INDEX CONVENTION (every tool relies on it): file NNNNN.jpg = video time NNNNN/4 s, zero-based
-# (00000.jpg = 0.00 s, 00001.jpg = 0.25 s, ... 06323.jpg = 1580.75 s; 6324 frames for the 1581.19 s video).
+# (00000.jpg = 0.00 s, 00001.jpg = 0.25 s, ... 06324.jpg = 1581.00 s; 6325 frames for the 1581.19 s video).
+# A run over the whole video writes f4/.timing = 'round-up' (prepare-data re-extracts frame dirs without it).
 # Frame index for a video time t: round(t * 4).
 #
-# The filter chain is the one the original frames were made with (fps=4,scale=480:270:flags=area, -q:v 4).
+# Filter chain: fps=4:round=up,scale=480:270:flags=area, -q:v 4. round=up keeps the last source frame at or before
+# k/4 s (at most one 25 fps frame early). The original cloud frames used plain fps=4 (round=near), which keeps the
+# LAST source frame that rounds to slot k, i.e. video time k/4 + 0.12 s: those frames were 0.12 s late (measured on
+# the Mac, 27 Sep 2026, against exact decodes at 20, 339, 400, 700, 1130, 1500 s). Re-extract old data dirs.
 # A partial or chunked extraction seeks with -ss (a multiple of 0.25 s) and numbers its first frame round(ss*4);
 # chunks are cut with -frames:v, so they reproduce the frames of one full pass exactly (verified: same index =
 # identical picture, see docs/handoff/data-verification.md). The video is copyrighted: never commit it or its frames.
@@ -74,7 +78,7 @@ one() { # $1 first frame index, $2 frame count ("" = until the end of the video)
   [ "$first" -gt 0 ] && seek=(-ss "$ss")
   [ -n "$count" ] && lim=(-frames:v "$count")
   # ${a[@]+"${a[@]}"}: empty-array safe under set -u with the bash 3.2 that macOS ships
-  nice "$FF" -nostdin -v error ${seek[@]+"${seek[@]}"} -i "$VIDEO" -an -vf "fps=4,scale=480:270:flags=area" -q:v 4 \
+  nice "$FF" -nostdin -v error ${seek[@]+"${seek[@]}"} -i "$VIDEO" -an -vf "fps=4:round=up,scale=480:270:flags=area" -q:v 4 \
     ${lim[@]+"${lim[@]}"} -start_number "$first" "$OUT/%05d.jpg"
 }
 
@@ -97,4 +101,5 @@ fail=0
 for p in "${pids[@]}"; do wait "$p" || fail=1; done
 [ "$fail" = 0 ] || { echo "extract-frames: an ffmpeg chunk failed" >&2; exit 1; }
 N=$(find "$OUT" -name '[0-9][0-9][0-9][0-9][0-9].jpg' | wc -l | tr -d ' ')
+[ "$FIRST" = 0 ] && [ "$TILL_END" = 1 ] && echo round-up > "$OUT/.timing"
 echo "extract-frames: done in $(( $(date +%s) - T0 )) s; $N frames in $OUT"

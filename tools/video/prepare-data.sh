@@ -98,10 +98,10 @@ echo "video: $VIDEO ($LEN s)"
 
 # 1. frames
 NF=$({ find "$DATA/f4" -name '[0-9][0-9][0-9][0-9][0-9].jpg' 2>/dev/null || true; } | wc -l | tr -d ' ')
-EXPECT=$(awk -v l="$LEN" 'BEGIN {print int(l * 4) - 2}') # the full video gives 6324 (1581.19 s)
+EXPECT=$(awk -v l="$LEN" 'BEGIN {print int(l * 4) - 2}') # the full video gives 6325 (1581.19 s); frames without f4/.timing (the old 0.12 s late extraction) are redone
 if [ "$SKIP_FRAMES" = 1 ]; then
   step "frames: skipped (--skip-frames)"
-elif [ "$FORCE" = 0 ] && [ "$NF" -ge "$EXPECT" ]; then
+elif [ "$FORCE" = 0 ] && [ "$NF" -ge "$EXPECT" ] && [ "$(cat "$DATA/f4/.timing" 2>/dev/null)" = round-up ]; then
   step "frames: $NF present in $DATA/f4 — skipped"
 else
   step "frames -> $DATA/f4 (expect about $((EXPECT + 2)))"
