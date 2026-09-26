@@ -36,6 +36,8 @@ export function ensureIndexed(g: THREE.BufferGeometry): THREE.BufferGeometry {
 export class Bucket {
   private parts: THREE.BufferGeometry[] = [];
   tris = 0;
+  /** minimum fx tag of everything added while set (2 = wing part: own wash level for isolations) */
+  tag = 0;
   add(g: THREE.BufferGeometry, m?: THREE.Matrix4 | null, color: THREE.ColorRepresentation = 0xffffff, fx = 0): void {
     const geo = ensureIndexed(g.index ? g : g);
     if (m) geo.applyMatrix4(m);
@@ -52,7 +54,7 @@ export class Bucket {
       col[i * 3] = c.r;
       col[i * 3 + 1] = c.g;
       col[i * 3 + 2] = c.b;
-      f[i] = fx;
+      f[i] = Math.max(fx, this.tag);
     }
     // keep a pre-existing colour attribute (e.g. gradient teeth) multiplied by the tint
     const old = geo.getAttribute('color') as THREE.BufferAttribute | undefined;

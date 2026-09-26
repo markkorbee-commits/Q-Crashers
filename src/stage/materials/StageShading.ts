@@ -20,6 +20,13 @@ export interface StageUniforms {
   uEnvTint: THREE.IUniform<THREE.Color>;
   /** decor glow weights per aGroup: x banners, y skull eyes, z emblem/portal, w misc */
   uGlow: THREE.IUniform<THREE.Vector4>;
+  /**
+   * region isolation of the floods + decor glow: x castle-core level, y side-section level,
+   * z castle flood tint weight, w side flood tint weight (the tint colours below replace the wash hue)
+   */
+  uRegionF: THREE.IUniform<THREE.Vector4>;
+  uFloodTintC: THREE.IUniform<THREE.Color>;
+  uFloodTintS: THREE.IUniform<THREE.Color>;
 }
 
 export function createStageUniforms(): StageUniforms {
@@ -32,6 +39,9 @@ export function createStageUniforms(): StageUniforms {
     uFlashPos: { value: new THREE.Vector3(0, 20, -10) },
     uEnvTint: { value: new THREE.Color(1, 1, 1) },
     uGlow: { value: new THREE.Vector4(1, 1, 1, 1) },
+    uRegionF: { value: new THREE.Vector4(1, 1, 0, 0) },
+    uFloodTintC: { value: new THREE.Color(1, 1, 1) },
+    uFloodTintS: { value: new THREE.Color(1, 1, 1) },
   };
 }
 
@@ -43,7 +53,12 @@ uniform vec3 uBack;
 uniform vec3 uFlash;
 uniform vec3 uFlashPos;
 uniform vec3 uEnvTint;
+uniform vec4 uRegionF;
+uniform vec3 uFloodTintC;
+uniform vec3 uFloodTintS;
 varying vec3 vStageWP;
+float stageSideW(vec3 wp) { return smoothstep(37.3, 38.3, abs(wp.x)); }
+float stageRegion(vec3 wp) { return mix(uRegionF.x, uRegionF.y, stageSideW(wp)); }
 // cheap contact occlusion where vertical faces meet the deck (1.9) / upper platform (5.5) / ground
 float stageAO(vec3 wp) {
   vec3 gn = normalize(cross(dFdx(wp), dFdy(wp)));
@@ -70,7 +85,15 @@ vec3 stageFlood(vec3 wp, vec3 n) {
   }
   // the side sections / arms get a lower flood density than the castle
   acc *= mix(1.0, 0.4, smoothstep(37.0, 50.0, abs(wp.x)));
-  acc += uFront * max(dot(n, vec3(0.0, 0.2425, 0.9701)), 0.0);
+  // region isolation: a castle / side colour override re-tints the floods (same brightness), the
+  // region levels dim them (castle: 0 leaves the castle dark while the crown keeps its own wash)
+  float sw = stageSideW(wp);
+  float tw = mix(uRegionF.z, uRegionF.w, sw);
+  acc = mix(acc, mix(uFloodTintC, uFloodTintS, sw) * dot(acc, vec3(0.3, 0.59, 0.11)) * 1.4, tw);
+  // level 1 = the dark default set; 2 = a fully flood-lit castle (~2.8x)
+  float rg = mix(uRegionF.x, uRegionF.y, sw);
+  acc *= rg <= 1.0 ? 0.06 + 0.94 * rg : pow(rg, 1.5);
+  acc += uFront * max(dot(n, vec3(0.0, 0.2425, 0.9701)), 0.0) * min(0.3 + 0.7 * rg, 1.3);
   acc += uBack * max(dot(n, vec3(0.0, 0.9285, -0.3714)), 0.0);
   vec3 fd = uFlashPos - wp;
   float fl = length(fd);
@@ -131,7 +154,7 @@ ${
   o.glowGroups
     ? `{
   float gw = vGroup < 0.5 ? uGlow.w : (vGroup < 1.5 ? uGlow.x : (vGroup < 2.5 ? uGlow.y : uGlow.z));
-  totalEmissiveRadiance *= gw;
+  totalEmissiveRadiance *= gw * stageRegion(vStageWP);
 }`
     : ''
 }`,

@@ -73,6 +73,14 @@ export function createLedMaterial(): THREE.ShaderMaterial {
         uContentCol: { value: new THREE.Color(1, 0.3, 0.1) },
         uContentMix: { value: 0 },
         uContentGain: { value: 1 },
+        // side sections (|x| > 37.5) take their own LED colours
+        uLedS: { value: new THREE.Color(1, 0.1, 0.05) },
+        uLed2S: { value: new THREE.Color(0.1, 0.2, 1) },
+        uAccentS: { value: new THREE.Color(1, 1, 1) },
+        /** x castle-core level, y side-section level, z LED batten level, w horizontal outline battens */
+        uRegion: { value: new THREE.Vector4(1, 1, 1, 0.35) },
+        /** 0..1 window level (share of the windows lit) */
+        uWinLvl: { value: 1 },
       },
     ]),
     vertexShader: LED_VERT,
@@ -162,6 +170,11 @@ const LED_FRAG = /* glsl */ `
       uniform vec3 uContentCol;
       uniform float uContentMix;
       uniform float uContentGain;
+      uniform vec3 uLedS;
+      uniform vec3 uLed2S;
+      uniform vec3 uAccentS;
+      uniform vec4 uRegion;
+      uniform float uWinLvl;
       varying vec4 vLed;
       varying vec2 vUv;
       varying vec3 vWP;
@@ -180,10 +193,14 @@ const LED_FRAG = /* glsl */ `
         return mix(mix(h21(i), h21(i + vec2(1, 0)), f.x), mix(h21(i + vec2(0, 1)), h21(i + vec2(1, 1)), f.x), f.y);
       }
 
-      // pattern value for one pixel: returns colour
-      vec3 ledPattern(float pid, float s, float strip, vec3 wp, float grp) {
-        vec3 cA = grp > 0.5 ? uAccent : uLed;
-        vec3 cB = grp > 0.5 ? uAccent * 0.6 : uLed2;
+      // pattern value for one pixel: returns colour. grp: 0 content colour, 1 accent (pilasters),
+      // 2 horizontal outline (content colour at the outline level); sideW: 0 castle core .. 1 side sections
+      vec3 ledPattern(float pid, float s, float strip, vec3 wp, float grp, float sideW) {
+        vec3 led = mix(uLed, uLedS, sideW);
+        vec3 acc = mix(uAccent, uAccentS, sideW);
+        vec3 cA = grp > 0.5 && grp < 1.5 ? acc : led;
+        vec3 cB = grp > 0.5 && grp < 1.5 ? acc * 0.6 : mix(uLed2, uLed2S, sideW);
+        if (grp > 1.5) { cA *= uRegion.w; cB *= uRegion.w; }
         float pat = uPattern;
         vec3 c = cA;
         if (pat < 0.5) {
@@ -304,6 +321,9 @@ const LED_FRAG = /* glsl */ `
         float rnd = vLed.w;
         vec3 col = vec3(0.0);
         float pulse = 1.0 + uPulse * 1.2;
+        // region: castle core (|x| < 37.5) vs side sections / arms
+        float sideW = smoothstep(37.3, 38.3, abs(vWP.x));
+        float regG = mix(uRegion.x, uRegion.y, sideW);
         if (kind < 0.5 || (kind > 6.5 && kind < 7.5)) {
           // pixel batten or dots
           float pitch = kind < 0.5 ? 0.1 : 0.3;
@@ -321,20 +341,27 @@ const LED_FRAG = /* glsl */ `
             m = 1.0 - smoothstep(0.18, 0.36, length(d));
           }
           m = mix(m, 0.55, clamp(fw * 1.5 - 0.3, 0.0, 1.0));
-          col = ledPattern(pid, s, strip, vWP, rnd) * m * pulse;
+          col = ledPattern(pid, s, strip, vWP, rnd, sideW) * m * pulse;
           #ifdef LED_OVERLAY
           // far away a chase / sparkle averages over many pixels: keep a steady outline level
-          col = max(col, (rnd > 0.5 ? uAccent : uLed) * 0.45 * m * vFarO);
+          vec3 steady = rnd > 0.5 && rnd < 1.5 ? mix(uAccent, uAccentS, sideW) : mix(uLed, uLedS, sideW) * (rnd > 1.5 ? uRegion.w : 1.0);
+          col = max(col, steady * 0.45 * m * vFarO);
           #endif
+          col *= uRegion.z;
         } else if (kind < 1.5) {
-          // window pane: glow brightest low-centre, tracery bars, per-window variation / flicker
-          float g = 0.7 + 0.45 * (1.0 - vUv.y) * (1.0 - abs(vUv.x - 0.5) * 1.2);
-          float bars = 1.0;
-          float bx = abs(vUv.x - 0.5);
-          bars *= smoothstep(0.018, 0.035, bx);
-          float by = fract(vUv.y * 3.0);
-          bars *= mix(1.0, smoothstep(0.0, 0.05, by) * smoothstep(1.0, 0.95, by), 0.85);
-          float var = 0.75 + 0.5 * rnd;
+          // window: a dim pane with two vertical LED tubes standing in the opening (the "window bars"
+          // of the real set) + per-window variation / flicker. Only a share of the windows is lit at
+          // mid levels, so the castle reads as a dark set with sparse practicals, not a lit palace.
+          float g = 0.05 + 0.06 * (1.0 - vUv.y);
+          float bx = abs(abs(vUv.x - 0.5) - 0.2);
+          float fwx = fwidth(vUv.x) * 1.5;
+          float tube = 1.0 - smoothstep(0.045, 0.045 + fwx + 0.01, bx);
+          tube *= smoothstep(0.04, 0.1, vUv.y) * (1.0 - smoothstep(0.66, 0.74, vUv.y));
+          // far away the tubes average out: keep their mean light instead of shimmering
+          tube = mix(tube, 0.11, clamp(fwx * 4.0 - 0.5, 0.0, 1.0));
+          float bars = g + 1.5 * tube;
+          float lit = smoothstep(rnd - 0.12, rnd + 0.12, 0.25 + 0.85 * uWinLvl);
+          float var = (0.75 + 0.5 * rnd) * lit;
           float mode = uWinMode;
           if (mode > 0.5 && mode < 1.5) {
             // fire flicker
@@ -360,7 +387,7 @@ const LED_FRAG = /* glsl */ `
             float swap = mod(floor(uBeat / 4.0), 2.0);
             wp = mix(1.15, 0.45, abs(step(0.0, vWP.x) - swap));
           }
-          col = uWin * g * mix(0.25, 1.0, bars) * var * wp * pulse;
+          col = uWin * bars * var * wp * pulse;
         } else if (kind < 2.5) {
           float r = length(vUv - 0.5) * 2.0;
           float core = 1.0 - smoothstep(0.35, 1.0, r);
@@ -408,7 +435,8 @@ const LED_FRAG = /* glsl */ `
           grid = mix(grid, 0.6, clamp(fwidth(p.x / 0.05) - 0.4, 0.0, 1.0));
           col = panelContent(p, size) * (0.35 + 0.65 * grid) * pulse * uContentGain;
         }
-        col += vec3(uStrobe) * 3.0 * step(kind, 0.5);
+        col += vec3(uStrobe) * 3.0 * step(kind, 0.5) * uRegion.z;
+        col *= regG;
         #ifdef LED_OVERLAY
         col *= vOverlay;
         if (max(col.r, max(col.g, col.b)) < 1e-4) discard;

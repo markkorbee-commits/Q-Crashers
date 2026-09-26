@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { FrameContext, QualitySettings } from '../core/types';
-import type { StageLook } from './StageLook';
+import type { StageLookEx } from './StageLook';
 import { buildBody } from './dragon/body';
 import { buildHead } from './dragon/head';
 import { createKit, type PartBuckets } from './dragon/kit';
@@ -8,6 +8,9 @@ import { HEAD, headMatrix, wingLayout } from './dragon/layout';
 import {
   createBulbMaterial,
   createEnvMap,
+  createGarlandMaterial,
+  GARLAND,
+  Garlands,
   createRosetteGlowMaterial,
   createStripMaterial,
   createThroatMaterial,
@@ -16,7 +19,7 @@ import {
   type CrownUniforms,
 } from './dragon/shading';
 import { flameTexture, lavaTextures, panelTextures, scaleTextures, steelTextures, type PbrSet } from './dragon/textures';
-import { buildWings, rosetteGear } from './dragon/wings';
+import { buildWings, rosetteGear, WING_FX } from './dragon/wings';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 /** World positions the crown exposes (registered as anchors by MainStageSystem). */
@@ -63,12 +66,15 @@ export class DragonCrown {
   private textures: THREE.Texture[] = [];
   private meshes: THREE.Mesh[] = [];
   private anchorData: CrownAnchors | null = null;
-  private stat = { buildMs: 0, texMs: 0, headMs: 0, bodyWingMs: 0, mergeMs: 0, tris: 0, ledSegments: 0, bulbs: 0, texSize: 0, draws: 0 };
+  private stat = { buildMs: 0, texMs: 0, headMs: 0, bodyWingMs: 0, mergeMs: 0, tris: 0, ledSegments: 0, bulbs: 0, texSize: 0, draws: 0, garlandBulbs: 0 };
   private tmpM = new THREE.Matrix4();
   private tmpR = new THREE.Matrix4();
   private tmpC = new THREE.Color();
   private tmpC2 = new THREE.Color();
   private level: QualitySettings['level'] = 'high';
+  /** festoon bulb strings (wings here; the castle / side sections add theirs before finishGarlands) */
+  readonly garlands = new Garlands();
+  private garlandMesh: THREE.Mesh | null = null;
 
   async build(q: QualitySettings): Promise<void> {
     const t0 = performance.now();
@@ -144,6 +150,7 @@ export class DragonCrown {
     t1 = performance.now();
     const body = buildBody(kit);
     const { wings, membrane } = buildWings(kit);
+    for (const w of wings) for (const g of w.garlands) this.garlands.string(g, GARLAND.wings, 0.85, 0.15);
     this.stat.bodyWingMs = Math.round(performance.now() - t1);
     await yieldFrame();
     t1 = performance.now();
@@ -219,7 +226,7 @@ export class DragonCrown {
       const parts = rosetteGear(detail).map((g) => {
         const n = g.getAttribute('position').count;
         g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 3).fill(1), 3));
-        g.setAttribute('fx', new THREE.BufferAttribute(new Float32Array(n), 1));
+        g.setAttribute('fx', new THREE.BufferAttribute(new Float32Array(n).fill(WING_FX), 1));
         for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv', 'color', 'fx'].includes(k)) g.deleteAttribute(k);
         return g.index ? g.toNonIndexed() : g;
       });
@@ -271,7 +278,19 @@ export class DragonCrown {
     this.setQuality(q);
   }
 
-  update(ctx: FrameContext, look: StageLook): void {
+  /** build the single instanced festoon mesh (after every set piece added its strings) */
+  finishGarlands(): void {
+    if (this.garlandMesh || this.garlands.count === 0) return;
+    const mat = createGarlandMaterial(this.U);
+    this.materials.push(mat);
+    const m = this.garlands.build(mat);
+    this.group.add(m);
+    this.meshes.push(m);
+    this.garlandMesh = m;
+    this.stat.garlandBulbs = this.garlands.count;
+  }
+
+  update(ctx: FrameContext, look: StageLookEx): void {
     const U = this.U;
     const cam = ctx.camera;
     U.uPixel.value = (2 * Math.tan(THREE.MathUtils.degToRad(cam.fov) * 0.5)) / Math.max(200, typeof window !== 'undefined' ? window.innerHeight : 720);
@@ -284,10 +303,23 @@ export class DragonCrown {
     U.uEmber.value = look.ember;
     U.uMinPx.value = this.level === 'mobile' ? 1.5 : 2.0;
 
-    // LEDs
+    // LEDs (dragon colours; the wings may carry their own) + region levels
     U.uLed.value.copy(look.led);
     U.uLed2.value.copy(look.led2);
+    U.uLedW.value.copy(look.wingLed);
+    U.uLedW2.value.copy(look.wingLed2);
+    U.uDragonG.value = look.dragonGain;
+    U.uWingG.value = look.wingGain;
+    U.uWingWash.value = look.wingWash;
+    U.uDragonWash.value = look.dragonWash;
+    U.uBeat.value = ctx.beat.beat;
     U.uLedI.value = Math.max(0, look.ledIntensity);
+    // festoons: HDR level per group (not tied to the master level: a cue may light them in a blackout)
+    U.uGarl.value.copy(look.garland);
+    U.uGarlCol.value.copy(look.garlandColor);
+    U.uGarlPat.value = look.garlandPattern;
+    U.uGarlRate.value = look.garlandRate;
+    if (this.garlandMesh) this.garlandMesh.visible = Math.max(look.garland.x, look.garland.y, look.garland.z) > 0.002;
     U.uPattern.value = look.ledPattern;
     U.uPhase.value = look.ledPhase;
     U.uPulse.value = Math.max(0, Math.min(1, look.pulse));
@@ -373,16 +405,9 @@ export class DragonCrown {
   }
 
   setQuality(q: QualitySettings): void {
+    // anisotropy is applied once at build (a runtime change would re-upload every crown texture) and
+    // the crown casts no shadows (the renderer's shadow map is off in every preset)
     this.level = q.level;
-    for (const t of this.textures) {
-      if (t.anisotropy !== q.anisotropy && !(t instanceof THREE.DataTexture && t.mapping === THREE.EquirectangularReflectionMapping)) {
-        t.anisotropy = q.anisotropy;
-        t.needsUpdate = true;
-      }
-    }
-    for (const m of this.meshes) {
-      m.castShadow = q.shadows && !(m.material instanceof THREE.ShaderMaterial);
-    }
   }
 
   stats(): Record<string, number | string> {
@@ -391,6 +416,7 @@ export class DragonCrown {
       crownTris: Math.round(this.stat.tris),
       ledSegments: this.stat.ledSegments,
       bulbs: this.stat.bulbs,
+      garlandBulbs: this.stat.garlandBulbs,
       buildMs: this.stat.buildMs,
       buildSplit: `tex ${this.stat.texMs} / head ${this.stat.headMs} / body+wings ${this.stat.bodyWingMs} / merge ${this.stat.mergeMs}`,
       texSize: this.stat.texSize,

@@ -4,8 +4,8 @@ import type { AnchorName } from '../core/Anchors';
 import type { FrameContext, QualitySettings, System } from '../core/types';
 import type { Platform, PlayerController } from '../player/PlayerController';
 import { yawTowards } from '../player/spots';
-import { CastleBuilder } from './castle/Castle';
-import { SidesBuilder } from './castle/Sides';
+import { addCastleGarlands, CastleBuilder } from './castle/Castle';
+import { addSideGarlands, SidesBuilder } from './castle/Sides';
 import { barrierLayout, barrierRuns, barrierSegmentGeometry, DeckBuilder } from './deck/Deck';
 import { SpeakerBuilder } from './deck/Speakers';
 import { DragonCrown } from './DragonCrown';
@@ -20,6 +20,30 @@ import { createStageLookEx, type StageLookEx } from './StageLook';
 const RANK: Record<QualitySettings['level'], number> = { mobile: 0, medium: 1, high: 2, ultra: 3 };
 
 const CANDLE = new THREE.Color('#ffb45a');
+
+/**
+ * Castle emitter calibration against the official Endshow footage: the castle is a dark printed set
+ * whose vertical LED pilasters, window tubes and the front-line lamps read as sparse points and
+ * lines, while the dragon, the wings and their LED lines carry the image. (Round 1 had the castle
+ * outlined like a lit palace: every cornice a bright line, windows as glowing panes, strong floods.)
+ */
+const CALIB = {
+  /** HDR gain of the content-coloured battens (was 9) */
+  batten: 1.5,
+  /** pilaster strips relative to the battens */
+  pilaster: 0.9,
+  /** horizontal cornice / eave / ledge battens relative to the content colour */
+  outline: 0.3,
+  /** window tube gain (the pane itself is ~10 % of the tubes) */
+  window: 1.0,
+  arcade: 0.8,
+  lamp: 3.8,
+  lantern: 2.6,
+  /** decor backlights (banners, skull eyes, emblem) */
+  decor: 0.6,
+  /** virtual floods relative to the lighting wash */
+  flood: 0.32,
+};
 
 /** c += src * k (THREE.Color has no addScaled) */
 function addScaled(c: THREE.Color, src: THREE.Color, k: number): THREE.Color {
@@ -96,6 +120,10 @@ export class MainStageSystem implements System {
     // ---- crown -----------------------------------------------------------------------------------
     try {
       await this.crown.build(q);
+      // festoon bulb strings: the wings' (added by the crown) + the castle / side-section eaves
+      addCastleGarlands(this.crown.garlands);
+      addSideGarlands(this.crown.garlands);
+      this.crown.finishGarlands();
     } catch (e) {
       console.error('[stage] crown build failed', e);
     }
@@ -209,6 +237,25 @@ export class MainStageSystem implements System {
       roof.push(...c.roof);
     }
     set('laser_stage', byX(lasers));
+    // blue cold-fire plume heads on the castle-terrace roofline (two groups per side): the inner group
+    // on the wall walk + inner tower roof, the outer group on the outer tower roof + wall walk.
+    // Not (yet) a core AnchorName: registered by name so pyro targets can resolve it.
+    {
+      const zw = L.facadeZ - 0.9;
+      const plumes: THREE.Vector3[] = [];
+      for (const s of [-1, 1])
+        for (const [x, y, z] of [
+          [13.0, L.wallTop + 0.3, zw],
+          [14.4, L.wallTop + 0.3, zw],
+          [16.1, 13.95, -12.9],
+          [24.0, 12.85, -11.6],
+          [27.0, 12.85, -11.6],
+          [29.9, L.wallTop + 0.3, zw],
+          [31.2, L.wallTop + 0.3, zw],
+        ])
+          plumes.push(new THREE.Vector3(s * x, y, z));
+      a.set('roof_plumes' as AnchorName, byX(plumes));
+    }
     set('fixtures_truss', truss);
     set('roof', byX(roof));
   }
@@ -332,20 +379,28 @@ export class MainStageSystem implements System {
     const u = this.mats.u;
     // soft-limited: env wash intensities above ~1 compress instead of blowing out the set
     const wi = 1.5 * (1 - Math.exp(-Math.max(0, look.washIntensity) / 1.1));
-    // virtual floods: set A follows the lighting wash, set B leans to the LED secondary colour
-    u.uFloodA.value.copy(look.wash).multiplyScalar(wi * 3.2 * (0.55 + 0.6 * look.energy));
-    u.uFloodB.value.copy(look.wash).lerp(look.led2, 0.55).multiplyScalar(wi * 2.8 * (0.55 + 0.6 * look.energy));
+    // virtual floods: set A follows the lighting wash, set B leans to the LED secondary colour. The set
+    // is a dark printed flat in the official footage (the LED lines, dragon and wings carry the image),
+    // so the floods sit well below the crown's wash (CALIB.flood)
+    const fl = CALIB.flood * wi * (0.55 + 0.6 * look.energy);
+    u.uFloodA.value.copy(look.wash).multiplyScalar(3.2 * fl);
+    u.uFloodB.value.copy(look.wash).lerp(look.castleLed2, 0.55).multiplyScalar(2.8 * fl);
     addScaled(u.uFront.value.copy(look.wash).multiplyScalar(wi * 0.42), look.pulseColor, 1.2);
     u.uFront.value.r += look.strobe * 2.5;
     u.uFront.value.g += look.strobe * 2.5;
     u.uFront.value.b += look.strobe * 2.5;
-    addScaled(u.uBack.value.setRGB(0.012, 0.02, 0.045), look.led, 0.06 * look.ledIntensity);
+    addScaled(u.uBack.value.setRGB(0.012, 0.02, 0.045), look.castleLed, 0.06 * look.ledIntensity * Math.min(1, look.castleGain));
     u.uFlash.value.copy(look.flash).multiplyScalar(1.6);
     u.uFlashPos.value.copy(this.app.env.flashPos);
+    // region isolation of floods + decor glow (castle core / side sections, colour overrides)
+    u.uRegionF.value.set(look.castleGain, look.sidesGain, look.castleFloodTint, look.sidesFloodTint);
+    u.uFloodTintC.value.copy(look.castleLed);
+    u.uFloodTintS.value.copy(look.sidesLed);
     // env reflections carry the rig's hot fixture spots: they fade with the practicals (blackouts)
     const E = look.emit;
     const castle = E * (1 - look.ember);
-    addScaled(u.uEnvTint.value.setRGB(0.35, 0.35, 0.42).multiplyScalar(0.12 + 0.88 * E), look.wash, wi * 1.2);
+    const setLvl = Math.min(1, Math.max(look.castleGain, look.sidesGain));
+    addScaled(u.uEnvTint.value.setRGB(0.35, 0.35, 0.42).multiplyScalar((0.12 + 0.88 * E) * (0.25 + 0.75 * setLvl)), look.wash, wi * 1.2 * setLvl);
     u.uGlow.value.set(look.bannerGlow, look.skullGlow * (0.6 + look.eyesIntensity * 0.5), look.emblemGlow, 1);
 
     const l = this.mats.led.uniforms;
@@ -356,19 +411,24 @@ export class MainStageSystem implements System {
     l.uPhase.value = look.ledPhase;
     l.uPattern.value = look.ledPatternX;
     // castle battens: ledIntensity already carries master x presence; 'ember' leaves the castle dark
-    const ledGain = 9 * look.ledIntensity * (1 - look.ember);
-    (l.uLed.value as THREE.Color).copy(look.led).multiplyScalar(ledGain);
-    (l.uLed2.value as THREE.Color).copy(look.led2).multiplyScalar(ledGain);
-    (l.uAccent.value as THREE.Color).copy(look.accent).multiplyScalar(ledGain * 0.75);
-    (l.uWin.value as THREE.Color).copy(look.windowColor).multiplyScalar(2.3 * look.windows);
+    const ledGain = CALIB.batten * look.ledIntensity * (1 - look.ember);
+    (l.uLed.value as THREE.Color).copy(look.castleLed).multiplyScalar(ledGain);
+    (l.uLed2.value as THREE.Color).copy(look.castleLed2).multiplyScalar(ledGain);
+    (l.uAccent.value as THREE.Color).copy(look.accent).multiplyScalar(ledGain * CALIB.pilaster);
+    (l.uLedS.value as THREE.Color).copy(look.sidesLed).multiplyScalar(ledGain);
+    (l.uLed2S.value as THREE.Color).copy(look.sidesLed2).multiplyScalar(ledGain);
+    (l.uAccentS.value as THREE.Color).copy(look.sidesAccent).multiplyScalar(ledGain * CALIB.pilaster);
+    (l.uRegion.value as THREE.Vector4).set(look.castleGain, look.sidesGain, look.battenGain, CALIB.outline);
+    (l.uWin.value as THREE.Color).copy(look.windowColor).multiplyScalar(CALIB.window * look.windows);
+    l.uWinLvl.value = look.windows;
     l.uWinMode.value = look.windowMode;
-    (l.uArcade.value as THREE.Color).copy(look.arcade).multiplyScalar(1.6 * (0.25 + 0.75 * look.windows) * castle);
+    (l.uArcade.value as THREE.Color).copy(look.arcade).multiplyScalar(CALIB.arcade * (0.25 + 0.75 * look.windows) * castle);
     // front-line lamp row + crystal lanterns (ramparts, arm posts): they carry the U of the stage from
-    // far away, so they are bright HDR points; their level follows the look's window level (the
-    // dormant opening shows them at ~30 %, blackouts turn them off)
+    // far away, so they are HDR points; their level follows the look's window level (the dormant
+    // opening shows them at ~30 %, blackouts turn them off)
     const lampLvl = Math.pow(THREE.MathUtils.smoothstep(look.windows, 0, 0.4), 0.6) * M * (1 - look.ember);
-    (l.uLamp.value as THREE.Color).copy(look.lamp).multiplyScalar((4 + 10 * look.ledIntensity) * (0.5 + 0.5 * lampLvl) * castle);
-    (l.uLantern.value as THREE.Color).copy(look.lantern).multiplyScalar((7 + 4 * look.energy) * lampLvl);
+    (l.uLamp.value as THREE.Color).copy(look.lamp).multiplyScalar(CALIB.lamp * (0.4 + look.ledIntensity) * (0.25 + 0.75 * lampLvl) * castle);
+    (l.uLantern.value as THREE.Color).copy(look.lantern).multiplyScalar(CALIB.lantern * (0.65 + 0.35 * look.energy) * lampLvl);
     (l.uCandle.value as THREE.Color).copy(CANDLE).multiplyScalar(1.4 * castle);
     (l.uPortal.value as THREE.Color).copy(look.portal).multiplyScalar((0.5 + 0.8 * look.mouth) * castle);
     l.uPulse.value = look.pulse;
@@ -379,7 +439,7 @@ export class MainStageSystem implements System {
     // every panel content mode (incl. the absolute fire / ice / ember looks) follows the master level;
     // under 'ember' the castle panels stay low so only the dragon reads
     l.uContentGain.value = M * (1 - 0.8 * look.ember);
-    u.uGlow.value.multiplyScalar(castle);
+    u.uGlow.value.multiplyScalar(castle * CALIB.decor);
   }
 
   setQuality(q: QualitySettings): void {

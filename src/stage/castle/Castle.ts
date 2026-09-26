@@ -4,6 +4,7 @@ import { boxMinMax, cyl, decorDisc, decorPanel, GLOW, METAL, PAINT, railing, rod
 import { type ArchKind, extrude, frameShape, type Opening, paneShape, wallShape } from '../lib/gothic';
 import { L } from '../layout';
 import { LED_KIND } from '../materials/LedMaterial';
+import { GARLAND, type Garlands } from '../dragon/shading';
 
 /**
  * The grey gothic castle core of the 2026 RED (printed scenic flats on scaffold in reality), laid out
@@ -14,8 +15,8 @@ import { LED_KIND } from '../materials/LedMaterial';
  *    the logo shield keystone under the dragon's chin, flanked by two big round arches through which the
  *    oversized stone stairs climb from the deck (Y 1.9) to the upper castle platform (Y 5.5)
  *  - a gallery at Y 5.5 on corbels along the inner bays (black tubular railing)
- *  - towers: outer pair projecting from the facade (top 14, spires to 18), inner pair rising behind the
- *    parapet (top 16, the 15 m torch positions) — moved out to X ±17.3 so the crown's gold foreleg,
+ *  - towers: outer pair projecting from the facade (roof 12.2, spires to 16), inner pair rising behind
+ *    the parapet (roof 13.3, the torch pedestals; lowered from the bible so the wings read, see INNER) — moved out to X ±17.3 so the crown's gold foreleg,
  *    which hooks its talons over the parapet at X +11…+14, reads in front of them
  *  - a closed dark roof + scaffold back wall (hides the wing roots) and the rear pyro scaffold (Z −22,
  *    top Y 18) carrying the roof gerbs and comets behind the dragon.
@@ -37,12 +38,45 @@ interface TowerSpec {
   capTop: number;
 }
 
-const INNER: TowerSpec = { kind: 'inner', x: 17.3, w: 4.0, frontZ: -12.35, depth: 3.75, body: 15.4, base: 8.6, capTop: 18 };
-const OUTER: TowerSpec = { kind: 'outer', x: 25.5, w: 5.0, frontZ: -10.2, depth: 5.0, body: 13.4, base: L.deckY, capTop: 18 };
+/*
+ * Round-2 look parity: in the official footage the towers stand UNDER the wing arches (the thumbnail)
+ * and the wing membranes read down to the castle roofline from the terrace / drone. The bible heights
+ * (inner 16, outer 14 with spires to 18) put the towers in front of half of every wing, so both pairs
+ * are ~2 m lower here (inner roof 13.3 / pinnacles 15.6, outer 12.2 / spire 16).
+ */
+const INNER: TowerSpec = { kind: 'inner', x: 17.3, w: 4.0, frontZ: -12.35, depth: 3.75, body: 13.3, base: 8.6, capTop: 15.6 };
+const OUTER: TowerSpec = { kind: 'outer', x: 25.5, w: 5.0, frontZ: -10.2, depth: 5.0, body: 12.2, base: L.deckY, capTop: 16 };
 /** stair arches in the porch screen (round, springing 4.5, apex 7.0) */
 const ARCH: Opening = { cx: 8.9, y0: L.deckY, w: 5.0, h: 5.1, kind: 'round' };
 /** medallion (bible Ø 3.5 at Y 6.5; see layout.ts) */
 const MED = { x: 20, y: 7.25, r: 1.62 };
+
+/**
+ * Warm festoon swags of the castle core: along the facade eave between the pilasters and over the
+ * porch screen (the "lamp strings" of the official footage; lit by stage.garlands / stage.state).
+ */
+export function addCastleGarlands(g: Garlands): void {
+  const z = L.facadeZ + 0.5;
+  const y = L.wallTop - 0.6;
+  const runs = [
+    [13.35, 16.05, 18.75, 21.8, 23.2],
+    [27.8, 30.6, 32.7, 34.8, 36.6],
+  ];
+  for (const s of [-1, 1]) {
+    let u = 0;
+    for (const xs of runs)
+      for (let i = 0; i + 1 < xs.length; i++) u = g.swag(new THREE.Vector3(s * xs[i], y, z), new THREE.Vector3(s * xs[i + 1], y, z), 0.45, GARLAND.castle, 0.8, 0.14, u);
+    // porch screen, between the portal crown and the porch corners
+    const zp = L.porchFrontZ + 0.45;
+    const yp = L.porchTop - 0.35;
+    for (const [a, b] of [
+      [3.9, 6.6],
+      [6.6, 9.4],
+      [9.4, 12.2],
+    ])
+      u = g.swag(new THREE.Vector3(s * a, yp, zp), new THREE.Vector3(s * b, yp, zp), 0.35, GARLAND.castle, 0.8, 0.14, u);
+  }
+}
 
 export class CastleBuilder {
   private rng = new Rng(2026);
@@ -535,10 +569,9 @@ export class CastleBuilder {
     const inner = t.kind === 'inner';
     const tiers: Opening[] = [];
     if (inner) {
-      for (const o of [-0.58, 0.58]) tiers.push({ cx: x + o, y0: 11.1, w: 0.78, h: 2.3, kind: 'lancet' });
+      for (const o of [-0.58, 0.58]) tiers.push({ cx: x + o, y0: 10.2, w: 0.78, h: 2.0, kind: 'lancet' });
     } else {
       for (const o of [-0.62, 0.62]) tiers.push({ cx: x + o, y0: 9.1, w: 0.78, h: 2.05, kind: 'lancet' });
-      tiers.push({ cx: x, y0: 11.55, w: 0.95, h: 1.45, kind: 'pointed' });
     }
     this.slab(wallShape(x - hw, x + hw, t.base, t.body, tiers, k.seg), zf, 0.5, TINT.cool);
     boxMinMax(k.stone, x - hw, t.base, zb, x + hw, t.body, zf - 0.5, TINT.wall);
@@ -548,15 +581,15 @@ export class CastleBuilder {
       boxMinMax(k.stone, o.cx - o.w / 2 - 0.2, o.y0 - 0.2, zf, o.cx + o.w / 2 + 0.2, o.y0, zf + 0.25, TINT.trim);
     }
     // side windows (upper tier)
-    for (const side of [-1, 1]) this.appliedLancet(x + side * hw, inner ? 11.3 : 10.6, zc, side * (Math.PI / 2), 0.8, 2.0);
+    for (const side of [-1, 1]) this.appliedLancet(x + side * hw, inner ? 10.4 : 9.4, zc, side * (Math.PI / 2), 0.8, 2.0);
     // corner shafts with LED outlines
-    const shaft0 = inner ? 10.4 : t.base + 0.4;
+    const shaft0 = inner ? 9.9 : t.base + 0.4;
     for (const e of [-1, 1]) {
       const cx = x + e * (hw - 0.22);
       boxMinMax(k.stone, cx - 0.28, t.base, zf - 0.2, cx + 0.28, t.body - 0.4, zf + 0.26, TINT.trim);
       k.led.bar(new THREE.Vector3(cx, shaft0, zf + 0.26), new THREE.Vector3(cx, t.body - 0.6, zf + 0.26), OUT, 0.11);
     }
-    for (const y of inner ? [10.75] : [2.3, 8.7, 11.3]) boxMinMax(k.stone, x - hw - 0.08, y, zf - 0.1, x + hw + 0.08, y + 0.26, zf + 0.3, TINT.trim);
+    for (const y of inner ? [9.95] : [2.3, 8.7]) boxMinMax(k.stone, x - hw - 0.08, y, zf - 0.1, x + hw + 0.08, y + 0.26, zf + 0.3, TINT.trim);
     // cornice, parapet on 4 sides, merlons, roof deck
     const py = t.body;
     boxMinMax(k.stone, x - hw - 0.3, py - 0.4, zb - 0.3, x + hw + 0.3, py, zf + 0.35, TINT.trim);
@@ -578,6 +611,12 @@ export class CastleBuilder {
       const bowl = new THREE.TorusGeometry(0.6, 0.12, 6, 16);
       k.gold.add(bowl, new THREE.Matrix4().makeRotationX(Math.PI / 2).setPosition(x, py + 0.98, zc));
       bowl.dispose();
+      // flickering amber brazier lamp in the bowl (seen from the pit next to the dragon's head)
+      for (const [r, rnd] of [
+        [RIGHT, 0.23],
+        [OUT, 0.71],
+      ] as const)
+        k.led.rect(new THREE.Vector3(x, py + 1.55, zc), r, UP, 0.95, 1.25, LED_KIND.candle, rnd);
       k.pts.towerTorches.push(new THREE.Vector3(x, py + 1.1, zc));
       k.pts.towersTop.push(new THREE.Vector3(x, top, zc));
       k.pts.laserStage.push(new THREE.Vector3(x, py + 0.35, zf - 0.55));
