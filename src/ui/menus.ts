@@ -42,7 +42,7 @@ const SPECIAL = ['piano', 'crest_left', 'decking', 'entrance'];
 const SPOT_BLURB: Record<string, string> = {
   dj: 'Behind the decks in the gold vault, facing the field',
   dancers: 'On the red podium where the dancers perform',
-  castle: 'Up the castle stairs: the gallery over the deck and the field',
+  castle: 'The gallery at the top of the castle stairs',
   front: 'On the barrier, right under the dragon',
   crowd: 'In the pit with the Tribe, 30 m out',
   dragon_view: 'Looking up at the dragon crown',
