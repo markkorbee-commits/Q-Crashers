@@ -51,7 +51,8 @@ void main() {
   float n2 = texture(uNoise, vW.xz * 0.09 + 0.31).g;
   float n3 = texture(uNoise, vW.xz * 0.4 + 0.7).b;
   float paved = (1.0 - smoothstep(42.0, 47.0, abs(vW.x))) * smoothstep(-3.0, 0.0, vW.z) * (1.0 - smoothstep(134.0, 140.0, vW.z));
-  vec3 alb = mix(vec3(0.46, 0.45, 0.36), vec3(0.95, 0.9, 0.84), paved);
+  // paved albedo = the terrain's pale concrete (Terrain.ts, linear ≈ 0.40 / 0.385 / 0.34, day photos)
+  vec3 alb = mix(vec3(0.46, 0.45, 0.36), vec3(0.40, 0.385, 0.34), paved);
   alb *= (0.3 + 1.3 * n1 * (0.5 + 1.0 * n2)) * (0.7 + 0.6 * n3);
   // the sheet fades out before its border (no visible edge on the banks)
   float edge = (1.0 - smoothstep(105.0, 130.0, abs(vW.x))) * (1.0 - smoothstep(150.0, 168.0, vW.z));
@@ -95,7 +96,7 @@ export class FieldLight {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     geo.setIndex(idx);
-    this.uniforms = { ...shared, uFieldGain: { value: 0.2 }, uFieldReach: { value: 1.0 } };
+    this.uniforms = { ...shared, uFieldGain: { value: 0.15 }, uFieldReach: { value: 1.0 } };
     const mat = new THREE.ShaderMaterial({
       name: 'fx-fieldlight',
       uniforms: this.uniforms,
