@@ -61,10 +61,12 @@ def score_pair(ref_path, ours_path):
 
 
 rows = []
+skipped = []
 for p in data['pairs']:
     try:
         colour, light, shape, score = score_pair(p['ref'], p['ours'])
-    except FileNotFoundError:
+    except FileNotFoundError as e:
+        skipped.append((p['t'], getattr(e, 'filename', None) or p['ref']))
         continue
     track = next(n for a, b, n in TRACKS if a <= p['t'] < b)
     rows.append({'t': p['t'], 'track': track, 'colour': round(colour, 3), 'light': round(light, 3), 'shape': round(shape, 3),
@@ -81,7 +83,8 @@ parts = {k: round(100 * float(np.mean([r[k] for r in rows])), 1) for k in ('colo
 refs = [r['ref'] for r in rows]
 base = float(np.mean([score_pair(refs[i], refs[(i + len(refs) // 2) % len(refs)])[3] for i in range(len(refs))])) if len(refs) > 1 else 0
 normalised = round(100 * max(0.0, (overall / 100 - base) / (1 - base)), 1) if rows else 0
-json.dump({'overall': overall, 'baselineOtherMoment': round(100 * base, 1), 'normalised': normalised, 'parts': parts, 'tracks': summary, 'pairs': rows, 'errors': data.get('errors', [])},
+json.dump({'overall': overall, 'baselineOtherMoment': round(100 * base, 1), 'normalised': normalised, 'parts': parts, 'tracks': summary, 'pairs': rows,
+           'skipped': [{'t': t, 'missing': f} for t, f in skipped], 'errors': data.get('errors', [])},
           open(prefix + '.json', 'w'), indent=1)
 
 # contact sheet: the 6 worst and 6 best moments (video | ours)
@@ -100,3 +103,6 @@ print(f"calibration: the real video vs another moment of itself scores {100 * ba
 for k, v in summary.items():
     print(f"  {k:18s} {v:5.1f} %")
 print(f"{len(rows)} moments; worst: " + ', '.join(f"{r['t']:.1f}s {100 * r['score']:.0f}%" for r in srt[:5]))
+if skipped:
+    print(f"WARNING: {len(skipped)} of {len(data['pairs'])} moments skipped (missing file, first: {skipped[0][1]}): "
+          'these numbers are NOT comparable with a full run')

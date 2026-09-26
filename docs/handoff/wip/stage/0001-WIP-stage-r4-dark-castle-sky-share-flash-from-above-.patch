@@ -1,0 +1,423 @@
+From 2d56f99150ccefc90568c4fe0334b16f0bcd9ccd Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 26 Sep 2026 18:07:15 +0000
+Subject: [PATCH 1/4] WIP stage r4: dark castle (sky share, flash from above,
+ narrow FOH keys, nightK), LED calibration, sunburst rosettes
+
+---
+ src/stage/DragonCrown.ts              |  9 +++--
+ src/stage/MainStage.ts                | 56 +++++++++++++++++++++++----
+ src/stage/StageLights.ts              | 29 ++++++++++----
+ src/stage/dragon/shading.ts           | 40 ++++++++++++-------
+ src/stage/dragon/wings.ts             | 11 +++++-
+ src/stage/materials/StageMaterials.ts |  6 ++-
+ src/stage/materials/StageShading.ts   | 21 ++++++++++
+ 7 files changed, 135 insertions(+), 37 deletions(-)
+
+diff --git a/src/stage/DragonCrown.ts b/src/stage/DragonCrown.ts
+index b9063f4..5a744f0 100644
+--- a/src/stage/DragonCrown.ts
++++ b/src/stage/DragonCrown.ts
+@@ -340,11 +340,14 @@ export class DragonCrown {
+     U.uWashB.value.copy(wash).lerp(this.tmpC2.copy(look.led2).multiplyScalar(wi * 5), 0.18);
+     // a faint FOH work light that goes out with the practicals (blackouts: only sky + moon remain)
+     addScaled(U.uKey.value.setRGB(0.05, 0.06, 0.1).multiplyScalar(0.35 + 0.65 * E), wash, 0.22);
++    // pyro / firework flash: fireworks burst far above the crown and the pyro fires away from it, so
++    // the metal takes a glint, not a floodlight (video 1438.5: a full canopy over a dark red dragon;
++    // round 3 had ~6x the flash colour as irradiance and lit the crown white-orange on every burst)
+     const flash = look.flash;
+-    U.uFlash.value.copy(flash).multiplyScalar(6);
+-    addScaled(addScaled(U.uRim.value.setRGB(0.06, 0.08, 0.18), flash, 2.5), look.led, 0.35 * U.uLedI.value);
++    U.uFlash.value.copy(flash).multiplyScalar(1.6);
++    addScaled(addScaled(U.uRim.value.setRGB(0.06, 0.08, 0.18), flash, 1.0), look.led, 0.35 * U.uLedI.value);
+     // the env map carries the rig's hot fixture spots: dim them with the practicals
+-    addScaled(addScaled(U.uEnvTint.value.setRGB(0.3, 0.34, 0.46).multiplyScalar(0.2 + 0.8 * E), look.wash, wi * 0.9), flash, 1.2);
++    addScaled(addScaled(U.uEnvTint.value.setRGB(0.3, 0.34, 0.46).multiplyScalar(0.2 + 0.8 * E), look.wash, wi * 0.9), flash, 0.5);
+     addScaled(U.uAmbient.value.setRGB(0.015, 0.018, 0.03), look.led, 0.05 * U.uLedI.value);
+     // inner fire: throat point light + lava cracks
+     // throat light: pale pink-red (the mouth interior glows pink / white, not orange), lava stays fiery
+diff --git a/src/stage/MainStage.ts b/src/stage/MainStage.ts
+index 8b3fa11..05d775f 100644
+--- a/src/stage/MainStage.ts
++++ b/src/stage/MainStage.ts
+@@ -33,21 +33,36 @@ const LED_COLOURS = ['uLed', 'uLed2', 'uAccent', 'uLedS', 'uLed2S', 'uAccentS',
+  * outlined like a lit palace: every cornice a bright line, windows as glowing panes, strong floods.)
+  */
+ const CALIB = {
+-  /** HDR gain of the content-coloured battens (was 9) */
+-  batten: 1.5,
++  /**
++   * HDR gain of the content-coloured battens (was 9, then 1.5; round 4 matched to the official
++   * video with the objective metric: the castle battens clipped towards white-pink and lit the set)
++   */
++  batten: 0.95,
+   /** pilaster strips relative to the battens */
+   pilaster: 0.9,
+   /** horizontal cornice / eave / ledge battens relative to the content colour */
+   outline: 0.3,
+   /** window tube gain (the pane itself is ~10 % of the tubes) */
+-  window: 1.0,
+-  arcade: 0.8,
+-  lamp: 3.8,
+-  lantern: 2.6,
++  window: 0.8,
++  arcade: 0.7,
++  lamp: 2.8,
++  lantern: 2.3,
+   /** decor backlights (banners, skull eyes, emblem) */
+   decor: 0.6,
+   /** virtual floods relative to the lighting wash */
+   flood: 0.32,
++  /**
++   * share of the world's sky light (hemisphere incl. the site glow, moon, twilight) on the set: the
++   * printed castle never reads by sky light in the footage (round 4: sky + env + FOH washes summed
++   * up into a grey-white castle and side houses in every wide shot)
++   */
++  sky: 0.45,
++  /** env-reflection (IBL) share of the lighting wash */
++  envWash: 0.55,
++  /** how far a site-wide `atmos.glow` (red smoke, flame walls) pulls the floods towards its hue */
++  glowTint: 0.8,
++  /** virtual pyro / firework flash on the set print (was 1.6: bursts lit the castle white) */
++  flash: 0.7,
+ };
+ 
+ /** c += src * k (THREE.Color has no addScaled) */
+@@ -58,6 +73,17 @@ function addScaled(c: THREE.Color, src: THREE.Color, k: number): THREE.Color {
+   return c;
+ }
+ 
++const _glow = new THREE.Color();
++/** re-tint c towards the hue `hue` (max channel 1) by k, keeping its luminance */
++function tintTowards(c: THREE.Color, hue: THREE.Color, k: number): void {
++  const lum = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
++  const hl = Math.max(1e-4, 0.2126 * hue.r + 0.7152 * hue.g + 0.0722 * hue.b);
++  const s = lum / hl;
++  c.r += (hue.r * s - c.r) * k;
++  c.g += (hue.g * s - c.g) * k;
++  c.b += (hue.b * s - c.b) * k;
++}
++
+ /**
+  * The 2026 MainStage (RED, "Sacred Oath"), laid out on design-bible §5 (src/stage/layout.ts): the
+  * gothic castle core with the DJ portal and the stairs, the central deck, side sections with corner
+@@ -390,6 +416,7 @@ export class MainStageSystem implements System {
+     u.uGlow.value.set(0, 0, 0, 0);
+     u.uRegionF.value.set(1, 1, 0, 0);
+     u.uDay.value = 1;
++    u.uSkyK.value = 1;
+     const l = this.mats.led.uniforms;
+     for (let i = 0; i < LED_COLOURS.length; i++) (l[LED_COLOURS[i]].value as THREE.Color).setRGB(0, 0, 0);
+     l.uContentGain.value = 0;
+@@ -419,13 +446,26 @@ export class MainStageSystem implements System {
+     const fl = CALIB.flood * wi * (0.55 + 0.6 * look.energy);
+     u.uFloodA.value.copy(look.wash).multiplyScalar(3.2 * fl);
+     u.uFloodB.value.copy(look.wash).lerp(look.castleLed2, 0.55).multiplyScalar(2.8 * fl);
++    // a site-wide coloured glow (atmos.glow: red smoke, flame walls) TINTS the set's floods (same
++    // level) instead of adding white light; the world's hemisphere share of it is cut by uSkyK
++    const g = this.app.env.glowColor;
++    const gm = Math.max(g.r, g.g, g.b);
++    if (gm > 1e-3) {
++      const k = CALIB.glowTint * Math.min(1, gm * 2);
++      _glow.setRGB(g.r / gm, g.g / gm, g.b / gm);
++      tintTowards(u.uFloodA.value, _glow, k);
++      tintTowards(u.uFloodB.value, _glow, k);
++    }
++    u.uSkyK.value = CALIB.sky;
+     addScaled(u.uFront.value.copy(look.wash).multiplyScalar(wi * 0.42), look.pulseColor, 1.2);
+     u.uFront.value.r += look.strobe * 2.5;
+     u.uFront.value.g += look.strobe * 2.5;
+     u.uFront.value.b += look.strobe * 2.5;
+     addScaled(u.uBack.value.setRGB(0.012, 0.02, 0.045), look.castleLed, 0.06 * look.ledIntensity * Math.min(1, look.castleGain));
+-    u.uFlash.value.copy(look.flash).multiplyScalar(1.6);
++    // pyro / firework flash on the print: a soft top light from well above the set (see StageLights)
++    u.uFlash.value.copy(look.flash).multiplyScalar(CALIB.flash);
+     u.uFlashPos.value.copy(this.app.env.flashPos);
++    u.uFlashPos.value.y = Math.max(u.uFlashPos.value.y, 36);
+     // region isolation of floods + decor glow (castle core / side sections, colour overrides)
+     u.uRegionF.value.set(look.castleGain, look.sidesGain, look.castleFloodTint, look.sidesFloodTint);
+     u.uFloodTintC.value.copy(look.castleLed);
+@@ -434,7 +474,7 @@ export class MainStageSystem implements System {
+     const E = look.emit;
+     const castle = E * (1 - look.ember);
+     const setLvl = Math.min(1, Math.max(look.castleGain, look.sidesGain));
+-    addScaled(u.uEnvTint.value.setRGB(0.35, 0.35, 0.42).multiplyScalar((0.12 + 0.88 * E) * (0.25 + 0.75 * setLvl)), look.wash, wi * 1.2 * setLvl);
++    addScaled(u.uEnvTint.value.setRGB(0.35, 0.35, 0.42).multiplyScalar((0.12 + 0.88 * E) * (0.25 + 0.75 * setLvl)), look.wash, wi * CALIB.envWash * setLvl);
+     u.uGlow.value.set(look.bannerGlow, look.skullGlow * (0.6 + look.eyesIntensity * 0.5), look.emblemGlow, 1);
+ 
+     const l = this.mats.led.uniforms;
+diff --git a/src/stage/StageLights.ts b/src/stage/StageLights.ts
+index de49456..990abbc 100644
+--- a/src/stage/StageLights.ts
++++ b/src/stage/StageLights.ts
+@@ -12,6 +12,8 @@ interface Rig {
+ 
+ const RANK: Record<QualitySettings['level'], number> = { mobile: 0, medium: 1, high: 2, ultra: 3 };
+ const _c = new THREE.Color();
++/** minimum height (m) of the pyro / firework flash light over the set */
++const FLASH_MIN_Y = 36;
+ 
+ /**
+  * The few REAL lights aimed at the set (everything else is the virtual flood field + emissives):
+@@ -41,9 +43,13 @@ export class StageLights {
+       this.rigs.push({ light: l, rank, role, side });
+     };
+     point('flash', 0, 0, new THREE.Vector3(0, 25, -10), 110, 2);
+-    spot('center', 0, 0, new THREE.Vector3(0, 2.3, -1.2), new THREE.Vector3(0, 13, -7), 0.6, 60);
+-    spot('front', 1, -1, new THREE.Vector3(-30, 17, 38), new THREE.Vector3(-14, 7, -7), 0.5, 140);
+-    spot('front', 1, 1, new THREE.Vector3(30, 17, 38), new THREE.Vector3(14, 7, -7), 0.5, 140);
++    // uplight on the dragon's chest / head: a tight cone, so it does not paint the castle core behind
++    spot('center', 0, 0, new THREE.Vector3(0, 2.3, -1.2), new THREE.Vector3(0, 13, -7), 0.42, 60);
++    // FOH key lights on the portal, the DJ and the dancers (~14 m pools at the deck): the castle
++    // facade beyond them stays the dark printed flat of the official wide shots (round 4: the old
++    // 0.5 rad washes over the whole core lit the facade like a floodlit palace)
++    spot('front', 1, -1, new THREE.Vector3(-30, 17, 38), new THREE.Vector3(-4, 4.5, -6), 0.26, 140);
++    spot('front', 1, 1, new THREE.Vector3(30, 17, 38), new THREE.Vector3(4, 4.5, -6), 0.26, 140);
+     point('base', 2, -1, new THREE.Vector3(-27, 3.4, -3.2), 26, 1.4);
+     point('base', 2, 1, new THREE.Vector3(27, 3.4, -3.2), 26, 1.4);
+     spot('rim', 3, 0, new THREE.Vector3(0, 30, -34), new THREE.Vector3(0, 14, -6), 0.7, 90);
+@@ -74,26 +80,33 @@ export class StageLights {
+       if (!l.visible) continue;
+       switch (rig.role) {
+         case 'flash': {
++          // fireworks burst 60-150 m up and the pyro fires from the deck front / roof towards the sky:
++          // the printed facade only catches a soft top light (video 1438.5: a full canopy over a castle
++          // that stays dark; 843: deck flames, dark castle). The light sits well above the set so the
++          // vertical facade sees it at a grazing angle, never as a 25 m high point lamp before it
++          // (round 3: ~3000 cd at 20 m lit the castle white on every burst).
+           l.position.copy(flashPos);
++          l.position.y = Math.max(l.position.y, FLASH_MIN_Y);
+           _c.copy(look.flash);
+           const m = Math.max(_c.r, _c.g, _c.b);
+           if (m > 1e-4) l.color.copy(_c).multiplyScalar(1 / m);
+-          l.intensity = Math.min(3, flashI) * 2600;
++          l.intensity = Math.min(3, flashI) * 420;
+           break;
+         }
+         case 'center':
+           l.color.copy(wash).lerp(look.led, 0.45 * E);
+-          l.intensity = (60 * E + 140 * wi) * (0.5 + 0.7 * look.energy) * (1 + look.pulse);
++          l.intensity = (50 * E + 120 * wi) * (0.5 + 0.7 * look.energy) * (1 + look.pulse);
+           break;
+         case 'front':
+-          // FOH washes aimed at the castle: they follow the castle level (a dark-castle look keeps them low)
++          // FOH keys on the portal: they follow the castle level (a dark-castle look keeps them low)
++          // and take the wash colour (no white work light on the set)
+           l.color.copy(wash).lerp(look.castleLed2, (rig.side > 0 ? 0.25 : 0.1) * E);
+-          l.intensity = (50 * E + 130 * wi) * (0.6 + 0.5 * look.energy) * (1 + 0.6 * look.pulse + look.strobe * 2) * (0.15 + 0.85 * Math.min(1.3, look.castleGain));
++          l.intensity = (28 * E + 75 * wi) * (0.6 + 0.5 * look.energy) * (1 + 0.6 * look.pulse + look.strobe * 2) * (0.1 + 0.9 * Math.min(1.3, look.castleGain));
+           break;
+         case 'base':
+           // low lights on the castle base: they belong to the castle (region level / colour)
+           l.color.copy(look.castleLed2).lerp(wash, 0.35);
+-          l.intensity = 45 * (0.4 * E + look.ledIntensity) * Math.min(1.5, look.castleGain);
++          l.intensity = 22 * (0.4 * E + look.ledIntensity) * Math.min(1.5, look.castleGain);
+           break;
+         case 'rim':
+           l.color.copy(look.led).lerp(wash, 0.5);
+diff --git a/src/stage/dragon/shading.ts b/src/stage/dragon/shading.ts
+index 86bb3f2..22d0229 100644
+--- a/src/stage/dragon/shading.ts
++++ b/src/stage/dragon/shading.ts
+@@ -131,12 +131,18 @@ uniform vec3 uLedW2;
+ uniform float uDragonG;
+ uniform float uWingG;
+ float crownHash(float n) { return fract(sin(n * 12.9898) * 43758.5453); }
+-// strip / dot group: 0 primary, 1 accent (dragon); 2 primary, 3 accent (wings: own colours + level)
++// overall LED output of the crown (strips, pixel dots, membrane lanes, rosette spokes), calibrated
++// against the official video (round 4): at 1.0 the lines clipped to white-pink under the tone curve
++// and outshone the lit sculpture; the footage keeps them saturated (1463 / 1389.5 / 843 / 191.5)
++const float CROWN_LED_K = 0.6;
++// strip / dot group: 0 primary, 1 accent (dragon); 2 primary, 3 accent (wings: own colours + level).
++// A fractional part f (0..0.45) dims the strip to 1 - 2f (secondary outlines: top edges, rings).
+ float crownWing(float g) { return step(1.5, g); }
++float crownDim(float g) { return clamp(1.0 - 2.0 * fract(g + 0.001), 0.05, 1.0); }
+ vec3 crownSteady(float g) {
+   float w = crownWing(g);
+   vec3 c = (g - 2.0 * w) > 0.5 ? mix(uLed2, uLedW2, w) : mix(uLed, uLedW, w);
+-  return c * mix(uDragonG, uWingG, w);
++  return c * mix(uDragonG, uWingG, w) * CROWN_LED_K;
+ }
+ // 'ember': the dragon and the inner wings stay lit, the outer wings fade to a dim red silhouette
+ float emberMask(float x) { return mix(1.0, mix(0.2, 1.0, 1.0 - smoothstep(16.0, 36.0, abs(x))), uEmber); }
+@@ -171,7 +177,7 @@ vec3 crownLed(float u, float grpIn, float side, float seed) {
+     b = 0.85 + 0.15 * sin(u * 0.9 - uPhase * 6.2831);
+   }
+   b *= 1.0 + 1.4 * uPulse;
+-  return (base * b * uLedI + vec3(uPulse * uLedI * 0.25)) * mix(uDragonG, uWingG, wing);
++  return (base * b * uLedI + vec3(uPulse * uLedI * 0.25)) * mix(uDragonG, uWingG, wing) * CROWN_LED_K;
+ }
+ `;
+ 
+@@ -363,9 +369,11 @@ iblIrradiance *= uEnvTint * max(crownWashReg(), 0.03);`,
+   float em = emberMask(vCrownPos.x);
+   totalEmissiveRadiance += lc * line * feather * grow * uWings * 2.4 * em;
+   // the printed skin is flooded by its own warm uplights from below (follows the wing glow level):
+-  // saturated print, brightest at the lower edge, falling off towards the scalloped top
++  // saturated print, brightest at the lower edge, falling off towards the scalloped top. Kept below
++  // the blades / spars (video 1047.25, 1389.5: the skin reads as a dim red-orange ground under the
++  // lit blades and the printed suns, never as a glowing orange sheet)
+   vec3 print = crownAlb * crownAlb * ${(o.printGain ?? 1.9).toFixed(3)};
+-  totalEmissiveRadiance += print * (0.04 * uEmit + 0.8 * uWings) * em * mix(1.15, 0.45, smoothstep(3.0, 18.0, vMemb.y)) * (1.0 - uDay);
++  totalEmissiveRadiance += print * (0.03 * uEmit + 0.42 * uWings) * em * mix(1.15, 0.4, smoothstep(3.0, 18.0, vMemb.y)) * (1.0 - uDay);
+   // printed fabric lets some of the back light (sky, fireworks behind the stage) shine through
+   totalEmissiveRadiance += crownAlb * uRim * ${(0.35 * (o.printGain ?? 1.9) / 1.9).toFixed(3)};
+ }`;
+@@ -451,7 +459,7 @@ void main() {
+   // is pushed above the lit haze around the crown, so the wing ribs read as lines of light
+   vec3 steady = crownSteady(vInfo.x) * uLedI * 0.7;
+   c = max(c, steady * vFar) * (1.0 + 1.2 * vFar);
+-  gl_FragColor = vec4(c * core * dots * vFade * 3.2 * emberMask(vWX), 1.0);
++  gl_FragColor = vec4(c * core * dots * vFade * 3.2 * crownDim(vInfo.x) * emberMask(vWX), 1.0);
+ }`,
+   });
+ }
+@@ -793,17 +801,21 @@ void main() {
+   float a = atan(vP.y, vP.x);
+   float R = 2.25;
+   float fr = fwidth(r);
+-  // central star (8 points) + 16 spokes + rim ring
+-  float star = smoothstep(0.62 + fr, 0.62 - fr, r / (0.55 + 0.35 * pow(abs(cos(a * 4.0)), 6.0)));
+-  float spokes = pow(abs(cos(a * 8.0)), 60.0) * smoothstep(0.35, 0.6, r) * smoothstep(R * 0.93, R * 0.8, r);
++  // a SUNBURST (official footage 338 / 1047.25: orange suns of long and short rays on the dark
++  // skin), not a lit disc in a bright ring: small 8-point star + 16 tapered rays of alternating
++  // length + a faint core glow; the ring LED only as a thin dim accent
++  float star = smoothstep(0.5 + fr, 0.5 - fr, r / (0.5 + 0.32 * pow(abs(cos(a * 4.0)), 6.0)));
++  float ca = cos(a * 8.0);
++  float rayLen = ca > 0.0 ? R * 0.95 : R * 0.62;
++  float rays = pow(abs(ca), 14.0) * smoothstep(0.3, 0.55, r) * (1.0 - smoothstep(rayLen * 0.45, rayLen, r));
+   float sa = fwidth(a * 8.0);
+-  spokes = mix(spokes, 0.06, clamp(sa * 0.8, 0.0, 1.0));
+-  float rim = smoothstep(0.09 + fr, 0.0, abs(r - R * 0.86));
+-  float glow = exp(-r * 1.7) * 0.6;
++  rays = mix(rays, 0.08 * (1.0 - smoothstep(R * 0.4, R * 0.9, r)), clamp(sa * 0.8, 0.0, 1.0));
++  float rim = smoothstep(0.07 + fr, 0.0, abs(r - R * 0.86));
++  float glow = exp(-r * 2.6) * 0.3;
+   vec3 led = crownLed(r * 2.0 + vSeed * 0.1, 3.0, sign(vSeed), 0.3);
+   float lv = max(uLedI, 0.2);
+-  vec3 c = uRosette * (star * 2.2 + glow) * (0.35 + 0.9 * uWings) + (uRosette * 0.5 + led * 0.6) * spokes * 1.5 * lv + led * rim * 0.9;
+-  gl_FragColor = vec4(c * 1.5 * emberMask(vSeed), 1.0);
++  vec3 c = uRosette * (star * 1.5 + glow + rays * (0.5 + 0.6 * lv)) * (0.3 + 0.8 * uWings) + led * (rays * 0.4 + rim * 0.3);
++  gl_FragColor = vec4(c * 1.2 * emberMask(vSeed), 1.0);
+ }`,
+   });
+ }
+diff --git a/src/stage/dragon/wings.ts b/src/stage/dragon/wings.ts
+index 5bfc433..716acdb 100644
+--- a/src/stage/dragon/wings.ts
++++ b/src/stage/dragon/wings.ts
+@@ -396,7 +396,7 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
+       // rolled lip on the band's upper edge
+       W.armor.add(tube(edge.map((p) => p.clone().addScaledVector(nrm, 0.1)), () => 0.12, { radial: 5 }), null, GOLD_DEEP);
+     }
+-    W.strips.add(edge.map((p) => p.clone().addScaledVector(nrm, 0.14)), WING_LED, 0.13, 0, 0.3 + pi * 0.2);
++    W.strips.add(edge.map((p) => p.clone().addScaledVector(nrm, 0.14)), WING_EDGE, 0.13, 0, 0.3 + pi * 0.2);
+     // warm festoon along the sagging top edge, hanging just in front of the gold band
+     {
+       const g: V3[] = [];
+@@ -583,7 +583,7 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
+       const a = (j / 40) * Math.PI * 2;
+       rp.push(v3(Math.cos(a) * 2.42, Math.sin(a) * 2.42, 0.3).applyMatrix4(m));
+     }
+-    W.strips.add(rp, WING_ACCENT, 0.12, 0, 0.5 + i * 0.1);
++    W.strips.add(rp, WING_RING, 0.12, 0, 0.5 + i * 0.1);
+   });
+   for (const [g] of sun) g.dispose();
+ 
+@@ -648,6 +648,13 @@ export const WING_FX = 2;
+ /** strip groups of the wing LEDs (crownLed: +2 = wing colours and the wing level) */
+ const WING_LED = 2;
+ const WING_ACCENT = 3;
++/**
++ * dimmed secondary outlines (crownDim: a fractional group f dims a strip to 1 - 2f): the sagging top
++ * edges and the rosette rings. The footage reads the wings by their lit spars and blades; the top
++ * hems carry bulbs, not a continuous bright arc, and the suns have no bright ring.
++ */
++const WING_EDGE = WING_LED + 0.25;
++const WING_RING = WING_ACCENT + 0.4;
+ 
+ function withAxis(g: THREE.BufferGeometry, m: THREE.Matrix4): THREE.BufferGeometry {
+   g.rotateX(Math.PI / 2);
+diff --git a/src/stage/materials/StageMaterials.ts b/src/stage/materials/StageMaterials.ts
+index b4a2298..db550b2 100644
+--- a/src/stage/materials/StageMaterials.ts
++++ b/src/stage/materials/StageMaterials.ts
+@@ -93,8 +93,10 @@ export class StageMaterials {
+       envMap: this.env,
+       envMapIntensity: 0.55,
+     });
+-    // the off-white print of the daytime photos is ~2x the old grey: scaled back in the show
+-    patchStageShading(this.stone, this.u, { flood: 1, nightK: 0.487 });
++    // the off-white print of the daytime photos is ~2x the old grey: scaled back in the show, and a
++    // little further (round 4, objective match to the official video): at night the printed castle
++    // is a dark flat that only reads where the show lights it
++    patchStageShading(this.stone, this.u, { flood: 1, nightK: 0.36 });
+ 
+     this.paint = new THREE.MeshStandardMaterial({
+       name: 'stage-paint',
+diff --git a/src/stage/materials/StageShading.ts b/src/stage/materials/StageShading.ts
+index d225631..37c0d64 100644
+--- a/src/stage/materials/StageShading.ts
++++ b/src/stage/materials/StageShading.ts
+@@ -33,6 +33,13 @@ export interface StageUniforms {
+    * keeps the level it was calibrated to.
+    */
+   uDay: THREE.IUniform<number>;
++  /**
++   * Share of the WORLD's sky light (hemisphere + moon / twilight directionals, incl. the site glow
++   * the EnvironmentSystem adds to the hemisphere) that reaches the set. The castle is a dark printed
++   * flat that the official footage never shows by sky light (it only reads where the show lights it),
++   * so the set takes a reduced share; 1 in the dev `?daylight` view.
++   */
++  uSkyK: THREE.IUniform<number>;
+ }
+ 
+ export function createStageUniforms(): StageUniforms {
+@@ -49,9 +56,19 @@ export function createStageUniforms(): StageUniforms {
+     uFloodTintC: { value: new THREE.Color(1, 1, 1) },
+     uFloodTintS: { value: new THREE.Color(1, 1, 1) },
+     uDay: { value: 0 },
++    uSkyK: { value: 1 },
+   };
+ }
+ 
++/**
++ * three's lights_fragment_begin with the world's directional lights (moon / twilight: the only
++ * directional lights in the scene; the stage's own lights are spots / points) scaled by uSkyK.
++ */
++const LIGHTS_BEGIN_SKY = THREE.ShaderChunk.lights_fragment_begin.replace(
++  'getDirectionalLightInfo( directionalLight, directLight );',
++  'getDirectionalLightInfo( directionalLight, directLight );\n\t\tdirectLight.color *= uSkyK;',
++);
++
+ const FLOOD_GLSL = /* glsl */ `
+ uniform vec3 uFloodA;
+ uniform vec3 uFloodB;
+@@ -64,6 +81,7 @@ uniform vec4 uRegionF;
+ uniform vec3 uFloodTintC;
+ uniform vec3 uFloodTintS;
+ uniform float uDay;
++uniform float uSkyK;
+ varying vec3 vStageWP;
+ float stageSideW(vec3 wp) { return smoothstep(37.3, 38.3, abs(wp.x)); }
+ float stageRegion(vec3 wp) { return mix(uRegionF.x, uRegionF.y, stageSideW(wp)); }
+@@ -170,6 +188,7 @@ ${
+     : ''
+ }`,
+       )
++      .replace('#include <lights_fragment_begin>', LIGHTS_BEGIN_SKY)
+       .replace(
+         '#include <lights_fragment_maps>',
+         `#include <lights_fragment_maps>
+@@ -178,6 +197,8 @@ ${
+ #endif
+ #if defined( RE_IndirectDiffuse )
+   iblIrradiance *= uEnvTint;
++  // ambient + hemisphere (the world's sky dome and its site glow): the set takes its own share
++  irradiance *= uSkyK;
+ #endif`,
+       )
+       .replace(
+-- 
+2.43.0
+

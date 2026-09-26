@@ -7,10 +7,11 @@
  * Example: node scripts/shot.mjs "autostart&t=300&cam=0,2,120,0,0.1&quality=high" .shots/stage.png
  * Requires the dev server (npm run dev) on http://localhost:5173 unless --base is given.
  * Prints console errors and a perf/stat summary (from window.__app) as JSON.
+ * Browser/renderer: scripts/lib/browser.mjs (CHROME_PATH, RENDERER=gpu|swiftshader; info on stderr).
  */
-import { chromium } from 'playwright-core';
 import fs from 'node:fs';
 import path from 'node:path';
+import { launchBrowser, reportWebGL } from './lib/browser.mjs';
 
 const args = process.argv.slice(2);
 const query = args[0] ?? 'autostart';
@@ -25,11 +26,7 @@ const wait = Number(opt('wait', '3000'));
 const base = opt('base', 'http://localhost:5173/');
 const evalJs = opt('eval', null);
 
-const exe = process.env.CHROME_PATH || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
-const browser = await chromium.launch({
-  executablePath: exe,
-  args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'],
-});
+const browser = await launchBrowser({ extraArgs: ['--autoplay-policy=no-user-gesture-required'] });
 const ctx = await browser.newContext({
   viewport: { width: w, height: h },
   deviceScaleFactor: 1,
@@ -45,6 +42,7 @@ page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
 const url = `${base}?${query}`;
 const t0 = Date.now();
 await page.goto(url, { waitUntil: 'load', timeout: 120000 });
+await reportWebGL(page);
 await page.waitForFunction(() => window.__app && window.__app.ready, null, { timeout: 900000, polling: 250 }).catch(() => errors.push('timeout waiting for __app.ready'));
 const loadMs = Date.now() - t0;
 if (evalJs) await page.evaluate(evalJs).catch((e) => errors.push('eval: ' + e.message));

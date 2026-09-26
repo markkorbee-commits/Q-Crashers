@@ -606,6 +606,6 @@ Spotlight endshow (2026 marketing) [S42]; 26 min 21 s (2026 video, FACT [S45]).
 - [S48] Wikipedia: Defqon.1 Festival (Endshow = fireworks, pyrotechnics, water screens, narrated storyline). https://en.wikipedia.org/wiki/Defqon.1_Festival
 
 Local working material (not in git; copyrighted):
-`/tmp/claude-0/-home-user-Q-Crashers/de5b2351-28d0-5f9c-98e9-2fbf28f2c6ab/scratchpad/refs/production/`
+`<cloud-scratchpad>/refs/production/`
 holds the permit PDFs and their extracted text (`ofgv_defqon*.txt`), the colour timeline
 (`timeline.txt`), and 2x/4x frame grids in `grids/` (lasers1-4, pyro1-7, misc1-6, zoom_*).

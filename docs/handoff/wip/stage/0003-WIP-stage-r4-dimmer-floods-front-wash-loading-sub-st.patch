@@ -1,0 +1,134 @@
+From f608a33da0cbfcee2386690a1820dfbd6ab868b7 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 26 Sep 2026 18:31:51 +0000
+Subject: [PATCH 3/4] WIP stage r4: dimmer floods/front wash, loading sub-steps
+
+---
+ src/stage/DragonCrown.ts            | 17 +++++++++++------
+ src/stage/MainStage.ts              | 13 +++++++++----
+ src/stage/materials/StageShading.ts |  5 +++--
+ 3 files changed, 23 insertions(+), 12 deletions(-)
+
+diff --git a/src/stage/DragonCrown.ts b/src/stage/DragonCrown.ts
+index 6a1a7c2..d788ac6 100644
+--- a/src/stage/DragonCrown.ts
++++ b/src/stage/DragonCrown.ts
+@@ -77,7 +77,11 @@ export class DragonCrown {
+   readonly garlands = new Garlands();
+   private garlandMesh: THREE.Mesh | null = null;
+ 
+-  async build(q: QualitySettings): Promise<void> {
++  /**
++   * @param step optional loading-bar sub-step reporter (label, 0..1 within the crown build); it must
++   * yield to the event loop like the default does
++   */
++  async build(q: QualitySettings, step: (label: string, f: number) => Promise<void> = () => yieldFrame()): Promise<void> {
+     const t0 = performance.now();
+     this.group.name = 'DragonCrown';
+     this.level = q.level;
+@@ -87,17 +91,18 @@ export class DragonCrown {
+     this.stat.texSize = ts;
+ 
+     // ---------------------------------------------------------------- textures
++    await step('dragon scale textures', 0);
+     const scale = scaleTextures(Math.min(ts, 1024), aniso);
+-    await yieldFrame();
++    await step('armour + steel textures', 0.2);
+     const panel = panelTextures(Math.min(ts, 1024), aniso);
+     const steel = steelTextures(Math.max(256, Math.min(ts / 2, 512)), aniso);
+-    await yieldFrame();
++    await step('wing print textures', 0.35);
+     const flame = flameTexture(Math.min(ts, 2048), Math.min(ts, 2048) / 2, aniso);
+     const lava = lavaTextures(Math.max(256, Math.min(ts / 2, 512)), aniso);
+     const env = createEnvMap();
+     this.textures.push(...texList(scale), ...texList(panel), ...texList(steel), flame, lava.map, lava.emissiveMap, env);
+     this.stat.texMs = Math.round(performance.now() - t0);
+-    await yieldFrame();
++    await step('dragon head', 0.5);
+ 
+     // ---------------------------------------------------------------- materials
+     const U = this.U;
+@@ -151,13 +156,13 @@ export class DragonCrown {
+     let t1 = performance.now();
+     const head = buildHead(kit);
+     this.stat.headMs = Math.round(performance.now() - t1);
+-    await yieldFrame();
++    await step('body + wings', 0.6);
+     t1 = performance.now();
+     const body = buildBody(kit);
+     const { wings, membrane } = buildWings(kit);
+     for (const w of wings) for (const g of w.garlands) this.garlands.string(g, GARLAND.wings, 0.85, 0.15);
+     this.stat.bodyWingMs = Math.round(performance.now() - t1);
+-    await yieldFrame();
++    await step('merging the crown', 0.85);
+     t1 = performance.now();
+ 
+     // head rig: jaw pivot lives in head space
+diff --git a/src/stage/MainStage.ts b/src/stage/MainStage.ts
+index bba6c1d..68272f2 100644
+--- a/src/stage/MainStage.ts
++++ b/src/stage/MainStage.ts
+@@ -50,8 +50,10 @@ const CALIB = {
+   lantern: 2.3,
+   /** decor backlights (banners, skull eyes, emblem) */
+   decor: 0.6,
+-  /** virtual floods relative to the lighting wash */
+-  flood: 0.32,
++  /** virtual floods relative to the lighting wash (0.32 until round 3) */
++  flood: 0.24,
++  /** virtual FOH front wash relative to the lighting wash (0.42 until round 3) */
++  front: 0.26,
+   /**
+    * share of the world's sky light (hemisphere incl. the site glow, moon, twilight) on the set: the
+    * printed castle never reads by sky light in the footage (round 4: sky + env + FOH washes summed
+@@ -126,10 +128,13 @@ export class MainStageSystem implements System {
+     this.app = app;
+     this.root.name = 'MainStage';
+     const q = app.quality;
++    // loading-bar sub-steps (shares measured on the medium preset: textures ~45 %, set ~20 %, crown ~35 %)
++    await app.loadStep('stone + decor textures', 0);
+     this.mats = await StageMaterials.create(app.renderer, q);
+     this.resolver = new LookResolver(app.show);
+     const t1 = performance.now();
+     this.timing.materials = t1 - t0;
++    await app.loadStep('castle, deck + vault', 0.45);
+ 
+     // ---- geometry --------------------------------------------------------------------------------
+     const kit = createKit(RANK[q.level] >= 2 ? 2 : RANK[q.level] === 1 ? 1 : 0);
+@@ -159,7 +164,7 @@ export class MainStageSystem implements System {
+ 
+     // ---- crown -----------------------------------------------------------------------------------
+     try {
+-      await this.crown.build(q);
++      await this.crown.build(q, (label, f) => app.loadStep(label, 0.65 + 0.33 * f));
+       // festoon bulb strings: the wings' (added by the crown) + the castle / side-section eaves
+       addCastleGarlands(this.crown.garlands);
+       addSideGarlands(this.crown.garlands);
+@@ -480,7 +485,7 @@ export class MainStageSystem implements System {
+       tintTowards(u.uFloodB.value, _glow, k);
+     }
+     u.uSkyK.value = CALIB.sky;
+-    addScaled(u.uFront.value.copy(look.wash).multiplyScalar(wi * 0.42), look.pulseColor, 1.2);
++    addScaled(u.uFront.value.copy(look.wash).multiplyScalar(wi * CALIB.front), look.pulseColor, 1.2);
+     u.uFront.value.r += look.strobe * 2.5;
+     u.uFront.value.g += look.strobe * 2.5;
+     u.uFront.value.b += look.strobe * 2.5;
+diff --git a/src/stage/materials/StageShading.ts b/src/stage/materials/StageShading.ts
+index dd14b1e..3c36ff5 100644
+--- a/src/stage/materials/StageShading.ts
++++ b/src/stage/materials/StageShading.ts
+@@ -109,8 +109,9 @@ vec3 stageFlood(vec3 wp, vec3 n) {
+     vec3 c = mod(idx, 2.0) < 0.5 ? uFloodA : uFloodB;
+     acc += c * (beam * prof * lam);
+   }
+-  // the side sections / arms get a lower flood density than the castle
+-  acc *= mix(1.0, 0.4, smoothstep(37.0, 50.0, abs(wp.x)));
++  // the side sections / arms get a lower flood density than the castle (their printed houses stay
++  // dark silhouettes in the footage; round 4: 0.4 -> 0.25)
++  acc *= mix(1.0, 0.25, smoothstep(37.0, 50.0, abs(wp.x)));
+   // region isolation: a castle / side colour override re-tints the floods (same brightness), the
+   // region levels dim them (castle: 0 leaves the castle dark while the crown keeps its own wash)
+   float sw = stageSideW(wp);
+-- 
+2.43.0
+

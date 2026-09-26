@@ -166,7 +166,7 @@ blocked; treat as weaker evidence. Local working files are listed at the end; th
 - WHO alcohol fact sheet: https://www.who.int/news-room/fact-sheets/detail/alcohol
 
 ## 12. Local evidence (session scratchpad; not committed)
-Base: `/tmp/claude-0/-home-user-Q-Crashers/de5b2351-28d0-5f9c-98e9-2fbf28f2c6ab/scratchpad/`
+Base: `<cloud-scratchpad>/`
 - Storyboard frames `yt/frames/fNNN_*.jpg` (160 × 320×180, every 9.8825 s), contact sheets `yt/sheets/sheet_0..7.jpg`, metadata `yt/meta.json`.
 - Frame analyses `frames_000.json`, `frames_040.json`, `frames_080.json`, `frames_120.json`.
 - Key images: `refs/thumb_maxresdefault.jpg`, `refs/stage/qd_1782996132-260627_224139_delio_201020.jpg` (official photo, EXIF), `refs/stage/fb_housemafia_1451083087063535.jpg`, `refs/stage/fb_edmlab_*.jpg`, `refs/stage/fbvid_*`, `refs/stage/yt_xyTqAO8tOdM_oar2.jpg`, notes `notes/img_notes.md`.

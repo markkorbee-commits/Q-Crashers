@@ -6,9 +6,10 @@
 Decodes the video at low resolution and stores, per frame: luma (mean and a 4x4 grid), dark fraction,
 white-hot fraction, fire fraction (saturated bright red..yellow), 12 hue bins of saturated bright pixels,
 upper/lower-half splits of fire and white (sky fireworks vs stage pyro), and the HSV-histogram distance to the
-previous frame (camera cuts). Derived numbers only.
+previous frame (camera cuts). Derived numbers only. ffmpeg: env FFMPEG, else ffmpeg on PATH, else imageio_ffmpeg.
+Whole video in parallel chunks + combine: tools/video/prepare-data.sh.
 """
-import sys, subprocess, shutil
+import os, sys, subprocess, shutil
 import numpy as np
 
 src, out = sys.argv[1], sys.argv[2]
@@ -17,7 +18,7 @@ dur = float(sys.argv[sys.argv.index('--t') + 1]) if '--t' in sys.argv else 0.0
 fps = int(sys.argv[sys.argv.index('--fps') + 1]) if '--fps' in sys.argv else 25
 W = int(sys.argv[sys.argv.index('--w') + 1]) if '--w' in sys.argv else 192
 H = W * 9 // 16
-ffmpeg = shutil.which('ffmpeg')
+ffmpeg = os.environ.get('FFMPEG') or shutil.which('ffmpeg')
 if not ffmpeg:
     import imageio_ffmpeg
     ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()

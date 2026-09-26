@@ -13,9 +13,10 @@
  * Exit code 0 = within budget, 1 = over budget, 3 = page error / load failure.
  * Views: `default` = the start camera (as a phone user sees it), `overview` = a high, wide view
  * over the whole grounds (everything in the frustum: worst case for draw calls).
+ * Browser/renderer: scripts/lib/browser.mjs (CHROME_PATH, RENDERER=gpu|swiftshader).
  */
-import { chromium } from 'playwright-core';
 import fs from 'node:fs';
+import { launchBrowser, reportWebGL } from './lib/browser.mjs';
 
 const args = process.argv.slice(2);
 const opt = (name, def) => {
@@ -35,11 +36,7 @@ const POSES = {
   overview: [0, 60, 330, 0, -0.16, 70],
 };
 
-const exe = process.env.CHROME_PATH || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
-const browser = await chromium.launch({
-  executablePath: exe,
-  args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
-});
+const browser = await launchBrowser();
 const errors = [];
 let exitCode = 0;
 const rows = [];
@@ -52,6 +49,7 @@ try {
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
   const url = `${base}?autostart&quality=mobile&nogovernor&analyze=0&t=${times[0] ?? 0}`;
   await page.goto(url, { waitUntil: 'load', timeout: 120000 });
+  await reportWebGL(page);
   await page.waitForFunction(() => window.__app && window.__app.ready, null, { timeout: 900000, polling: 250 });
   await page.evaluate(() => window.__app.clock.pause());
   const home = await page.evaluate(() => {
