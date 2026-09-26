@@ -119,9 +119,44 @@ function addExtParam(key, name) {
   if (!EXT_PARAMS.has(key)) EXT_PARAMS.set(key, new Set());
   EXT_PARAMS.get(key).add(name);
 }
+/** value lists a doc adds to an fx param ("`param`: add `a`", "| `param` | adds `a` …"); merged into EXT_ENUM below */
+const extAddsFromDocs = {};
+function addExtValues(key, vals) {
+  extAddsFromDocs[key] = [...new Set([...(extAddsFromDocs[key] ?? []), ...vals])];
+}
+const backticked = (s) => [...s.matchAll(/`([a-zA-Z][a-zA-Z0-9_]*)`/g)].map((m) => m[1]);
+function registerFx(sys, fx) {
+  VOCAB[sys] = VOCAB[sys] ?? {};
+  VOCAB[sys][fx] = VOCAB[sys][fx] ?? {};
+}
 function scanExtProse(md, fileSys) {
   const talked = new Set(fileSys ? [fileSys] : []);
+  // the module docs' own idioms (docs/show-format-ext/<sys>.md): "## New fx: `flare`", "### `flood`: …"
+  // under "## New fx", "* lights fx: `flood` (…) and `festoon` (…)", "lights look `preset`: add `curtain`",
+  // and param tables under "### comet" / "### shell, salvo, finale" whose rows say "| `end` | adds `pops` …"
+  let inNewFx = false;
+  let headingFx = [];
   for (const line of md.split('\n')) {
+    const hd = line.match(/^(#{2,4})\s+(.*)$/);
+    if (hd) {
+      const newFx = hd[2].match(/^New fx\b:?\s*(.*)$/i);
+      if (hd[1] === '##') inNewFx = !!newFx;
+      if (fileSys && newFx) for (const fx of backticked(newFx[1])) registerFx(fileSys, fx);
+      else if (fileSys && inNewFx && hd[1] === '###') {
+        const fx = hd[2].match(/^`([a-z_]+)`/);
+        if (fx) registerFx(fileSys, fx[1]);
+      }
+      headingFx = fileSys ? [...hd[2].split(':')[0].matchAll(/[a-z_]+/g)].map((m) => m[0]).filter((w) => VOCAB[fileSys]?.[w]) : [];
+    }
+    const fxList = line.match(/\b([a-z]+)\s+fx:\s*(.*)$/);
+    if (fxList && SYSTEMS.has(fxList[1])) {
+      for (const fx of backticked(fxList[2].replace(/\([^)]*\)?/g, ''))) registerFx(fxList[1], fx);
+      talked.add(fxList[1]);
+    }
+    const addTo = line.match(/\b([a-z]+)\s+([a-z_]+)\s+`([a-zA-Z0-9_]+)`:\s*add\s+(.*)$/);
+    if (addTo && SYSTEMS.has(addTo[1])) addExtValues(`${addTo[1]}.${addTo[2]}.${addTo[3]}`, backticked(addTo[4].split(/[.;]/)[0]));
+    const addsRow = line.match(/^\|\s*`([a-zA-Z0-9_]+)`\s*\|\s*adds\s+(.*)$/);
+    if (addsRow) for (const fx of headingFx) addExtValues(`${fileSys}.${fx}.${addsRow[1]}`, backticked(addsRow[2]));
     const en = line.match(/EXT_ENUM\[\s*'([a-z0-9]+)\.([a-z_]+)\.([a-zA-Z0-9_]+)'\s*\]`?\s*:?\s*(.*)$/);
     if (en && SYSTEMS.has(en[1])) {
       const key = `${en[1]}.${en[2]}.${en[3]}`;
@@ -176,6 +211,17 @@ const EXT_ENUM = {
   'fireworks.salvo.pattern': ['line', 'v', 'arc', 'random'],
 };
 for (const [k, vals] of Object.entries(extEnumFromDocs)) EXT_ENUM[k] = [...new Set([...(EXT_ENUM[k] ?? []), ...vals])];
+// "add" / "adds" lists extend an enumeration that exists (base table or EXT_ENUM); they never create a
+// new closed list for a param that is free-form so far
+for (const [k, vals] of Object.entries(extAddsFromDocs)) {
+  const [s, f, prm] = k.split('.');
+  if (EXT_ENUM[k] || VOCAB[s]?.[f]?.[prm]) EXT_ENUM[k] = [...new Set([...(EXT_ENUM[k] ?? []), ...vals])];
+}
+/** lasers resolve their own target tokens (src/lasers/LaserSystem.ts TOKENS: `corners`, `turrets`, `arms` …) */
+const LASER_TOKENS = (() => {
+  const m = read('src/lasers/LaserSystem.ts').match(/const TOKENS[^=]*=\s*\{([\s\S]*?)\n\};/);
+  return new Set(m ? [...m[1].matchAll(/^\s*([a-z0-9_]+):/gm)].map((x) => x[1]) : []);
+})();
 /** preferred extended anchors (p.at) — the cue's `target` is the contract fallback */
 const EXT_ANCHORS = new Set(['flare_pots', 'corner_towers', 'tower_torches', 'arms', 'arm_ends', 'side_fronts', 'wing_spars', 'hang_lines', 'piano']);
 const COLOR_PARAMS = new Set(['color', 'color2', 'eyes', 'rosettes', 'windowColor', 'tint', 'shaft']);
@@ -356,9 +402,10 @@ function* expand(def) {
 }
 
 // ------------------------------------------------------------------------------ cues
-function checkTargets(list, where) {
+function checkTargets(list, where, sys) {
   for (const t of list) {
     if (typeof t !== 'string') err(`${where}: target must be a string`);
+    else if (sys === 'lasers' && LASER_TOKENS.has(t) && !ANCHORS.has(t)) noteExt(`lasers target token "${t}"`);
     else if (!ANCHORS.has(t) && !FILTERS.has(t)) err(`${where}: unknown target "${t}" (not an AnchorName or filter)`);
   }
 }
@@ -454,7 +501,7 @@ for (const [i, c] of cues.entries()) {
     err(`${where}: fx "${c.fx}" is not in the ${c.sys} vocabulary (${Object.keys(VOCAB[c.sys] ?? {}).join(', ')})`);
     continue;
   }
-  if (c.target !== undefined) checkTargets(Array.isArray(c.target) ? c.target : [c.target], where);
+  if (c.target !== undefined) checkTargets(Array.isArray(c.target) ? c.target : [c.target], where, c.sys);
   if (c.snap !== undefined && !['beat', 'halfbeat', 'bar', 'none'].includes(c.snap)) err(`${where}: snap "${c.snap}"`);
   checkParams(c, where);
   if (c.repeat) {
@@ -470,7 +517,7 @@ for (const [i, c] of cues.entries()) {
     }
     if (r.cycleTargets) {
       if (!Array.isArray(r.cycleTargets) || !r.cycleTargets.length) err(`${where}: cycleTargets`);
-      else r.cycleTargets.forEach((tl) => checkTargets(tl, `${where} cycleTargets`));
+      else r.cycleTargets.forEach((tl) => checkTargets(tl, `${where} cycleTargets`, c.sys));
     }
   }
   if (c.note !== undefined && typeof c.note !== 'string') err(`${where}: note must be a string`);
