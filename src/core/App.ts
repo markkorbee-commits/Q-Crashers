@@ -4,6 +4,7 @@ import { AudioSources } from '../audio/AudioSources';
 import type { AudioTrack } from '../audio/AudioTrack';
 import { SilentTrack } from '../audio/AudioTrack';
 import { PostFX } from '../postfx/PostFX';
+import { SceneGlare } from '../postfx/SceneGlare';
 import { ShowClock } from '../show/ShowClock';
 import { ShowEngine, type ResolvedPalette } from '../show/ShowEngine';
 import { Anchors } from './Anchors';
@@ -95,6 +96,8 @@ export class App {
   quality: QualitySettings;
   clock!: ShowClock;
   postfx: PostFX;
+  /** pyro veiling glare driver (pyro light field -> postfx.glare), updated right before rendering */
+  readonly sceneGlare = new SceneGlare();
   palette: ResolvedPalette = ShowEngine.newPalette();
   /** player feet position, maintained by the PlayerController */
   readonly playerPos = new THREE.Vector3(0, 0, 160);
@@ -500,16 +503,34 @@ export class App {
     storageSet(AUTO_HINT_KEY, next === this.autoLevel ? null : JSON.stringify({ gpu: this.device.gpu, level: next }));
   }
 
+  /**
+   * Size the canvas and the post chain to the window. The drawing buffer follows the preset (device
+   * pixel ratio cap x renderScale); the governor's dynamic resolution is applied inside PostFX
+   * (setRenderScale: the scene renders into part of the full-size targets, nothing is reallocated).
+   * Only without the offscreen post chain does the governor scale the canvas itself.
+   */
   resize(): void {
     const w = window.innerWidth;
     const h = window.innerHeight;
     this.lastScale = this.governor.scale;
-    const pr = Math.min(window.devicePixelRatio || 1, this.quality.maxPixelRatio) * this.quality.renderScale * this.governor.scale;
+    const offscreen = this.offscreenScene;
+    const pr = Math.min(window.devicePixelRatio || 1, this.quality.maxPixelRatio) * this.quality.renderScale * (offscreen ? 1 : this.governor.scale);
     this.renderer.setPixelRatio(pr);
     this.renderer.setSize(w, h, true);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.postfx.setSize(Math.floor(w * pr), Math.floor(h * pr));
+    this.postfx.setRenderScale(offscreen ? this.governor.scale : 1);
+  }
+
+  /**
+   * Resolution (pixels) the scene is actually rendered at this frame: the drawing buffer x the dynamic
+   * render scale. Systems that size things in pixels (minimum line widths, particle sizes) should use
+   * this instead of renderer.getDrawingBufferSize.
+   */
+  getRenderSize(out: THREE.Vector2): THREE.Vector2 {
+    if (this.offscreenScene) return this.postfx.getSceneSize(out);
+    return this.renderer.getDrawingBufferSize(out);
   }
 
   start(): void {
@@ -564,6 +585,8 @@ export class App {
     this.updateSystems(ctx, this.params.has('debug') || this.frame % 30 === 0 || this.frame < 90);
     for (const h of this.frameHooks) h(ctx);
     this.input.endFrame();
+    // after the frame hooks: the fx engine has packed this frame's pyro light field
+    this.sceneGlare.update(this, dt, ctx.seeked);
     this.postfx.render(this.scene, this.camera, dt, ctx.time);
     this.lastRender.calls = this.renderer.info.render.calls;
     this.lastRender.triangles = this.renderer.info.render.triangles;
@@ -574,7 +597,9 @@ export class App {
     const verdict = this.governor.sample(rawDt);
     if (this.governor.scale !== this.lastScale) {
       this.lastScale = this.governor.scale;
-      this.resize();
+      // with the post chain: a viewport change, no canvas resize and no target reallocation
+      if (this.offscreenScene) this.postfx.setRenderScale(this.governor.scale);
+      else this.resize();
     }
     if (verdict) this.suggestLevel(verdict);
     // preset changes rebuild systems: only while the show is not playing (pre-show, paused, ended),
@@ -630,6 +655,7 @@ export class App {
     ctx.seeked = true;
     ctx.showPlaying = false;
     this.updateSystems(ctx, false);
+    this.sceneGlare.update(this, 0, true);
     this.postfx.render(this.scene, this.camera, 0, ctx.time);
   }
 }

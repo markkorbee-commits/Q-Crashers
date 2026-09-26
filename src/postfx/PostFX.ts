@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { PerceptionParams, PhotoParams, QualitySettings } from '../core/types';
-import { AFTERIMAGE, COMPOSITE, DOF, DOWNSAMPLE, GLARE, PREFILTER, TRAILS, UPSAMPLE, VERT } from './shaders';
+import { AFTERIMAGE, COMPOSITE, DOF, DOWNSAMPLE, GLARE, GLARE_GATE, PREFILTER, TRAILS, UPSAMPLE, VERT } from './shaders';
 
 type RT = THREE.WebGLRenderTarget;
 type Uniforms = Record<string, THREE.IUniform>;
@@ -36,6 +36,34 @@ export interface BodyParams {
   /** multiplier on the star-streak glare (0 = halos only, 1 = full streaks) */
   star: number;
 }
+
+/**
+ * Scene veiling glare (written each frame by SceneGlare from the pyro light field): a camera looking
+ * into a flame wall scatters its light over the whole picture. Applies to both sides of the compare
+ * split (it is the scene and the lens, not the body).
+ */
+export interface GlareParams {
+  /** 0..1 global glare amount (smoothed): wider bloom, lens scatter tail, faint frame-wide lift */
+  amount: number;
+  /** colour of the frame-wide lift, normalised (max channel 1), linear */
+  r: number;
+  g: number;
+  b: number;
+  /** halo line sources in use (≤ GLARE_MAX) */
+  count: number;
+  /**
+   * per source: segment end points in centred screen units (x, y in screen heights from the picture
+   * centre, +y up): (ax, ay, bx, by)
+   */
+  readonly seg: THREE.Vector4[];
+  /** per source: halo colour (linear, premultiplied, x glareTune.halo) and halo radius at A (screen heights) */
+  readonly col: THREE.Vector4[];
+  /** per source: halo radius at B (screen heights) */
+  readonly rb: number[];
+}
+
+/** maximum number of glare halo line sources (the fx engine packs ≤ 12 pyro lights) */
+export const GLARE_MAX = 12;
 
 /**
  * HDR render pipeline:
@@ -83,11 +111,40 @@ export class PostFX {
   readonly tone = { contrast: 1.5, shoulder: 0.95, hdrMax: 64, midIn: 0.18, midOut: 0.19, crosstalk: 10, crossSaturation: 1.6, saturation: 1 };
   /** musical drive for rhythmic perception effects (written by the PerceptionSystem) */
   readonly rhythm = { breath: 0, kick: 0 };
+  /** scene veiling glare from the pyro (written by SceneGlare each frame); identity = amount 0 */
+  readonly glare: GlareParams = {
+    amount: 0,
+    r: 1,
+    g: 0.45,
+    b: 0.15,
+    count: 0,
+    seg: Array.from({ length: GLARE_MAX }, () => new THREE.Vector4()),
+    col: Array.from({ length: GLARE_MAX }, () => new THREE.Vector4()),
+    rb: new Array<number>(GLARE_MAX).fill(0.1),
+  };
+  /**
+   * glare tuning (tuned side by side with the drone / terrace footage at 76 s, 600 s, 1508 s, 1565 s):
+   * halo = gain of the line-source halos (exposed HDR units at full saturation), core / coreSharp =
+   * optional extra hot core (weight, tightness; off: a thin core draws a flame row as a light-sabre
+   * streak, the fire itself must provide the core), gateL0 = bright-pass luminance along a light that counts as "fire
+   * visible" (63 %), flat = frame-wide lift, psf = wide scatter of the real bright pass; bloom, wide,
+   * threshold and exposure = extra bloom share, wide-mip emphasis, bloom threshold drop and exposure
+   * lift (fractions) at amount = 1
+   */
+  readonly glareTune = { halo: 16, core: 0, coreSharp: 25, gateL0: 0.6, flat: 0.03, psf: 0.3, bloom: 0.8, wide: 1.2, threshold: 0.3, exposure: 0 };
 
   private readonly sober = PostFX.defaults();
   private readonly hdrType: THREE.TextureDataType;
   private width = 2;
   private height = 2;
+  /**
+   * Dynamic resolution: share of the drawing buffer the scene is rendered at (0.25..1). The scene
+   * renders into the lower-left `sceneW x sceneH` part of the full-size HDR target; the post chain and
+   * the composite read that part and output at full size. Changing it never reallocates anything.
+   */
+  private renderScale = 1;
+  private sceneW = 2;
+  private sceneH = 2;
   private levels = 0;
   private baseDiv = 2;
   private mobile = false;
@@ -105,7 +162,7 @@ export class PostFX {
   private bloomUp: RT[] = [];
   private trail: RT[] = [];
   private after: RT[] = [];
-  private glare: RT | null = null;
+  private starRT: RT | null = null;
   private dof: RT | null = null;
   private trailIdx = 0;
   private trailValid = false;
@@ -122,6 +179,9 @@ export class PostFX {
   private readonly mGlare: THREE.RawShaderMaterial;
   private readonly mDof: THREE.RawShaderMaterial;
   private readonly mComposite: THREE.RawShaderMaterial;
+  private readonly mGate: THREE.RawShaderMaterial;
+  /** GLARE_MAX x 1: visible fire along each pyro light (GLARE_GATE) */
+  private gateRT: RT | null = null;
 
   // camera history for motion blur
   private readonly viewProj = new THREE.Matrix4();
@@ -132,6 +192,8 @@ export class PostFX {
   private readonly camDir = new THREE.Vector3();
   private readonly prevCamDir = new THREE.Vector3();
   private hasPrev = false;
+  private readonly sceneRect = new THREE.Vector4(1, 1, 1, 1);
+  private static readonly FULL_RECT = new THREE.Vector4(1, 1, 1, 1);
 
   private last: { scene: THREE.Scene | null; camera: THREE.Camera | null; dt: number; time: number } = { scene: null, camera: null, dt: 0, time: 0 };
 
@@ -151,11 +213,13 @@ export class PostFX {
     const v4 = () => ({ value: new THREE.Vector4() });
     const f = (value = 0) => ({ value });
     const tex = () => ({ value: null as THREE.Texture | null });
+    // used part of a source target (dynamic resolution): uv scale xy, clamp zw; (1,1,1,1) = all of it
+    const rect = () => ({ value: new THREE.Vector4(1, 1, 1, 1) });
 
-    this.mPrefilter = mat(PREFILTER, { tSrc: tex(), uTexel: v2(), uSpread: f(1), uThreshold: v4(), uExposure: v2(), uSplit: f(-1), uKaris: f(0.25) });
-    this.mDown = mat(DOWNSAMPLE, { tSrc: tex(), uTexel: v2(), uSpread: f(1) });
+    this.mPrefilter = mat(PREFILTER, { tSrc: tex(), uSrcRect: rect(), uTexel: v2(), uSpread: f(1), uThreshold: v4(), uExposure: v2(), uSplit: f(-1), uKaris: f(0.25) });
+    this.mDown = mat(DOWNSAMPLE, { tSrc: tex(), uSrcRect: rect(), uTexel: v2(), uSpread: f(1) });
     this.mUp = mat(UPSAMPLE, { tLow: tex(), tCur: tex(), uLowTexel: v2(), uRadius: f(1), uLowWeight: f(1), uCurWeight: f(1) });
-    this.mTrails = mat(TRAILS, { tCur: tex(), tPrev: tex(), uPersist: v2(), uSplit: f(-1), uSmear: f(0.35) });
+    this.mTrails = mat(TRAILS, { tCur: tex(), uCurRect: rect(), tPrev: tex(), uPersist: v2(), uSplit: f(-1), uSmear: f(0.35) });
     this.mAfter = mat(AFTERIMAGE, { tBright: tex(), tPrev: tex(), uDecay: f(0), uFloor: f(0.6) });
     this.mGlare = mat(GLARE, {
       tSrc: tex(),
@@ -164,10 +228,14 @@ export class PostFX {
       uFalloff: { value: [0.26, 0.3, 0.3] },
       uGain: f(0.05),
     });
-    this.mDof = mat(DOF, { tColor: tex(), tDepth: tex(), uTexel: v2(), uClip: v2(), uDof: v4() });
+    this.mGate = mat(GLARE_GATE, { tSrc: tex(), uGN: { value: 0 }, uGS: { value: this.glare.seg }, uGate: v2() });
+    this.mDof = mat(DOF, { tColor: tex(), tDepth: tex(), uDepthRect: rect(), uTexel: v2(), uClip: v2(), uDof: v4() });
     this.mComposite = mat(COMPOSITE, {
       tScene: tex(),
+      uSceneRect: rect(),
+      uSceneTexel: v2(),
       tDepth: tex(),
+      uDepthRect: rect(),
       tD1: tex(),
       tD2: tex(),
       tD3: tex(),
@@ -176,6 +244,14 @@ export class PostFX {
       tAfter: tex(),
       tDof: tex(),
       tVeil: tex(),
+      uVeilSize: v4(),
+      uGlare: v4(),
+      uGN: { value: 0 },
+      uGS: { value: this.glare.seg },
+      uGC: { value: this.glare.col },
+      uGRB: { value: this.glare.rb },
+      uGHalo: v4(),
+      tGate: tex(),
       uView: v4(),
       uBody: v4(),
       uRes: v4(),
@@ -244,6 +320,7 @@ export class PostFX {
     if (w === this.width && h === this.height && this.hdr && samples === this.samples) return;
     this.width = w;
     this.height = h;
+    this.updateSceneSize();
     this.updateLodScale();
     if (this.hdr && samples !== this.samples) {
       this.hdr.depthTexture?.dispose();
@@ -251,6 +328,28 @@ export class PostFX {
       this.hdr = null;
     }
     this.allocate();
+  }
+
+  /**
+   * Dynamic resolution without reallocation (the PerfGovernor's steps): the scene renders at `s` of
+   * the drawing buffer into a sub-rectangle of the full-size targets and is upscaled in the composite.
+   * The canvas, the targets and the post chain keep their size, so a step is free of hitches.
+   */
+  setRenderScale(s: number): void {
+    const v = clamp(Number.isFinite(s) ? s : 1, 0.25, 1);
+    if (v === this.renderScale) return;
+    this.renderScale = v;
+    this.updateSceneSize();
+  }
+
+  /** the scene's render resolution (pixels) at the current render scale */
+  getSceneSize(out: THREE.Vector2): THREE.Vector2 {
+    return out.set(this.sceneW, this.sceneH);
+  }
+
+  private updateSceneSize(): void {
+    this.sceneW = Math.max(2, Math.min(this.width, Math.round(this.width * this.renderScale)));
+    this.sceneH = Math.max(2, Math.min(this.height, Math.round(this.height * this.renderScale)));
   }
 
   setQuality(q: QualitySettings): void {
@@ -312,7 +411,7 @@ export class PostFX {
   }
 
   private materials(): THREE.RawShaderMaterial[] {
-    return [this.mPrefilter, this.mDown, this.mUp, this.mTrails, this.mAfter, this.mGlare, this.mDof, this.mComposite];
+    return [this.mPrefilter, this.mDown, this.mUp, this.mTrails, this.mAfter, this.mGlare, this.mGate, this.mDof, this.mComposite];
   }
 
   render(scene: THREE.Scene, camera: THREE.Camera, dt: number, time: number): void {
@@ -329,7 +428,18 @@ export class PostFX {
    */
   async capture(): Promise<Blob | null> {
     const l = this.last;
-    if (l.scene && l.camera) this.frame(l.scene, l.camera, l.dt, l.time, false);
+    if (l.scene && l.camera) {
+      // a photo is always rendered at the full drawing-buffer resolution
+      const s = this.renderScale;
+      this.renderScale = 1;
+      this.updateSceneSize();
+      try {
+        this.frame(l.scene, l.camera, l.dt, l.time, false);
+      } finally {
+        this.renderScale = s;
+        this.updateSceneSize();
+      }
+    }
     return new Promise((resolve) => this.renderer.domElement.toBlob((b) => resolve(b), 'image/png'));
   }
 
@@ -348,12 +458,15 @@ export class PostFX {
     if (b.heat > 0.003) fx.push('heat');
     if (b.fade > 0.003) fx.push('fade');
     if (b.veil > 0.003) fx.push('veil');
+    if (this.glare.amount > 0.003) fx.push(`glare${this.glare.amount.toFixed(2)}`);
     if (Math.abs(b.roll) > 1e-4 || Math.abs(b.offX) > 1e-4 || Math.abs(b.offY) > 1e-4) fx.push('view');
     return {
       postfx: on ? 'on' : 'off',
       passes: this.passCount,
       bloomLevels: this.quality.bloom ? this.levels : 0,
       target: `${this.width}x${this.height}`,
+      scene: `${this.sceneW}x${this.sceneH}`,
+      renderScale: this.renderScale,
       base: `${this.levelW(0)}x${this.levelH(0)}`,
       msaa: this.hdr?.samples ?? 0,
       aa: this.aa ? 'fxaa' : this.samples ? `msaa${this.samples}` : 'none',
@@ -361,6 +474,16 @@ export class PostFX {
       hdr: this.hdrType === THREE.HalfFloatType ? 'half-float' : 'ldr-fallback',
       active: fx.join(',') || 'none',
     };
+  }
+
+  /** debug: per pyro light, [gate 0..1, mean bright luminance along it] of the last frame */
+  debugGate(): number[][] {
+    if (!this.gateRT) return [];
+    const buf = new Uint16Array(GLARE_MAX * 4);
+    this.renderer.readRenderTargetPixels(this.gateRT, 0, 0, GLARE_MAX, 1, buf);
+    const out: number[][] = [];
+    for (let i = 0; i < this.glare.count; i++) out.push([THREE.DataUtils.fromHalfFloat(buf[i * 4]), THREE.DataUtils.fromHalfFloat(buf[i * 4 + 1])]);
+    return out;
   }
 
   dispose(): void {
@@ -387,6 +510,14 @@ export class PostFX {
     // resolving multisampled depth costs a full-screen blit: only when DOF or motion blur read it
     this.depthResolved = this.dofActive(camera) || this.motionBlurActive();
     hdr.resolveDepthBuffer = this.depthResolved;
+    // dynamic resolution: the scene fills the lower-left sceneW x sceneH part of the target
+    const sw = this.sceneW;
+    const sh = this.sceneH;
+    const partial = sw < this.width || sh < this.height;
+    hdr.viewport.set(0, 0, sw, sh);
+    hdr.scissor.set(0, 0, sw, sh);
+    hdr.scissorTest = partial;
+    const sRect = this.sceneRect.set(sw / this.width, sh / this.height, (sw - 0.5) / this.width, (sh - 0.5) / this.height);
     r.autoClear = true;
     r.setRenderTarget(hdr);
     r.render(scene, camera);
@@ -397,9 +528,15 @@ export class PostFX {
     const p = this.perception;
     const split = p.split >= 0 ? clamp(p.split, 0, 1) : -1;
     const photo = this.photo.enabled;
-    const baseEx = this.exposure * (photo ? this.photo.exposure : 1);
+    const gp = this.glare;
+    const gt = this.glareTune;
+    const G = clamp(gp.amount, 0, 1);
+    const photoEx = photo ? this.photo.exposure : 1;
+    // pyro glare: the camera's iris opens a touch into the lit smoke, and the bright pass reaches
+    // further down so the whole fire cloud blooms
+    const baseEx = this.exposure * photoEx * (1 + gt.exposure * G);
     const ls = clamp(p.lightSensitivity, 0, 1);
-    const thA = this.bloomThreshold;
+    const thA = this.bloomThreshold * (1 - gt.threshold * G);
     const knA = this.bloomKnee;
     const thB = thA * (1 - 0.72 * ls);
     const knB = knA * (1 + 0.6 * ls);
@@ -414,6 +551,7 @@ export class PostFX {
       const next = this.trail[1 - this.trailIdx];
       const u = this.mTrails.uniforms;
       u.tCur.value = src;
+      (u.uCurRect.value as THREE.Vector4).copy(sRect);
       u.tPrev.value = prev.texture;
       (u.uPersist.value as THREE.Vector2).set(0, this.trailValid && !cut ? Math.pow(trails, step * 60) : 0);
       u.uSplit.value = split;
@@ -429,6 +567,8 @@ export class PostFX {
     {
       const u = this.mPrefilter.uniforms;
       u.tSrc.value = src;
+      // the trails buffer is full size; the scene target is used only in part
+      (u.uSrcRect.value as THREE.Vector4).copy(src === hdr.texture ? sRect : PostFX.FULL_RECT);
       (u.uTexel.value as THREE.Vector2).set(1 / this.width, 1 / this.height);
       (u.uThreshold.value as THREE.Vector4).set(thA, knA, thB, knB);
       (u.uExposure.value as THREE.Vector2).set(baseEx * this.sober.exposure, baseEx * p.exposure);
@@ -456,8 +596,10 @@ export class PostFX {
         this.down(s, i - 1, this.bloomDown[i]);
         s = this.bloomDown[i].texture;
       }
+      // under pyro glare the wide mips gain weight: the lens' long scatter tail becomes visible
+      const wide = gt.wide * G;
       let wsum = 0;
-      for (let i = 0; i < n; i++) wsum += this.bloomWeights[i] ?? 0.85;
+      for (let i = 0; i < n; i++) wsum += this.bloomWeight(i, n, wide);
       const inv = 1 / wsum;
       const u = this.mUp.uniforms;
       u.uRadius.value = this.bloomRadius;
@@ -466,8 +608,8 @@ export class PostFX {
         u.tLow.value = low;
         u.tCur.value = i === 0 ? bright : this.bloomDown[i].texture;
         (u.uLowTexel.value as THREE.Vector2).set(1 / this.levelW(i + 1), 1 / this.levelH(i + 1));
-        u.uLowWeight.value = (i === n - 2 ? (this.bloomWeights[n - 1] ?? 0.85) : 1) * (i === 0 ? inv : 1);
-        u.uCurWeight.value = (this.bloomWeights[i] ?? 0.85) * (i === 0 ? inv : 1);
+        u.uLowWeight.value = (i === n - 2 ? this.bloomWeight(n - 1, n, wide) : 1) * (i === 0 ? inv : 1);
+        u.uCurWeight.value = this.bloomWeight(i, n, wide) * (i === 0 ? inv : 1);
         this.draw(this.mUp, this.bloomUp[i]);
         low = this.bloomUp[i].texture;
       }
@@ -498,7 +640,7 @@ export class PostFX {
     const body = this.body;
     const star = clamp(body.star, 0, 2);
     if (ls > 0.003 && star > 0.003) {
-      const g = (this.glare ??= this.target(this.levelW(0), this.levelH(0)));
+      const g = (this.starRT ??= this.target(this.levelW(0), this.levelH(0)));
       const u = this.mGlare.uniforms;
       u.tSrc.value = bright;
       const w = this.levelW(0);
@@ -535,6 +677,7 @@ export class PostFX {
       const u = this.mDof.uniforms;
       u.tColor.value = d1;
       u.tDepth.value = hdr.depthTexture;
+      (u.uDepthRect.value as THREE.Vector4).copy(sRect);
       (u.uTexel.value as THREE.Vector2).set(1 / this.levelW(0), 1 / this.levelH(0));
       (u.uClip.value as THREE.Vector2).set(persp.near, persp.far);
       (u.uDof.value as THREE.Vector4).set(this.photo.focusDistance, cocScale, maxCoc, 0);
@@ -544,7 +687,12 @@ export class PostFX {
     // 8. composite
     const u = this.mComposite.uniforms;
     u.tScene.value = src;
+    (u.uSceneRect.value as THREE.Vector4).copy(src === hdr.texture ? sRect : PostFX.FULL_RECT);
+    // FXAA steps one rendered texel (in screen uv): the trails buffer has full resolution
+    if (src === hdr.texture) (u.uSceneTexel.value as THREE.Vector2).set(1 / sw, 1 / sh);
+    else (u.uSceneTexel.value as THREE.Vector2).set(1 / this.width, 1 / this.height);
     u.tDepth.value = hdr.depthTexture;
+    (u.uDepthRect.value as THREE.Vector4).copy(sRect);
     u.tD1.value = d1;
     u.tD2.value = this.d2?.texture ?? null;
     u.tD3.value = this.d3?.texture ?? null;
@@ -553,7 +701,31 @@ export class PostFX {
     u.tAfter.value = afterTex;
     u.tDof.value = dofOn ? this.dof!.texture : null;
     const veil = bloomOn ? clamp(body.veil, 0, 2) : 0;
-    u.tVeil.value = veil > 0.001 ? this.bloomDown[n - 1].texture : null;
+    const psf = bloomOn ? gt.psf * G : 0;
+    u.tVeil.value = veil > 0.001 || psf > 0.001 ? this.bloomDown[n - 1].texture : null;
+    {
+      const wv = this.levelW(n - 1);
+      const hv = this.levelH(n - 1);
+      (u.uVeilSize.value as THREE.Vector4).set(wv, hv, 1 / wv, 1 / hv);
+      // analytic halos / lift in exposed units: they follow the photo exposure like the fire itself
+      const flat = gt.flat * G * photoEx;
+      (u.uGlare.value as THREE.Vector4).set(gp.r * flat, gp.g * flat, gp.b * flat, psf);
+      const gn = Math.max(0, Math.min(GLARE_MAX, gp.count | 0));
+      u.uGN.value = gn;
+      // gate: the halos glow only where bright fire is actually rendered along each light
+      let gateOn = 0;
+      if (gn > 0 && bloomOn) {
+        const g = (this.gateRT ??= this.target(GLARE_MAX, 1, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter }));
+        const gu = this.mGate.uniforms;
+        gu.tSrc.value = this.bloomDown[Math.min(2, n - 1)].texture;
+        gu.uGN.value = gn;
+        (gu.uGate.value as THREE.Vector2).set(this.width / this.height, gt.gateL0);
+        this.draw(this.mGate, g);
+        u.tGate.value = g.texture;
+        gateOn = 1;
+      } else u.tGate.value = null;
+      (u.uGHalo.value as THREE.Vector4).set(gt.halo * photoEx, gt.core, gt.coreSharp, gateOn);
+    }
     // head lurch / nystagmus: zoom in just enough that the rotated, shifted view never shows an edge
     const aspect = this.width / this.height;
     const roll = clamp(body.roll, -0.2, 0.2);
@@ -587,7 +759,7 @@ export class PostFX {
     const mbAllowed = !this.mobile;
     if (!mbAllowed) (u.uB3.value as THREE.Vector4).y = 0;
     (u.uThr.value as THREE.Vector4).set(thA, knA, thB, knB);
-    (u.uBloom.value as THREE.Vector2).set(bloomOn ? this.bloomStrength : 0, bloomOn ? 1 : 0);
+    (u.uBloom.value as THREE.Vector2).set(bloomOn ? Math.min(0.9, this.bloomStrength * (1 + gt.bloom * G)) : 0, bloomOn ? 1 : 0);
     (u.uLook.value as THREE.Vector4).set(baseEx, photo ? this.photo.vignette : this.vignette, photo ? this.photo.grain : this.grain, viewOn ? 1 : 0);
     (u.uFeat.value as THREE.Vector4).set(glareTex ? star : 0, afterTex ? 1 : 0, dofOn ? 1 : 0, mbAllowed && !cut ? this.motionBlurBase : 0);
     if (cut) (u.uB3.value as THREE.Vector4).y = 0;
@@ -621,6 +793,11 @@ export class PostFX {
     const cut = !this.hasPrev || this.camPos.distanceToSquared(this.prevCamPos) > 36 || this.camDir.dot(this.prevCamDir) < 0.85;
     if (cut) this.prevViewProj.copy(this.viewProj);
     return cut;
+  }
+
+  /** relative weight of bloom mip i of n; `wide` > 0 shifts weight towards the wide mips */
+  private bloomWeight(i: number, n: number, wide: number): number {
+    return (this.bloomWeights[i] ?? 0.85) * (1 + (wide * i) / Math.max(1, n - 1));
   }
 
   private dofActive(camera: THREE.Camera | null): boolean {
@@ -710,7 +887,7 @@ export class PostFX {
     this.d3 = size(this.d3, 2);
     for (let i = 1; i < this.levels; i++) this.bloomDown[i] = size(this.bloomDown[i] ?? null, i);
     for (let i = 0; i < this.levels - 1; i++) this.bloomUp[i] = size(this.bloomUp[i] ?? null, i);
-    if (this.glare) this.glare.setSize(this.levelW(0), this.levelH(0));
+    if (this.starRT) this.starRT.setSize(this.levelW(0), this.levelH(0));
     if (this.dof) this.dof.setSize(this.levelW(0), this.levelH(0));
     if (this.trail.length) this.ensureFeedback(this.trail, w, h);
     if (this.after.length) this.ensureFeedback(this.after, this.levelW(1), this.levelH(1));
@@ -718,13 +895,13 @@ export class PostFX {
   }
 
   private disposeTargets(): void {
-    const all = [this.hdr, this.base, this.d2, this.d3, this.glare, this.dof, ...this.bloomDown, ...this.bloomUp, ...this.trail, ...this.after];
+    const all = [this.hdr, this.base, this.d2, this.d3, this.starRT, this.dof, this.gateRT, ...this.bloomDown, ...this.bloomUp, ...this.trail, ...this.after];
     for (const t of all) {
       if (!t) continue;
       t.depthTexture?.dispose();
       t.dispose();
     }
-    this.hdr = this.base = this.d2 = this.d3 = this.glare = this.dof = null;
+    this.hdr = this.base = this.d2 = this.d3 = this.starRT = this.dof = this.gateRT = null;
     this.bloomDown = [];
     this.bloomUp = [];
     this.trail = [];

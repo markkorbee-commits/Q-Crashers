@@ -1,5 +1,10 @@
 import type { QualityLevel, QualitySettings } from './types';
 
+/**
+ * The single source of the per-preset budgets. Other modules read these values (crowd: crowdCount;
+ * lasers: laserBudget — design-bible §7.4 640 / 400 / 200 / 96; lights: beamBudget) and must not keep
+ * their own per-level tables.
+ */
 export const QUALITY_PRESETS: Record<QualityLevel, QualitySettings> = {
   ultra: {
     level: 'ultra',
@@ -9,7 +14,6 @@ export const QUALITY_PRESETS: Record<QualityLevel, QualitySettings> = {
     shadows: false,
     shadowMapSize: 2048,
     crowdCount: 65000,
-    crowdNearCount: 3500,
     flagCount: 420,
     particleScale: 1,
     beamBudget: 420,
@@ -31,7 +35,6 @@ export const QUALITY_PRESETS: Record<QualityLevel, QualitySettings> = {
     shadows: false,
     shadowMapSize: 1024,
     crowdCount: 45000,
-    crowdNearCount: 2200,
     flagCount: 300,
     particleScale: 0.75,
     beamBudget: 300,
@@ -53,7 +56,6 @@ export const QUALITY_PRESETS: Record<QualityLevel, QualitySettings> = {
     shadows: false,
     shadowMapSize: 512,
     crowdCount: 26000,
-    crowdNearCount: 1100,
     flagCount: 160,
     particleScale: 0.5,
     beamBudget: 180,
@@ -75,7 +77,6 @@ export const QUALITY_PRESETS: Record<QualityLevel, QualitySettings> = {
     shadows: false,
     shadowMapSize: 512,
     crowdCount: 11000,
-    crowdNearCount: 450,
     flagCount: 70,
     particleScale: 0.3,
     beamBudget: 96,
@@ -142,8 +143,9 @@ export function neighbourLevel(level: QualityLevel, dir: -1 | 1): QualityLevel |
 }
 
 /**
- * Dynamic-resolution steps (multipliers on the preset's renderScale). Few and coarse on purpose:
- * every step resizes the canvas and the post-processing targets.
+ * Dynamic-resolution steps (multipliers on the preset's renderScale). A step only changes the part of
+ * the full-size HDR target the scene renders into (PostFX.setRenderScale): no canvas resize, no target
+ * reallocation. Still coarse, so the measurement windows stay meaningful.
  */
 export const DYN_SCALES: readonly number[] = [1, 0.9, 0.8, 0.7, 0.6];
 /** frames per measurement window */

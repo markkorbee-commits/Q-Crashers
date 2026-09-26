@@ -17,12 +17,11 @@ export const SURF_CONE = 1;
 export const SURF_FOG = 2;
 
 /**
- * Laser segment budget per quality level — research/design-bible.md §7.4 (ultra 640 / high 400 /
- * medium 200 / mobile 96). The quality preset's laserBudget can only lower it. Big drawing buffers
- * (4K, high-DPR phones) get a further fill-rate cut; the generators then draw fewer, brighter and
- * slightly wider beams (per-beam power ∝ 1/√n) so the figures keep their weight.
+ * Laser segment budget per quality level: the preset's laserBudget (core/Quality.ts, the single
+ * source; research/design-bible.md §7.4: ultra 640 / high 400 / medium 200 / mobile 96). Big drawing
+ * buffers (4K, high-DPR phones) get a further fill-rate cut; the generators then draw fewer, brighter
+ * and slightly wider beams (per-beam power ∝ 1/√n) so the figures keep their weight.
  */
-const BIBLE_BEAMS: Record<string, number> = { ultra: 640, high: 400, medium: 200, mobile: 96 };
 /** drawing-buffer pixel count up to which the full budget applies */
 const FULL_BUDGET_PIXELS = 2.1e6;
 
@@ -161,7 +160,7 @@ export class LaserRenderer {
   }
 
   setQuality(q: QualitySettings): void {
-    const beams = Math.max(32, Math.min(q.laserBudget, BIBLE_BEAMS[q.level] ?? q.laserBudget));
+    const beams = Math.max(32, q.laserBudget);
     this.beamBudget = beams;
     this.sq = surfaceQuality(q);
     this.shared.uOct.value = q.volumetrics ? 2 : 1;

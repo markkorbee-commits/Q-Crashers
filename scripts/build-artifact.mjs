@@ -17,7 +17,18 @@ let html = fs.readFileSync(path.join(out, 'index.html'), 'utf8');
 const pick = (re) => [...html.matchAll(re)].map((m) => m[0]);
 // artifact gallery name (the explanation goes into the publish description)
 const title = '<title>Defqon.1 Endshow Experience</title>';
-const fonts = pick(/<link[^>]+fonts\.(googleapis|gstatic)\.com[^>]*>/g);
+// Web fonts load non-blocking (preload + media="print" link flipped to "all" on load; the UI also flips
+// it from JS because a sandbox may block inline handlers). A <noscript> fallback link must stay inside
+// its <noscript>: lifted out it would be a render-blocking stylesheet. Font links are picked outside
+// <noscript> blocks only; head <noscript> blocks that carry font links are copied whole.
+const NOSCRIPT = /<noscript>[\s\S]*?<\/noscript>/g;
+const headHtml = (html.match(/<head>([\s\S]*?)<\/head>/) ?? ['', ''])[1];
+const fontLink = /<link[^>]+fonts\.(googleapis|gstatic)\.com[^>]*>/g;
+const fonts = [...headHtml.replace(NOSCRIPT, '').matchAll(fontLink)].map((m) => m[0]);
+const fontNoscripts = [...headHtml.matchAll(NOSCRIPT)].map((m) => m[0]).filter((b) => /fonts\.googleapis\.com/.test(b));
+for (const f of fonts) {
+  if (/rel="stylesheet"/.test(f) && !/media="print"/.test(f)) console.warn(`[artifact] blocking web-font stylesheet: ${f}`);
+}
 const metas = pick(/<meta name="(description|theme-color)"[^>]*>/g);
 const styles = [];
 for (const m of html.matchAll(/<link rel="stylesheet"[^>]*href="(\.\/[^"]+\.css)"[^>]*>/g)) {
@@ -28,7 +39,7 @@ const preloads = pick(/<link rel="modulepreload"[^>]*>/g);
 const body = (html.match(/<body>([\s\S]*?)<\/body>/) ?? ['', '<div id="app"></div>'])[1]
   .replace(/<script[\s\S]*?<\/script>/g, '')
   .trim();
-const page = [title, ...metas, ...fonts, ...styles, ...preloads, body, ...scripts].join('\n') + '\n';
+const page = [title, ...metas, ...fonts, ...fontNoscripts, ...styles, ...preloads, body, ...scripts].join('\n') + '\n';
 fs.writeFileSync(path.join(out, 'index.html'), page);
 for (const m of html.matchAll(/<link rel="stylesheet"[^>]*href="\.\/([^"]+\.css)"[^>]*>/g)) fs.rmSync(path.join(out, m[1]), { force: true });
 

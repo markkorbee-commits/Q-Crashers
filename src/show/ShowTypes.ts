@@ -122,7 +122,11 @@ export interface ShowFile {
   tempo: TempoSegment[];
   sections: Section[];
   palettes: Record<string, Palette>;
-  moments: { t: number; label: string }[];
+  /**
+   * Jump-to moments (Moments menu). `lead` = seconds the jump lands before `t` (default 2.5, so the
+   * build-up is seen); `spot` = id of a NamedSpot to watch it from (the menu's "watch from" button).
+   */
+  moments: { t: number; label: string; lead?: number; spot?: string }[];
   cues: CueDef[];
 }
 
