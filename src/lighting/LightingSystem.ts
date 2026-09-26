@@ -128,6 +128,13 @@ const LASER_AIR_SAT = 3;
  */
 const DECK_HAZE_K = 0.5;
 const DECK_RIG_K = 0;
+/**
+ * Round 7: a camera on the deck (deckCloseUp) stands under the stage flood. The film's close-ups of the fire
+ * ritual (v656, v680.5) keep dark air over the performers — the red smoke lies on the deck (FB_DECK) and the
+ * flood colours the set — where the stage-wide flood volume veiled the whole frame pink-red. Share of the
+ * flood cues' stage air (FB_STAGE / FB_STAGE_HIGH) a full close-up loses; scatter and laser air stay.
+ */
+const CLOSE_FLOOD_K = 1;
 /** static downlights (arch crown): PAR-can beam half angle and the lit lens face seen off-axis */
 const TAN_CAN = Math.tan((6 * Math.PI) / 180);
 const CAN_GAIN = 7;
@@ -137,8 +144,13 @@ const CAN_GAIN = 7;
  * from inside the portal at 658–666 they filled the frame). Their volume is drawn at this share.
  */
 const ARCH_BEAM_K = 0.12;
-/** arch downlights: haze glow around the portal mouth per unit of mean level */
-const ARCH_GLOW_K = 0.035;
+/**
+ * arch downlights: haze glow around the portal mouth per unit of mean level. Round 7: 0 (was 0.035). The
+ * local blob (FB_BOOTH, with its near pre-slice share) filled the portal mouth of every close-up with a cream
+ * haze on top of the stage flood and the deck air; the film's portal shows the lamps and the red smoke,
+ * not a lit cloud (troupe close-ups 656 / 690 / 705 +2.5 / +2.2 / +1.1 points, none lower)
+ */
+const ARCH_GLOW_K = 0;
 
 /**
  * LightingSystem ('lights'): the RED show rig.
@@ -307,6 +319,14 @@ export class LightingSystem implements System {
       const c = this.flood.cols[FB_DECK];
       const k = deckCloseUp(camera);
       c.set(this.deckBase.x * k, this.deckBase.y * k, this.deckBase.z * k);
+      // ... and stands under the stage flood: the flood's lit air over the whole set is replaced by that
+      // deck smoke (CLOSE_FLOOD_K), so a close-up keeps the dark air above the performers
+      const s = this.closeFloodK * k;
+      for (let j = 0; j < 2; j++) {
+        const all = this.stageAll[j];
+        const fl = this.stageFl[j];
+        this.flood.cols[j === 0 ? FB_STAGE : FB_STAGE_HIGH].set(all.x - fl.x * s, all.y - fl.y * s, all.z - fl.z * s);
+      }
       // the backlight veil is forward scatter: only a camera in front of the lamps, facing them, sees it
       const f = backFacing(camera);
       const b = this.backBase;
@@ -642,13 +662,13 @@ export class LightingSystem implements System {
       }
       // discharge-lamp beams read slightly cool (~7500 K); the arch cans' short throw hardly shows a cone
       const gobo = this.sGobo[i];
-      const bk = BEAM_GAIN * (f.focus ? ARCH_BEAM_K : 1);
+      const bk = BEAM_GAIN * (f.focus ? this.archBeamK : 1);
       this.beams.push(lx, ly, lz, r0, dx, dy, dz, len, r * bk * 0.92, g * bk * 0.97, b * bk * 1.06, tan, f.seed, grounded ? gy + 1 : 0, gobo);
       this.sprites.push(SPR_LENS, lx, ly, lz, dx, dy, dz, Math.atan(tan), r * LENS_GAIN, g * LENS_GAIN, b * LENS_GAIN, 0.2);
       if (f.focus) {
         // a PAR can's big lens reads as a bright disc from well off its axis (the ring of lamps in the arch
         // crown, v656 / v705)
-        this.sprites.push(SPR_BULB, lx, ly, lz, dx, dy, dz, 0, r * CAN_GAIN, g * CAN_GAIN, b * CAN_GAIN, 0.16);
+        this.sprites.push(SPR_BULB, lx, ly, lz, dx, dy, dz, 0, r * this.archCanK, g * this.archCanK, b * this.archCanK, 0.16);
         archDim += dim;
         this.archCol.r += r;
         this.archCol.g += g;
@@ -832,9 +852,11 @@ export class LightingSystem implements System {
     if (strobe > 0) this.floorGlow.lerp(this.cT.setRGB(1, 1, 1), Math.min(1, strobe));
     // (the wash level saturates: a 1.1 wash reads as a stronger set colour, not as a denser fog)
     const washGlow = env.stageWashIntensity / (1 + 0.45 * env.stageWashIntensity);
-    this.glow.update(cam.position, env.stageWashColor, washGlow + strobe * 0.35, this.floorGlow, floorI, 0.02 * hz);
+    this.glow.update(cam.position, env.stageWashColor, (washGlow + strobe * 0.35) * this.washGlowK, this.floorGlow, floorI * this.floorGlowK, 0.02 * hz);
     this.writeFloodGlow(env, haze, sumDim / nf, strobe, t);
     for (let i = 0; i < FLOOD_BLOBS; i++) this.floodBase[i].copy(this.flood.cols[i]);
+    this.stageAll[0].copy(this.flood.cols[FB_STAGE]);
+    this.stageAll[1].copy(this.flood.cols[FB_STAGE_HIGH]);
     this.flood.update();
 
     this.dev?.update(ctx);
@@ -863,7 +885,7 @@ export class LightingSystem implements System {
   private writeWash(t: number, env: App['env']): void {
     const bl = this.idx.wash.resolve(t, this.washBlend);
     const pal = this.app.palette;
-    // premultiplied blend of the two wash states (none = palette primary at 0.35)
+    // premultiplied blend of the two wash states (none = dark; palette primary at 0.35 only in a show without washes)
     const W = this.acc.setRGB(0, 0, 0);
     this.washI = 0;
     this.addWash(bl.to, bl.k);
@@ -922,7 +944,10 @@ export class LightingSystem implements System {
       W.g += c.c1.g * c.intensity * w;
       W.b += c.c1.b * c.intensity * w;
       this.washI += c.intensity * w;
-    } else {
+    } else if (this.idx.wash.items.length === 0) {
+      // a show without any set-wash cue: the palette primary at 0.35. A show that writes its washes means
+      // "no wash" between them (and after an explicit black / 0 cue): the set stays dark (video 1322.5 /
+      // 1323.5: the isolated wings over an unlit set, not a gold flood)
       W.r += pal.primary.r * 0.35 * w;
       W.g += pal.primary.g * 0.35 * w;
       W.b += pal.primary.b * 0.35 * w;
@@ -1124,6 +1149,14 @@ export class LightingSystem implements System {
     add(FB_FIELD_FAR, this.floodField, FLOOD_K_FIELD * fg);
     // a field flood also lifts the air over the stage a little (one continuous cloud)
     add(FB_STAGE, this.floodField, FLOOD_K_STAGE * fg * 0.35);
+    // (the flood share of the stage air, for the deck close-up weighting at draw time)
+    {
+      const k0 = FLOOD_K_STAGE * fg;
+      const fs = this.floodStage;
+      const ff = this.floodField;
+      this.stageFl[0].set((fs.r + ff.r * 0.35) * k0, (fs.g + ff.g * 0.35) * k0, (fs.b + ff.b * 0.35) * k0);
+      this.stageFl[1].set(fs.r * k0, fs.g * k0, fs.b * k0);
+    }
     add(FB_SIDE_L, this.floodSideL, FLOOD_K_SIDES * hk);
     add(FB_SIDE_R, this.floodSideR, FLOOD_K_SIDES * hk);
     // backlights and the booth spot glow in the haze around them (hue x the brightest lamp's level)
@@ -1161,7 +1194,7 @@ export class LightingSystem implements System {
       cols[FB_DECK].set(this.deckBase.x * cu, this.deckBase.y * cu, this.deckBase.z * cu);
     }
     // the arch downlights light the smoke in and in front of the portal (their cones are faint, see ARCH_BEAM_K)
-    if (this.archLevel > 0) add(FB_BOOTH, this.app.env.archSpotColor, ARCH_GLOW_K * hk * this.archLevel);
+    if (this.archLevel > 0 && this.archGlowK > 0) add(FB_BOOTH, this.app.env.archSpotColor, this.archGlowK * hk * this.archLevel);
     // storm haze: in very dense haze / smoke the whole rig + wash light scatters into a lit cloud
     const sc = smooth01((haze - SCATTER_H0) / (SCATTER_H1 - SCATTER_H0));
     this.scatter = sc;
@@ -1185,6 +1218,11 @@ export class LightingSystem implements System {
   private scatter = 0;
   /** deck-air glow colour before the close-up weight (FB_DECK) */
   private readonly deckBase = new THREE.Vector3();
+  /** stage air (FB_STAGE, FB_STAGE_HIGH) of this frame, and the flood cues' share of it (close-up weighting) */
+  private readonly stageAll = [new THREE.Vector3(), new THREE.Vector3()];
+  private readonly stageFl = [new THREE.Vector3(), new THREE.Vector3()];
+  /** share of the stage flood's lit air a deck close-up loses (side-by-side calibration) */
+  closeFloodK = CLOSE_FLOOD_K;
   /** backlight veil colour before the facing weight (FB_BACK, FB_BACK_WIDE) */
   private readonly backBase = new THREE.Vector3();
   /** albedo of the deck fog (its cue colour, max channel 1) and scratch for the active fog cues */
@@ -1224,6 +1262,13 @@ export class LightingSystem implements System {
   /** deck-air glow gain (side-by-side calibration) and the rig's share in it */
   deckHazeK = DECK_HAZE_K;
   deckRigK = DECK_RIG_K;
+  /** set haze glow (WashGlow): wash part and floor-spill part multipliers (side-by-side calibration) */
+  washGlowK = 1;
+  floorGlowK = 1;
+  /** arch-crown downlights: cone share, lens-disc gain and haze glow (side-by-side calibration) */
+  archBeamK = ARCH_BEAM_K;
+  archCanK = CAN_GAIN;
+  archGlowK = ARCH_GLOW_K;
 
   /**
    * flood colours = this frame's floods + the laser light held by the smoke (LaserSystem.airLight, read
@@ -1244,6 +1289,8 @@ export class LightingSystem implements System {
       this.addGlow(FB_STAGE, c, k * 0.5);
       this.addGlow(FB_STAGE_HIGH, c, k * 0.8);
     }
+    this.stageAll[0].copy(cols[FB_STAGE]);
+    this.stageAll[1].copy(cols[FB_STAGE_HIGH]);
     this.flood.update();
   }
 

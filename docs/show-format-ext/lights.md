@@ -102,6 +102,34 @@ level scales its lamp and its shaft together.
   every second kick with a softer decay. Strobes are at 40 %, blinders at 50 % with a 0.25 s rise,
   floods at 60 % with an attack of at least 0.3 s, and light-bus flashes at 40 %.
 
+## Round 7: wash semantics, back-to-back cues, deck close-ups (no cue change needed)
+Measured with `scripts/similarity.mjs` on the Mac GPU against the exact-time frames (64 moments: 64.7 / 46.5 % →
+64.8 / 46.7 % raw / calibrated, colour 63.8, light 80.0, shape 53.8; mean of the 10 worst 39.6 → 40.5).
+* **No wash cue = no wash.** In a show that writes its set washes, the time between two wash cues and the fade
+  after an explicit black / 0 wash is an unlit set. The palette primary at 0.35 is only the default of a show
+  without any set-wash cue. Before, every gap and every cross-fade "from nothing" flooded the set in the
+  palette primary: the cold_gold palette lit the isolated wings gold at 1322.3–1324 after the black cue.
+  1322.5 s +6.7, 1323 s +2.1, 1318 s +2.5 points.
+* **Back-to-back state cues cross-fade.** A `look` / `wash` / `pillars` / `festoon` cue that starts where the
+  previous one of its track ends (within 2 ms) cross-fades from that cue over its `fade`. Before, it faded in
+  from the null state: looks dipped through dark, pillar lamps through the default blue and the wash through
+  the palette primary at each of the ~700 touching boundaries in the show. A cue that should cut to its state
+  sets a short `fade` (e.g. a black wash that must be dark at once: `fade: 0.1`).
+* **Deck close-ups under a stage flood.** A camera on or at the deck that looks at the set (the deck-air
+  weight) does not see the flood cues' lit air over the whole set (the stage flood volume). The flood still
+  colours the set and the light bus, and the deck smoke (`fog.lowfog` on the deck) carries the red air around
+  the performers. The film's close-ups of the fire ritual keep dark air above the performers. Scatter (storm
+  haze) and laser air stay. 656 s 38.5 → 44.7, 680.5 s 35.9 → 47.3, 690 s 46.4 → 48.9 (with the two points below).
+* **Deck air** sits over the deck under the performers (centre Z −4.5, was −1.5 at the deck lip).
+* **Arch cans**: no haze glow of their own (it filled the portal mouth of every close-up with a cream cloud);
+  the lamp discs and the 12 % cones stay.
+* Measured and NOT changed: the stage FOH key at 1/3.5 of its round-6 gain (troupe −8 points in sum, 724.5
+  −8.3: keep it); `floodSetK` 0 / 2 (no effect at 567.5 / 594.25 / 600.5; 594.5 −2.6 / +2.2); the finale
+  flood volume (`floodGlowK` 0.5: 1511.75 ±0, 1536.25 +0.7, but 567.5 −14; the far field blob off: 1516 +6,
+  1522 +8, 567.5 −15.6; the lights' finale output is pure red, the grey-pink veil comes from other layers);
+  the set haze glow ×2 / ×3 (64 moments unchanged, ± per moment); the deck close-up share 0.8 (lower).
+  New calibration hooks: `lights.closeFloodK`, `archGlowK`, `archBeamK`, `archCanK`, `washGlowK`, `floorGlowK`.
+
 ## Round 6: backlight veil, deck air, arch cans (no cue change needed)
 Measured with `scripts/similarity.mjs` on the Mac GPU (64 moments: 61.0 / 39.4 % → 62.2 / 41.3 % raw / calibrated;
 colour 59.8 → 61.7, light 76.2 → 77.0, shape 50.1 → 50.6).

@@ -645,8 +645,11 @@ export class FloodGlow {
     sig[FB_BACK] = S(2.8, 1.8, 2.2);
     centres[FB_BACK_WIDE] = C(0, 3.6, -5.2, 0.25);
     sig[FB_BACK_WIDE] = S(8, 3.5, 4.5);
-    // deck air (round 6): the smoke over the deck and the pit, lit by the wash and the rig (close-ups only)
-    centres[FB_DECK] = C(0, 3.4, -1.5, 1);
+    // deck air (round 6): the smoke over the deck and the pit, lit by the wash and the rig (close-ups only).
+    // Round 7: centred over the deck under the performers (Z −4.5, the deck spans Z −14…0) instead of at its
+    // lip (−1.5): a camera at the deck edge no longer starts inside the densest smoke (troupe 650–705: +2.5
+    // at 650, +3.0 at 680.5, +1.1 at 705, none lower)
+    centres[FB_DECK] = C(0, 3.4, -4.5, 1);
     sig[FB_DECK] = S(18, 3.2, 8);
     centres[FB_BOOTH] = C(0, 3.2, -4, 1);
     sig[FB_BOOTH] = S(3.5, 2.5, 3.5);
