@@ -7,7 +7,7 @@ import type { Cue } from '../show/ShowTypes';
 import { dirFromAzAlt, EPHEM, showProgress, STARS } from './site';
 import { TimeSlicer } from '../core/yieldTo';
 import { cloudNoiseTextureAsync } from './tex';
-import { flashBounce, flashCompression, fogGlsl, installHeightFog, updateWorldLights, worldUniforms, type HeightFogConfig } from './worldLights';
+import { flashBounce, flashCompression, fogGlsl, installHeightFog, updateWorldLights, worldLightTune, worldUniforms, type HeightFogConfig } from './worldLights';
 
 /**
  * Blue-hour sky of Sat 27 June 2026, 22:40–23:06 CEST over Biddinghuizen (event-context §4.3/§4.4):
@@ -338,9 +338,16 @@ export class EnvironmentSystem implements System {
   private fogBase = 0.0012;
   /**
    * site smoke tuning (side-by-side calibration): `fog` = height-fog density gain per unit env.smoke,
-   * `glow` = share of the site glow in the fog colour per unit smoke, `sky` = the lit smoke veil on the sky
+   * `glow` = share of the site glow in the fog colour per unit smoke, `sky` = the lit smoke veil on the sky.
+   * Round 7 (similarity, Mac GPU): fog 7 -> 2, glow 0.4 -> 0.25. The dense red / pink height fog buried the
+   * fountains and the pillars under one flat veil; the video keeps them crisp inside the smoke: 76.25
+   * (pink whiteout) 36.2 -> 44.5 %, 1528 45.9 -> 51.1, 1530.5 46.6 -> 54.0, 545.5 +1.4, 1508.5 +0.9;
+   * 1536.25 -2.3 (the smoke is thickest there at the end of the red-smoke scene; thinner-but-redder
+   * variants, fog 2.5-3 with glow 0.6-0.7, and a fountain-lit smoke colour lost more elsewhere)
    */
-  readonly smokeTune = { fog: 7, glow: 0.4, sky: 1 };
+  readonly smokeTune = { fog: 2, glow: 0.25, sky: 1 };
+  /** show light on the grounds (worldLights calibration, in-page A/B) */
+  readonly worldTune = worldLightTune;
   private level = 1;
   private stats_ = { level: 0, sunAlt: 0, moonAlt: 0, cover: 0, lightning: 0 };
 

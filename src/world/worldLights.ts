@@ -119,6 +119,25 @@ const BOUNCE_WARM = 3;
  */
 const GLOW_GAIN = 0.8;
 
+/**
+ * Height falloff of the flash light on the grounds (round 7). A flash bucket's centre is its sources'
+ * intensity-weighted centroid: flame walls, gerbs and flame rows sit at 6-25 m, aerial breaks at 40-150 m.
+ * The official video keeps the field dark under the bursts (264.75 s: green breaks at 57 m over a black
+ * field; 1438.5 s, 1047.25 s) while the low walls light it orange (600.4, 1508-1510). Share of a bucket's
+ * direct light and of the smoke bounce that reaches the grounds: 1 up to FLASH_H0 m, then
+ * 1 / (1 + ((y - FLASH_H0) / FLASH_HW)²) (57 m: 0.24, 68 m: 0.13; the 1/(d² + R²) of the area light
+ * already counts the height itself). Similarity (Mac GPU): 264.75 36.6 -> 44.0 %, the pyro-lit set of 876
+ * (flash centre at 30 m) unchanged, 1291.75 -0.9 (a faint red field under 68 m breaks); h0 = 20 cost 876 -1.2.
+ * In-page A/B: `__app.get('environment').worldTune` (h0 / hw; 1e9 = off).
+ */
+export const worldLightTune = { h0: 30, hw: 15 };
+
+/** share of a flash bucket's light that reaches the grounds, by the height (m) of its centre */
+function groundShare(y: number): number {
+  const x = Math.max(0, (y - worldLightTune.h0) / Math.max(1, worldLightTune.hw));
+  return 1 / (1 + x * x);
+}
+
 const tmp = new THREE.Color();
 
 /** c' = k · max · (c / max)^p per channel (see FLASH_WARM), written to out */
@@ -150,7 +169,8 @@ export function flashBounce(env: LightEnv, out: THREE.Color): THREE.Color {
 const bounceC = new THREE.Color();
 
 function setFlash(b: FlashBucket, k: number, pos: THREE.Vector4, col: THREE.Vector3): void {
-  const fl = FLASH_GAIN * k;
+  // aerial breaks high over the field light the ground far less than the walls on the deck
+  const fl = FLASH_GAIN * k * groundShare(b.pos.y);
   const c = b.color;
   warm(c.r, c.g, c.b, FLASH_WARM, fl, warmOut);
   col.set(warmOut.r, warmOut.g, warmOut.b);
@@ -208,7 +228,7 @@ export function updateWorldLights(env: LightEnv, time: number, flashScale = 1): 
   // bounce off the lit smoke around the flash centre (falls to a quarter at WORLD_BOUNCE_R + 0.6 spread)
   flashBounce(env, bounceC);
   const F = env.flashIntensity;
-  const bk = F > 0 ? (flashScale * WORLD_BOUNCE_K * F) / (F + WORLD_BOUNCE_F) : 0;
+  const bk = F > 0 ? (flashScale * WORLD_BOUNCE_K * F * groundShare(env.flashPos.y)) / (F + WORLD_BOUNCE_F) : 0;
   u.uWAmbCol.value.set(bounceC.r * bk, bounceC.g * bk, bounceC.b * bk);
   const sp = env.flashSpread;
   const r = WORLD_BOUNCE_R + 0.6 * sp;
