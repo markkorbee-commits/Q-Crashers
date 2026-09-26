@@ -83,6 +83,24 @@ export interface QueuePoint {
   dz: number;
 }
 
+/**
+ * A viewpoint the crowd keeps clear (start positions, named spots): nobody within `ring` m; with a
+ * `yaw` (0 = looking towards −Z) also nobody in the forward cone (± `cone` rad) out to `r1` m and only
+ * `keep` of the people between `r1` and `r2` m, so the first image from a spot is the show, not a
+ * back of a head 1 m from the lens. Edges are soft (angle +12°, radius +1.5 m) so the gap reads as
+ * the natural space in front of a viewer, not a cut-out wedge.
+ */
+export interface ClearZone {
+  x: number;
+  z: number;
+  ring: number;
+  yaw?: number;
+  cone?: number;
+  r1?: number;
+  r2?: number;
+  keep?: number;
+}
+
 export interface LayoutInput {
   target: number;
   heightAt: (x: number, z: number) => number;
@@ -91,7 +109,72 @@ export interface LayoutInput {
   flagTarget: number;
   /** no flag carriers within these circles (x, z, r): named viewpoints */
   flagAvoid?: readonly (readonly [number, number, number])[];
+  /** viewpoints kept clear of people (see ClearZone) */
+  clear?: readonly ClearZone[];
   seed?: number;
+}
+
+/** cooperative-scheduling hooks for a layout build on the main thread (loading bar + yields) */
+export interface LayoutHooks {
+  /** report a named sub-step (0..1 of the build) and let the page paint */
+  step?(label: string, fraction: number): Promise<void>;
+  /** true when the current time slice is used up */
+  due?(): boolean;
+  /** yield to the browser and start a new slice */
+  yield?(): Promise<void>;
+  /** the build was superseded (a newer count / preset): stop early */
+  cancelled?(): boolean;
+}
+
+export class LayoutCancelled extends Error {
+  constructor() {
+    super('crowd layout superseded');
+  }
+}
+
+const CONE_EDGE = (12 * Math.PI) / 180;
+
+/**
+ * Density multiplier 0..1 of the clear zones at a point (the lowest zone wins).
+ * `hard` = only the empty parts (ring + cone to r1): 0 there, else 1 (final-position test).
+ */
+export function clearFactor(x: number, z: number, zones: readonly ClearZone[] | undefined, hard = false): number {
+  if (!zones || zones.length === 0) return 1;
+  let f = 1;
+  for (let i = 0; i < zones.length; i++) {
+    const c = zones[i];
+    const dx = x - c.x;
+    const dz = z - c.z;
+    const d2 = dx * dx + dz * dz;
+    const reach = c.yaw === undefined ? c.ring + 0.8 : Math.max(c.ring + 0.8, (c.r2 ?? 0) + 1.5);
+    if (d2 >= reach * reach) continue;
+    const d = Math.sqrt(d2);
+    if (d < c.ring) return 0;
+    let k = hard ? 1 : smoothstep(c.ring, c.ring + 0.8, d);
+    if (c.yaw !== undefined && d > 1e-3) {
+      // angle between the offset and the view direction (−sin yaw, −cos yaw)
+      const cosA = (-dx * Math.sin(c.yaw) - dz * Math.cos(c.yaw)) / d;
+      const ang = Math.acos(clamp(cosA, -1, 1));
+      const cone = c.cone ?? Math.PI / 3;
+      const r1 = c.r1 ?? 6;
+      const r2 = c.r2 ?? 9;
+      const keep = c.keep ?? 0.35;
+      if (hard) {
+        if (ang < cone && d < r1) return 0;
+      } else {
+        const inCone = 1 - smoothstep(cone, cone + CONE_EDGE, ang);
+        const radial = d < r1 ? 0 : d < r2 ? keep : lerp(keep, 1, smoothstep(r2, r2 + 1.5, d));
+        k = Math.min(k, lerp(1, radial, inCone));
+      }
+    }
+    if (k < f) f = k;
+  }
+  return f;
+}
+
+function zonesKey(zones: readonly ClearZone[] | undefined): string {
+  if (!zones) return '';
+  return zones.map((c) => `${c.x.toFixed(1)},${c.z.toFixed(1)},${c.ring},${c.yaw?.toFixed(2) ?? '-'}`).join('|');
 }
 
 export interface FlagDef {
@@ -180,20 +263,62 @@ export function fullDensity(x: number, z: number, out: { zone: number }): number
   return d;
 }
 
-function colliderHit(x: number, z: number, cs: readonly Collider2D[], m: number): boolean {
-  for (let i = 0; i < cs.length; i++) {
-    const c = cs[i];
-    if (c.kind === 'box') {
-      if (x > c.minX - m && x < c.maxX + m && z > c.minZ - m && z < c.maxZ + m) return true;
-    } else {
-      const dx = x - c.x;
-      const dz = z - c.z;
-      const r = c.r + m;
-      if (dx * dx + dz * dz < r * r) return true;
+function colliderHitOne(x: number, z: number, c: Collider2D, m: number): boolean {
+  if (c.kind === 'box') return x > c.minX - m && x < c.maxX + m && z > c.minZ - m && z < c.maxZ + m;
+  const dx = x - c.x;
+  const dz = z - c.z;
+  const r = c.r + m;
+  return dx * dx + dz * dz < r * r;
+}
+
+/**
+ * 4 m spatial hash over the colliders (bounding boxes grown by MAX_MARGIN), so the per-cell test of
+ * the 200k-cell density field and the queues touches a handful of colliders instead of all of them
+ * (the barrier runs alone are hundreds of circles).
+ */
+const HASH_CELL = 4;
+const MAX_MARGIN = 0.5;
+class ColliderHash {
+  private readonly cells = new Map<number, number[]>();
+  private readonly big: number[] = [];
+  constructor(private readonly cs: readonly Collider2D[]) {
+    for (let i = 0; i < cs.length; i++) {
+      const c = cs[i];
+      const x0 = c.kind === 'box' ? c.minX : c.x - c.r;
+      const x1 = c.kind === 'box' ? c.maxX : c.x + c.r;
+      const z0 = c.kind === 'box' ? c.minZ : c.z - c.r;
+      const z1 = c.kind === 'box' ? c.maxZ : c.z + c.r;
+      const ix0 = Math.floor((x0 - MAX_MARGIN) / HASH_CELL);
+      const ix1 = Math.floor((x1 + MAX_MARGIN) / HASH_CELL);
+      const iz0 = Math.floor((z0 - MAX_MARGIN) / HASH_CELL);
+      const iz1 = Math.floor((z1 + MAX_MARGIN) / HASH_CELL);
+      // a collider larger than the whole site (a world bound) is tested by the fallback list
+      if ((ix1 - ix0 + 1) * (iz1 - iz0 + 1) > 4096) {
+        this.big.push(i);
+        continue;
+      }
+      for (let iz = iz0; iz <= iz1; iz++) {
+        for (let ix = ix0; ix <= ix1; ix++) {
+          const k = key(ix, iz);
+          let list = this.cells.get(k);
+          if (!list) this.cells.set(k, (list = []));
+          list.push(i);
+        }
+      }
     }
   }
-  return false;
+
+  /** is (x, z) within margin m (≤ MAX_MARGIN) of any collider */
+  hit(x: number, z: number, m: number): boolean {
+    const cs = this.cs;
+    for (let j = 0; j < this.big.length; j++) if (colliderHitOne(x, z, cs[this.big[j]], m)) return true;
+    const list = this.cells.get(key(Math.floor(x / HASH_CELL), Math.floor(z / HASH_CELL)));
+    if (!list) return false;
+    for (let j = 0; j < list.length; j++) if (colliderHitOne(x, z, cs[list[j]], m)) return true;
+    return false;
+  }
 }
+const key = (ix: number, iz: number) => (ix + 32768) * 65536 + (iz + 32768);
 
 /** smooth value noise (deterministic) for the warp field and group clustering */
 function vnoise(x: number, z: number, s: number): number {
@@ -360,7 +485,20 @@ const X1 = 108;
 const Z0 = -2;
 const Z1 = 173;
 
-function buildField(colliders: readonly Collider2D[], queues: readonly QueuePoint[]) {
+/** the clear zones applied to the static field (cached per zone set) */
+let clearCache: { key: string; base: Float32Array; dens: Float32Array } | null = null;
+
+/** yield when the time slice is used up; throw when a newer build superseded this one */
+async function slice(h: LayoutHooks | undefined): Promise<void> {
+  if (!h) return;
+  if (h.cancelled?.()) throw new LayoutCancelled();
+  if (h.due?.() && h.yield) {
+    await h.yield();
+    if (h.cancelled?.()) throw new LayoutCancelled();
+  }
+}
+
+async function buildField(colliders: readonly Collider2D[], queues: readonly QueuePoint[], hash: ColliderHash, h?: LayoutHooks) {
   const key = `${colliders.length}:${queues.length}`;
   if (fieldCache && fieldCache.key === key) return fieldCache;
   const nx = Math.ceil((X1 - X0) / CELL);
@@ -369,12 +507,13 @@ function buildField(colliders: readonly Collider2D[], queues: readonly QueuePoin
   const zones = new Uint8Array(nx * nz);
   const zo = { zone: 0 };
   for (let iz = 0; iz < nz; iz++) {
+    if ((iz & 7) === 0) await slice(h);
     const z = Z0 + (iz + 0.5) * CELL;
     const off = (iz & 1) * 0.5 * CELL;
     for (let ix = 0; ix < nx; ix++) {
       const x = X0 + (ix + 0.5) * CELL + off;
       let d = fullDensity(x, z, zo);
-      if (d > 0 && colliderHit(x, z, colliders, 0.45)) d = 0;
+      if (d > 0 && hash.hit(x, z, 0.45)) d = 0;
       if (d > 0) {
         // queue fields in front of the bar counters stay for the queues (added separately)
         for (let q = 0; q < queues.length; q++) {
@@ -398,10 +537,57 @@ function buildField(colliders: readonly Collider2D[], queues: readonly QueuePoin
   return fieldCache;
 }
 
-/** Generate the crowd for `input.target` people (deterministic for identical input). */
-export function generateLayout(input: LayoutInput): CrowdLayout {
+/** the static field with the clear zones applied (only the cells they reach are touched) */
+function applyClear(base: Float32Array, nx: number, nz: number, zonesIn: readonly ClearZone[] | undefined): Float32Array {
+  const zk = zonesKey(zonesIn);
+  if (!zonesIn || zonesIn.length === 0) return base;
+  if (clearCache && clearCache.base === base && clearCache.key === zk) return clearCache.dens;
+  const dens = base.slice();
+  for (const c of zonesIn) {
+    const reach = c.yaw === undefined ? c.ring + 0.8 : Math.max(c.ring + 0.8, (c.r2 ?? 0) + 1.5);
+    const iz0 = Math.max(0, Math.floor((c.z - reach - Z0) / CELL) - 1);
+    const iz1 = Math.min(nz - 1, Math.ceil((c.z + reach - Z0) / CELL) + 1);
+    const ix0 = Math.max(0, Math.floor((c.x - reach - X0) / CELL) - 2);
+    const ix1 = Math.min(nx - 1, Math.ceil((c.x + reach - X0) / CELL) + 1);
+    for (let iz = iz0; iz <= iz1; iz++) {
+      const z = Z0 + (iz + 0.5) * CELL;
+      const off = (iz & 1) * 0.5 * CELL;
+      for (let ix = ix0; ix <= ix1; ix++) {
+        const i = iz * nx + ix;
+        if (dens[i] <= 0) continue;
+        dens[i] *= clearFactor(X0 + (ix + 0.5) * CELL + off, z, zonesIn);
+      }
+    }
+  }
+  clearCache = { key: zk, base, dens };
+  return dens;
+}
+
+/** people (base position ± a walker's range) standing in the empty part of a clear zone */
+function inClearHole(x: number, z: number, yaw: number, walker: boolean, zones: readonly ClearZone[] | undefined): boolean {
+  if (!zones || zones.length === 0) return false;
+  if (clearFactor(x, z, zones, true) <= 0) return true;
+  if (!walker) return false;
+  // walkers stroll ± 2.4 m along their facing (shaders.ts personPose): keep both ends out of the hole
+  const fx = Math.sin(yaw) * 2.4;
+  const fz = Math.cos(yaw) * 2.4;
+  return clearFactor(x + fx, z + fz, zones, true) <= 0 || clearFactor(x - fx, z - fz, zones, true) <= 0;
+}
+
+/**
+ * Generate the crowd for `input.target` people (deterministic for identical input). Async: it
+ * yields to the browser through `hooks` (the loading bar keeps painting, a live count change never
+ * freezes a frame for long) and aborts with LayoutCancelled when a newer build took over.
+ */
+export async function generateLayout(input: LayoutInput, hooks?: LayoutHooks): Promise<CrowdLayout> {
   const seed = input.seed ?? 2026;
-  const { dens, zones, nx, nz } = buildField(input.colliders, input.queues);
+  const hash = new ColliderHash(input.colliders);
+  await hooks?.step?.('crowd field', 0);
+  const field = await buildField(input.colliders, input.queues, hash, hooks);
+  const { zones, nx, nz } = field;
+  const dens = applyClear(field.dens, nx, nz, input.clear);
+  const clear = input.clear;
+  await hooks?.step?.('placing people', 0.35);
 
   // --- queues first (they count towards the total)
   const cands: Cand[] = [];
@@ -416,7 +602,8 @@ export function generateLayout(input: LayoutInput): CrowdLayout {
       const dist = 1.1 + k * 0.62 + (hash32(hs + 1) / 4294967296) * 0.15;
       const x = Q.x + Q.dx * dist + px * j;
       const z = Q.z + Q.dz * dist + pz * j;
-      if (colliderHit(x, z, input.colliders, 0.3)) continue;
+      if (hash.hit(x, z, 0.3)) continue;
+      if (clearFactor(x, z, clear, true) <= 0) continue;
       const yaw = Math.atan2(-Q.dx, -Q.dz) + (hash32(hs + 2) / 4294967296 - 0.5) * 0.5;
       cands.push({ x, z, zone: ZONE.Q, seed: hash32(hs + 3) & 0xffffff, yaw });
     }
@@ -427,6 +614,7 @@ export function generateLayout(input: LayoutInput): CrowdLayout {
   let lo = 0;
   let hi = 2;
   for (let it = 0; it < 22; it++) {
+    await slice(hooks);
     const mid = (lo + hi) / 2;
     if (expectedCount(dens, zones, mid) < want) lo = mid;
     else hi = mid;
@@ -436,6 +624,7 @@ export function generateLayout(input: LayoutInput): CrowdLayout {
   const a = CELL * CELL;
 
   for (let iz = 0; iz < nz && cands.length < input.target; iz++) {
+    if ((iz & 7) === 0) await slice(hooks);
     const zc = Z0 + (iz + 0.5) * CELL;
     const off = (iz & 1) * 0.5 * CELL;
     for (let ix = 0; ix < nx; ix++) {
@@ -478,6 +667,9 @@ export function generateLayout(input: LayoutInput): CrowdLayout {
       } else {
         yaw += (r3 - 0.5) * 0.36 + (vnoise(x * 0.2, z * 0.2, 9) - 0.5) * 0.3;
       }
+      // the jitter / warp / group pull moved the person off the cell centre: re-test the viewpoints'
+      // empty zones at the final position (sparse-zone walkers along their whole stroll)
+      if (clear && inClearHole(x, z, yaw, sparse, clear)) continue;
       cands.push({ x, z, zone, seed: hash32(h + 15) & 0xffffff, yaw });
       if (cands.length >= input.target) break;
     }
@@ -527,7 +719,9 @@ export function generateLayout(input: LayoutInput): CrowdLayout {
     for (let s = starts[c]; s < starts[c] + counts[c]; s++) chunkIndexOfSlot[s] = chunks.length - 1;
   }
   let capes = 0;
+  await hooks?.step?.('dressing the Tribe', 0.6);
   for (let s = 0; s < n; s++) {
+    if ((s & 1023) === 0) await slice(hooks);
     const c = cands[order[s]];
     const y = input.heightAt(c.x, c.z);
     const rng = new Rng(c.seed * 2654435761 + 7);
@@ -553,6 +747,8 @@ export function generateLayout(input: LayoutInput): CrowdLayout {
   }
 
   // --- flag carriers: 0.8 % (capped by quality), most in zones B–C and on the banks
+  await hooks?.step?.('flags', 0.9);
+  if (hooks?.cancelled?.()) throw new LayoutCancelled();
   const flags: FlagDef[] = [];
   const FW = [0.5, 1.2, 1.5, 0.8, 1.0, 0.25, 0.2, 0];
   const keys: { k: number; s: number }[] = [];

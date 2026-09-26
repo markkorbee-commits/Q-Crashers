@@ -207,6 +207,30 @@ vec3 skinPt(int bone, vec3 p, inout vec3 n, Pose Q) {
 vec3 toWorld(Person P, Pose Q, vec3 lp) {
   return P.pos + vec3(Q.push.x, 0.0, Q.push.y) + rY(P.yaw + Q.walkYaw) * (lp * (P.h / 1.75));
 }
+
+/**
+ * Near-lens fade (1 visible … 0 gone): a person whose body axis (feet to raised hands, ~2.2 m) passes
+ * within ~1.2 m of the lens and who is in front of the camera dissolves, so walking through the Tribe,
+ * a low show camera or a teleport never fills the frame with a head. CrowdSystem routes everyone
+ * within ~2.4 m of the camera to the dithered 'crowd-fade' draw, which evaluates this per instance.
+ */
+float lensFade(vec3 feet, float h) {
+  float top = feet.y + 2.2 * h / 1.75;
+  vec3 cp = vec3(feet.x, clamp(cameraPosition.y, feet.y, top), feet.z);
+  float da = distance(cameraPosition, cp);
+  if (da > 1.6) return 1.0;
+  vec3 vc = (viewMatrix * vec4(cp, 1.0)).xyz;
+  float inView = smoothstep(-0.25, 0.3, -vc.z / max(length(vc), 1e-3));
+  return mix(1.0, smoothstep(0.95, 1.55, da), inView);
+}
+`;
+
+/** screen-door dissolve for the near-lens fade (interleaved gradient noise, stable per pixel) */
+const LENS_DITHER = /* glsl */ `
+  if (vFade < 0.999) {
+    float ign = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+    if (ign >= vFade) discard;
+  }
 `;
 
 /** the procedural crowd brain: mood shares + beat → a pose (crowd instances only) */
@@ -745,9 +769,14 @@ const FOG_F = /* glsl */ `#include <fog_pars_fragment>`;
 
 export type BodyKind = 'near' | 'hero' | 'mid' | 'performer';
 
-export function bodyVertex(kind: BodyKind): string {
+/**
+ * `fade`: the near-lens dissolve (lensFade + a dithered discard). Only the small 'crowd-fade' draw
+ * and the performers use it — a discard in the big hero / near draws would cost them early-Z.
+ */
+export function bodyVertex(kind: BodyKind, fade = false): string {
   const performer = kind === 'performer';
   const mid = kind === 'mid';
+  const lens = fade && !mid;
   return /* glsl */ `
 ${COMMON}
 ${performer ? '' : PERSON_POSE}
@@ -763,6 +792,7 @@ attribute vec4 iP0; attribute vec4 iP1; attribute vec4 iP2; attribute vec4 iP3; 
 }
 ${mid ? 'varying vec3 vCol;' : 'varying vec3 vN; varying vec3 vW; varying vec3 vLocal; flat varying ivec4 vLook; flat varying int vBone; flat varying int vSlot;'}
 ${performer ? 'varying float vGlow; varying float vKey; varying vec3 vLanL; varying vec3 vLanR; varying vec2 vLanOn;' : ''}
+${lens ? 'varying float vFade;' : ''}
 
 void main() {
 ${
@@ -796,6 +826,13 @@ ${
   vec4 mvPosition = viewMatrix * vec4(wp, 1.0);
   gl_Position = projectionMatrix * mvPosition;
 ${
+  lens
+    ? `  vFade = P.h > 0.01 ? lensFade(P.pos + vec3(Q.push.x, 0.0, Q.push.y), P.h) : 1.0;
+  // fully dissolved: collapse the instance outside the clip volume (no raster work at all)
+  if (vFade < 0.002) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);`
+    : ''
+}
+${
   mid
     ? `  vec3 alb = max(albedoOf(bone, slot, p, P.look), vec3(0.022));
   vec3 V = normalize(cameraPosition - wp);
@@ -808,8 +845,9 @@ ${
 `;
 }
 
-export function bodyFragment(kind: BodyKind): string {
+export function bodyFragment(kind: BodyKind, fade = false): string {
   const performer = kind === 'performer';
+  const lens = fade && kind !== 'mid';
   if (kind === 'mid') {
     return /* glsl */ `
 ${FOG_F}
@@ -829,8 +867,10 @@ ${FOG_F}
 uniform sampler2D tFlags;
 ${performer ? 'uniform vec4 uLantern; uniform vec4 uTube; uniform vec4 uKey; varying float vGlow; varying float vKey; varying vec3 vLanL; varying vec3 vLanR; varying vec2 vLanOn;' : ''}
 varying vec3 vN; varying vec3 vW; varying vec3 vLocal; flat varying ivec4 vLook; flat varying int vBone; flat varying int vSlot;
+${lens ? 'varying float vFade;' : ''}
 
 void main() {
+${lens ? LENS_DITHER : ''}
   vec3 N = normalize(vN);
   if (!gl_FrontFacing) N = -N;
   vec3 V = normalize(cameraPosition - vW);
@@ -1098,6 +1138,8 @@ void main() {
   vPart = aPart;
   vec4 mvPosition = viewMatrix * vec4(wp, 1.0);
   gl_Position = projectionMatrix * mvPosition;
+  // the carrier dissolved at the lens (see lensFade): the pole and the cloth go with them
+  if (lensFade(P.pos + vec3(Q.push.x, 0.0, Q.push.y), P.h) < 0.5) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
   #include <fog_vertex>
 }
 `;
@@ -1187,6 +1229,8 @@ void main() {
     c.y += 0.05;
   }
   float vis = on * step(0.002, dot(col, vec3(1.0)));
+  // no phone floating in front of the lens once its owner has dissolved there
+  if (dist < 2.6) vis *= step(0.5, lensFade(P.pos + vec3(Q.push.x, 0.0, Q.push.y), P.h));
   // never smaller than ~0.6 px; energy conserving (tiny, dim dots far away, no bright cards)
   float px = dist * uPixel;
   vec2 size = max(hs, vec2(px * 0.6));
