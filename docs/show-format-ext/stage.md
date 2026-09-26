@@ -50,6 +50,30 @@ reads where the show lights it. Engine changes:
   sunburst of long and short rays (video 338 / 1047.25), not a lit disc in a ring; the white rosette
   rims are a grey silhouette at night.
 
+### Round 5: the LED panels show the castle print (engine change, no cue change needed)
+
+The real set has no LED video walls (design bible §5.1): a `screens.content` colour look colours the
+printed castle. The LED panels over the banners (portal piers X ±5, inner towers, outer bays X ±27.4,
+side sections) therefore no longer fill with one flat, saturated colour:
+
+| `screens.content` `mode` | what the panels show |
+|---|---|
+| `color` | The castle print lit in `color`: ashlar stone uplit from the deck (a light pool at the foot, dark top and edges), an arcade of two round arches with dark openings, a cornice band and a framed banner with mirrored scroll ornaments. The brightest faces lean pastel (off-white stone under coloured light). Joints, openings and the banner field take `color2` at a low level (else `color`). The mean level is ~40 % of the old flat fill; the 5 cm LED grid stays, at lower contrast. |
+| `pulse` | The same print, pumped on the beat. |
+| `fire` | The same print under flickering fire light rising from the deck, tinted by `color` (video 656 / 705: pale stone and stairs under a warm red-orange light, never a picture of flames). |
+| `ice`, `runes`, `logo`, `title`, `eye`, `embers`, `off` | Unchanged. |
+
+The block layout varies per panel (seeded by its position), deterministic and seek-safe. The
+castle `castleColor` / `sidesColor` overrides still re-tint the panels of their zone at 85 %.
+
+Also in round 5:
+
+- **Pyro / firework flash.** The set (castle floods, crown flash / rim / reflections, the flash light
+  over the set) takes 45 % of the lighting system's flash (`STAGE_FLASH_SHARE`): bursts and gerbs no
+  longer light the castle grey-white (video 264.75, 1438.5, 1047.25 keep a dark set).
+- **Wing print.** The printed inferno on the wing membranes is uplit in the wing LED hue with a 35 %
+  warm share, so a blue / cyan look (In The Cold) no longer shows glowing orange membranes.
+
 ## `stage.state`: new params
 
 Like every other `stage.state` value, the new params are cross-faded over the cue's `fade`. A param
