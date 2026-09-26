@@ -12,8 +12,8 @@ import {
   GARLAND,
   Garlands,
   createRosetteGlowMaterial,
+  ROSETTE_R,
   createStripMaterial,
-  createThroatMaterial,
   createUniforms,
   patchStandard,
   type CrownUniforms,
@@ -149,8 +149,7 @@ export class DragonCrown {
     const stripMat = createStripMaterial(U);
     const bulbMat = createBulbMaterial(U);
     const glowMat = createRosetteGlowMaterial(U);
-    const throatMat = createThroatMaterial(U);
-    this.materials.push(membraneMat, rosetteMat, stripMat, bulbMat, glowMat, throatMat, this.eyeMat);
+    this.materials.push(membraneMat, rosetteMat, stripMat, bulbMat, glowMat, this.eyeMat);
 
     // ---------------------------------------------------------------- geometry
     const HM = headMatrix();
@@ -256,22 +255,15 @@ export class DragonCrown {
       this.group.add(m);
       this.meshes.push(m);
     }
-    // eyes + throat
-    {
-      if (!mixMat) {
-        const eyes = new THREE.Mesh(head.eyeballs, this.eyeMat);
-        eyes.name = 'crown-eyes';
-        eyes.matrixAutoUpdate = false;
-        this.group.add(eyes);
-        this.meshes.push(eyes);
-      }
-      const throat = new THREE.Mesh(head.throat, throatMat);
-      throat.name = 'crown-throat';
-      throat.matrixAutoUpdate = false;
-      throat.renderOrder = 12;
-      this.group.add(throat);
-      this.meshes.push(throat);
+    // eyes (the throat glow rides in the rosette-glow draw, see below)
+    if (!mixMat) {
+      const eyes = new THREE.Mesh(head.eyeballs, this.eyeMat);
+      eyes.name = 'crown-eyes';
+      eyes.matrixAutoUpdate = false;
+      this.group.add(eyes);
+      this.meshes.push(eyes);
     }
+    head.throat.dispose();
     // rosettes (instanced gear + glow)
     {
       const frames = wings.flatMap((w) => w.rosetteFrames);
@@ -286,14 +278,20 @@ export class DragonCrown {
       const gear = mergeGeometries(parts, false)!;
       const inst = new THREE.InstancedMesh(gear, rosetteMat, frames.length);
       inst.name = 'crown-rosettes';
-      const glowGeo = new THREE.CircleGeometry(2.35, 48);
-      const glow = new THREE.InstancedMesh(glowGeo, glowMat, frames.length);
+      // the rosette suns + (last instance, iKind 1) the throat glow: one additive draw
+      const glowGeo = new THREE.CircleGeometry(ROSETTE_R, 48);
+      const kind = new Float32Array(frames.length + 1);
+      kind[frames.length] = 1;
+      glowGeo.setAttribute('iKind', new THREE.InstancedBufferAttribute(kind, 1));
+      const glow = new THREE.InstancedMesh(glowGeo, glowMat, frames.length + 1);
       glow.name = 'crown-rosette-glow';
       glow.renderOrder = 12;
       frames.forEach((f, i) => {
         inst.setMatrixAt(i, f);
         glow.setMatrixAt(i, f.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0, 0.2)));
       });
+      // throat disc (head frame): 3.3 x 2.5 m, 1.2 m below and 1 m behind the head origin
+      glow.setMatrixAt(frames.length, HM.clone().multiply(new THREE.Matrix4().makeTranslation(0, -1.2, -1.0)).multiply(new THREE.Matrix4().makeScale(3.3 / ROSETTE_R, 2.5 / ROSETTE_R, 1)));
       inst.computeBoundingSphere();
       glow.computeBoundingSphere();
       this.stat.tris += (gear.getAttribute('position').count / 3) * frames.length;

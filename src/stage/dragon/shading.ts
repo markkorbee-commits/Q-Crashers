@@ -849,6 +849,30 @@ export class Garlands {
 // Emissive rosette hub (instanced, rotates with the gear) and the throat glow
 // ---------------------------------------------------------------------------------------------
 
+/** radius of the rosette glow disc (the throat glow instance is scaled from it) */
+export const ROSETTE_R = 2.35;
+
+/**
+ * Throat glow: a soft, additive haze of pale pink / white light deep in the jaws with a hint of the
+ * blue light at the back of the throat (design bible §5.6). No hard edge and no dark rim, so it never
+ * reads as a big eye inside the mouth; the pixel dots on palate, gums and tongue carry the detail.
+ * d: disc coordinates (-1..1); needs uMouth / uEmit.
+ */
+const THROAT_GLSL = /* glsl */ `
+uniform float uMouth;
+vec3 throatGlow(vec2 d) {
+  float r2 = dot(d, d);
+  // soft falloff that reaches exactly 0 well before the disc edge
+  float g = exp(-r2 * 2.4) * (1.0 - smoothstep(0.3, 0.85, r2));
+  // the glow rises from the tongue root instead of filling the whole opening evenly
+  g *= mix(1.0, 0.3, smoothstep(0.35, 0.95, d.y * 0.5 + 0.5));
+  float core = exp(-r2 * 16.0);
+  vec3 c = mix(vec3(1.0, 0.5, 0.62), vec3(0.4, 0.5, 1.0), core * 0.6);
+  return c * g * (0.05 * uEmit + 0.5 * uMouth);
+}
+`;
+
+/** Emissive rosette suns (instanced, turning with the gears) + the throat glow as the last instance (iKind 1). */
 export function createRosetteGlowMaterial(U: CrownUniforms): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     uniforms: U,
@@ -857,10 +881,13 @@ export function createRosetteGlowMaterial(U: CrownUniforms): THREE.ShaderMateria
     blending: THREE.AdditiveBlending,
     side: THREE.DoubleSide,
     vertexShader: /* glsl */ `
+attribute float iKind; // 0 rosette sun, 1 the throat glow (the last instance)
 varying vec2 vP;
 varying float vSeed;
+varying float vKind;
 void main() {
   vP = position.xy;
+  vKind = iKind;
   #ifdef USE_INSTANCING
   vec4 w = instanceMatrix * vec4(position, 1.0);
   vSeed = instanceMatrix[3].x;
@@ -872,11 +899,19 @@ void main() {
 }`,
     fragmentShader: /* glsl */ `
 ${LED_GLSL}
+#define ROSETTE_R ${ROSETTE_R.toFixed(3)}
+${THROAT_GLSL}
 uniform vec3 uRosette;
 uniform float uWings;
 varying vec2 vP;
 varying float vSeed;
+varying float vKind;
 void main() {
+  if (vKind > 0.5) {
+    // throat glow (see THROAT_GLSL): a soft additive haze of pale pink / white light deep in the jaws
+    gl_FragColor = vec4(throatGlow(vP / ROSETTE_R), 1.0);
+    return;
+  }
   float r = length(vP);
   float a = atan(vP.y, vP.x);
   float R = 2.25;
@@ -896,40 +931,6 @@ void main() {
   float lv = max(uLedI, 0.2);
   vec3 c = uRosette * (star * 1.5 + glow + rays * (0.5 + 0.6 * lv)) * (0.3 + 0.8 * uWings) + led * (rays * 0.4 + rim * 0.3);
   gl_FragColor = vec4(c * 1.2 * emberMask(vSeed) * crownSide(vSeed), 1.0);
-}`,
-  });
-}
-
-/**
- * Throat glow: a soft, additive haze of pale pink / white light deep in the jaws with a hint of the
- * blue light at the back of the throat (design bible §5.6). No hard edge and no dark rim, so it never
- * reads as a big eye inside the mouth; the pixel dots on palate, gums and tongue carry the detail.
- */
-export function createThroatMaterial(U: CrownUniforms): THREE.ShaderMaterial {
-  return new THREE.ShaderMaterial({
-    uniforms: U,
-    side: THREE.DoubleSide,
-    transparent: true,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-    vertexShader: /* glsl */ `
-varying vec2 vUv;
-void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-    fragmentShader: /* glsl */ `
-uniform float uMouth;
-uniform float uEmit;
-varying vec2 vUv;
-void main() {
-  vec2 d = (vUv - 0.5) * 2.0;
-  float r2 = dot(d, d);
-  // soft falloff that reaches exactly 0 well before the disc edge
-  float g = exp(-r2 * 2.4) * (1.0 - smoothstep(0.3, 0.85, r2));
-  // the glow rises from the tongue root instead of filling the whole opening evenly
-  g *= mix(1.0, 0.3, smoothstep(0.35, 0.95, vUv.y));
-  float core = exp(-r2 * 16.0);
-  vec3 c = mix(vec3(1.0, 0.5, 0.62), vec3(0.4, 0.5, 1.0), core * 0.6);
-  c *= g * (0.05 * uEmit + 0.5 * uMouth);
-  gl_FragColor = vec4(c, 1.0);
 }`,
   });
 }
