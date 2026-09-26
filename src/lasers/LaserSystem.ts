@@ -58,6 +58,12 @@ const TRIBE_MIN_H = HEAD_PLANE + 4.5;
 const FOG_TOP = 0.95;
 /** the low fog lies on the paved field (|X| ≤ 44, FogSystem regions ±45): the sea layer stops at the bank toe */
 const FOG_ZONE_X = 47;
+/** side banks of the bowl (terrain-layout.json sideBanks): toe |x| (m), rise per m, crest height, Z range */
+const BANK_TOE = 46;
+const BANK_SLOPE = 0.096;
+const BANK_CREST = 5.2;
+const BANK_Z0 = -20;
+const BANK_Z1 = 105;
 /** audience area checked by the Tribe-mode clearance (field + side banks + back plaza) */
 const AUD_ZMIN = 2;
 const AUD_ZMAX = 175;
@@ -321,6 +327,8 @@ export class LaserSystem implements System {
   private prev = new Int16Array(0);
   private toCam = new Float32Array(0);
   private flare = new Float32Array(0); // per emitter: r, g, b, eye
+  /** per emitter: haze glow (r, g, b) of the beams heading towards the camera (looking into a fan / cone) */
+  private glowA = new Float32Array(0);
   private readonly tmpColor = new THREE.Color();
   private readonly tmpColor2 = new THREE.Color();
   private readonly v2 = new THREE.Vector2();
@@ -399,6 +407,10 @@ export class LaserSystem implements System {
    *   ceilRoofK       scale of that distance for a sheet tilted up into the sky (roof projectors)
    *   ceilSmooth      0 = fine smoke texture on that ceiling, 1 = broad soft clouds
    *   ceilStage       weight of that ceiling towards the set
+   *   webK            level of the ground web (grid looks from the plinths / pillars / deck at a height)
+   *   glowK / glowSize  soft glow at the aperture of a cone the camera looks into (level, sprite size in m)
+   *   bankClip        1 = low beams end where the side banks rise above them
+   *   scanK / scanW   level / glow width of the scanned deck figures (zigzag web, trees)
    */
   readonly tune = {
     blueR: 0,
@@ -414,6 +426,12 @@ export class LaserSystem implements System {
     ceilRoofK: 0.35,
     ceilSmooth: 1,
     ceilStage: 1.5,
+    webK: 0.3,
+    glowK: 3,
+    glowSize: 7,
+    bankClip: 1,
+    scanK: 1.5,
+    scanW: 1.6,
   };
   /** half-width of the lit sea this frame (FOG_ZONE_X, wider on a dense bank with tune.seaBank) */
   private seaZoneX = FOG_ZONE_X;
@@ -453,6 +471,7 @@ export class LaserSystem implements System {
     this.prev = new Int16Array(n * 2);
     this.toCam = new Float32Array(n * 3);
     this.flare = new Float32Array(n * 4);
+    this.glowA = new Float32Array(n * 3);
     this.gfx.buildHousings(this.rig.emitters);
     // chevron side bands: mean |x| of the deck units outside the dark centre pair, and their pitch
     const deck = this.rig.byGroup.deck;
@@ -525,6 +544,7 @@ export class LaserSystem implements System {
       this.prev[i * 2] = this.prev[i * 2 + 1] = -1;
     }
     this.flare.fill(0);
+    this.glowA.fill(0);
     this.lensE = -1;
     this.envR = this.envG = this.envB = this.envPow = 0;
     this.audienceWash = 0;
@@ -1253,6 +1273,19 @@ export class LaserSystem implements System {
     } else {
       if (this.aimYP(s, e)) this.dirYP(e, this.aimYaw, this.aimPitch);
       else this.dirYP(e, e.side * 0.1, s.tilt);
+      // the camera inside the cone looks into it: the beams all around the view direction light the smoke at
+      // the aperture into a soft glow (v1389.5: a violet disc around the lantern with faint rays)
+      const i3 = e.index * 3;
+      const cc = this.dx * this.toCam[i3] + this.dy * this.toCam[i3 + 1] + this.dz * this.toCam[i3 + 2];
+      const ch = Math.cos(h);
+      if (cc > ch && this.tune.glowK > 0 && !this.recording) {
+        const x = (cc - ch) / Math.max(1e-4, 1 - ch);
+        const gl = I * this.tune.glowK * x * x;
+        const c2 = s.hasColor2 ? s.color2 : s.color;
+        this.glowA[i3] += (s.color.r + c2.r) * 0.5 * gl;
+        this.glowA[i3 + 1] += (s.color.g + c2.g) * 0.5 * gl;
+        this.glowA[i3 + 2] += (s.color.b + c2.b) * 0.5 * gl;
+      }
     }
     this.basis(this.dx, this.dy, this.dz);
     const b = this.bx;
@@ -1313,7 +1346,7 @@ export class LaserSystem implements System {
         this.dirYP(e, (u - 0.5) * s.spread + sway, pitch);
         // over a crowd the web keeps its clearance above the heads — also where it reaches the banks
         if (this.tribe) this.tribeLift(e.pos.x, e.pos.y, e.pos.z);
-        this.beam(e, this.lerpColor(s, u), pb, 0, 170);
+        this.beam(e, this.lerpColor(s, u), pb * this.tune.webK, 0, 170);
       }
       return;
     }
@@ -1455,8 +1488,9 @@ export class LaserSystem implements System {
     const sl = Math.sin(lean);
     const spreadT = s.spread * (0.8 + 0.2 * Math.sin(ph + alt * 1.3));
     const top = s.heightGiven ? s.height : 11;
-    const pb = I * this.perBeam(n) * 0.9;
+    const pb = I * this.perBeam(n) * 0.9 * this.tune.scanK;
     const r0 = this.reachNow;
+    this.widthK = this.tune.scanW;
     for (let i = 0; i < n; i++) {
       const u = n > 1 ? i / (n - 1) : 0.5;
       const a = (u - 0.5) * spreadT;
@@ -1478,6 +1512,7 @@ export class LaserSystem implements System {
       this.beam(e, this.lerpColor(s, u), pb, 0.35, maxLen);
     }
     this.reachNow = r0;
+    this.widthK = 1;
   }
 
   /**
@@ -1496,9 +1531,10 @@ export class LaserSystem implements System {
     const alt = e.order % 2 ? 1 : -1;
     const spreadT = Math.min(170 * DEG, s.spread * (0.86 + 0.14 * Math.sin(ph + alt * 1.3)));
     // (a scanned tent is a dense figure: the film's trees read nearly white-hot at their core)
-    const pb = I * this.perBeam(n) * 1.4;
+    const pb = I * this.perBeam(n) * 1.4 * this.tune.scanK;
     const ax = e.pos.x;
     const az = e.pos.z;
+    this.widthK = this.tune.scanW;
     for (let i = 0; i < n; i++) {
       const u = n > 1 ? i / (n - 1) : 0.5;
       const a = (u - 0.5) * spreadT;
@@ -1507,6 +1543,7 @@ export class LaserSystem implements System {
       this.setDir(sa * e.lat.x, -ca, sa * e.lat.z);
       this.beamFrom(e, ax, top, az, this.lerpColor(s, u), pb, h / Math.max(0.05, ca), 0.35, false);
     }
+    this.widthK = 1;
     if (!this.recording) this.gfx.pushSprite(ax, top, az, 0.7, s.color.r * pb * 0.5, s.color.g * pb * 0.5, s.color.b * pb * 0.5, 1);
     // the unit on the deck is the projector: its aperture glows faintly
     this.glow(e, s.color, I * 0.2);
@@ -2022,6 +2059,15 @@ export class LaserSystem implements System {
         floorHit = true;
       }
     }
+    // low beams end on the side bank they run into (the web over the field, lines along the deck front)
+    if (this.tune.bankClip > 0 && dy < 0.2) {
+      const tb = bankHit(ox, oy, oz, dx, dy, dz);
+      if (tb > 0 && tb < len) {
+        len = tb;
+        hit = true;
+        floorHit = true;
+      }
+    }
     if (e.origin === 'field') {
       for (let i = 0; i < STAGE_BOXES.length; i++) {
         const tb = rayBox(ox, oy, oz, dx, dy, dz, STAGE_BOXES[i]);
@@ -2107,6 +2153,14 @@ export class LaserSystem implements System {
       const x = e.pos.x + e.fwd.x * 0.05;
       const z = e.pos.z + e.fwd.z * 0.05;
       this.gfx.pushSprite(x, e.pos.y, z, size, r * 5, g * 5, b * 5, 0);
+      const i3 = i * 3;
+      const gr = this.glowA[i3];
+      const gg = this.glowA[i3 + 1];
+      const gb = this.glowA[i3 + 2];
+      if (gr + gg + gb > 0.01) {
+        const k = this.tune.glowK;
+        this.gfx.pushSprite(x, e.pos.y, z, this.tune.glowSize, gr * k, gg * k, gb * k, 1);
+      }
       // a beam (nearly) straight into the lens: veiling glare over a large part of the frame, sized in
       // angle (not metres) so a drone 400 m out is flooded as much as a camera in the pit. The `lens`
       // hit floods the frame; any other beam that lines up with the lens (±1–2°) flares more gently
@@ -2144,6 +2198,23 @@ export class LaserSystem implements System {
     this.app?.scene.remove(this.gfx.group);
     this.gfx.dispose();
   }
+}
+
+/**
+ * distance along a ray to the side bank it heads for (a plane rising BANK_SLOPE per m from |x| = BANK_TOE to
+ * BANK_CREST, Z BANK_Z0..BANK_Z1); -1 = none (the ray clears the crest, runs along the axis or leaves the Z range)
+ */
+function bankHit(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number): number {
+  if (Math.abs(dx) < 1e-4) return -1;
+  const sgn = dx > 0 ? 1 : -1;
+  const den = BANK_SLOPE * Math.abs(dx) - dy;
+  if (den <= 1e-5) return -1;
+  const d = (oy - BANK_SLOPE * (sgn * ox - BANK_TOE)) / den;
+  if (d <= 0) return -1;
+  const y = oy + dy * d;
+  if (y < 0 || y > BANK_CREST) return -1;
+  const z = oz + dz * d;
+  return z < BANK_Z0 || z > BANK_Z1 ? -1 : d;
 }
 
 /** slab test; returns entry distance (> 0) or -1 when missed / origin inside */
