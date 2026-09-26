@@ -29,8 +29,9 @@ const DOWN13 = /* glsl */ `
 uniform sampler2D tSrc;
 uniform vec2 uTexel;
 uniform float uSpread;
+uniform vec4 uSrcRect; // used part of the source (dynamic resolution): uv scale xy, clamp zw
 in vec2 vUv;
-vec3 tap(vec2 o) { return texture(tSrc, vUv + o * uTexel * uSpread).rgb; }
+vec3 tap(vec2 o) { return texture(tSrc, min(vUv * uSrcRect.xy + o * uTexel * uSpread, uSrcRect.zw)).rgb; }
 /** b0 = centre box (weight 0.5), b1..b4 = corner boxes (0.125 each) */
 void gather13(out vec3 b0, out vec3 b1, out vec3 b2, out vec3 b3, out vec3 b4) {
   vec3 a = tap(vec2(-2.0, 2.0)), b = tap(vec2(0.0, 2.0)), c = tap(vec2(2.0, 2.0));
@@ -114,13 +115,14 @@ void main() {
 export const TRAILS = /* glsl */ `${HEADER}
 uniform sampler2D tCur;
 uniform sampler2D tPrev;
+uniform vec4 uCurRect;  // used part of the scene target (dynamic resolution)
 uniform vec2 uPersist; // per-frame persistence: sober, altered
 uniform float uSplit;
 uniform float uSmear;
 in vec2 vUv;
 out vec4 fragColor;
 void main() {
-  vec3 cur = sanitize(texture(tCur, vUv).rgb);
+  vec3 cur = sanitize(texture(tCur, min(vUv * uCurRect.xy, uCurRect.zw)).rgb);
   vec3 prev = texture(tPrev, vUv).rgb;
   float k = (uSplit < 0.0 || vUv.x >= uSplit) ? uPersist.y : uPersist.x;
   vec3 o = max(mix(cur, prev, k * uSmear), prev * k);
@@ -177,10 +179,47 @@ void main() {
 }
 `;
 
+/**
+ * Pyro glare gate (GLARE_MAX x 1 target): texel i = how much bright, rendered fire lies along pyro
+ * light i's screen segment (mean of the exposed bright pass sampled along it), mapped to 0..1. The
+ * analytic halos only glow where the fire is actually on screen (not through a blank frame when the
+ * light field says "fire" but nothing bright is visible, or behind the camera's view).
+ */
+export const GLARE_GATE = /* glsl */ `${HEADER}
+#define GLARE_MAX 12
+#define GATE_TAPS 9
+uniform sampler2D tSrc;
+uniform int uGN;
+uniform vec4 uGS[GLARE_MAX];
+uniform vec2 uGate;  // aspect, luminance of full gate
+out vec4 fragColor;
+void main() {
+  int i = int(gl_FragCoord.x);
+  if (i >= uGN) { fragColor = vec4(0.0); return; }
+  vec4 s = uGS[i];
+  vec2 k = vec2(1.0 / uGate.x, 1.0);
+  vec2 a = s.xy * k + 0.5;
+  vec2 b = s.zw * k + 0.5;
+  float acc = 0.0;
+  for (int j = 0; j < GATE_TAPS; j++) {
+    vec2 uv = mix(a, b, (float(j) + 0.5) / float(GATE_TAPS));
+    // a part outside the frame: the edge sample stands in, fading with the distance outside
+    vec2 cuv = clamp(uv, 0.002, 0.998);
+    acc += dot(texture(tSrc, cuv).rgb, LUMA) * exp(-6.0 * length(uv - cuv));
+  }
+  float l = acc / float(GATE_TAPS);
+  fragColor = vec4(1.0 - exp(-l / max(uGate.y, 1e-4)), l, 0.0, 1.0);
+}
+`;
+
 /** Shared depth helpers (perspective depth -> positive view distance) and circle of confusion. */
 const DEPTH = /* glsl */ `
+uniform sampler2D tDepth;
+uniform vec4 uDepthRect; // used part of the scene depth (dynamic resolution): uv scale xy, clamp zw
 uniform vec2 uClip;  // near, far
 uniform vec4 uDof;   // focus distance (m), coc scale (px), max coc (px), unused
+/** scene depth at a screen uv */
+float depthAt(vec2 uv) { return texture(tDepth, min(uv * uDepthRect.xy, uDepthRect.zw)).r; }
 float viewZ(float d) {
   float z = d * 2.0 - 1.0;
   return 2.0 * uClip.x * uClip.y / (uClip.y + uClip.x - z * (uClip.y - uClip.x));
@@ -198,20 +237,19 @@ export const DOF = /* glsl */ `${HEADER}${DEPTH}
 #define SAMPLES 48
 #endif
 uniform sampler2D tColor;
-uniform sampler2D tDepth;
 uniform vec2 uTexel;
 in vec2 vUv;
 out vec4 fragColor;
 float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
 void main() {
-  float zc = viewZ(texture(tDepth, vUv).r);
+  float zc = viewZ(depthAt(vUv));
   float cc = cocPx(zc);
   float R = cc;
   for (int i = 0; i < 12; i++) {
     float a = float(i) * 0.5236 + 0.2;
     float rad = uDof.z * (i < 6 ? 0.45 : 0.95);
     vec2 o = vec2(cos(a), sin(a)) * rad;
-    float zs = viewZ(texture(tDepth, vUv + o * uTexel).r);
+    float zs = viewZ(depthAt(vUv + o * uTexel));
     if (zs < zc) { float cs = cocPx(zs); if (cs > rad * 0.8) R = max(R, cs); }
   }
   vec3 acc = texture(tColor, vUv).rgb;
@@ -223,7 +261,7 @@ void main() {
       float r = sqrt(fi / float(SAMPLES)) * R;
       float a = fi * 2.3999632 + rot;
       vec2 suv = vUv + vec2(cos(a), sin(a)) * r * uTexel;
-      float zs = viewZ(texture(tDepth, suv).r);
+      float zs = viewZ(depthAt(suv));
       float cs = cocPx(zs);
       if (zs > zc) cs = min(cs, cc * 1.5 + 0.5);
       float w = smoothstep(r - 1.0, r + 0.5, cs);
@@ -249,7 +287,8 @@ export const COMPOSITE = /* glsl */ `${HEADER}${DEPTH}
 #define AA 0
 #endif
 uniform sampler2D tScene;
-uniform sampler2D tDepth;
+uniform vec4 uSceneRect;  // used part of tScene (dynamic resolution): uv scale xy, clamp zw
+uniform vec2 uSceneTexel; // one texel of the rendered scene, in screen uv
 uniform sampler2D tD1;
 uniform sampler2D tD2;
 uniform sampler2D tD3;
@@ -265,7 +304,8 @@ uniform int uGN;               // pyro halo line sources in use
 uniform vec4 uGS[GLARE_MAX];   // segment a.xy, b.xy (screen heights from the picture centre)
 uniform vec4 uGC[GLARE_MAX];   // halo colour (premultiplied), radius at a
 uniform float uGRB[GLARE_MAX]; // radius at b
-uniform float uGHalo;          // halo gain
+uniform vec4 uGHalo;           // halo gain, core gain, core sharpness (radius^-2 factor), gate on
+uniform sampler2D tGate;       // GLARE_GATE output: .r = 0..1 visible fire along light i
 uniform vec4 uView;      // altered side head motion: offset x, y (screen heights), roll (rad), 1/zoom
 uniform vec4 uBody;      // altered side: heat 0..1, heartbeat pulse 0..1, fade 0..1, veil
 uniform vec4 uRes;       // w, h, 1/w, 1/h
@@ -322,10 +362,13 @@ vec4 bicubic4(sampler2D t, vec2 uv, vec4 size) {
 }
 vec3 bicubic(sampler2D t, vec2 uv, vec4 size) { return bicubic4(t, uv, size).rgb; }
 
+/** the rendered scene at a screen uv (it may fill only part of its target: dynamic resolution) */
+vec3 scn(vec2 uv) { return texture(tScene, min(uv * uSceneRect.xy, uSceneRect.zw)).rgb; }
+
 vec3 fetch(vec2 uv, float chroma) {
-  if (chroma < 0.001) return texture(tScene, uv).rgb;
+  if (chroma < 0.001) return scn(uv);
   vec2 d = (uv - 0.5) * chroma * 0.018;
-  return vec3(texture(tScene, uv + d).r, texture(tScene, uv).g, texture(tScene, uv - d).b);
+  return vec3(scn(uv + d).r, scn(uv).g, scn(uv - d).b);
 }
 
 #if AA
@@ -338,13 +381,13 @@ float aaW(vec3 c) { return 1.0 / (1.0 + dot(c, LUMA) * uLook.x); }
  * edge, 2 + 2 taps along it resolve it. Runs in HDR with tone-compressed luma and a Karis-weighted resolve.
  */
 vec3 fxaa(vec2 uv) {
-  vec2 px = uRes.zw;
-  vec3 rgbM = texture(tScene, uv).rgb;
+  vec2 px = uSceneTexel;
+  vec3 rgbM = scn(uv);
   float lM = aaLuma(rgbM);
-  float lNW = aaLuma(texture(tScene, uv + vec2(-0.5, 0.5) * px).rgb);
-  float lNE = aaLuma(texture(tScene, uv + vec2(0.5, 0.5) * px).rgb) + 1.0 / 384.0;
-  float lSW = aaLuma(texture(tScene, uv + vec2(-0.5, -0.5) * px).rgb);
-  float lSE = aaLuma(texture(tScene, uv + vec2(0.5, -0.5) * px).rgb);
+  float lNW = aaLuma(scn(uv + vec2(-0.5, 0.5) * px));
+  float lNE = aaLuma(scn(uv + vec2(0.5, 0.5) * px)) + 1.0 / 384.0;
+  float lSW = aaLuma(scn(uv + vec2(-0.5, -0.5) * px));
+  float lSE = aaLuma(scn(uv + vec2(0.5, -0.5) * px));
   float lMax = max(max(lNE, lSE), max(lNW, lSW));
   float lMin = min(min(lNE, lSE), min(lNW, lSW));
   if (max(lMax, lM) - min(lMin, lM) < max(0.04, lMax * 0.125)) return rgbM;
@@ -354,8 +397,8 @@ vec3 fxaa(vec2 uv) {
   if (dl < 1e-5) return rgbM;
   vec2 d1 = dir / dl;
   vec2 d2 = clamp(d1 / (min(abs(d1.x), abs(d1.y)) * 8.0), -2.0, 2.0);
-  vec3 n1 = texture(tScene, uv - d1 * 0.5 * px).rgb, p1 = texture(tScene, uv + d1 * 0.5 * px).rgb;
-  vec3 n2 = texture(tScene, uv - d2 * 2.0 * px).rgb, p2 = texture(tScene, uv + d2 * 2.0 * px).rgb;
+  vec3 n1 = scn(uv - d1 * 0.5 * px), p1 = scn(uv + d1 * 0.5 * px);
+  vec3 n2 = scn(uv - d2 * 2.0 * px), p2 = scn(uv + d2 * 2.0 * px);
   float wn1 = aaW(n1), wp1 = aaW(p1), wn2 = aaW(n2), wp2 = aaW(p2);
   vec3 a = (n1 * wn1 + p1 * wp1) / (wn1 + wp1);
   vec3 b = (n1 * wn1 + p1 * wp1 + n2 * wn2 + p2 * wp2) / (wn1 + wp1 + wn2 + wp2);
@@ -384,7 +427,7 @@ vec3 motionBlurred(vec2 uv, float amount, float chroma) {
 #if MB_SAMPLES == 0
   return fetch(uv, chroma);
 #else
-  float d = texture(tDepth, uv).r;
+  float d = depthAt(uv);
   vec4 wp = uInvViewProj * vec4(uv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0);
   wp /= wp.w;
   vec4 pp = uPrevViewProj * wp;
@@ -494,10 +537,11 @@ vec3 glareHalos(vec2 p) {
     float d2 = dot(d, d) / (r * r);
     // wide r^-3 scatter tail + a tight, hot core (the flame row itself blows out to white)
     float q = 1.0 + d2;
-    float qc = 1.0 + d2 * 16.0;
-    acc += c.rgb * (1.0 / (q * sqrt(q)) + 1.5 / (qc * qc));
+    float qc = 1.0 + d2 * uGHalo.z;
+    float gate = uGHalo.w > 0.5 ? texelFetch(tGate, ivec2(i, 0), 0).r : 1.0;
+    acc += c.rgb * (gate * (1.0 / (q * sqrt(q)) + uGHalo.y / (qc * qc)));
   }
-  return acc * uGHalo;
+  return acc * uGHalo.x;
 }
 
 vec3 toSRGB(vec3 c) {
@@ -536,7 +580,7 @@ void main() {
   // ---- photographic depth of field
   if (uFeat.z > 0.5) {
     vec4 dof = bicubic4(tDof, suv, uBaseSize);
-    float coc = cocPx(viewZ(texture(tDepth, suv).r));
+    float coc = cocPx(viewZ(depthAt(suv)));
     col = mix(col, dof.rgb, smoothstep(0.35, 1.3, max(coc, dof.a)));
   }
 

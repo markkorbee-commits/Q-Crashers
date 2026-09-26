@@ -11,8 +11,6 @@ const GLARE_DIST = 350;
 const GLARE_E0 = 7;
 /** the site-wide `atmos.glow` (lit smoke) counts as a light of this intensity per unit of glow */
 const GLOW_WEIGHT = 3;
-/** halo radius of a light = HALO_K x its reach (the distance at which its light on smoke halves) */
-const HALO_K = 1.6;
 /** view-space depth (m) at which a light segment is clipped (a flame row passing the camera) */
 const NEAR = 1.5;
 /** attack / release time constants (s) of the global glare amount (camera iris / eye response) */
@@ -39,6 +37,12 @@ const CALM_TAU = 0.6;
  * iris-like smoothing (snapped on seek). Allocation-free.
  */
 export class SceneGlare {
+  /**
+   * tuning: `psf` = angular radius of the lens' glare kernel (screen heights; fixed in image space),
+   * `src` = visible size of a light around its line (share of its reach: the flames and the smoke they
+   * light), `dist` (m) / `e0` / `glow` as the constants above
+   */
+  readonly tune = { psf: 0.05, src: 0.35, dist: GLARE_DIST, e0: GLARE_E0, glow: GLOW_WEIGHT };
   /** unsmoothed glare amount of this frame (debug) */
   target = 0;
   /** light energy seen this frame (debug) */
@@ -57,6 +61,7 @@ export class SceneGlare {
       }
     }
     const cam = app.camera;
+    const tn = this.tune;
     const lu = this.fx.lights.uniforms;
     const n = Math.min(GLARE_MAX, lu.uFxLN.value | 0);
     const m = cam.matrixWorldInverse.elements;
@@ -101,9 +106,13 @@ export class SceneGlare {
       const nay = (p[5] * ay) / ad;
       const nbx = (p[0] * bx) / bd;
       const nby = (p[5] * by) / bd;
-      const reach = Math.max(1, A.w);
-      const ra = clamp((HALO_K * reach * p[5]) / ad / 2, 0.012, 1.2);
-      const rb = clamp((HALO_K * reach * p[5]) / bd / 2, 0.012, 1.2);
+      // halo radius (screen heights): the lens kernel (fixed in image space) widened by the size of the
+      // fire itself (flames + the smoke they light, projected)
+      const size = tn.src * Math.max(1, A.w) * p[5] * 0.5;
+      const sa = size / ad;
+      const sb = size / bd;
+      const ra = clamp(Math.sqrt(tn.psf * tn.psf + sa * sa), 0.01, 0.45);
+      const rb = clamp(Math.sqrt(tn.psf * tn.psf + sb * sb), 0.01, 0.45);
       // how much of the source is in (or just outside) the frame: its halo still reaches in
       let vis = 0;
       for (let s = 0; s < 3; s++) {
@@ -119,7 +128,7 @@ export class SceneGlare {
       const my = (ay + by) * 0.5;
       const md = (ad + bd) * 0.5;
       const dist = Math.sqrt(mx * mx + my * my + md * md);
-      const df = (1 / (1 + (dist / GLARE_DIST) * (dist / GLARE_DIST))) * zoom;
+      const df = (1 / (1 + (dist / tn.dist) * (dist / tn.dist))) * zoom;
       eVis += I * df * vis;
       cr += C.x * df * vis;
       cg += C.y * df * vis;
@@ -132,17 +141,17 @@ export class SceneGlare {
     }
     const g = app.env.glowColor;
     const glowA = Math.max(0, g.r, g.g, g.b);
-    const eG = glowA * GLOW_WEIGHT;
+    const eG = glowA * tn.glow;
     const e = eVis + eG;
     this.energy = e;
-    const x = e / GLARE_E0;
+    const x = e / tn.e0;
     let target = 1 - Math.exp(-x);
     const calm = app.reduceFlashing;
     if (calm) target = Math.min(target, CALM_CAP);
     this.target = target;
 
     // halos: the lights' share of the saturated glare (G / E, stable for small E)
-    const perE = (x > 1e-4 ? (1 - Math.exp(-x)) / x : 1 - x * 0.5) / GLARE_E0;
+    const perE = (x > 1e-4 ? (1 - Math.exp(-x)) / x : 1 - x * 0.5) / tn.e0;
     const hk = perE * (calm ? CALM_HALO : 1);
     for (let i = 0; i < k; i++) {
       const c = out.col[i];
@@ -162,9 +171,9 @@ export class SceneGlare {
       out.amount += (target - out.amount) * (1 - Math.exp(-Math.max(0, dt) / tau));
     }
     // colour of the frame-wide lift: the fire seen + the glowing smoke
-    const tr = cr + g.r * GLOW_WEIGHT;
-    const tg = cg + g.g * GLOW_WEIGHT;
-    const tb = cb + g.b * GLOW_WEIGHT;
+    const tr = cr + g.r * tn.glow;
+    const tg = cg + g.g * tn.glow;
+    const tb = cb + g.b * tn.glow;
     const tm = Math.max(tr, tg, tb);
     if (tm > 1e-3) this.hue.setRGB(tr / tm, tg / tm, tb / tm);
     out.r = this.hue.r;

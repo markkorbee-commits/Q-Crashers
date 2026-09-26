@@ -74,6 +74,24 @@ Auteursrechtelijk beschermde media staan in `.gitignore` en worden nooit gecommi
 * **Publiek** in drie LOD's (GPU-geskinde silhouetten dichtbij, instanced midden, impostors ver).
 * **Kwaliteitspresets + PerfGovernor** (dynamische resolutie, dan preset-stap).
 
+## Checks
+
+Draai deze tegen een lopende dev-server (`npm run dev`, of `npx vite --port <poort>` + `--base`):
+
+```bash
+npx tsc --noEmit                               # TypeScript strict
+node scripts/validate-show.mjs --quiet         # show-JSON tegen het cue-contract
+node scripts/budget-check.mjs --base http://localhost:5173/
+```
+
+`scripts/budget-check.mjs` is de mobiele render-budgetcheck (CI): hij rendert de preset **mobile** op een
+telefoonviewport (844×390, touch) op de zwaarste showmomenten (standaard `t=843` en `t=1515`), vanuit de
+startcamera én een hoog overzicht over het hele terrein, en faalt (exit 1) zodra één frame meer dan
+**110 draw calls** of **800k driehoeken** kost (budgetten uit `docs/performance.md`). Exit 3 = laad- of
+paginafout. Opties: `--times 843,1515`, `--views default,overview`, `--calls 110`, `--triangles 800000`,
+`--size 844x390`, `--json out.json`. Losse schermafbeelding met budgetcontrole:
+`node scripts/shot.mjs "autostart&quality=mobile&t=843" .shots/m.png --mobile --budget`.
+
 ## Onderzoek
 
 `research/` bevat de Design Bible (`design-bible.md`) en de onderbouwing per onderwerp (podium, terrein,

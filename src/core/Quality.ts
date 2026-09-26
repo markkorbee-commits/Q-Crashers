@@ -143,8 +143,9 @@ export function neighbourLevel(level: QualityLevel, dir: -1 | 1): QualityLevel |
 }
 
 /**
- * Dynamic-resolution steps (multipliers on the preset's renderScale). Few and coarse on purpose:
- * every step resizes the canvas and the post-processing targets.
+ * Dynamic-resolution steps (multipliers on the preset's renderScale). A step only changes the part of
+ * the full-size HDR target the scene renders into (PostFX.setRenderScale): no canvas resize, no target
+ * reallocation. Still coarse, so the measurement windows stay meaningful.
  */
 export const DYN_SCALES: readonly number[] = [1, 0.9, 0.8, 0.7, 0.6];
 /** frames per measurement window */
