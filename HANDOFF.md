@@ -364,6 +364,24 @@ Eerdere stand (cloud, vóór de overdracht):
 - Tools zijn overgezet: datamap via `ENDSHOW_DATA`, browserkeuze via `scripts/lib/browser.mjs` (Chrome + GPU op de
   Mac), workflowscripts met alle paden als argumenten (`tools/workflows/`).
 
+## Nieuwe wensen van de gebruiker (26 sep 2026, avond)
+
+Gepland voor ronde 7-8 (na de metriekrondes, met eigen groepen en een controle achteraf):
+
+- Perception: XTC- en alcoholeffecten duidelijk sterker (analyse loopt), en ketamine als derde optie met
+  educatieve risicowaarschuwing in dezelfde stijl als XTC (Trimbos/Jellinek-bronnen, nooit gebruiks-, doserings- of
+  aankoopinformatie). De Show-camera blijft onaangetast.
+- Reuzenrad (`src/world/landmarks.ts`, `FERRIS_WHEEL` in `src/world/site.ts`): erheen lopen, instappen (E / tik),
+  rit met gondel-schommel en uitzicht op de show, uitstappen; spot "Reuzenrad"; rotatie als functie van de showtijd.
+- Fotomodus verwijderen (camera 'photo', `src/ui/PhotoPanel.ts`, DOF/bokeh in postfx, UI-knoppen/sneltoetsen);
+  de spot "Photo terrace" (uitzichtpunt) blijft.
+- Vergelijkmodus: split-screen met de officiële YouTube-video (embed, gesynchroniseerd met de showtijd; niets van de
+  video wordt verspreid). Werkt lokaal; in de claude.ai-artifact kan een YouTube-iframe geblokkeerd zijn.
+- Geluid met afstandsvertraging: knallen van pyro/vuurwerk komen verder weg later aan (343 m/s).
+- Lichtgevoeligheid: waarschuwing bij de start + optie "minder flitsen".
+- Niet nodig (besloten): VR/WebXR, deelbare momenten-menu. Advies over rechten (audio, merken) is genoteerd: de
+  artifact blijft privé.
+
 ## Open punten (prioriteit)
 
 Het uitgewerkte plan met meetpunten en bestanden staat in `docs/handoff/findings/r5_next.md`; kort:
