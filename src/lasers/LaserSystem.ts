@@ -11,20 +11,22 @@ import { type Emitter, type EmitterGroup, LaserRig } from './LaserRig';
 /**
  * LaserSystem ('lasers') — show lasers of the 2026 RED Endshow.
  *
- * Cue contract (docs/show-format.md):
- *   look  preset fan|sheet|tunnel|sweep|crossfire|sky|wave|cone|grid|burst (+ extension: chevron);
- *         color, color2, count, speed (cycles/bar), spread (deg), tilt (deg), origin stage|field|all,
- *         height (sheet / web / chevron, m), intensity, kick;
+ * Cue contract (docs/show-format.md + docs/show-format-ext/lasers.md):
+ *   look  preset fan|sheet|tunnel|sweep|crossfire|sky|wave|cone|grid|burst (+ extensions: chevron, zigzag,
+ *         x, rings, dashes); color, color2, count, speed (cycles/bar), spread (deg), tilt (deg),
+ *         origin stage|field|all, height (m), intensity, kick;
  *         extensions (optional): fade (s crossfade from the look it replaces), aim [x,y,z] (world point the
- *         figure centres on), distance (chevron convergence Z), segments (piano bounce: segments lit)
- *   hit   short full-rig burst: color, pattern fan|star
- *   off   all lasers off for dur
+ *         figure centres on), distance (chevron / x / dashes, m), segments + path (piano bounce), reach (m,
+ *         visible beam length), rows (pillar rows), parallel (chevron), rings / lobes / squash (rings, tunnel)
+ *   hit   short full-rig burst: color, pattern fan|star; lens (bool) = one beam straight into the camera
+ *   off   lasers off for dur — gates the looks / hits that started before it (a later look overrides it)
  *
  * Semantics: every projector runs the latest-started active `look` that selects it (target groups /
  * origin / left|right|center filters, or the preset's natural projector set). Sheets live on their own
  * layer, so a deck sheet and a beam figure can run on the same projectors (as a laser console layers
  * cues). Everything is a pure function of show time (+ the tempo map): pause / seek / restart give the
- * identical picture.
+ * identical picture. The haze the beams light is thickest around the set (smoke machines) and thins
+ * over the field (shaders.ts stageHaze), so figures read brightest near the stage, as filmed.
  *
  * Audience mode (design-bible §7.4): "As filmed" (empty field) lets sheets / tunnels / the web skim 1–3 m
  * over the floor; "Tribe" mode (crowd present) keeps audience-level sheets, tunnels, the web and the
@@ -42,7 +44,9 @@ import { type Emitter, type EmitterGroup, LaserRig } from './LaserRig';
  * flares + hit spots, instanced projector housings.
  */
 
-type Preset = 'fan' | 'sheet' | 'tunnel' | 'sweep' | 'crossfire' | 'sky' | 'wave' | 'cone' | 'grid' | 'burst' | 'chevron';
+type Preset =
+  | 'fan' | 'sheet' | 'tunnel' | 'sweep' | 'crossfire' | 'sky' | 'wave' | 'cone' | 'grid' | 'burst' | 'chevron'
+  | 'zigzag' | 'x' | 'rings' | 'dashes';
 
 const G: Record<EmitterGroup, number> = { deck: 1, tower: 2, high: 4, corner: 8, pillar: 16, base: 32, turret: 64, dragon: 128, piano: 256 };
 const STAGE_MASK = G.deck | G.tower | G.high | G.corner | G.dragon;
@@ -58,6 +62,15 @@ const FOG_ZONE_X = 47;
 const AUD_ZMIN = 2;
 const AUD_ZMAX = 175;
 const AUD_XMAX = 125;
+/** default visible reach (m) of fans / sweeps / bursts from the side sections and arm turrets: the side
+ *  fans of the video stay a short bright spray at the source instead of crossing the whole sky */
+const SIDE_REACH = 70;
+/** default length of a `rings` cone (m) */
+const RING_REACH = 42;
+/** presets whose side-projector beams get SIDE_REACH by default */
+const SIDE_REACH_PRESETS: ReadonlySet<string> = new Set(['fan', 'sweep', 'wave', 'burst', 'cone']);
+/** deck units whose |x| is 3, 15, 27 m: six symmetric positions (every other unit) */
+const deckSix = (e: Emitter): boolean => e.group !== 'deck' || Math.round(Math.abs(e.pos.x)) % 12 === 3;
 
 interface PresetDef {
   count: number;
@@ -137,6 +150,28 @@ const PRESETS: Record<Preset, PresetDef> = {
     tribeStage: G.tower,
     tribeField: G.tower,
   },
+  // compact V web along the deck front (Bass Modulators v798 / v838): every unit fans a few beams in a
+  // lateral plane leaning `tilt` up from the audience axis; they stop at `height` (the top line of the
+  // Vs), so neighbouring fans cross into a zig-zag lattice. tilt < 0 = Λ down-fans landing on the floor
+  // just in front of the deck (v803.8).
+  zigzag: { count: 4, spread: 70, tilt: 74, speed: 0.25, stage: G.deck, field: G.base },
+  // compact X: the outermost selected unit per side fires through a crossing point `distance` m in
+  // front of the deck at `height` and on to the floor (red X of the break, v520.4–529.9)
+  x: { count: 1, spread: 2.5, tilt: 0, speed: 0.05, stage: G.deck, field: G.base },
+  // circles / spirograph rosettes scanned into the haze: a cone per projector with rings travelling
+  // towards the audience (sunburst v377, tunnels v1063.8, animated circles v1182)
+  rings: {
+    count: 10,
+    spread: 40,
+    tilt: 6,
+    speed: 1,
+    stage: G.deck,
+    field: G.pillar,
+    pick: deckSix,
+    tribeStage: G.tower | G.high,
+  },
+  // ground projection: dashed white streaks scanned on the empty field (v400.0–400.8)
+  dashes: { count: 4, spread: 90, tilt: 0, speed: 0.5, stage: G.deck, field: G.base, pick: deckSix },
 };
 
 /** cue target tokens → projector groups (+ optional side restriction) */
@@ -246,6 +281,23 @@ class LookSlot {
   /** optional world aim point (param `aim: [x,y,z]`) */
   hasAim = false;
   aim = new THREE.Vector3();
+  /** visible beam length (m, 0 = unlimited / preset default) */
+  reach = 0;
+  /** `lasers.off` gate of this look (offs that started at or after it) */
+  gate = 1;
+  /** pillar-row filter (bit r-1 = row r, 1 = nearest the stage; 0 = all rows) */
+  rowMask = 0;
+  /** rings: rings visible along the cone (0 = none for tunnels), figure lobes, lobe amplitude, squash */
+  rings = 0;
+  lobes = 0;
+  lobeAmp = 0;
+  squash = 1;
+  /** chevron: parallel bands per side instead of converging fans */
+  parallel = false;
+  /** hit: one beam straight into the camera */
+  lens = false;
+  /** figure distance (m) for x / dashes / chevron */
+  distance = 0;
 }
 
 export class LaserSystem implements System {
@@ -285,7 +337,27 @@ export class LaserSystem implements System {
   audienceMode: 'auto' | 'tribe' | 'filmed' = 'auto';
   private crowdSys: { mode?: unknown; count?: unknown } | null | undefined = undefined;
   private bx = new Float32Array(9); // basis F, R, N
-  private offGate = 1;
+  /** active `lasers.off` cues this frame (scratch) */
+  private readonly offs: Cue[] = [];
+  /** visible reach applied by beam() for the emitter being generated (0 = none) + fade start fraction */
+  private reachNow = 0;
+  private reachFade = 0.35;
+  /** ribbon width multiplier for the beams being generated (thick glowing X) */
+  private widthK = 1;
+  /** outermost members per side of the slot being generated (preset x) */
+  private xL: Emitter | null = null;
+  private xR: Emitter | null = null;
+  /** chevron geometry of the deck: mean |x| of the side units and the unit pitch (m) */
+  private chevSideX = 21;
+  private deckPitch = 6;
+  /** scratch points of the bounce path */
+  private readonly pA = new THREE.Vector3();
+  private readonly pB = new THREE.Vector3();
+  /** haze uniform before the per-shot camera scale (applied right before drawing) */
+  private hazeBase = 0.6;
+  /** emitter firing a `lens` hit this frame (-1 = none): its flare floods the frame */
+  private lensE = -1;
+  private camSys: { hazeScale?: unknown } | null | undefined = undefined;
   private beatGate = 1;
   private kickEnv = 0;
   private hasKick = false;
@@ -320,6 +392,7 @@ export class LaserSystem implements System {
     this.app = app;
     this.q = app.quality;
     this.gfx.init(app.quality);
+    this.gfx.setPreRender(this.preRender);
     app.scene.add(this.gfx.group);
     // provisional layout from what is registered now (stage systems init before us);
     // rebuilt on the first frame once the grounds have registered the pillars / FOH
@@ -337,8 +410,35 @@ export class LaserSystem implements System {
     this.toCam = new Float32Array(n * 3);
     this.flare = new Float32Array(n * 4);
     this.gfx.buildHousings(this.rig.emitters);
+    // chevron side bands: mean |x| of the deck units outside the dark centre pair, and their pitch
+    const deck = this.rig.byGroup.deck;
+    let sx = 0;
+    let ns = 0;
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const e of deck) {
+      lo = Math.min(lo, e.pos.x);
+      hi = Math.max(hi, e.pos.x);
+      if (Math.abs(e.pos.x) <= 5) continue;
+      sx += Math.abs(e.pos.x);
+      ns++;
+    }
+    this.chevSideX = ns ? sx / ns : 21;
+    this.deckPitch = deck.length > 1 ? (hi - lo) / (deck.length - 1) : 6;
     this.rigDirty = false;
   }
+
+  /**
+   * Right before the laser meshes draw (the camera rig has updated by then): the show camera's per-shot
+   * haze scale (telephoto / in-haze shots, CameraRig.hazeScale 0.35–1) also thins the laser haze a
+   * little, so beams in long-lens shots stay thin lines instead of glowing bars.
+   */
+  private readonly preRender = (): void => {
+    if (this.camSys === undefined) this.camSys = (this.app.get('camera') as unknown as { hazeScale?: unknown } | undefined) ?? null;
+    const hs = this.camSys?.hazeScale;
+    const k = typeof hs === 'number' && Number.isFinite(hs) ? 0.45 + 0.55 * clamp01(hs) : 1;
+    this.gfx.shared.uHaze.value = this.hazeBase * k;
+  };
 
   setQuality(q: QualitySettings): void {
     this.q = q;
@@ -381,6 +481,7 @@ export class LaserSystem implements System {
       this.prev[i * 2] = this.prev[i * 2 + 1] = -1;
     }
     this.flare.fill(0);
+    this.lensE = -1;
     this.envR = this.envG = this.envB = this.envPow = 0;
     this.audienceWash = 0;
     this.seaR = this.seaG = this.seaB = 0;
@@ -398,19 +499,22 @@ export class LaserSystem implements System {
     // ------------------------------------------------------------------ resolve active cues
     const act = app.show.active('lasers', t, this.act);
     this.slotCount = 0;
-    this.offGate = 1;
-    for (const c of act) {
-      if (c.fx === 'off') {
-        const a = t - c.t;
-        const b = c.t + c.dur - t;
-        this.offGate = Math.min(this.offGate, 1 - clamp01(a / 0.03) * clamp01(b / 0.03));
-      }
-    }
+    const offs = this.offs;
+    offs.length = 0;
+    for (const c of act) if (c.fx === 'off') offs.push(c);
     for (const c of act) {
       if (c.fx !== 'look' && c.fx !== 'hit') continue;
       if (this.slotCount >= MAX_SLOTS) break;
       const s = this.slots[this.slotCount];
       if (!this.resolveSlot(s, c, t)) continue;
+      // `off` gates what was already running when it started; a look / hit started later overrides it
+      let gate = 1;
+      for (let k = 0; k < offs.length; k++) {
+        const o = offs[k];
+        if (o.t < c.t - 1e-4) continue;
+        gate = Math.min(gate, 1 - clamp01((t - o.t) / 0.03) * clamp01((o.t + o.dur - t) / 0.03));
+      }
+      s.gate = gate;
       const si = this.slotCount++;
       s.members.length = 0;
       for (let i = 0; i < nE; i++) {
@@ -439,10 +543,13 @@ export class LaserSystem implements System {
         s.members.length = w;
       }
       s.surfWant = 0;
-      if (!s.hit && s.preset === 'sheet') s.surfWant = Math.min(s.members.length, 2);
-      else if (!s.hit && s.preset === 'tunnel') s.surfWant = Math.min(s.members.length, 3);
-      surfReq += s.surfWant;
-      req += s.members.length * this.beamsPerEmitter(s);
+      if (s.gate > 0.001) {
+        if (!s.hit && s.preset === 'sheet') s.surfWant = Math.min(s.members.length, 2);
+        else if (!s.hit && s.preset === 'tunnel') s.surfWant = Math.min(s.members.length, 3);
+        else if (!s.hit && s.preset === 'rings') s.surfWant = Math.min(s.members.length, 8);
+        surfReq += s.surfWant;
+        req += this.slotBeams(s);
+      }
     }
     this.requested = req;
     // design-bible budget, cut further for very large drawing buffers (fill rate)
@@ -461,7 +568,7 @@ export class LaserSystem implements System {
 
     // ------------------------------------------------------------------ generate
     this.gfx.begin();
-    if (this.offGate > 0.001) {
+    {
       // pass 1 records every beam direction one shutter interval earlier (same beams, same order),
       // pass 2 emits the beams at t with that direction as motion smear. Pure function of show time.
       this.ensureSmearCapacity();
@@ -469,6 +576,7 @@ export class LaserSystem implements System {
       this.recIdx = 0;
       for (let si = 0; si < this.slotCount; si++) {
         const s = this.slots[si];
+        if (s.gate <= 0.001) continue;
         s.bars = s.barsNow - SHUTTER / s.barLen;
         if (s.hit) this.genHit(s, t - SHUTTER);
         else this.genLook(s, si, t);
@@ -478,6 +586,7 @@ export class LaserSystem implements System {
       this.recIdx = 0;
       for (let si = 0; si < this.slotCount; si++) {
         const s = this.slots[si];
+        if (s.gate <= 0.001) continue;
         s.bars = s.barsNow;
         if (s.hit) this.genHit(s, t);
         else this.genLook(s, si, t);
@@ -554,7 +663,8 @@ export class LaserSystem implements System {
     app.renderer.getDrawingBufferSize(this.v2);
     u.uPixAng.value = (2 * Math.tan((cam.fov * DEG) / 2)) / Math.max(1, this.v2.y / Math.max(0.001, cam.zoom));
     const haze = app.env.haze;
-    u.uHaze.value = 0.22 + 0.9 * haze;
+    this.hazeBase = 0.22 + 0.9 * haze;
+    u.uHaze.value = this.hazeBase;
     // extinction of the beam power in the haze (visibility of a few hundred metres in show haze)
     u.uExt.value = 0.0012 + 0.0045 * haze;
     // low fog layer: from fog.lowfog cues (ground haze over the field carries the laser sheets)
@@ -583,7 +693,8 @@ export class LaserSystem implements System {
       u.uFogNear.value = (fog as THREE.Fog).near;
       u.uFogFar.value = (fog as THREE.Fog).far * 1.25;
     } else u.uFogMode.value = 0;
-    this.gfx.beamUniforms.uGain.value = 9;
+    // (9 before round 2, no knee: beams read as saturated neon bars next to the video)
+    this.gfx.beamUniforms.uGain.value = 7;
     this.gfx.beamUniforms.uHalo.value = 0.8 + haze * 0.8;
     this.gfx.surfUniforms.uGainS.value = 2.2;
   }
@@ -610,6 +721,8 @@ export class LaserSystem implements System {
       s.intensity = num(p.intensity, 1, 0, 1);
       s.kick = false;
       s.fade = 0;
+      s.lens = p.lens === true;
+      s.reach = num(p.reach, 0, 0, 650);
       const hitDur = Math.min(c.dur, 2);
       const rel = t - c.t;
       if (rel > hitDur + 0.4) return false;
@@ -642,6 +755,14 @@ export class LaserSystem implements System {
       const aim = p.aim;
       s.hasAim = Array.isArray(aim) && aim.length === 3 && Number.isFinite(aim[0]) && Number.isFinite(aim[1]) && Number.isFinite(aim[2]);
       if (s.hasAim) s.aim.set(aim[0], aim[1], aim[2]);
+      s.lens = false;
+      s.reach = num(p.reach, 0, 0, 650);
+      s.rings = Math.round(num(p.rings, pr === 'rings' ? 3 : 0, 0, 24));
+      s.lobes = Math.round(num(p.lobes, 0, 0, 9));
+      s.lobeAmp = s.lobes > 0 ? num(p.lobeAmp, 0.42, 0.05, 0.95) : 0;
+      s.squash = num(p.squash, pr === 'rings' ? 0.5 : 1, 0.1, 3);
+      s.parallel = p.parallel === true;
+      s.distance = num(p.distance, pr === 'x' ? 15 : pr === 'dashes' ? 14 : 70, pr === 'chevron' ? 20 : 2, 200);
       const a = t - c.t;
       const b = c.t + c.dur - t;
       s.env = clamp01(a / 0.03) * clamp01(b / 0.05);
@@ -654,6 +775,15 @@ export class LaserSystem implements System {
     s.groupSide = 0;
     s.hasGroupToken = false;
     s.filter = 0;
+    // pillar rows (1 = nearest the stage), like pyro `rows`
+    s.rowMask = 0;
+    const rows = p.rows;
+    if (typeof rows === 'number' && rows >= 1 && rows <= 16) s.rowMask = 1 << (Math.round(rows) - 1);
+    else if (Array.isArray(rows))
+      for (let k = 0; k < rows.length; k++) {
+        const r = rows[k];
+        if (typeof r === 'number' && r >= 1 && r <= 16) s.rowMask |= 1 << (Math.round(r) - 1);
+      }
     for (const tk of c.targets) {
       if (tk === 'left') s.filter = -1;
       else if (tk === 'right') s.filter = 1;
@@ -684,6 +814,7 @@ export class LaserSystem implements System {
   }
 
   private selects(s: LookSlot, e: Emitter): boolean {
+    if (s.rowMask !== 0 && e.row >= 0 && !(s.rowMask & (1 << e.row))) return false;
     if (s.filter === -1 && e.pos.x > -0.5) return false;
     if (s.filter === 1 && e.pos.x < 0.5) return false;
     if (s.filter === 2 && Math.abs(e.pos.x) > 12) return false;
@@ -705,7 +836,23 @@ export class LaserSystem implements System {
 
   /** beams one projector asks for (a sheet only draws its two bright scan edges; the surface is the sheet) */
   private beamsPerEmitter(s: LookSlot): number {
-    return !s.hit && s.preset === 'sheet' ? 2 : s.count;
+    if (s.hit) return s.lens ? 1 : s.count;
+    return s.preset === 'sheet' ? 2 : s.count;
+  }
+
+  /** beam instances a slot will draw this frame (for the budget) */
+  private slotBeams(s: LookSlot): number {
+    const m = s.members.length;
+    if (s.hit) return s.lens ? Math.min(m, 1) : m * s.count;
+    switch (s.preset) {
+      case 'sheet':
+        return m * 2;
+      case 'x':
+        // two drawing units, each beam + its floor trace
+        return Math.min(m, 2) * s.count * 2;
+      default:
+        return m * s.count;
+    }
   }
 
   /** weight of the look being replaced on layer slot `li` (= emitter * 2 + layer) */
@@ -721,11 +868,20 @@ export class LaserSystem implements System {
   private genLook(s: LookSlot, si: number, t: number): void {
     const mem = s.members;
     if (!mem.length) return;
-    const baseI = s.intensity * s.env * this.offGate * (s.kick ? this.beatGate : 1);
+    const baseI = s.intensity * s.env * s.gate * (s.kick ? this.beatGate : 1);
     if (baseI <= 0.001) return;
     // surfaces for sheets / tunnels: evenly spaced, symmetric subset of the members
     const grant = s.surfGrant;
     const m = mem.length;
+    if (s.preset === 'x') {
+      // the X is drawn by the outermost selected unit on each side
+      this.xL = this.xR = null;
+      for (let k = 0; k < m; k++) {
+        const e = mem[k];
+        if (e.pos.x < 0 && (!this.xL || e.pos.x < this.xL.pos.x)) this.xL = e;
+        if (e.pos.x >= 0 && (!this.xR || e.pos.x > this.xR.pos.x)) this.xR = e;
+      }
+    }
     for (let k = 0; k < m; k++) {
       const e = mem[k];
       const li = e.index * 2 + s.layer;
@@ -738,6 +894,10 @@ export class LaserSystem implements System {
       const I = baseI * w * e.power;
       let surf = false;
       for (let j = 0; j < grant && !surf; j++) surf = k === Math.round(((j + 0.5) / grant) * (m - 1));
+      // visible reach: the cue's, else a short spray for fans from the side sections / arm turrets
+      this.reachNow =
+        s.reach > 0 ? s.reach : (e.group === 'corner' || e.group === 'turret') && SIDE_REACH_PRESETS.has(s.preset) ? SIDE_REACH : 0;
+      this.reachFade = 0.35;
       switch (s.preset) {
         case 'fan':
           this.genFan(s, e, I);
@@ -773,8 +933,21 @@ export class LaserSystem implements System {
           if (surf) this.genSheet(s, e, I);
           else this.glow(e, s.color, I * 0.2);
           break;
+        case 'zigzag':
+          this.genZigzag(s, e, I);
+          break;
+        case 'x':
+          if (e === this.xL || e === this.xR) this.genX(s, e, I);
+          break;
+        case 'rings':
+          this.genRings(s, e, I, surf);
+          break;
+        case 'dashes':
+          this.genDashes(s, e, I);
+          break;
       }
     }
+    this.reachNow = 0;
   }
 
   /** per-beam power: a projector splits its output over the beams it draws */
@@ -902,8 +1075,17 @@ export class LaserSystem implements System {
    * Domitor Draconis mirror bounce (show-analysis 6.1): one white laser from the light tube on the piano,
    * reflected by the crystal lanterns. `segments` (default 4 = the symmetric V of f093) lights the path
    * segment by segment — author one cue per piano hit with segments 1, 2, 3, 4 to build it up.
+   * `path` authors the segments instead: a list of [from, to] pairs, each end 'P' (the piano tube),
+   * 'L1'…'L4' / 'R1'…'R4' (crystal lanterns, row 1 nearest the stage) or a world point [x,y,z]; a beam
+   * towards a world point is an open ray that runs on through it (into the sky or down to the floor).
+   * With `path`, `segments` lights only the first N entries.
    */
   private genBounce(s: LookSlot, e: Emitter, I: number): void {
+    const path = s.cue?.p.path;
+    if (Array.isArray(path) && path.length > 0) {
+      this.genPath(s, e, I, path);
+      return;
+    }
     const segs = Math.round(num(s.cue?.p.segments, 4, 1, BOUNCE.length));
     const col = s.color;
     for (let k = 0; k < segs; k++) {
@@ -912,11 +1094,60 @@ export class LaserSystem implements System {
       const b = this.rig.mirror(tr, ts);
       if (!a || !b) continue;
       const depth = fr < 0 ? 0 : fr + 1;
-      const pw = I * 1.5 * Math.pow(0.86, depth);
+      const pw = I * 1.05 * Math.pow(0.86, depth);
       const len = this.setDir(b.x - a.x, b.y - a.y, b.z - a.z);
       this.beamFrom(e, a.x, a.y, a.z, col, pw, len);
       // the crystal lights up where the beam lands (mirror glint)
       if (!this.recording) this.gfx.pushSprite(b.x, b.y, b.z, 0.5, col.r * pw * 9, col.g * pw * 9, col.b * pw * 9, 0);
+    }
+  }
+
+  /** resolve a bounce-path end into `out`: 0 = invalid, 1 = piano / crystal (closed), 2 = world point (open) */
+  private pathPoint(v: unknown, e: Emitter, out: THREE.Vector3): number {
+    if (typeof v === 'string') {
+      if (v === 'P' || v === 'piano') {
+        out.copy(e.pos);
+        return 1;
+      }
+      if (v.length === 2) {
+        const side = v[0] === 'L' ? -1 : v[0] === 'R' ? 1 : 0;
+        const row = v.charCodeAt(1) - 49;
+        const m = side !== 0 && row >= 0 && row < 8 ? this.rig.mirror(row, side) : null;
+        if (m) {
+          out.copy(m);
+          return 1;
+        }
+      }
+      return 0;
+    }
+    if (Array.isArray(v) && v.length === 3 && Number.isFinite(v[0]) && Number.isFinite(v[1]) && Number.isFinite(v[2])) {
+      out.set(v[0], v[1], v[2]);
+      return 2;
+    }
+    return 0;
+  }
+
+  /** authored bounce path (see genBounce) */
+  private genPath(s: LookSlot, e: Emitter, I: number, path: readonly unknown[]): void {
+    const segs = Math.round(num(s.cue?.p.segments, path.length, 1, path.length));
+    const col = s.color;
+    const A = this.pA;
+    const B = this.pB;
+    for (let k = 0; k < segs; k++) {
+      const seg = path[k];
+      if (!Array.isArray(seg) || seg.length < 2) continue;
+      const ka = this.pathPoint(seg[0], e, A);
+      const kb = this.pathPoint(seg[1], e, B);
+      if (!ka || !kb) continue;
+      const pw = I * 1.05 * Math.pow(0.9, k);
+      const len = this.setDir(B.x - A.x, B.y - A.y, B.z - A.z);
+      if (len < 0.05) continue;
+      const open = kb === 2;
+      this.beamFrom(e, A.x, A.y, A.z, col, pw, open ? 650 : len, 0, !open);
+      if (this.recording) continue;
+      // the crystals light up where the beam lands and where it is reflected (mirror glints)
+      if (!open) this.gfx.pushSprite(B.x, B.y, B.z, 0.5, col.r * pw * 9, col.g * pw * 9, col.b * pw * 9, 0);
+      if (ka === 1 && A.distanceToSquared(e.pos) > 0.01) this.gfx.pushSprite(A.x, A.y, A.z, 0.42, col.r * pw * 6, col.g * pw * 6, col.b * pw * 6, 0);
     }
   }
 
@@ -973,19 +1204,24 @@ export class LaserSystem implements System {
     if (tunnel && surf) {
       const c = s.color;
       const P = I * (squash < 1 ? 0.8 : 1.2);
+      // `rings`: circles scanned down the tunnel towards the audience instead of the rotating segments
+      const rg = s.rings > 0;
       if (!this.recording) this.gfx.pushSurface(
         e.pos.x, e.pos.y, e.pos.z, 170,
         b[0], b[1], b[2], h,
         b[6], b[7], b[8], SURF_CONE,
-        c.r * P, c.g * P, c.b * P, 0.04,
-        ph * 0.5, 0, 0.85, ph * 0.5 + rand01(e.index * 31 + (s.cue?.id ?? 0)),
-        0, squash,
+        c.r * P, c.g * P, c.b * P, rg ? 0.015 : 0.04,
+        ph * 0.5, 0, rg ? 0.25 : 0.85, ph * 0.5 + rand01(e.index * 31 + (s.cue?.id ?? 0)),
+        0, squash, 0,
+        rg ? 170 / s.rings : 0, s.speed * s.bars,
       );
       if (!this.recording) this.envAdd(c, P);
     }
     // a skimming tunnel runs through the low fog: its lower beams light the fog tops (golden corridor, f138)
     if (tunnel && squash < 1 && !this.recording && this.lowHaze > 0.05) {
-      const w = I * 0.7;
+      // (0.7 before round 2: from the field cameras the lit fog flooded the frame; v1373 is dark with
+      // bright hatched streaks on the fog)
+      const w = I * 0.2;
       const c2 = s.hasColor2 ? s.color2 : s.color;
       this.seaR += s.color.r * w;
       this.seaG += s.color.g * w;
@@ -1064,11 +1300,15 @@ export class LaserSystem implements System {
   private genChevron(s: LookSlot, e: Emitter, I: number): void {
     const n = s.nEff;
     const ph = TAU * s.speed * s.bars;
-    const zc = num(s.cue?.p.distance, 70, 20, 200);
+    const zc = s.distance;
     const tr = this.tribe;
     const ax = s.hasAim ? s.aim.x : 0;
     const az = s.hasAim ? s.aim.z : zc + 8;
     const yc = s.hasAim ? s.aim.y : tr ? TRIBE_MIN_H + 1.5 : 0;
+    if (s.parallel) {
+      this.genChevronBands(s, e, I, ax, tr ? Math.max(yc, TRIBE_MIN_H + 1.5) : yc, az);
+      return;
+    }
     // horizontal frame unit -> apex
     let hx = ax - e.pos.x;
     let hz = az - e.pos.z;
@@ -1096,6 +1336,235 @@ export class LaserSystem implements System {
       this.setDir(ax + lx * lat + hx * along - e.pos.x, yc - e.pos.y, az + lz * lat + hz * along - e.pos.z);
       if (tr) this.tribeLift(e.pos.x, e.pos.y, e.pos.z);
       this.beam(e, this.lerpColor(s, u), pb, 0);
+    }
+  }
+
+  /**
+   * `parallel: true` (In The Cold v1346–1370, the golden X seen from the drone): every unit on one side
+   * fires along the SAME direction — from the side's centre through the crossing point — so each side
+   * draws a band of parallel lines and the two bands cross in a hatched X instead of converging into a
+   * hot spot. The lines of one unit fill its share of the band (evenly spaced at the crossing, `spread`
+   * 16 = the default width); the beams run on past the crossing until they reach the floor.
+   */
+  private genChevronBands(s: LookSlot, e: Emitter, I: number, ax: number, ay: number, az: number): void {
+    const n = s.nEff;
+    const cx = e.side * this.chevSideX;
+    // band direction (shared by the side)
+    let hx = ax - cx;
+    let hz = az - e.pos.z;
+    const hd = Math.hypot(hx, hz) || 1;
+    hx /= hd;
+    hz /= hd;
+    const slope = (ay - e.pos.y) / hd;
+    // the unit's share of the band, as an angle at the crossing distance
+    const perp = this.deckPitch * Math.abs(hz);
+    const share = (((perp * (n - 1)) / Math.max(1, n)) * (s.spread / (16 * DEG))) / hd;
+    const pb = I * this.perBeam(n) * 0.9;
+    for (let i = 0; i < n; i++) {
+      const u = n > 1 ? i / (n - 1) : 0.5;
+      const a = (u - 0.5) * share;
+      const ca = Math.cos(a);
+      const sa = Math.sin(a);
+      this.setDir(hx * ca - hz * sa, slope, hz * ca + hx * sa);
+      if (this.tribe) this.tribeLift(e.pos.x, e.pos.y, e.pos.z);
+      this.beam(e, this.lerpColor(s, u), pb, 0);
+    }
+  }
+
+  /**
+   * Compact V web along the deck front (v798 violet zig-zag, v838.2): each unit fans `count` beams
+   * across `spread` in a lateral plane that leans `tilt` up from the audience axis (72° = steep Vs); the
+   * beams end on the top line `height` (world Y, default 11), so neighbouring fans cross into a lattice
+   * under the lanterns. Negative tilt = Λ down-fans that land on the floor in front of the deck (v803.8).
+   * The fans breathe with `speed`, alternate units in counter-phase (galvo dashes: scanned look).
+   */
+  private genZigzag(s: LookSlot, e: Emitter, I: number): void {
+    const n = s.nEff;
+    const ph = TAU * s.speed * s.bars;
+    const alt = e.order % 2 ? 1 : -1;
+    let lean = s.tilt + 0.05 * Math.sin(ph * 0.5 + e.rank * Math.PI);
+    // over a crowd the down-fan would land on people: it becomes the rising V
+    if (this.tribe && lean < 0.6) lean = 1.2;
+    const cl = Math.cos(lean);
+    const sl = Math.sin(lean);
+    const spreadT = s.spread * (0.8 + 0.2 * Math.sin(ph + alt * 1.3));
+    const top = s.heightGiven ? s.height : 11;
+    const pb = I * this.perBeam(n) * 0.9;
+    const r0 = this.reachNow;
+    for (let i = 0; i < n; i++) {
+      const u = n > 1 ? i / (n - 1) : 0.5;
+      const a = (u - 0.5) * spreadT;
+      const ca = Math.cos(a);
+      const sa = Math.sin(a);
+      this.setDir(ca * cl * e.fwd.x + sa * e.lat.x, ca * sl, ca * cl * e.fwd.z + sa * e.lat.z);
+      let maxLen = 650;
+      this.reachNow = r0;
+      this.reachFade = 0.35;
+      if (this.dy > 0.02 && top > e.pos.y + 0.3) {
+        // the beams stop on the top line (a crisp end: the lattice has a straight upper edge)
+        maxLen = (top - e.pos.y) / this.dy;
+        if (r0 <= 0 || maxLen < r0) {
+          this.reachNow = maxLen + 1;
+          this.reachFade = 0.75;
+        }
+      }
+      if (this.tribe) this.tribeLift(e.pos.x, e.pos.y, e.pos.z);
+      this.beam(e, this.lerpColor(s, u), pb, 0.35, maxLen);
+    }
+    this.reachNow = r0;
+  }
+
+  /**
+   * Compact X on the field (the red X of the break, v520.4–529.9): the outermost selected unit on each
+   * side fires `count` beams (a narrow `spread` band) through the crossing point — `aim`, else
+   * (0, `height` 1.2, `distance` 15) — and on until they reach the floor, so the X lies in front of
+   * the deck. Where a beam skims the last 0.7 m down to the floor it also draws its trace on the floor
+   * (seen from the drones as the glowing X on the field). Over a crowd the crossing is lifted above the
+   * heads (and nothing grazes the floor).
+   */
+  private genX(s: LookSlot, e: Emitter, I: number): void {
+    const n = s.nEff;
+    const ph = TAU * s.speed * s.bars;
+    const px = s.hasAim ? s.aim.x : 0;
+    let py = s.hasAim ? s.aim.y : s.heightGiven ? s.height : 1.2;
+    const pz = s.hasAim ? s.aim.z : s.distance;
+    if (this.tribe && pz > AUD_ZMIN) py = Math.max(py, this.groundAt(px, pz) + TRIBE_MIN_H);
+    this.setDir(px - e.pos.x, py - e.pos.y, pz - e.pos.z);
+    const yaw0 = Math.atan2(this.dx * e.lat.x + this.dz * e.lat.z, this.dx * e.fwd.x + this.dz * e.fwd.z) + 0.015 * Math.sin(ph) * e.side;
+    const pitch0 = Math.asin(Math.max(-1, Math.min(1, this.dy)));
+    const col = s.hasColor2 && e.side > 0 ? s.color2 : s.color;
+    const pb = I * this.perBeam(n) * 2.4;
+    this.widthK = 3;
+    // the crossing glows softly in the haze (two beams through the same smoke; reads from the drones)
+    if (e === this.xR && !this.recording) this.gfx.pushSprite(px, py, pz, 3.2, col.r * pb * 0.3, col.g * pb * 0.3, col.b * pb * 0.3, 1);
+    // over a crowd the X is lifted and would rise on forever: its arms end as far past the crossing
+    const r0 = this.reachNow;
+    if (this.tribe && r0 <= 0) {
+      this.reachNow = 2.1 * Math.hypot(px - e.pos.x, py - e.pos.y, pz - e.pos.z);
+      this.reachFade = 0.6;
+    }
+    for (let i = 0; i < n; i++) {
+      const off = n > 1 ? (i / (n - 1) - 0.5) * s.spread : 0;
+      this.dirYP(e, yaw0 + off, pitch0);
+      if (this.tribe) this.tribeLift(e.pos.x, e.pos.y, e.pos.z);
+      this.beam(e, col, pb, 0);
+      if (!this.tribe) this.floorGraze(e, col, pb * 0.8);
+    }
+    this.widthK = 1;
+    this.reachNow = r0;
+  }
+
+  /** trace on the floor of the current beam (this.dx/dy/dz from e) over its last 0.7 m of height */
+  private floorGraze(e: Emitter, col: THREE.Color, power: number): void {
+    const dy = this.dy;
+    const hl = Math.hypot(this.dx, this.dz);
+    if (dy > -1e-3 || hl < 1e-3) return;
+    const lf = e.pos.y / -dy;
+    const lg = Math.max(0, (e.pos.y - 0.7) / -dy);
+    if (lf - lg < 1) return;
+    const ux = this.dx / hl;
+    const uz = this.dz / hl;
+    const sx = e.pos.x + this.dx * lg;
+    const sz = e.pos.z + this.dz * lg;
+    this.setDir(ux, 0, uz);
+    this.beamFrom(e, sx, 0.05, sz, col, power, (lf - lg) * hl, 0, false);
+  }
+
+  /**
+   * Circles / spirograph figures scanned into the haze (the blue sunburst v377–380, the cyan tunnels
+   * v1063.8–1070, the animated circles v1182): every projector draws a cone (`spread` = full aperture,
+   * axis `tilt` / `aim`, `squash` = vertical/horizontal → ellipses) of `reach` m (default 42) on which
+   * `rings` bright circles travel towards the audience at `speed` rings per bar; `lobes` 3–9 turns the
+   * circle into a rotating spirograph rosette. The scanned shell is a surface; `count` dashed radial
+   * beams mark the scan lines. Colours alternate between color / color2 per projector.
+   */
+  private genRings(s: LookSlot, e: Emitter, I: number, surf: boolean): void {
+    const n = s.nEff;
+    const reach = s.reach > 0 ? s.reach : RING_REACH;
+    const half = Math.min(1.25, 0.5 * s.spread);
+    const ph = TAU * s.speed * s.bars;
+    let yaw: number;
+    let pitch: number;
+    if (this.aimYP(s, e)) {
+      yaw = this.aimYaw;
+      pitch = this.aimPitch;
+    } else {
+      // stage units splay a little outwards, so the figures of neighbouring units overlap less
+      yaw = e.origin === 'stage' ? (e.rank - 0.5) * 0.3 : 0;
+      pitch = s.tilt;
+    }
+    // over a crowd the lower edge of the cone clears the heads over its length
+    if (this.tribe) pitch = Math.max(pitch, Math.atan2(TRIBE_MIN_H - e.pos.y, reach * 0.8) + half * Math.min(1, s.squash));
+    this.dirYP(e, yaw, pitch);
+    this.basis(this.dx, this.dy, this.dz);
+    const b = this.bx;
+    const rot = ph * 0.125 * e.side + e.order * 0.7;
+    const col = s.hasColor2 && e.order % 2 ? s.color2 : s.color;
+    const k = s.lobes;
+    const la = s.lobeAmp;
+    const th = Math.tan(half);
+    const sq = s.squash;
+    const pb = I * this.perBeam(n) * (surf ? 0.4 : 0.75);
+    this.reachNow = reach;
+    this.reachFade = 0.3;
+    for (let i = 0; i < n; i++) {
+      const phi = (TAU * i) / n;
+      let cx = Math.cos(phi + rot);
+      let cy = Math.sin(phi + rot);
+      if (k > 0) {
+        cx = (cx + la * Math.cos(k * phi - rot)) / (1 + la);
+        cy = (cy - la * Math.sin(k * phi - rot)) / (1 + la);
+      }
+      this.setDir(b[0] + th * (cx * b[3] + sq * cy * b[6]), b[1] + th * (cx * b[4] + sq * cy * b[7]), b[2] + th * (cx * b[5] + sq * cy * b[8]));
+      this.beam(e, col, pb, 0.75, reach);
+    }
+    if (surf && !this.recording) {
+      const P = I * 1.3;
+      const ringPh = s.speed * s.bars + (e.order % 2) * 0.5;
+      this.gfx.pushSurface(
+        e.pos.x, e.pos.y, e.pos.z, reach,
+        b[0], b[1], b[2], half,
+        b[6], b[7], b[8], SURF_CONE,
+        col.r * P, col.g * P, col.b * P, 0.012,
+        ph * 0.5, rot, 0.3, ph * 0.25 + e.order,
+        0, sq, 0,
+        reach / Math.max(1, s.rings), ringPh, k, la,
+      );
+      this.envAdd(col, P * 0.5);
+    }
+  }
+
+  /**
+   * Ground projection (v400.0–400.8): the deck units scan short dashed white streaks onto the empty
+   * field — `count` streaks per unit across `spread`, starting `distance` m out (default 14) and spread
+   * over `reach` m (default 26), sweeping sideways at `speed`. The air beams feeding the streaks are
+   * swept by the galvo too fast to read in the haze (none in the video): only the floor graphics show. In
+   * Tribe mode (crowd on the field) nothing is projected onto the audience.
+   */
+  private genDashes(s: LookSlot, e: Emitter, I: number): void {
+    if (this.tribe) return;
+    const n = s.nEff;
+    const ph = TAU * s.speed * s.bars;
+    const span = s.reach > 0 ? s.reach : 26;
+    const d0 = s.distance;
+    const col = s.color;
+    const pb = I * this.perBeam(n);
+    const sweep = 0.3 * s.spread * Math.sin(ph + e.rank * 2.2);
+    this.reachNow = 0;
+    for (let i = 0; i < n; i++) {
+      const u = n > 1 ? i / (n - 1) : 0.5;
+      const w = 0.5 + 0.5 * Math.sin(ph * 1.7 + i * 2.39 + e.order * 1.13);
+      const r0 = d0 + span * 0.55 * w;
+      const L = span * (0.1 + 0.16 * (0.5 + 0.5 * Math.sin(ph * 1.1 + i * 1.7 + e.order * 0.7)));
+      this.dirYP(e, (u - 0.5) * s.spread + sweep, 0);
+      const hx = this.dx;
+      const hz = this.dz;
+      const sx = e.pos.x + hx * r0;
+      const sz = e.pos.z + hz * r0;
+      const gy = Math.max(0, this.groundAt(sx, sz)) + 0.05;
+      // the streak on the floor (scanned line, broken into dashes by the galvo blanking)
+      this.setDir(hx, 0, hz);
+      this.beamFrom(e, sx, gy, sz, s.hasColor2 && i % 2 ? s.color2 : col, pb * 0.55, L, 0.95, false);
     }
   }
 
@@ -1256,13 +1725,20 @@ export class LaserSystem implements System {
   private genHit(s: LookSlot, t: number): void {
     const mem = s.members;
     const n = s.nEff;
-    const I0 = s.intensity * s.env * this.offGate;
+    const I0 = s.intensity * s.env * s.gate;
     if (I0 <= 0.001 || n <= 0) return;
+    if (s.lens) {
+      this.genLens(s, I0);
+      return;
+    }
     const seed = s.cue ? s.cue.seed : 0;
     const rot = rand01(seed) * TAU + (t - (s.cue?.t ?? 0)) * 0.6;
     for (let k = 0; k < mem.length; k++) {
       const e = mem[k];
       const I = I0 * e.power * this.perBeam(n) * 1.3;
+      // short stabs from the side sections / turrets, unless the cue sets its own reach
+      this.reachNow = s.reach > 0 ? s.reach : e.group === 'corner' || e.group === 'turret' ? SIDE_REACH : 0;
+      this.reachFade = 0.35;
       if (s.starHit) {
         this.dirYP(e, 0, e.origin === 'field' ? 8 * DEG : 22 * DEG);
         this.basis(this.dx, this.dy, this.dz);
@@ -1286,6 +1762,32 @@ export class LaserSystem implements System {
         }
       }
     }
+    this.reachNow = 0;
+  }
+
+  /**
+   * `lens: true` (v1492.88, a laser into the drone lens): the member that faces the camera best fires
+   * one beam straight into it; the aperture flare then floods the frame (pushFlares: lens veil).
+   */
+  private genLens(s: LookSlot, I0: number): void {
+    const mem = s.members;
+    let best: Emitter | null = null;
+    let bc = -2;
+    for (let k = 0; k < mem.length; k++) {
+      const e = mem[k];
+      const i3 = e.index * 3;
+      const c = this.toCam[i3] * e.fwd.x + this.toCam[i3 + 2] * e.fwd.z + (e.origin === 'stage' ? 0.2 : 0);
+      if (c > bc) {
+        bc = c;
+        best = e;
+      }
+    }
+    if (!best) return;
+    const i3 = best.index * 3;
+    if (!this.recording) this.lensE = best.index;
+    this.setDir(this.toCam[i3], this.toCam[i3 + 1], this.toCam[i3 + 2]);
+    this.reachNow = 0;
+    this.beam(best, s.color, I0 * 2.5 * best.power, 0);
   }
 
   // ------------------------------------------------------------------------------------ helpers
@@ -1364,12 +1866,12 @@ export class LaserSystem implements System {
    * instance, a hit spot, and accumulate the aperture flare (blinding when it points at the eye).
    */
   /** a beam segment that starts somewhere other than the projector aperture (mirror bounces) */
-  private beamFrom(e: Emitter, ox: number, oy: number, oz: number, col: THREE.Color, power: number, len: number): void {
+  private beamFrom(e: Emitter, ox: number, oy: number, oz: number, col: THREE.Color, power: number, len: number, dash = 0, target = true): void {
     this.oOverride = true;
     this.ox = ox;
     this.oy = oy;
     this.oz = oz;
-    this.beam(e, col, power, 0, len, true);
+    this.beam(e, col, power, dash, len, target);
     this.oOverride = false;
   }
 
@@ -1420,14 +1922,27 @@ export class LaserSystem implements System {
         }
       }
     }
+    // visible reach: the beam has dissolved in the haze after `reach` m (it still ends on what it hits)
+    const R = this.reachNow;
+    let reachK = 1;
+    if (R > 0) {
+      if (R < len) {
+        len = R;
+        hit = false;
+      } else if (hit) {
+        const a = R * this.reachFade;
+        const x = clamp01((len - a) / Math.max(0.01, R - a));
+        reachK = 1 - x * x * (3 - 2 * x);
+      }
+    }
     const r = col.r * power;
     const g = col.g * power;
     const b = col.b * power;
-    if (!this.gfx.pushBeam(ox, oy, oz, dx, dy, dz, len, r, g, b, dash, hit, this.beamWidth, px, py, pz)) return;
-    if (hit) {
+    if (!this.gfx.pushBeam(ox, oy, oz, dx, dy, dz, len, r, g, b, dash, hit, this.beamWidth * this.widthK, px, py, pz, R, this.reachFade)) return;
+    if (hit && reachK > 0.01) {
       // a beam grazing the floor spreads its spot over a long ellipse (1 / sin of the incidence): dim, so
       // a fan of shallow beams landing together (chevron apex) does not bloom into one hot blob
-      const inc = floorHit && !target ? Math.min(1, Math.max(0.1, -dy * 5)) : 1;
+      const inc = (floorHit && !target ? Math.min(1, Math.max(0.1, -dy * 5)) : 1) * reachK;
       this.gfx.pushSprite(ox + dx * len, oy + dy * len, oz + dz * len, target ? 0.32 : 0.2, r * 5 * inc, g * 5 * inc, b * 5 * inc, 1);
     }
     if (!fromAperture) {
@@ -1479,7 +1994,19 @@ export class LaserSystem implements System {
       const e = em[i];
       const eye = this.flare[i4 + 3];
       const size = 0.16 * (1 + Math.min(10, Math.sqrt(eye) * 3));
-      this.gfx.pushSprite(e.pos.x + e.fwd.x * 0.05, e.pos.y, e.pos.z + e.fwd.z * 0.05, size, r * 5, g * 5, b * 5, 0);
+      const x = e.pos.x + e.fwd.x * 0.05;
+      const z = e.pos.z + e.fwd.z * 0.05;
+      this.gfx.pushSprite(x, e.pos.y, z, size, r * 5, g * 5, b * 5, 0);
+      // a beam (nearly) straight into the lens: veiling glare over a large part of the frame, sized in
+      // angle (not metres) so a drone 400 m out is flooded as much as a camera in the pit. The `lens`
+      // hit floods the frame; any other beam that lines up with the lens (±1–2°) flares more gently
+      const lens = i === this.lensE;
+      if (eye > (lens ? 0.05 : 0.35)) {
+        const d = Math.hypot(this.camPos.x - x, this.camPos.y - e.pos.y, this.camPos.z - z);
+        const k = Math.min(1, eye);
+        const v = (Math.min(2.5, eye * 1.6) / m) * (lens ? 1.2 : 0.4);
+        this.gfx.pushSprite(x, e.pos.y, z, d * (lens ? 0.12 + 0.32 * k : 0.06 + 0.12 * k), r * v, g * v, b * v, 2);
+      }
     }
   }
 

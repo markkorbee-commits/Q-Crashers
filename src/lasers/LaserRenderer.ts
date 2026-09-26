@@ -5,7 +5,7 @@ import { makeHazeNoise3D } from './noise3d';
 import { BEAM_FRAG, BEAM_VERT, SPRITE_FRAG, SPRITE_VERT, SURF_FRAG, SURF_VERT } from './shaders';
 
 const BEAM_STRIDE = 16;
-const SURF_STRIDE = 24;
+const SURF_STRIDE = 28;
 const SPRITE_STRIDE = 8;
 /** vertices along a beam ribbon (redistributed around the camera's closest point in the shader) */
 const BEAM_SEGMENTS = 16;
@@ -100,6 +100,9 @@ export class LaserRenderer {
       uTime: { value: 0 },
       uFlow: { value: 0 },
       uExt: { value: 0.004 },
+      // stage -> field haze gradient (see shaders.ts)
+      uFieldHaze: { value: 0.22 },
+      uStageL: { value: 34 },
     };
     const common = {
       transparent: true,
@@ -139,6 +142,16 @@ export class LaserRenderer {
 
   get surfUniforms(): Record<string, THREE.IUniform> {
     return this.surfMat.uniforms;
+  }
+
+  /** callback run right before the laser meshes draw (after the camera rig updated this frame) */
+  private preRender: (() => void) | null = null;
+  private readonly onBefore = (): void => {
+    this.preRender?.();
+  };
+
+  setPreRender(fn: () => void): void {
+    this.preRender = fn;
   }
 
   init(q: QualitySettings): void {
@@ -200,6 +213,7 @@ export class LaserRenderer {
     this.beamMesh.frustumCulled = false;
     this.beamMesh.renderOrder = 20;
     this.beamMesh.name = 'laser-beams';
+    this.beamMesh.onBeforeRender = this.onBefore;
     this.group.add(this.beamMesh);
   }
 
@@ -232,6 +246,7 @@ export class LaserRenderer {
     g.setAttribute('sD', new THREE.InterleavedBufferAttribute(buf, 4, 12));
     g.setAttribute('sE', new THREE.InterleavedBufferAttribute(buf, 4, 16));
     g.setAttribute('sF', new THREE.InterleavedBufferAttribute(buf, 4, 20));
+    g.setAttribute('sG', new THREE.InterleavedBufferAttribute(buf, 4, 24));
     g.instanceCount = 0;
     this.surfBuf = buf;
     this.surfGeo = g;
@@ -239,6 +254,7 @@ export class LaserRenderer {
     this.surfMesh.frustumCulled = false;
     this.surfMesh.renderOrder = 19;
     this.surfMesh.name = 'laser-sheets';
+    this.surfMesh.onBeforeRender = this.onBefore;
     this.group.add(this.surfMesh);
   }
 
@@ -263,6 +279,7 @@ export class LaserRenderer {
     this.spriteMesh.frustumCulled = false;
     this.spriteMesh.renderOrder = 21;
     this.spriteMesh.name = 'laser-flares';
+    this.spriteMesh.onBeforeRender = this.onBefore;
     this.group.add(this.spriteMesh);
   }
 
@@ -300,13 +317,17 @@ export class LaserRenderer {
     this.spriteCount = 0;
   }
 
-  /** returns false when the buffer is full */
+  /**
+   * returns false when the buffer is full. `reach` (m, 0 = none) is where the beam has dissolved in the
+   * haze; it starts to fade at `reach × fadeFrom`.
+   */
   pushBeam(
     ox: number, oy: number, oz: number,
     dx: number, dy: number, dz: number, len: number,
     r: number, g: number, b: number,
     dash: number, hit: boolean, width: number,
     px: number, py: number, pz: number,
+    reach = 0, fadeFrom = 0.35,
   ): boolean {
     if (this.beamCount >= this.beamBudget) return false;
     const d = this.beamData;
@@ -326,7 +347,7 @@ export class LaserRenderer {
     d[o++] = px;
     d[o++] = py;
     d[o++] = pz;
-    d[o] = 0;
+    d[o] = reach >= 1 ? Math.floor(reach) + Math.min(0.95, Math.max(0.05, fadeFrom)) : 0;
     this.beamCount++;
     return true;
   }
@@ -336,7 +357,9 @@ export class LaserRenderer {
    * plane normal (sheet) / cone up axis, kind (SURF_*), colour × power, wave amplitude, wave phases,
    * segment mask + phase, and the extras: `zoneX` = |x| beyond which the surface is blanked (laser
    * safety zoning over the banks; 0 = none), `squash` = vertical / horizontal aperture of an
-   * elliptical cone (1 = round), `lift` = sheet height above the low-fog top (fog layer only).
+   * elliptical cone (1 = round), `lift` = sheet height above the low-fog top (fog layer only), and the
+   * cone figure: `ringSpacing` (m, 0 = no rings) + `ringPhase` (cycles) for rings travelling down the
+   * cone, `lobes` / `lobeAmp` for a spirograph rosette instead of a circle.
    */
   pushSurface(
     ax: number, ay: number, az: number, range: number,
@@ -345,6 +368,7 @@ export class LaserRenderer {
     r: number, g: number, b: number, waveAmp: number,
     ph1: number, ph2: number, seg: number, segPh: number,
     zoneX = 0, squash = 1, lift = 0,
+    ringSpacing = 0, ringPhase = 0, lobes = 0, lobeAmp = 0,
   ): boolean {
     if (this.surfCount >= this.surfCap) return false;
     const d = this.surfData;
@@ -372,7 +396,11 @@ export class LaserRenderer {
     d[o++] = zoneX > 0 ? zoneX : 1e5;
     d[o++] = squash;
     d[o++] = lift;
-    d[o] = 0;
+    d[o++] = 0;
+    d[o++] = ringSpacing;
+    d[o++] = ringPhase - Math.floor(ringPhase);
+    d[o++] = lobes;
+    d[o] = lobeAmp;
     this.surfCount++;
     return true;
   }
