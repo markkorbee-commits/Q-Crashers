@@ -84,6 +84,8 @@ export class PostFX {
   enabled = true;
   /** base exposure (scene-referred), tweakable in the debug menu */
   exposure = 1;
+  /** exposure of the current camera, set by CameraRig each frame (the Show camera exposes like the film crew) */
+  cameraExposure = 1;
   /** share of bright-pass energy redistributed into the glow (0..1) */
   bloomStrength = 0.3;
   /** bloom threshold / soft knee in exposed scene units (1 = display white) */
@@ -534,7 +536,7 @@ export class PostFX {
     const photoEx = photo ? this.photo.exposure : 1;
     // pyro glare: the camera's iris opens a touch into the lit smoke, and the bright pass reaches
     // further down so the whole fire cloud blooms
-    const baseEx = this.exposure * photoEx * (1 + gt.exposure * G);
+    const baseEx = this.exposure * this.cameraExposure * photoEx * (1 + gt.exposure * G);
     const ls = clamp(p.lightSensitivity, 0, 1);
     const thA = this.bloomThreshold * (1 - gt.threshold * G);
     const knA = this.bloomKnee;

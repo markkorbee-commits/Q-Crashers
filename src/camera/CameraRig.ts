@@ -21,6 +21,12 @@ const NUMPAD = ['Numpad1', 'Numpad2', 'Numpad3', 'Numpad4', 'Numpad5', 'Numpad6'
 /** modes that sit near the spectator and may glide into each other instead of cutting */
 const GLIDE = new Set<CameraMode>(['first', 'third', 'free', 'photo']);
 const CENTER = new THREE.Vector2(0, 0);
+/**
+ * exposure of the Show camera: the film crew exposed for the lit set and the fire, so the dark grounds sink away.
+ * Measured on the default 64 moments of the official video (scripts/similarity.mjs, Mac GPU, after round 4):
+ * 1 -> 27.9 %, 0.7 -> 31.8 %, 0.6 -> 32.9 %, 0.5 -> 34.0 %, 0.4 -> 34.3 % (colour starts to drop).
+ */
+const SHOWCAM_EXPOSURE = 0.5;
 
 /**
  * All camera modes:
@@ -339,6 +345,7 @@ export class CameraRig implements System {
         break;
     }
 
+    app.postfx.cameraExposure = this.mode === 'showcam' ? SHOWCAM_EXPOSURE : 1;
     this.hazeScale = this.mode === 'showcam' ? this.pose.haze : this.mode === 'photo' ? clamp(1 - 0.6 * smoothstep(34, 12, this.photo.fov), 0.35, 1) : 1;
 
     // glide between nearby modes instead of cutting
