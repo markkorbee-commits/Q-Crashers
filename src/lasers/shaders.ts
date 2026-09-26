@@ -237,6 +237,15 @@ varying float vZone;
 varying float vLift;
 varying vec3 vColor2;
 varying vec2 vRing;
+varying float vCeilK;
+// the lit low-fog layer on the side banks (a dense bank floods the bowl): x = amount (0 = flat at the fog top),
+// y = bank toe |x| (m), z = slope, w = crest height (terrain-layout.json sideBanks, Z -20..105, ramp to 115)
+uniform vec4 uBank;
+
+float bankY(vec3 p) {
+  float s = clamp((abs(p.x) - uBank.y) * uBank.z, 0.0, uBank.w);
+  return s * step(-20.0, p.z) * (1.0 - smoothstep(105.0, 115.0, p.z));
+}
 
 vec3 rayDir(float u) {
   vec3 F = sB.xyz;
@@ -268,6 +277,7 @@ void main() {
   vec3 d0 = rayDir(u - 0.0025);
   vNormal = normalize(cross(d, d1 - d0));
   vec3 P = sA.xyz + d * r;
+  if (sC.w > 1.5 && uBank.x > 0.0) P.y += uBank.x * bankY(P);
   vWorld = P;
   vDir = d;
   vColor = sD.rgb;
@@ -279,6 +289,7 @@ void main() {
   vSegPh = sE.w;
   vZone = sF.x;
   vLift = sF.z;
+  vCeilK = sF.w > 0.0 ? sF.w : 1.0;
   vRing = sG.xy;
   // low-fog layer: the crest colour rides in the (unused) wave-phase slots
   vColor2 = sC.w > 1.5 ? sE.xyz : sD.rgb;
@@ -290,6 +301,10 @@ export const SURF_FRAG = /* glsl */ `
 uniform float uGainS;
 uniform vec4 uCeil;
 uniform float uTime;
+// laser sea: x = trough floor, y = falloff exponent with the distance from the deck, z = gain
+uniform vec4 uSea;
+// ceiling seen from far below: x = smooth broad clouds instead of the fine smoke texture, y = weight towards the set
+uniform vec4 uCeilT;
 ${HAZE_GLSL}
 varying vec3 vWorld;
 varying vec3 vNormal;
@@ -302,6 +317,7 @@ varying float vMode;
 varying float vSeg;
 varying float vSegPh;
 varying float vZone;
+varying float vCeilK;
 varying float vLift;
 varying vec3 vColor2;
 varying vec2 vRing;
@@ -356,8 +372,8 @@ void main() {
     float edgeU = smoothstep(0.0, 0.12, min(vU, 1.0 - vU));
     // most of the sea is dark trough; the light sits on the crests that rise into the sheet (video
     // Embers v1139-1160: bright rolling waves and dark gaps, never an evenly lit floor)
-    float I = uGainS * uLowHaze * (0.015 + 0.5 * crest + 3.6 * crest * crest) * (0.55 + 1.3 * streak) * (0.55 + 0.45 * hazePhase(c))
-      * pow(max(vR, 6.0), -0.55) / max(nv, 0.25) * exp(-vLift / 1.3) * edgeU;
+    float I = uGainS * uSea.z * uLowHaze * (uSea.x + 0.5 * crest + 3.6 * crest * crest) * (0.55 + 1.3 * streak) * (0.55 + 0.45 * hazePhase(c))
+      * pow(max(vR, 6.0), -uSea.y) / max(nv, 0.25) * exp(-vLift / 1.3) * edgeU;
     // deep scan colour in the troughs and on most of the swell, the second colour only on the brightest
     // crests (v1145: a saturated deep-blue sea with pale-blue highlights)
     col = mix(vColor, vColor2, smoothstep(0.3, 0.9, crest)) * I;
@@ -376,9 +392,16 @@ void main() {
     // from inside — a blue ceiling of clouds over the upper half of the frame, the scan lines lost in the
     // smoke. uCeil: x extra gain, y..z plane distance (m) over which this takes over, w pattern loss
     float planeDist = abs(dot(cameraPosition - vWorld, Nn));
-    float farBelow = (1.0 - above) * smoothstep(uCeil.y, uCeil.z, planeDist);
+    float farBelow = (1.0 - above) * smoothstep(uCeil.y * vCeilK, uCeil.z * vCeilK, planeDist);
     float texC = smoothstep(0.3, 0.75, n1 * 0.7 + n2 * 0.3);
-    float t3 = mix(mix(0.12 + 1.7 * tex * tex, tex * 0.9 + 0.3, faceOn), 0.1 + 1.6 * texC * texC, farBelow);
+    float ceilT = 0.1 + 1.6 * texC * texC;
+    if (uCeilT.x > 0.0 && farBelow > 0.0) {
+      // broad, soft clouds (tens of metres): the lit smoke over the set reads as a smooth band, not blotches
+      float nB = texture(uNoise, vWorld * vec3(0.0045, 0.011, 0.0065) + uDrift * 0.6).r;
+      ceilT = mix(ceilT, 0.25 + 1.1 * smoothstep(0.25, 0.8, nB * 0.8 + n1 * 0.2), uCeilT.x);
+    }
+    ceilT *= 1.0 + uCeilT.y * (stageHaze(vWorld) - 0.5);
+    float t3 = mix(mix(0.12 + 1.7 * tex * tex, tex * 0.9 + 0.3, faceOn), ceilT, farBelow);
     // the air part thins from the stage cloud to the field air (as for the beams: the stage haze drifts
     // back over the set, the far field holds little of it) and the low fog adds half its density here —
     // its lit tops are the sea layer (pushSea). A sheet over the far field is a faint veil, not a lit
@@ -408,7 +431,7 @@ void main() {
     pattern *= 1.0 + 2.0 * exp(-e * 80.0);
     // fine flicker (scanner sampling / speckle)
     pattern *= 0.88 + 0.12 * sin(uTime * 41.0 + vU * 331.0 + vR * 0.7);
-    pattern = mix(pattern, 0.8 + 0.4 * s1, farBelow * uCeil.w);
+    pattern = mix(pattern, 0.8 + 0.4 * s1 * (1.0 - uCeilT.x), farBelow * uCeil.w);
     col = vColor * I * pattern;
   } else {
     // ---- cone shell (tunnel): the drawn circle = dense scan lines + rotating bright segments

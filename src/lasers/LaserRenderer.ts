@@ -29,7 +29,7 @@ export const SURF_FOG = 2;
  * 37 -> 44 %, 1127 38 -> 45 % (the video's upper half is lit blue haze, ours was a black sky); a level sheet
  * a few metres over the camera (1505.8, 1469.5) keeps its crisp line.
  */
-const CEIL_GAIN = 7;
+const CEIL_GAIN = 12;
 
 /** drawing-buffer pixel count up to which the full budget applies */
 const FULL_BUDGET_PIXELS = 2.1e6;
@@ -131,7 +131,14 @@ export class LaserRenderer {
       ...common,
       vertexShader: SURF_VERT,
       fragmentShader: SURF_FRAG,
-      uniforms: { ...this.shared, uGainS: { value: 1 }, uCeil: { value: new THREE.Vector4(CEIL_GAIN, 12, 35, 0.85) } },
+      uniforms: {
+        ...this.shared,
+        uGainS: { value: 1 },
+        uCeil: { value: new THREE.Vector4(CEIL_GAIN, 12, 35, 0.85) },
+        uCeilT: { value: new THREE.Vector4(1, 1.5, 0, 0) },
+        uSea: { value: new THREE.Vector4(0.015, 0.55, 1, 0) },
+        uBank: { value: new THREE.Vector4(0, 46, 0.096, 5.2) },
+      },
     });
     this.spriteMat = new THREE.ShaderMaterial({
       ...common,
@@ -376,7 +383,7 @@ export class LaserRenderer {
     r: number, g: number, b: number, waveAmp: number,
     ph1: number, ph2: number, seg: number, segPh: number,
     zoneX = 0, squash = 1, lift = 0,
-    ringSpacing = 0, ringPhase = 0, lobes = 0, lobeAmp = 0,
+    ringSpacing = 0, ringPhase = 0, lobes = 0, lobeAmp = 0, ceilK = 0,
   ): boolean {
     if (this.surfCount >= this.surfCap) return false;
     const d = this.surfData;
@@ -404,7 +411,7 @@ export class LaserRenderer {
     d[o++] = zoneX > 0 ? zoneX : 1e5;
     d[o++] = squash;
     d[o++] = lift;
-    d[o++] = 0;
+    d[o++] = ceilK;
     d[o++] = ringSpacing;
     d[o++] = ringPhase - Math.floor(ringPhase);
     d[o++] = lobes;

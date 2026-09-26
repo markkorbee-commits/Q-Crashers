@@ -4,7 +4,7 @@ import { hash32, rand01 } from '../core/rng';
 import type { FrameContext, QualitySettings, System } from '../core/types';
 import { resolveColor } from '../show/colors';
 import type { Cue } from '../show/ShowTypes';
-import { laserize } from './laserColor';
+import { LASER_BLUE, laserize } from './laserColor';
 import { LaserRenderer, SURF_CONE, SURF_FOG, SURF_SHEET } from './LaserRenderer';
 import { type Emitter, type EmitterGroup, LaserRig } from './LaserRig';
 
@@ -384,6 +384,39 @@ export class LaserSystem implements System {
   readonly airLight = new THREE.Color(0, 0, 0);
   /** low-fog density from which the smoke above the bank holds the sheets' light (full at 0.9) */
   airGate0 = 0.65;
+  /**
+   * Calibration hooks (side by side with the video / scripts/similarity.mjs, like the lighting's floodGlowK):
+   * the defaults are the committed look; they are read every frame, so an experiment can set them in the page
+   * (`__app.get('lasers').tune.seaFloor = 0.05`).
+   *   blueR / blueG   red / green leak of the 450 nm diode primary (laserColor.ts)
+   *   seaFloor        lit share of the troughs of the laser sea on a dense bank (0.015 = mostly dark trough;
+   *                   thinner banks keep 0.015)
+   *   seaFall         falloff exponent of the sea with the distance from the deck on a dense bank (thinner: 0.55)
+   *   seaGain         sea level
+   *   seaBank         a dense bank (>= 0.75 → 0.9) floods the bowl: the sea follows the side banks up to |x| seaBankX
+   *   ceilGain        gain of a sheet seen from far below (the lit smoke ceiling, LaserRenderer CEIL_GAIN)
+   *   ceilD0 / ceilD1 camera-to-plane distance (m) over which a sheet overhead turns into that ceiling
+   *   ceilRoofK       scale of that distance for a sheet tilted up into the sky (roof projectors)
+   *   ceilSmooth      0 = fine smoke texture on that ceiling, 1 = broad soft clouds
+   *   ceilStage       weight of that ceiling towards the set
+   */
+  readonly tune = {
+    blueR: 0,
+    blueG: -0.09,
+    seaFloor: 0.015,
+    seaFall: 0.55,
+    seaGain: 1,
+    seaBank: 0,
+    seaBankX: FOG_ZONE_X,
+    ceilGain: 12,
+    ceilD0: 12,
+    ceilD1: 35,
+    ceilRoofK: 0.35,
+    ceilSmooth: 1,
+    ceilStage: 1.5,
+  };
+  /** half-width of the lit sea this frame (FOG_ZONE_X, wider on a dense bank with tune.seaBank) */
+  private seaZoneX = FOG_ZONE_X;
   /** second scan colour (lights the crests) */
   private sea2R = 0;
   private sea2G = 0;
@@ -692,6 +725,19 @@ export class LaserSystem implements System {
     }
     this.lowHaze = low;
     u.uLowHaze.value = low * 0.9;
+    // calibration hooks (tune): diode primary, laser sea, the lit smoke ceiling
+    const tn = this.tune;
+    LASER_BLUE[0] = tn.blueR;
+    LASER_BLUE[1] = tn.blueG;
+    const su = this.gfx.surfUniforms;
+    // a dense bank (0.75 -> 0.9, Embers) floods the bowl: evenly lit sea, up the side banks
+    const xd = clamp01((low - 0.75) / 0.15);
+    const dense = xd * xd * (3 - 2 * xd);
+    (su.uSea.value as THREE.Vector4).set(0.015 + (tn.seaFloor - 0.015) * dense, 0.55 + (tn.seaFall - 0.55) * dense, tn.seaGain, 0);
+    this.seaZoneX = FOG_ZONE_X + (Math.max(FOG_ZONE_X, tn.seaBankX) - FOG_ZONE_X) * dense * tn.seaBank;
+    (su.uBank.value as THREE.Vector4).x = dense * tn.seaBank;
+    (su.uCeil.value as THREE.Vector4).set(tn.ceilGain, tn.ceilD0, Math.max(tn.ceilD0 + 1, tn.ceilD1), 0.85);
+    (su.uCeilT.value as THREE.Vector4).set(tn.ceilSmooth, tn.ceilStage, 0, 0);
     // the smoke drift and the low-fog flow follow SHOW time like everything else (round 5: they ran on
     // real time, so the laser sea on the ground depended on how long the app had been running and on
     // the previously rendered moment — 6-7/255 mean pixel difference at 1389.5 / 1169.5 / 1463 / 1145
@@ -1665,7 +1711,12 @@ export class LaserSystem implements System {
     const ph2 = ph * 0.73 + seed * 3.1;
     const P = I * 1.0 / Math.max(0.4, 2 * half);
     const c = s.color;
-    if (!this.recording) this.gfx.pushSurface(e.pos.x, e.pos.y, e.pos.z, range, fx, fy, fz, half, nx, ny, nz, SURF_SHEET, c.r * P, c.g * P, c.b * P, amp, ph1, ph2, 0, seed * TAU);
+    // a sheet tilted up into the sky from the roof (castle / wing units over the set, in the stage smoke) lights the
+    // clouds above the camera as a ceiling from a few metres under its plane already (v1134-1140); a deck sheet —
+    // also one rising to 14 m over the field (v1505.8) — keeps its crisp line up to ~12 m under it
+    const up = e.pos.y > 8 ? clamp01((fy - 0.03) / 0.08) : 0;
+    const ceilK = 1 + (this.tune.ceilRoofK - 1) * up;
+    if (!this.recording) this.gfx.pushSurface(e.pos.x, e.pos.y, e.pos.z, range, fx, fy, fz, half, nx, ny, nz, SURF_SHEET, c.r * P, c.g * P, c.b * P, amp, ph1, ph2, 0, seed * TAU, 0, 1, 0, 0, 0, 0, 0, ceilK);
     // a sheet skimming a low fog lights the fog tops ("laser sea"): collected here, drawn once (pushSea)
     if (!this.recording && !tr && this.lowHaze > 0.05) {
       const hField = e.pos.y + Math.tan(pitch) * 40;
@@ -1720,7 +1771,7 @@ export class LaserSystem implements System {
     // (the fog kind carries the crest colour in the wave-phase slots)
     // (range 160: the bank covers the paved field and the hard-standing, it fades out before the road and
     // the decking — it does not float over the photo terrace)
-    this.gfx.pushSurface(0, FOG_TOP, -1, 160, 0, 0, 1, 1.25, 0, 1, 0, SURF_FOG, this.seaR * k, this.seaG * k, this.seaB * k, 0, this.sea2R * k, this.sea2G * k, this.sea2B * k, 0, FOG_ZONE_X, 1, 0);
+    this.gfx.pushSurface(0, FOG_TOP, -1, 160, 0, 0, 1, 1.25, 0, 1, 0, SURF_FOG, this.seaR * k, this.seaG * k, this.seaB * k, 0, this.sea2R * k, this.sea2G * k, this.sea2B * k, 0, this.seaZoneX, 1, 0);
   }
 
   /** ground height (terrain system; flat 0 fallback) */
