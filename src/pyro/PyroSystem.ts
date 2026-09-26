@@ -638,10 +638,12 @@ export class PyroSystem extends CueFxSystem {
     const allSteps = steps;
     this.rowSmoke(out, cue, pts, allSteps, Hh * 0.85, Hh * 1.3, color, 4, 0.34 * inten, (3 + dur * 3) * Math.min(n, 30), cue.t + 0.25, dur + maxDelay, 5, 8, 0.5, 1.6);
     const lc = warm ? FIRE_LIGHT : color;
-    this.rowLight(out, cue, pts, steps, stagger, dur, 0.45, Hh * 0.45, lc, 1.1 * Math.pow(Hh / 20, 0.7) * inten * (blowout ? 1.4 : 1), 0.4 * Hh + 10);
+    // (the light collapses with the flames when the valves close, see the puff shader's burn-out)
+    this.rowLight(out, cue, pts, steps, stagger, dur, blowout ? 0.45 : 0.25, Hh * 0.45, lc, 1.1 * Math.pow(Hh / 20, 0.7) * inten * (blowout ? 1.4 : 1), 0.4 * Hh + 10);
     cx.multiplyScalar(1 / n);
     cx.y += Hh * 0.5;
-    out.flashes.push({ kind: 1, t0: cue.t, t1: cue.t + maxDelay + dur + 0.45, color: color.clone(), peak: Math.min(blowout ? 3.2 : 2.6, 0.1 * n + 0.6) * inten * (warm ? 1 : 0.7), decay: 0.45, pos: cx, strobe: 0 });
+    const fTail = blowout ? 0.45 : 0.25;
+    out.flashes.push({ kind: 1, t0: cue.t, t1: cue.t + maxDelay + dur + fTail, color: color.clone(), peak: Math.min(blowout ? 3.2 : 2.6, 0.1 * n + 0.6) * inten * (warm ? 1 : 0.7), decay: fTail, pos: cx, strobe: 0 });
   }
 
   /**
