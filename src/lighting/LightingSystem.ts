@@ -87,6 +87,17 @@ const FLOOD_SLICES: Record<string, number> = { ultra: 10, high: 9, medium: 7, mo
 /** dense-haze scatter ("storm haze"): env.haze range over which the lit haze turns into a glowing cloud */
 const SCATTER_H0 = 0.76;
 const SCATTER_H1 = 0.92;
+/**
+ * Round 5 (similarity against the video, 1243 s beam storm: 29 % -> 47 %): the storm cloud is multiple
+ * scattering in dense haze, which saturates its light towards the dominant hue of the rig and the wash
+ * (c' = max · (c / max)^SCATTER_SAT, like the pyro bounce in worldLights): a cool-white rig under a steel
+ * wash lights STEEL-BLUE haze between crisp white beams (video mean sRGB 86 / 128 / 165), not a milky
+ * grey veil over the whole frame (ours was 154 / 170 / 185 with p10 luma 139). SCATTER_GAIN: its level.
+ */
+const SCATTER_SAT = 4;
+const SCATTER_GAIN = 0.5;
+/** storm haze: how far the beams bloom into soft shafts (was 0.85: wide milky shafts; the video's are crisp) */
+const STORM_SOFT = 0.45;
 /** static downlights (arch crown): PAR-can beam half angle and the lit lens face seen off-axis */
 const TAN_CAN = Math.tan((6 * Math.PI) / 180);
 const CAN_GAIN = 5;
@@ -176,6 +187,9 @@ export class LightingSystem implements System {
   private readonly floodSideL = new THREE.Color();
   private readonly floodSideR = new THREE.Color();
   private readonly cF = new THREE.Color();
+  /** saturated wash / rig colour of the storm-haze scatter (scratch) */
+  private readonly cSW = new THREE.Color();
+  private readonly cSR = new THREE.Color();
   private baseHaze = 0.6;
   private hazeCam: { hazeScale?: number } | null = null;
   private festoonLit = 0;
@@ -375,7 +389,7 @@ export class LightingSystem implements System {
     this.beams.material.uniforms.uGain.value = 1;
     this.beams.material.uniforms.uNoise.value = 0.85;
     // storm haze: beams bloom into soft shafts (energy spread over a wider cone)
-    this.beams.material.uniforms.uSoft.value = 0.85 * smooth01((haze - 0.7) / 0.22);
+    this.beams.material.uniforms.uSoft.value = STORM_SOFT * smooth01((haze - 0.7) / 0.22);
 
     // ---------------------------------------------------------------- cue state
     for (let g = 0; g < this.blends.length; g++) {
@@ -1035,14 +1049,18 @@ export class LightingSystem implements System {
     if (sc > 0) {
       const washI = Math.min(1.5, env.stageWashIntensity);
       const rig = Math.min(1, rigOut * 2.2) + strobe * 0.6;
-      const kw = FLOOD_K_STAGE * sc * 0.42 * washI;
-      add(FB_STAGE, env.stageWashColor, kw);
-      add(FB_STAGE_HIGH, env.stageWashColor, kw * 0.8);
-      const kr = FLOOD_K_STAGE * sc * 0.5 * rig;
-      add(FB_STAGE, env.stageColor, kr);
-      add(FB_STAGE_HIGH, env.stageColor, kr * 0.9);
-      add(FB_FIELD, env.stageColor, FLOOD_K_FIELD * sc * 0.5 * (rig + washI * 0.4));
-      add(FB_FIELD, env.stageWashColor, FLOOD_K_FIELD * sc * 0.35 * washI);
+      // multiple scattering saturates the cloud's light (see SCATTER_SAT)
+      const wash = saturateColor(env.stageWashColor, SCATTER_SAT, this.cSW);
+      const rigC = saturateColor(env.stageColor, SCATTER_SAT, this.cSR);
+      const g = sc * SCATTER_GAIN;
+      const kw = FLOOD_K_STAGE * g * 0.42 * washI;
+      add(FB_STAGE, wash, kw);
+      add(FB_STAGE_HIGH, wash, kw * 0.8);
+      const kr = FLOOD_K_STAGE * g * 0.5 * rig;
+      add(FB_STAGE, rigC, kr);
+      add(FB_STAGE_HIGH, rigC, kr * 0.9);
+      add(FB_FIELD, rigC, FLOOD_K_FIELD * g * 0.5 * (rig + washI * 0.4));
+      add(FB_FIELD, wash, FLOOD_K_FIELD * g * 0.35 * washI);
     }
   }
   private scatter = 0;
@@ -1286,6 +1304,13 @@ function smooth01(x: number): number {
 
 function lum(c: THREE.Color): number {
   return (c.r + c.g + c.b) * 0.3333;
+}
+
+/** out = max · (c / max)^p per channel: saturates towards the dominant channel, keeps the peak */
+function saturateColor(c: THREE.Color, p: number, out: THREE.Color): THREE.Color {
+  const m = Math.max(c.r, c.g, c.b);
+  if (m <= 1e-6) return out.setRGB(0, 0, 0);
+  return out.setRGB(m * Math.pow(Math.max(0, c.r) / m, p), m * Math.pow(Math.max(0, c.g) / m, p), m * Math.pow(Math.max(0, c.b) / m, p));
 }
 
 /** out = c / max(c) (the hue at full value), black stays black */

@@ -24,10 +24,21 @@ varying vec3 vCol;
 varying vec4 vData;    // along, length, radius, energy
 varying vec4 vLocal;   // circle xy, seed, ground end
 varying float vGobo;
+varying float vNearBeam;
 
 void main() {
   vec3 d = iDir.xyz;
   float L = iDir.w;
+  // a lens right next to (or inside) a beam near its fixture — standing on the podium under the arch
+  // downlights, beside a deck head — sees no crisp cone but a diffuse glow: the ruled cone surface would
+  // fill the frame as a flat grey slab. Fade the volume while the camera is within a few metres of the
+  // cone, close to the lens (a beam aimed at the camera from the stage keeps its flare disc)
+  vec3 cr = cameraPosition - iPos.xyz;
+  float aC = dot(cr, d);
+  float rC = iPos.w + max(aC, 0.0) * iCol.w;
+  float dPerp = length(cr - d * aC);
+  float inReach = step(-1.0, aC) * step(aC, L);
+  vNearBeam = 1.0 - inReach * (1.0 - smoothstep(rC + 0.3, rC + 4.0, dPerp)) * (1.0 - smoothstep(10.0, 25.0, aC));
   vec3 up = abs(d.y) < 0.98 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
   vec3 t1 = normalize(cross(up, d));
   vec3 t2 = cross(t1, d);
@@ -65,6 +76,7 @@ varying vec3 vCol;
 varying vec4 vData;
 varying vec4 vLocal;
 varying float vGobo;
+varying float vNearBeam;
 
 void main() {
   vec3 V = cameraPosition - vWorld;
@@ -110,7 +122,7 @@ void main() {
 #endif
   // the beam emerges from the lens glow instead of starting with a hard cut
   float start = smoothstep(0.0, 0.8, along);
-  float k = chord * hg * spreadF * atten * tail * ground * nearF * haze * start * vData.w * uGain;
+  float k = chord * hg * spreadF * atten * tail * ground * nearF * vNearBeam * haze * start * vData.w * uGain;
   gl_FragColor = vec4(vCol * k, 1.0);
 }
 `;

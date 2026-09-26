@@ -680,11 +680,14 @@ export class LaserSystem implements System {
     }
     this.lowHaze = low;
     u.uLowHaze.value = low * 0.9;
-    const tt = ctx.time;
+    // the smoke drift and the low-fog flow follow SHOW time like everything else (round 5: they ran on
+    // real time, so the laser sea on the ground depended on how long the app had been running and on
+    // the previously rendered moment — 6-7/255 mean pixel difference at 1389.5 / 1169.5 / 1463 / 1145
+    // between forward and reverse seek orders). Paused, the smoke holds still: a seek = the same image
+    const tt = ctx.showTime;
     (u.uDrift.value as THREE.Vector3).set(tt * 0.0042, -tt * 0.0011, tt * 0.0017);
-    // show-driven animation (scan lines, dashes, flicker) follows show time; the air itself drifts in real time
-    u.uTime.value = ctx.showTime;
-    u.uFlow.value = tt % 2000;
+    u.uTime.value = tt;
+    u.uFlow.value = tt;
     const fog = app.scene.fog as (THREE.Fog | THREE.FogExp2 | null);
     if (fog && (fog as THREE.FogExp2).isFogExp2) {
       u.uFogMode.value = 1;

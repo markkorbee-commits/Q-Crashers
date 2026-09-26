@@ -131,9 +131,14 @@ export class PostFX {
    * streak, the fire itself must provide the core), gateL0 = bright-pass luminance along a light that counts as "fire
    * visible" (63 %), flat = frame-wide lift, psf = wide scatter of the real bright pass; bloom, wide,
    * threshold and exposure = extra bloom share, wide-mip emphasis, bloom threshold drop and exposure
-   * lift (fractions) at amount = 1
+   * lift (fractions) at amount = 1.
+   * Round 5 (similarity against the video, Mac GPU): the frame-wide lift (flat 0.03) and the wide halos
+   * (halo 16) laid a soft orange blob over the whole frame around every flame row — the video's drone
+   * shots show crisp flame rows on a dark field. flat 0.03 -> 0 (the lens veil is the real bright pass'
+   * wide scatter, psf) and halo 16 -> 8: 827.25 s 35 -> 56 %, 729.25 s 41 -> 60 %, 600.4 s 50 -> 57 %,
+   * 1565 68 -> 70 %; the lit-smoke moments without their smoke yet lose 2-3 points (313.75, 558.25, 76.25)
    */
-  readonly glareTune = { halo: 16, core: 0, coreSharp: 25, gateL0: 0.6, flat: 0.03, psf: 0.3, bloom: 0.8, wide: 1.2, threshold: 0.3, exposure: 0 };
+  readonly glareTune = { halo: 8, core: 0, coreSharp: 25, gateL0: 0.6, flat: 0, psf: 0.3, bloom: 0.8, wide: 1.2, threshold: 0.3, exposure: 0 };
 
   private readonly sober = PostFX.defaults();
   private readonly hdrType: THREE.TextureDataType;

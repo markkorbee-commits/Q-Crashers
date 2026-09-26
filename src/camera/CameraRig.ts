@@ -450,12 +450,15 @@ export class CameraRig implements System {
     cam.rotation.set(pitch, yaw, pl.eyeRot.z * 0.5, 'YXZ');
   }
 
-  /** walkable floor height under a camera position (deck when standing on it) */
+  /**
+   * walkable floor height under a camera position (the stage when standing on it). On the stage this is
+   * the walk map's highest top within reach of the feet (≤ 1 m above them: the pivot is the head, 1.62 m
+   * up), stair ramps included — the flat `platforms` alone dropped the floor to the terrain under the
+   * pit / crew / castle stairs, so the arm could sink into the steps
+   */
   private floorAt(x: number, z: number): number {
     const pl = this.player;
-    if (pl.onPlatform) {
-      for (const w of pl.platforms) if (x >= w.minX && x <= w.maxX && z >= w.minZ && z <= w.maxZ) return w.y;
-    }
+    if (pl.onPlatform) return pl.floorAt(x, z, this.pivot.y - 0.62);
     return pl.groundAt(x, z);
   }
 

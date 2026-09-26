@@ -22,6 +22,15 @@ export const SURF_FOG = 2;
  * buffers (4K, high-DPR phones) get a further fill-rate cut; the generators then draw fewer, brighter
  * and slightly wider beams (per-beam power ∝ 1/√n) so the figures keep their weight.
  */
+/**
+ * Extra gain of a sheet seen from far below its plane (the lit smoke-cloud ceiling of a roof projector
+ * tilted up over the field, SURF_FRAG uCeil: x gain, y..z camera-to-plane distance (m) over which it takes
+ * over, w loss of the scan-line pattern in the smoke). Round 5, similarity against the video: 1120.5 s
+ * 37 -> 44 %, 1127 38 -> 45 % (the video's upper half is lit blue haze, ours was a black sky); a level sheet
+ * a few metres over the camera (1505.8, 1469.5) keeps its crisp line.
+ */
+const CEIL_GAIN = 7;
+
 /** drawing-buffer pixel count up to which the full budget applies */
 const FULL_BUDGET_PIXELS = 2.1e6;
 
@@ -122,7 +131,7 @@ export class LaserRenderer {
       ...common,
       vertexShader: SURF_VERT,
       fragmentShader: SURF_FRAG,
-      uniforms: { ...this.shared, uGainS: { value: 1 } },
+      uniforms: { ...this.shared, uGainS: { value: 1 }, uCeil: { value: new THREE.Vector4(CEIL_GAIN, 12, 35, 0.85) } },
     });
     this.spriteMat = new THREE.ShaderMaterial({
       ...common,
