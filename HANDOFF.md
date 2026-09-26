@@ -319,7 +319,26 @@ echo $CHROME_PATH
 
 ## Stand van zaken
 
-Za 26 sep 2026, ± 21:20 (CEST).
+Za 26 sep 2026, ± 23:10 (CEST), lokaal op de MacBook Pro (M4 Max, GPU-render).
+
+- Stap 1-9 zijn op de Mac uitgevoerd (video + mp3 met kloppende checksums, cutlijst identiek aan de referentie).
+- Gelijkenis op de Mac-GPU (64 momenten, `--settle 500 --min-frames 30`), per moment in
+  `research/video-timeline/data/similarity-mac-*.json`:
+
+  | Stand | ruw | na ijking | kleur / licht / vorm |
+  |---|---|---|---|
+  | Mac-baseline (`a69bc09`) | 52,1 % | 25,6 % | 52,3 / 63,8 / 42,0 |
+  | + stage-WIP ronde 4 gemerged | 53,6 % | 27,9 % | 54,4 / 64,9 / 42,9 |
+  | + Show-camera-exposure 0,5 (`SHOWCAM_EXPOSURE`) | 57,5 % | 34,0 % | 55,6 / 71,3 / 48,7 |
+  | + ronde 5 (schermen, performers, pyro, atmosfeer) | 61,0 % | 39,4 % | 59,8 / 76,2 / 50,1 |
+
+- Ronde 5 (findings `docs/handoff/findings/r5_*.md`): schermen tonen kasteelprint i.p.v. vlakke panelen; MC met
+  gekleurde key + backlight, close-ups houden de haze, troupe-choreografie en -shots 641-740 s herzien; pyro met
+  verlichte rook (flares, serpents, gerb-wolken), lichten per cluster; beam-storm zonder witte sluier, blauwe
+  laserlucht, glare-lift weg, hemel naar de video gekeyd, laserzee op showtijd (determinisme), stage-walk-restpunten.
+  `scripts/similarity.mjs` doet nu standaard een pre-roll (seek naar t-2 s, 6 frames, dan t).
+
+Eerdere stand (cloud, vóór de overdracht):
 
 - Alle show-content is uit de video herbouwd (per span, met cameravolgorde = de officiële montage, één shot per cut).
 - Muzieksync: steady tracks 876 hits 100 % binnen 20 ms van het grid; free-tempo delen 60 % binnen 100 ms van een
@@ -349,9 +368,9 @@ Za 26 sep 2026, ± 21:20 (CEST).
 
 Het uitgewerkte plan met meetpunten en bestanden staat in `docs/handoff/findings/r5_next.md`; kort:
 
-1. Ronde 4 afronden: eerst de Mac-baseline (stap 9, met stabiliteitscheck), dan de stage-patch toepassen volgens
-   `docs/handoff/wip/README.md`, meten, houden wat winst geeft; daarna de exposure/"filmed" look vastzetten in
-   `src/postfx` (laatste meting: 1 → 57,7 %, 0,7 → 58,1 %, 0,5 → 58,2 % op 12 momenten; advies 0,7 of niets).
+1. ~~Ronde 4 afronden~~ klaar op de Mac (26 sep): baseline, stage-patch gemerged, Show-camera-exposure 0,5.
+   Punten 2-4 en delen van 5/7 zijn in ronde 5 aangepakt; restpunten en contractverzoeken van ronde 5 staan in
+   `docs/handoff/findings/r6_*.md` (ronde 6).
 2. Schermen: `screens.content` mode `'color'` rendert als vlakke felle panelen achter de MC (348, 361, 369, 447 s);
    de video toont kasteelkunst/ornamenten — render als getinte kasteel-/ornamenttextuur op gematigd niveau.
 3. Performerverlichting: MC egaal grijs belicht; video: sterk gekleurde key + tegenlicht in dichte haze (bv. 351,
