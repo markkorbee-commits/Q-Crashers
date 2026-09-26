@@ -107,6 +107,51 @@ export interface StageLookEx extends StageLook {
   contentMix: number;
   /** 0..1 master level of all castle emitters (blackouts: section 'silence' or state param 'master') */
   master: number;
+
+  // ---- region isolation (stage.state castle / sides / battens / dragon / wingLed / mask / *Color) ----
+  /** 0..2 level of every castle-core practical (|x| < 37.5: battens, windows, lamps, decor, portal) */
+  castleGain: number;
+  /** 0..2 level of every side-section / arm practical (|x| > 37.5) */
+  sidesGain: number;
+  /** 0..2 level of the LED battens + pixel dots only (castle + sides; windows etc. unaffected) */
+  battenGain: number;
+  /** 0..2 level of the dragon's LED lines / pixel dots (eyes + mouth keep their own controls) */
+  dragonGain: number;
+  /** 0..2 level of the wing LED lines (spars, edges, rosette rings, membrane pixel lanes) */
+  wingGain: number;
+  /** 0..1 share of the crown's wash rig / reflections that reaches the wings / the dragon (masks) */
+  wingWash: number;
+  dragonWash: number;
+  /**
+   * resolved LED colours per region (content / section colour with the state's region overrides);
+   * the base `led` / `led2` are the dragon's (crown) colours
+   */
+  castleLed: THREE.Color;
+  castleLed2: THREE.Color;
+  sidesLed: THREE.Color;
+  sidesLed2: THREE.Color;
+  sidesAccent: THREE.Color;
+  wingLed: THREE.Color;
+  wingLed2: THREE.Color;
+  /** 0..1 how much the side-section virtual floods take `sidesLed` instead of the lighting wash */
+  sidesFloodTint: number;
+  /** 0..1 same for the castle core floods (castleColor override) */
+  castleFloodTint: number;
+
+  // ---- warm festoon bulb strings (stage.state garlands / stage.garlands cues) ----------------------
+  /** HDR level of the garlands per group: x wings, y castle core, z side sections */
+  garland: THREE.Vector3;
+  garlandColor: THREE.Color;
+  /** 0 steady, 1 chase, 2 twinkle, 3 strobe */
+  garlandPattern: number;
+  /** pulses per beat of the chase / strobe */
+  garlandRate: number;
+
+  // ---- LED gate / stutter (stage.gate cues), already folded into ledIntensity / garland ------------
+  /** 0..1 gate multiplier of the castle battens this frame (1 = open) */
+  gateCastle: number;
+  /** 0..1 gate multiplier of the crown LED lines this frame */
+  gateCrown: number;
 }
 
 export function createStageLookEx(): StageLookEx {
@@ -129,5 +174,27 @@ export function createStageLookEx(): StageLookEx {
     contentColor: new THREE.Color('#ff5a12'),
     contentMix: 0,
     master: 1,
+    castleGain: 1,
+    sidesGain: 1,
+    battenGain: 1,
+    dragonGain: 1,
+    wingGain: 1,
+    wingWash: 1,
+    dragonWash: 1,
+    castleLed: new THREE.Color('#ff2a10'),
+    castleLed2: new THREE.Color('#2a60ff'),
+    sidesLed: new THREE.Color('#ff2a10'),
+    sidesLed2: new THREE.Color('#2a60ff'),
+    sidesAccent: new THREE.Color('#e8f4ff'),
+    wingLed: new THREE.Color('#ff2a10'),
+    wingLed2: new THREE.Color('#2a60ff'),
+    sidesFloodTint: 0,
+    castleFloodTint: 0,
+    garland: new THREE.Vector3(0, 0, 0),
+    garlandColor: new THREE.Color('#ffb46a'),
+    garlandPattern: 0,
+    garlandRate: 2,
+    gateCastle: 1,
+    gateCrown: 1,
   };
 }

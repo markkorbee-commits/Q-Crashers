@@ -44,21 +44,33 @@ export interface WingLayout {
   rosettes: THREE.Vector3[];
 }
 
+/**
+ * Round-2 look parity: measured against the official terrace photo (camera fitted on the delay-tower
+ * pairs) and the far telephoto shots of the video, the wings stand ~12 % larger than the bible
+ * numbers (finial tops ~29-31 m, outer finial ~44 m out) while the shoulders stay on the dragon. The
+ * layout is scaled about a pivot on the inner wing root line (x ±14, y 4), in the wing plane.
+ */
+export const WING_SCALE = 1.12;
+const WING_PIVOT = { x: 14, y: 4 };
+
 export function wingLayout(side: number): WingLayout {
   const s = side;
+  const k = WING_SCALE;
   const v = (x: number, y: number, z: number) => new THREE.Vector3(x * s, y, z);
-  const bases = [v(30.6, 4.6, -17.6), v(27.4, 3.9, -17.5), v(24.0, 3.9, -17.4)];
-  const tips = [v(40.2, 23.2, -21.2), v(29.0, 24.7, -21.5), v(14.7, 23.2, -20.9)];
-  const finialTops = [v(40.6, 26.5, -21.3), v(29.1, 28.0, -21.6), v(14.2, 26.5, -21.0)];
+  // scaled wing point (the shoulder is not scaled: it sits on the dragon's yoke)
+  const w = (x: number, y: number, z: number) => v(WING_PIVOT.x + (x - WING_PIVOT.x) * k, WING_PIVOT.y + (y - WING_PIVOT.y) * k, z);
+  const bases = [w(30.6, 4.6, -17.6), w(27.4, 3.9, -17.5), w(24.0, 3.9, -17.4)];
+  const tips = [w(40.2, 23.2, -21.2), w(29.0, 24.7, -21.5), w(14.7, 23.2, -20.9)];
+  const finialTops = [w(40.6, 26.5, -21.3), w(29.1, 28.0, -21.6), w(14.2, 26.5, -21.0)];
   const armJoin = new THREE.Vector3().lerpVectors(bases[2], tips[2], 0.36);
   return {
     side,
     shoulder: v(6.2, 14.6, -16.6),
-    wrist: v(27.3, 3.2, -17.3),
+    wrist: w(27.3, 3.2, -17.3),
     bases,
     tips,
     finialTops,
     armJoin,
-    rosettes: [v(32.5, 15.6, -19.4), v(23.4, 16.3, -19.4), v(15.4, 17.3, -18.8)],
+    rosettes: [w(32.5, 15.6, -19.4), w(23.4, 16.3, -19.4), w(15.4, 17.3, -18.8)],
   };
 }

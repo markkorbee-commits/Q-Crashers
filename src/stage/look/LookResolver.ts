@@ -27,6 +27,29 @@ interface StateVals {
   presence: number;
   /** 0..1 ember mask (only the dragon + inner wings lit) */
   ember: number;
+  /** region levels (0..2): castle core, side sections, LED battens, dragon LEDs, wing LEDs */
+  castle: number;
+  sides: number;
+  battens: number;
+  dragon: number;
+  wingLed: number;
+  /** wash rig share on the wings / the dragon (mask isolations) */
+  wingWash: number;
+  dragonWash: number;
+  /** region colour overrides (w = 0..1 weight of the override over the content / section colour) */
+  castleCol: THREE.Color;
+  castleColW: number;
+  sidesCol: THREE.Color;
+  sidesColW: number;
+  crownCol: THREE.Color;
+  crownColW: number;
+  wingCol: THREE.Color;
+  wingColW: number;
+  /** persistent festoon level (all groups) + colour / pattern / rate */
+  garlands: number;
+  garlandCol: THREE.Color;
+  garlandPat: number;
+  garlandRate: number;
 }
 
 const newVals = (): StateVals => ({
@@ -41,7 +64,42 @@ const newVals = (): StateVals => ({
   master: 1,
   presence: 1,
   ember: 0,
+  castle: 1,
+  sides: 1,
+  battens: 1,
+  dragon: 1,
+  wingLed: 1,
+  wingWash: 1,
+  dragonWash: 1,
+  castleCol: new THREE.Color(),
+  castleColW: 0,
+  sidesCol: new THREE.Color(),
+  sidesColW: 0,
+  crownCol: new THREE.Color(),
+  crownColW: 0,
+  wingCol: new THREE.Color(),
+  wingColW: 0,
+  garlands: 0,
+  garlandCol: new THREE.Color(),
+  garlandPat: 0,
+  garlandRate: 2,
 });
+
+/** stage.state `mask` presets: hard isolations applied after the explicit levels */
+const MASKS = ['all', 'center', 'crown', 'wings', 'dragon'] as const;
+/** garland pattern names (stage.state garlandPattern / stage.garlands pattern) */
+const GARLAND_PATTERN: Record<string, number> = { steady: 0, chase: 1, twinkle: 2, strobe: 3 };
+/** gate rates in pulses per beat + phase offset (stage.gate rate) */
+const GATE_RATE: Record<string, [number, number]> = {
+  '32nd': [8, 0],
+  '16th': [4, 0],
+  '8th': [2, 0],
+  beat: [1, 0],
+  offbeat: [1, 0.5],
+  half: [0.5, 0],
+  bar: [0.25, 0],
+};
+const clamp2 = (x: unknown, def: number) => (typeof x === 'number' && Number.isFinite(x) ? Math.max(0, Math.min(2, x)) : def);
 
 /**
  * Dormant = the "sleeping" set: its practicals follow the state's window / wing levels, so
@@ -80,6 +138,8 @@ const newTarget = (): ContentTarget => ({
 const CONTENT_PATTERN: Record<string, number> = { solid: 0, chase: 1, pulse: 2, dots: 3, sparkle: 3, split: 4, fire: 5, stripes: 6, wave: 6, dashes: 7, runes: 7 };
 
 const AMBER = new THREE.Color('#ffae42');
+/** tungsten festoon bulbs */
+const GARLAND_WARM = new THREE.Color('#ffb466');
 const FIRE = new THREE.Color('#ff5a12');
 const ICE = new THREE.Color('#a8dcff');
 const DEEP_RED = new THREE.Color('#b00008');
@@ -277,6 +337,21 @@ export class LookResolver {
     base.master = kind === 'silence' ? 0.03 : 1;
     base.presence = presenceOf(base);
     base.ember = 0;
+    base.castle = 1;
+    base.sides = 1;
+    base.battens = 1;
+    base.dragon = 1;
+    base.wingLed = 1;
+    base.wingWash = 1;
+    base.dragonWash = 1;
+    base.castleColW = 0;
+    base.sidesColW = 0;
+    base.crownColW = 0;
+    base.wingColW = 0;
+    base.garlands = 0;
+    base.garlandCol.copy(GARLAND_WARM);
+    base.garlandPat = 0;
+    base.garlandRate = 2;
 
     // ---- 2. persistent state cue with cross-fade ---------------------------------------------------
     const si = this.stateIndex(t);
@@ -293,7 +368,13 @@ export class LookResolver {
       this.applyState(cue, pal, cur);
       const fade = typeof cue.p.fade === 'number' ? Math.max(0, cue.p.fade) : 1.5;
       const k = fade <= 0 ? 1 : smoothstep(0, 1, (t - cue.t) / fade);
-      if (k < 1) lerpVals(from, cur, k, cur);
+      if (k < 1) {
+        // a look fading in from (or out to) a blackout keeps its region isolation for the whole fade
+        // (the dark side shows nothing, so e.g. a dragon-only fade-in never flashes the wings)
+        if (from.master * from.presence < 0.02) copyIsolation(from, cur);
+        else if (cur.master * cur.presence < 0.02) copyIsolation(cur, from);
+        lerpVals(from, cur, k, cur);
+      }
       rpm = this.stateRpm[si];
       angle = this.stateAngle[si] + ((rpm * Math.PI * 2) / 60) * (t - cue.t);
     }
@@ -310,6 +391,17 @@ export class LookResolver {
     out.master = cur.master;
     out.ember = cur.ember;
     out.emit = cur.master * cur.presence;
+    out.castleGain = cur.castle;
+    out.sidesGain = cur.sides;
+    out.battenGain = cur.battens;
+    out.dragonGain = cur.dragon;
+    out.wingGain = cur.wingLed;
+    out.wingWash = cur.wingWash;
+    out.dragonWash = cur.dragonWash;
+    out.garland.set(cur.garlands, cur.garlands, cur.garlands);
+    out.garlandColor.copy(cur.garlandCol);
+    out.garlandPattern = cur.garlandPat;
+    out.garlandRate = cur.garlandRate;
 
     // ---- LED defaults from the section + mode ------------------------------------------------------
     out.led.copy(pal.primary);
@@ -415,10 +507,53 @@ export class LookResolver {
     // ---- 4. transients -----------------------------------------------------------------------------
     let pulse = 0;
     out.pulseColor.setRGB(0, 0, 0);
+    let gCastle = 1;
+    let gCrown = 1;
+    let gGarl = 1;
+    let garlBest = cur.garlands;
     const act = show.active('stage', t, this.active);
     for (const c of act) {
       const lt = t - c.t;
       const e = smoothstep(0, 0.08, lt) * (1 - smoothstep(c.dur * 0.4, c.dur, lt));
+      if (c.fx === 'garlands') {
+        // warm festoon bulb strings: level per target group, own attack / release
+        if (lt >= c.dur) continue;
+        const att = typeof c.p.fade === 'number' ? Math.max(0, c.p.fade) : 0.08;
+        const rel = typeof c.p.release === 'number' ? Math.max(0, c.p.release) : Math.min(0.3, c.dur * 0.4);
+        const env = (att <= 0 ? 1 : smoothstep(0, att, lt)) * (rel <= 0 ? 1 : 1 - smoothstep(c.dur - rel, c.dur, lt));
+        const lvl = clamp2(c.p.level, 1) * env;
+        const tg = typeof c.p.target === 'string' ? c.p.target : 'all';
+        const G = out.garland;
+        if (tg === 'all' || tg === 'wings') G.x = Math.max(G.x, lvl);
+        if (tg === 'all' || tg === 'castle') G.y = Math.max(G.y, lvl);
+        if (tg === 'all' || tg === 'sides') G.z = Math.max(G.z, lvl);
+        if (lvl >= garlBest) {
+          garlBest = lvl;
+          if (c.p.color !== undefined) resolveColor(c.p.color, pal, out.garlandColor, 'accent');
+          if (typeof c.p.pattern === 'string' && GARLAND_PATTERN[c.p.pattern] !== undefined) out.garlandPattern = GARLAND_PATTERN[c.p.pattern];
+          if (typeof c.p.rate === 'number' && c.p.rate > 0) out.garlandRate = c.p.rate;
+        }
+        continue;
+      }
+      if (c.fx === 'gate') {
+        // LED gate / stutter on the beat grid (hard on/off, deterministic in the beat position)
+        if (lt >= c.dur) continue;
+        let rate = 4;
+        let ph = 0;
+        if (typeof c.p.rate === 'string' && GATE_RATE[c.p.rate]) [rate, ph] = GATE_RATE[c.p.rate];
+        else if (typeof c.p.rate === 'number' && c.p.rate > 0) rate = c.p.rate;
+        if (typeof c.p.phase === 'number') ph += c.p.phase;
+        const duty = typeof c.p.duty === 'number' ? clamp(c.p.duty, 0.02, 0.98) : 0.5;
+        const depth = typeof c.p.depth === 'number' ? clamp(c.p.depth, 0, 1) : 1;
+        const x = beat.beat * rate + ph;
+        const on = x - Math.floor(x) < duty ? 1 : 0;
+        const g = 1 - depth * (1 - on);
+        const tg = typeof c.p.target === 'string' ? c.p.target : 'all';
+        if (tg === 'all' || tg === 'castle') gCastle *= g;
+        if (tg === 'all' || tg === 'crown') gCrown *= g;
+        if (tg === 'all' || tg === 'garlands') gGarl *= g;
+        continue;
+      }
       if (c.fx === 'eyes_flash') {
         out.eyesIntensity += 3 * e;
         if (c.p.color) out.eyes.lerp(resolveColor(c.p.color, pal, _c2), e);
@@ -437,6 +572,26 @@ export class LookResolver {
     // energetic sections pump the LEDs on the kick
     if (beat.hasKick && (kind === 'drop' || kind === 'climax')) out.ledIntensity *= 0.8 + 0.35 * beat.kick;
     out.pulse = pulse;
+    // gates fold into the region levels (castle / sides / crown / festoons)
+    out.gateCastle = gCastle;
+    out.gateCrown = gCrown;
+    out.castleGain *= gCastle;
+    out.sidesGain *= gCastle;
+    out.dragonGain *= gCrown;
+    out.wingGain *= gCrown;
+    out.wings *= gCrown;
+    out.garland.multiplyScalar(gGarl);
+
+    // ---- region colours: the castle / side sections / crown can each take their own LED colour -------
+    // castle core: content / section colour with the state's castleColor override
+    const cw = cur.castleColW;
+    out.castleLed.copy(out.led).lerp(cur.castleCol, cw);
+    out.castleLed2.copy(out.led2).lerp(_c.copy(cur.castleCol).multiplyScalar(0.55), cw);
+    const sw = cur.sidesColW;
+    out.sidesLed.copy(out.castleLed).lerp(cur.sidesCol, sw);
+    out.sidesLed2.copy(out.castleLed2).lerp(_c.copy(cur.sidesCol).multiplyScalar(0.55), sw);
+    out.castleFloodTint = 0.5 * cw;
+    out.sidesFloodTint = Math.max(0.5 * cw, sw);
 
     // ---- colours of the castle-only emitters --------------------------------------------------------
     // crystal lanterns on the ramparts / arm posts: the "side sections" colour of the look (the show's
@@ -459,22 +614,35 @@ export class LookResolver {
         out.arcade.copy(COLD_BLUE).lerp(VIOLET, 0.4).multiplyScalar(0.7);
         break;
       default:
-        out.arcade.copy(pal.secondary).lerp(COLD_BLUE, 0.35).lerp(out.led2, 0.3);
+        out.arcade.copy(pal.secondary).lerp(COLD_BLUE, 0.35).lerp(out.castleLed2, 0.3);
     }
     out.portal.copy(pal.primary).lerp(out.eyes, 0.35);
-    // front-line fixture lenses: white-ish, leaning to the side-section colour (blue-white in Winter)
-    out.lamp.copy(WHITE).lerp(out.windowColor, 0.3).lerp(out.led, 0.15);
+    // front-line fixture lenses: coloured dots in the side-section colour (the "row of small blue /
+    // cyan lamp dots along the stage front" of the footage), a little white in the core
+    out.lamp.copy(WHITE).lerp(out.windowColor, 0.6).lerp(out.castleLed, 0.15);
     switch (out.mode) {
       case 'rage':
       case 'ember':
-        out.accent.copy(out.led).lerp(FIRE, 0.5);
+        out.accent.copy(out.castleLed).lerp(FIRE, 0.5);
         break;
       case 'frozen':
         out.accent.copy(ICE);
         break;
       default:
-        out.accent.copy(pal.accent).lerp(ICE, 0.35).lerp(out.led, 0.15);
+        out.accent.copy(pal.accent).lerp(ICE, 0.35).lerp(out.castleLed, 0.15);
     }
+    // a castle colour override also takes the white pilaster battens (a monochrome castle look)
+    if (cw > 0) out.accent.lerp(_c.copy(cur.castleCol).lerp(WHITE, 0.2), cw);
+    out.sidesAccent.copy(out.accent);
+    if (sw > 0) out.sidesAccent.lerp(_c.copy(cur.sidesCol).lerp(WHITE, 0.2), sw);
+
+    // crown: crownColor tints the dragon + wings, wingColor the wings only
+    if (cur.crownColW > 0) {
+      out.led.lerp(cur.crownCol, cur.crownColW);
+      out.led2.lerp(_c.copy(cur.crownCol).multiplyScalar(0.55), cur.crownColW);
+    }
+    out.wingLed.copy(out.led).lerp(cur.wingCol, cur.wingColW);
+    out.wingLed2.copy(out.led2).lerp(_c.copy(cur.wingCol).multiplyScalar(0.55), cur.wingColW);
 
     // ---- 5. app.env: wash, flash, strobe --------------------------------------------------------------
     out.wash.copy(env.stageWashColor);
@@ -548,6 +716,49 @@ export class LookResolver {
     if (p.windowColor !== undefined) resolveColor(p.windowColor, pal, v.windowColor, 'secondary');
     // extension: 'master' (0..1) dims every set emitter, e.g. for blackouts
     if (typeof p.master === 'number') v.master = Math.max(0, Math.min(1, p.master));
+    // ---- region isolation (docs/show-format-ext/stage.md) -------------------------------------------
+    v.castle = clamp2(p.castle, 1);
+    // the side sections follow the castle level unless they get their own
+    v.sides = clamp2(p.sides, v.castle);
+    v.battens = clamp2(p.battens, 1);
+    v.dragon = clamp2(p.dragon, 1);
+    v.wingLed = clamp2(p.wingLed, 1);
+    v.wingWash = 1;
+    v.dragonWash = 1;
+    v.castleColW = colorOverride(p.castleColor, pal, v.castleCol);
+    v.sidesColW = colorOverride(p.sidesColor, pal, v.sidesCol);
+    v.crownColW = colorOverride(p.crownColor, pal, v.crownCol);
+    v.wingColW = colorOverride(p.wingColor, pal, v.wingCol);
+    // hard isolations, applied over the explicit levels
+    const mask = typeof p.mask === 'string' && (MASKS as readonly string[]).includes(p.mask) ? p.mask : 'all';
+    switch (mask) {
+      case 'center':
+        v.sides = 0;
+        break;
+      case 'crown':
+        v.castle = 0;
+        v.sides = 0;
+        break;
+      case 'wings':
+        v.castle = 0;
+        v.sides = 0;
+        v.dragon = 0;
+        v.dragonWash = 0.25;
+        break;
+      case 'dragon':
+        v.castle = 0;
+        v.sides = 0;
+        v.wingLed = 0;
+        v.wings = 0;
+        v.wingWash = 0;
+        v.rosettes.setRGB(0, 0, 0);
+        break;
+    }
+    // warm festoon bulb strings (persistent level; stage.garlands cues add flashes / strobes on top)
+    v.garlands = clamp2(p.garlands, 0);
+    if (p.garlandColor !== undefined) resolveColor(p.garlandColor, pal, v.garlandCol, 'accent');
+    if (typeof p.garlandPattern === 'string' && GARLAND_PATTERN[p.garlandPattern] !== undefined) v.garlandPat = GARLAND_PATTERN[p.garlandPattern];
+    if (typeof p.garlandRate === 'number' && p.garlandRate > 0) v.garlandRate = p.garlandRate;
     v.presence = presenceOf(v);
     v.ember = v.mode === 'ember' ? 1 : 0;
   }
@@ -597,18 +808,89 @@ function copyVals(dst: StateVals, src: StateVals): void {
   dst.master = src.master;
   dst.presence = src.presence;
   dst.ember = src.ember;
+  dst.castle = src.castle;
+  dst.sides = src.sides;
+  dst.battens = src.battens;
+  dst.dragon = src.dragon;
+  dst.wingLed = src.wingLed;
+  dst.wingWash = src.wingWash;
+  dst.dragonWash = src.dragonWash;
+  dst.castleCol.copy(src.castleCol);
+  dst.castleColW = src.castleColW;
+  dst.sidesCol.copy(src.sidesCol);
+  dst.sidesColW = src.sidesColW;
+  dst.crownCol.copy(src.crownCol);
+  dst.crownColW = src.crownColW;
+  dst.wingCol.copy(src.wingCol);
+  dst.wingColW = src.wingColW;
+  dst.garlands = src.garlands;
+  dst.garlandCol.copy(src.garlandCol);
+  dst.garlandPat = src.garlandPat;
+  dst.garlandRate = src.garlandRate;
 }
 
+/** region isolation part of a state (levels, wash shares, colour overrides): dst <- src */
+function copyIsolation(dst: StateVals, src: StateVals): void {
+  dst.castle = src.castle;
+  dst.sides = src.sides;
+  dst.battens = src.battens;
+  dst.dragon = src.dragon;
+  dst.wingLed = src.wingLed;
+  dst.wingWash = src.wingWash;
+  dst.dragonWash = src.dragonWash;
+  dst.castleCol.copy(src.castleCol);
+  dst.castleColW = src.castleColW;
+  dst.sidesCol.copy(src.sidesCol);
+  dst.sidesColW = src.sidesColW;
+  dst.crownCol.copy(src.crownCol);
+  dst.crownColW = src.crownColW;
+  dst.wingCol.copy(src.wingCol);
+  dst.wingColW = src.wingColW;
+}
+
+/** resolve an optional colour override into `out`; returns its weight (1 when given, else 0) */
+function colorOverride(v: unknown, pal: ResolvedPalette, out: THREE.Color): number {
+  if (v === undefined || v === null || v === '') return 0;
+  resolveColor(v, pal, out, 'primary');
+  return 1;
+}
+
+/** override colour a -> b: a colour only fades in / out through its weight (never from black) */
+function lerpOverride(ca: THREE.Color, wa: number, cb: THREE.Color, wb: number, k: number, out: THREE.Color): number {
+  if (wa > 0 && wb > 0) out.lerpColors(ca, cb, k);
+  else if (wb > 0) out.copy(cb);
+  else out.copy(ca);
+  return wa + (wb - wa) * k;
+}
+
+const lerpN = (x: number, y: number, k: number): number => x + (y - x) * k;
+
+/** out = a -> b by k; out may alias b (colours use lerpColors, which is alias safe for its 2nd operand) */
 function lerpVals(a: StateVals, b: StateVals, k: number, out: StateVals): void {
   out.mode = k < 0.5 ? a.mode : b.mode;
-  out.eyes.copy(a.eyes).lerp(b.eyes, k);
-  out.eyesIntensity = a.eyesIntensity + (b.eyesIntensity - a.eyesIntensity) * k;
-  out.mouth = a.mouth + (b.mouth - a.mouth) * k;
-  out.wings = a.wings + (b.wings - a.wings) * k;
-  out.rosettes.copy(a.rosettes).lerp(b.rosettes, k);
-  out.windows = a.windows + (b.windows - a.windows) * k;
-  out.windowColor.copy(a.windowColor).lerp(b.windowColor, k);
-  out.master = a.master + (b.master - a.master) * k;
-  out.presence = a.presence + (b.presence - a.presence) * k;
-  out.ember = a.ember + (b.ember - a.ember) * k;
+  out.eyes.lerpColors(a.eyes, b.eyes, k);
+  out.eyesIntensity = lerpN(a.eyesIntensity, b.eyesIntensity, k);
+  out.mouth = lerpN(a.mouth, b.mouth, k);
+  out.wings = lerpN(a.wings, b.wings, k);
+  out.rosettes.lerpColors(a.rosettes, b.rosettes, k);
+  out.windows = lerpN(a.windows, b.windows, k);
+  out.windowColor.lerpColors(a.windowColor, b.windowColor, k);
+  out.master = lerpN(a.master, b.master, k);
+  out.presence = lerpN(a.presence, b.presence, k);
+  out.ember = lerpN(a.ember, b.ember, k);
+  out.castle = lerpN(a.castle, b.castle, k);
+  out.sides = lerpN(a.sides, b.sides, k);
+  out.battens = lerpN(a.battens, b.battens, k);
+  out.dragon = lerpN(a.dragon, b.dragon, k);
+  out.wingLed = lerpN(a.wingLed, b.wingLed, k);
+  out.wingWash = lerpN(a.wingWash, b.wingWash, k);
+  out.dragonWash = lerpN(a.dragonWash, b.dragonWash, k);
+  out.castleColW = lerpOverride(a.castleCol, a.castleColW, b.castleCol, b.castleColW, k, out.castleCol);
+  out.sidesColW = lerpOverride(a.sidesCol, a.sidesColW, b.sidesCol, b.sidesColW, k, out.sidesCol);
+  out.crownColW = lerpOverride(a.crownCol, a.crownColW, b.crownCol, b.crownColW, k, out.crownCol);
+  out.wingColW = lerpOverride(a.wingCol, a.wingColW, b.wingCol, b.wingColW, k, out.wingCol);
+  out.garlands = lerpN(a.garlands, b.garlands, k);
+  out.garlandCol.lerpColors(a.garlandCol, b.garlandCol, k);
+  out.garlandPat = k < 0.5 ? a.garlandPat : b.garlandPat;
+  out.garlandRate = k < 0.5 ? a.garlandRate : b.garlandRate;
 }

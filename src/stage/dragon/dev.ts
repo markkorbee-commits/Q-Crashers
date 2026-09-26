@@ -10,7 +10,7 @@ import * as THREE from 'three';
 import type { App } from '../../core/App';
 import type { FrameContext } from '../../core/types';
 import { DragonCrown } from '../DragonCrown';
-import { createStageLook, type StageLook } from '../StageLook';
+import { createStageLookEx, type StageLook } from '../StageLook';
 
 export interface DevOpts {
   preset?: string;
@@ -121,11 +121,13 @@ export async function installCrownDev(app: App, o: DevOpts = {}): Promise<Record
   // the terrain stub's placeholder stage block would hide the crown
   app.scene.getObjectByName('placeholder-stage')?.removeFromParent();
   if (o.castle !== false) app.scene.add(placeholderCastle(crown));
-  const look = createStageLook();
+  const look = createStageLookEx();
   const preset = P[o.preset ?? 'magenta'] ?? P.magenta;
   app.onFrame((ctx: FrameContext) => {
     const t = o.t ?? ctx.showTime;
     preset(look, t);
+    look.wingLed.copy(look.led);
+    look.wingLed2.copy(look.led2);
     look.ledPattern = o.pattern ?? 0;
     look.ledPhase = t * 2.5;
     look.rosetteAngle = t * 0.6;

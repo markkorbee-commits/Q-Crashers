@@ -23,6 +23,8 @@ export interface WingResult {
   roof: V3[];
   /** moving-head positions along each membrane panel's leading edge (one row per panel) */
   fixtureRows: V3[][];
+  /** festoon bulb strings (polylines): the panels' sagging top edges and the arched arm */
+  garlands: V3[][];
 }
 
 interface Finger {
@@ -32,7 +34,11 @@ interface Finger {
 
 export function buildWings(k: Kit): { wings: WingResult[]; membrane: THREE.BufferGeometry } {
   const mb = new MembraneBuilder();
+  // every wing part carries fx tag 2 (the wash rig can then light the wings and the dragon apart)
+  const buckets = [k.world.shell, k.world.armor, k.world.steel, k.world.copper, k.world.lava, k.world.ivory, k.world.flesh, k.world.rider];
+  for (const b of buckets) b.tag = WING_FX;
   const wings = [-1, 1].map((s) => buildWing(k, s, mb));
+  for (const b of buckets) b.tag = 0;
   return { wings, membrane: mb.build() };
 }
 
@@ -65,7 +71,7 @@ class MembraneBuilder {
     g.setAttribute('memb', new THREE.Float32BufferAttribute(this.memb, 3));
     const n = this.pos.length / 3;
     g.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(n * 3).fill(1), 3));
-    g.setAttribute('fx', new THREE.Float32BufferAttribute(new Float32Array(n), 1));
+    g.setAttribute('fx', new THREE.Float32BufferAttribute(new Float32Array(n).fill(WING_FX), 1));
     g.setIndex(this.idx);
     g.computeBoundingSphere();
     return g;
@@ -120,7 +126,7 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
         const r = THREE.MathUtils.lerp(0.66, 0.4, t);
         pts.push(p.addScaledVector(nrm, r * 0.9 + 0.06).addScaledVector(lat, off));
       }
-      W.strips.add(pts, 0, 0.13, 0, i * 0.2 + (off > 0 ? 0.1 : 0));
+      W.strips.add(pts, WING_LED, 0.13, 0, i * 0.2 + (off > 0 ? 0.1 : 0));
     }
   });
 
@@ -150,7 +156,7 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
       const p = arm.at(t);
       pts.push(p.addScaledVector(nrm, armR(t) + 0.06));
     }
-    W.strips.add(pts, 0, 0.14, 0, 0.77);
+    W.strips.add(pts, WING_LED, 0.14, 0, 0.77);
   }
   // perforated bone fin riding along the top of the arm (one continuous curved plate with holes)
   {
@@ -204,6 +210,21 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
   // ------------------------------------------------------------------ membranes (Coons patches)
   const rosetteFrames: THREE.Matrix4[] = [];
   const fixtureRows: V3[][] = [];
+  const garlands: V3[][] = [];
+  // warm festoon riding on top of the arched arm (dragon shoulder -> inner finger)
+  {
+    const g: V3[] = [];
+    for (let j = 0; j <= 24; j++) {
+      const t = 0.04 + (j / 24) * 0.9;
+      const p = arm.at(t);
+      const d = arm.tangent(t);
+      let up = v3().crossVectors(nrm, d).normalize();
+      if (up.y < 0) up.negate();
+      // riding high and proud of the arm, so the arc reads over the inner towers from the field
+      g.push(p.addScaledVector(up, armR(t) + 0.7).addScaledVector(nrm, armR(t) + 1.1));
+    }
+    garlands.push(g);
+  }
   const nu = segs(k, 22, 10);
   const nv = segs(k, 26, 12);
   const fingerAt = (f: Finger, t: number) => f.line.at(t);
@@ -239,14 +260,16 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
       lenL: fa.line.length * (ATT - t0),
     });
   };
-  fanPanel(fingers[0], fingers[1], 1.9, 0.0);
-  fanPanel(fingers[1], fingers[2], 2.4, 0.33);
+  // deep concave top edges between the finials: the "pagoda roof" silhouette of the official photos
+  // (tall spiky tips, the membrane and its festoon sagging well below them)
+  fanPanel(fingers[0], fingers[1], 7.0, 0.0);
+  fanPanel(fingers[1], fingers[2], 8.0, 0.33);
   {
     // inner panel: inner finger (from the arm join up) / sag edge to the shoulder / arm
     const fi = fingers[2];
     const tJ = 0.37;
     const sTop = L.shoulder.clone().add(v3(0, 2.6, -0.4));
-    const top = sagCurve(tipBelow(fi), sTop, 1.2);
+    const top = sagCurve(tipBelow(fi), sTop, 3.4);
     panels.push({
       left: (v, o) => o.copy(fingerAt(fi, tJ + (ATT - tJ) * v)),
       right: (v, o) => o.lerpVectors(L.shoulder, sTop, v),
@@ -336,7 +359,13 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
     const edge: V3[] = [];
     const ne = 24;
     for (let i = 0; i <= ne; i++) edge.push(pn.top(i / ne, v3()).addScaledVector(nrm, 0.12));
-    W.strips.add(edge, 0, 0.13, 0, 0.3 + pi * 0.2);
+    W.strips.add(edge, WING_LED, 0.13, 0, 0.3 + pi * 0.2);
+    // warm festoon along the sagging top edge, hanging just in front of the LED line
+    {
+      const g: V3[] = [];
+      for (let i = 0; i <= ne; i++) g.push(pn.top(i / ne, v3()).addScaledVector(nrm, 0.42).add(v3(0, -0.25, 0)));
+      garlands.push(g);
+    }
     const eLine = new Polyline(edge);
     const nSp = pi === 2 ? 6 : 10;
     for (let i = 1; i < nSp; i++) {
@@ -347,7 +376,7 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
       if (out.y < 0) out.negate();
       out.addScaledVector(v3(s, 0, 0), 0.15).normalize();
       W.steel.add(spike(0.9 + rnd() * 0.5, 0.16, { sides: 4, segs: 2 }), frameY(p, out, 0, 1, nrm));
-      W.bulbs.add(p.clone().addScaledVector(nrm, 0.25).addScaledVector(out, -0.3), BULB.led, t * eLine.length, 0.14, (i * 0.13 + pi * 0.3) % 1);
+      W.bulbs.add(p.clone().addScaledVector(nrm, 0.25).addScaledVector(out, -0.3), BULB.wingLed, t * eLine.length, 0.14, (i * 0.13 + pi * 0.3) % 1);
     }
     // row of moving-head bodies on short arms along the top edge (1.3 m pitch; beams are the
     // lighting system's job, these are the physical fixtures seen in the daylight photos)
@@ -400,7 +429,7 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
         const len = fi === 1 ? [1.5, 1.9, 2.3][Math.min(2, size)] : [1.5, 1.9, 2.3][size];
         const e0 = v3(-0.2, 0.2, 0.08).applyMatrix4(m);
         const e1 = v3(-0.31 + len * 0.18 * 0.6, len * 0.8, 0.08).applyMatrix4(m);
-        W.strips.add([e0, e1], 0, 0.12, t * 20, (fi * 0.3 + i * 0.07) % 1);
+        W.strips.add([e0, e1], WING_LED, 0.12, t * 20, (fi * 0.3 + i * 0.07) % 1);
       }
     }
   });
@@ -425,7 +454,7 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
     W.copper.add(flameProto.clone(), fm.clone().multiply(new THREE.Matrix4().makeRotationY(Math.PI / 2)).multiply(new THREE.Matrix4().makeScale(0.72, 0.85, 1)), i === 1 ? PAL.flameRed : PAL.flameOrange);
     const fo = flameOutline.map((p) => v3(p.x * 1.35, p.y * 1.35, 0.2).applyMatrix4(fm));
     fo.push(fo[0].clone());
-    W.strips.add(fo, 0, 0.1, 0, 0.9);
+    W.strips.add(fo, WING_LED, 0.1, 0, 0.9);
     // spear point
     const top = L.finialTops[i];
     const sd = v3().subVectors(top, tip);
@@ -439,7 +468,7 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
       W.steel.add(spike(1.2 + (1 - Math.abs(ang)) * 0.6, 0.2, { sides: 5, segs: 4, bendZ: -0.5, bend: ang * 0.35 }), hm);
     }
     // a dot on the collar
-    W.bulbs.add(tip.clone().addScaledVector(nrm, 0.7), BULB.accent, i * 3, 0.2, 0.2 * i);
+    W.bulbs.add(tip.clone().addScaledVector(nrm, 0.7), BULB.wingAccent, i * 3, 0.2, 0.2 * i);
     points.push(tip.clone(), top.clone());
   });
   // wrist and arm join points (for flames along the slopes)
@@ -477,11 +506,17 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
       const a = (j / 40) * Math.PI * 2;
       rp.push(v3(Math.cos(a) * 2.42, Math.sin(a) * 2.42, 0.3).applyMatrix4(m));
     }
-    W.strips.add(rp, 1, 0.12, 0, 0.5 + i * 0.1);
+    W.strips.add(rp, WING_ACCENT, 0.12, 0, 0.5 + i * 0.1);
   });
 
-  return { layout: L, rosetteFrames, points, roof, fixtureRows };
+  return { layout: L, rosetteFrames, points, roof, fixtureRows, garlands };
 }
+
+/** fx tag of wing geometry (crown shading: step(1.5, fx) = wing) */
+export const WING_FX = 2;
+/** strip groups of the wing LEDs (crownLed: +2 = wing colours and the wing level) */
+const WING_LED = 2;
+const WING_ACCENT = 3;
 
 function withAxis(g: THREE.BufferGeometry, m: THREE.Matrix4): THREE.BufferGeometry {
   g.rotateX(Math.PI / 2);

@@ -4,6 +4,7 @@ import { boxMinMax, cyl, decorDisc, decorPanel, GLOW, METAL, PAINT, prismX, rod,
 import { extrude, frameShape, type Opening, paneShape, wallShape } from '../lib/gothic';
 import { armX, ground, L, ledgeTop, rampartTop } from '../layout';
 import { LED_KIND } from '../materials/LedMaterial';
+import { GARLAND, type Garlands } from '../dragon/shading';
 
 const OUT = new THREE.Vector3(0, 0, 1);
 const UP = new THREE.Vector3(0, 1, 0);
@@ -22,6 +23,17 @@ const _box = new THREE.BoxGeometry(1, 1, 1);
  *    units, 4 m openings from Z 28 on (access to the crest bars), and the arm-end turret at (±94, 58)
  *    (lasers on its roof, the X-fan / CO2 / last flame on its field-side bastion).
  */
+/** warm festoon swags along the side-section eaves, pilaster to pilaster (stage.garlands 'sides') */
+export function addSideGarlands(g: Garlands): void {
+  const pil = [37.6, 44.9, 52.2, 59.5, 66.8, 74.1, 81.4, 88.7];
+  const z = L.sideFrontZ + 0.5;
+  const y = L.wallTop - 0.55;
+  for (const s of [-1, 1]) {
+    let u = 0;
+    for (let i = 0; i + 1 < pil.length; i++) u = g.swag(new THREE.Vector3(s * pil[i], y, z), new THREE.Vector3(s * pil[i + 1], y, z), 0.75, GARLAND.sides, 0.9, 0.15, u);
+  }
+}
+
 export class SidesBuilder {
   private rng = new Rng(88);
 

@@ -86,12 +86,14 @@ export class StageLights {
           l.intensity = (60 * E + 140 * wi) * (0.5 + 0.7 * look.energy) * (1 + look.pulse);
           break;
         case 'front':
-          l.color.copy(wash).lerp(look.led2, (rig.side > 0 ? 0.25 : 0.1) * E);
-          l.intensity = (50 * E + 130 * wi) * (0.6 + 0.5 * look.energy) * (1 + 0.6 * look.pulse + look.strobe * 2);
+          // FOH washes aimed at the castle: they follow the castle level (a dark-castle look keeps them low)
+          l.color.copy(wash).lerp(look.castleLed2, (rig.side > 0 ? 0.25 : 0.1) * E);
+          l.intensity = (50 * E + 130 * wi) * (0.6 + 0.5 * look.energy) * (1 + 0.6 * look.pulse + look.strobe * 2) * (0.15 + 0.85 * Math.min(1.3, look.castleGain));
           break;
         case 'base':
-          l.color.copy(look.led2).lerp(wash, 0.35);
-          l.intensity = 45 * (0.4 * E + look.ledIntensity);
+          // low lights on the castle base: they belong to the castle (region level / colour)
+          l.color.copy(look.castleLed2).lerp(wash, 0.35);
+          l.intensity = 45 * (0.4 * E + look.ledIntensity) * Math.min(1.5, look.castleGain);
           break;
         case 'rim':
           l.color.copy(look.led).lerp(wash, 0.5);

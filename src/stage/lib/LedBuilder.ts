@@ -54,11 +54,15 @@ export class LedBuilder {
   /**
    * LED batten from a to b facing `out`, `width` metres wide.
    * `s0` = batten coordinate at a (continuous along polylines).
+   * `rnd` = colour group for battens: 0 content colour, 1 accent (pilaster strips), 2 horizontal outline
+   * (cornices, eaves, ledges: drawn at the dimmer outline level, the real set has no bright outline
+   * there). Omitted (-1): horizontal battens become outlines, everything else content colour.
    */
-  bar(a: THREE.Vector3, b: THREE.Vector3, out: THREE.Vector3, width = 0.07, strip = this.newStrip(), s0 = 0, kind: number = LED_KIND.bar, rnd = 0): number {
+  bar(a: THREE.Vector3, b: THREE.Vector3, out: THREE.Vector3, width = 0.07, strip = this.newStrip(), s0 = 0, kind: number = LED_KIND.bar, rnd = -1): number {
     _d.subVectors(b, a);
     const len = _d.length();
     _d.normalize();
+    if (rnd < 0) rnd = kind === LED_KIND.bar && Math.abs(_d.y) < 0.35 ? 2 : 0;
     _w.crossVectors(out, _d).normalize().multiplyScalar(width / 2);
     const lift = _n.copy(out).normalize().multiplyScalar(0.02);
     const A = a.clone().add(lift).sub(_w);
@@ -74,13 +78,13 @@ export class LedBuilder {
     return s0 + len;
   }
 
-  /** a continuous batten along a polyline */
-  polyline(pts: THREE.Vector3[], out: THREE.Vector3 | ((i: number) => THREE.Vector3), width = 0.07, kind: number = LED_KIND.bar): void {
+  /** a continuous batten along a polyline (arch outlines: content colour, never the outline group) */
+  polyline(pts: THREE.Vector3[], out: THREE.Vector3 | ((i: number) => THREE.Vector3), width = 0.07, kind: number = LED_KIND.bar, grp = 0): void {
     const strip = this.newStrip();
     let s = 0;
     for (let i = 0; i + 1 < pts.length; i++) {
       const o = typeof out === 'function' ? out(i) : out;
-      s = this.bar(pts[i], pts[i + 1], o, width, strip, s, kind);
+      s = this.bar(pts[i], pts[i + 1], o, width, strip, s, kind, grp);
     }
   }
 
