@@ -42,6 +42,13 @@ Engine behaviour of the show camera (no cue change, all deterministic per shot):
 * Photo terrace: a pose on or just behind the terrace below 8 m is moved along its sight line to just
   in front of the front rail (≤ 9 m, framing unchanged), so the rails and glass never cross the frame.
 
+Authoring convention (round 7): a `camera.shot` starts on the exact first frame of its video shot,
+`t = cut − 0.036` with the cut from `$ENDSHOW_DATA/cuts.json` (exact since 27 Sep 2026), and the previous
+shot ends there. Not every entry of the cut list is a camera cut: white flashes, strobe hits and look
+changes inside one shot are listed too (e.g. v509.64, v510.2, v510.6, v1046.36, v1048.64, v1437.48,
+v1508.48, v1509.8, v1510.44), and a few real cuts are missing from it (v506.52, v1188.36, v1510.08,
+v1521.0): check a 25 fps sheet around the time before splitting or merging shots.
+
 ## atmos
 
 | fx | params |

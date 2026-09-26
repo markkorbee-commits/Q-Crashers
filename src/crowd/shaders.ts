@@ -9,6 +9,9 @@
  * rises the crowd joins in progressively and every pose blends smoothly (no popping).
  */
 
+/** strength of the arch-crown downlights on the performers in the portal (x LightEnv.archSpotIntensity 0..1.5) */
+const ARCH_KEY = 1.4;
+
 export const COMMON = /* glsl */ `
 #define PI 3.14159265
 #define TAU 6.28318531
@@ -866,7 +869,7 @@ ${ALBEDO_HEADER}
 ${LIGHTING}
 ${FOG_F}
 uniform sampler2D tFlags;
-${performer ? 'uniform vec4 uLantern; uniform vec4 uTube; uniform vec4 uKey; uniform vec3 uPerfKey; uniform vec3 uPerfBack; varying float vGlow; varying float vKey; varying vec3 vLanL; varying vec3 vLanR; varying vec2 vLanOn;' : ''}
+${performer ? 'uniform vec4 uLantern; uniform vec4 uTube; uniform vec4 uKey; uniform vec4 uArch; uniform vec3 uPerfKey; uniform vec3 uPerfBack; varying float vGlow; varying float vKey; varying vec3 vLanL; varying vec3 vLanR; varying vec2 vLanOn;' : ''}
 varying vec3 vN; varying vec3 vW; varying vec3 vLocal; flat varying ivec4 vLook; flat varying int vBone; flat varying int vSlot;
 ${lens ? 'varying float vFade;' : ''}
 
@@ -945,6 +948,16 @@ ${
       vec3 Lk2 = normalize(vec3(vW.x * 0.3, 7.0, 40.0) - vW);
       light += (uPerfKey + vec3(0.035, 0.035, 0.04)) * vKey * (max(dot(N, Lk2), 0.0) + 0.08);
     }
+  }
+  // the portal's ring of arch-crown downlights (LightingSystem, LightEnv.archSpot*): the performers in the arch
+  // and on the podium in front of it take their key light from the cans above them (v646–740: the lead on her
+  // pedestal and the bearers round her lit from the crown, the colour of the cans)
+  float inArch = smoothstep(3.8, 2.4, abs(vW.x)) * smoothstep(-10.5, -8.8, vW.z) * smoothstep(-0.8, -2.6, vW.z);
+  if (inArch > 0.0 && uArch.a > 0.0) {
+    // (the cans hang in the throat and are focused forward onto the deck: light from above, a little in front)
+    vec3 La = vec3(clamp(vW.x * 0.6, -1.9, 1.9), 6.6, max(vW.z + 0.8, -8.5)) - vW;
+    float la = max(length(La), 0.3);
+    light += uArch.rgb * (uArch.a * inArch * ${ARCH_KEY.toFixed(3)}) * (max(dot(N, La / la), 0.0) + 0.3 * max(N.y, 0.0) + 0.12) * (8.0 / (6.0 + la * la));
   }
   // backlight from the set behind the deck performers (rig, backlight blinders, LED walls): the film's
   // deck close-ups show coloured edges around a darker front; seen from behind it lights their backs
