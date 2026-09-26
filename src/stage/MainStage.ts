@@ -15,7 +15,7 @@ import { DevDaylight } from './DevDaylight';
 import { DragonCrown } from './DragonCrown';
 import { createKit, type StageKit } from './kit';
 import { armX, L } from './layout';
-import { LookResolver } from './look/LookResolver';
+import { LookResolver, STAGE_FLASH_SHARE, stageFlash } from './look/LookResolver';
 import { createLedOverlayMaterial } from './materials/LedMaterial';
 import { StageMaterials } from './materials/StageMaterials';
 import { StageLights } from './StageLights';
@@ -25,7 +25,7 @@ const RANK: Record<QualitySettings['level'], number> = { mobile: 0, medium: 1, h
 
 const CANDLE = new THREE.Color('#ffb45a');
 /** LED colour uniforms switched off by the dev `?daylight` view */
-const LED_COLOURS = ['uLed', 'uLed2', 'uAccent', 'uLedS', 'uLed2S', 'uAccentS', 'uWin', 'uArcade', 'uLamp', 'uLantern', 'uCandle', 'uPortal', 'uContentCol', 'uContentColS'] as const;
+const LED_COLOURS = ['uLed', 'uLed2', 'uAccent', 'uLedS', 'uLed2S', 'uAccentS', 'uWin', 'uArcade', 'uLamp', 'uLantern', 'uCandle', 'uPortal', 'uContentCol', 'uContentColS', 'uContentCol2'] as const;
 
 /**
  * Castle emitter calibration against the official Endshow footage: the castle is a dark printed set
@@ -414,15 +414,13 @@ export class MainStageSystem implements System {
       // refresh the env-driven fields only
       look.wash.copy(app.env.stageWashColor);
       look.washIntensity = app.env.stageWashIntensity;
-      const fi = app.env.flashIntensity;
-      look.flash.copy(app.env.flashColor);
-      if (fi > 3) look.flash.multiplyScalar(3 / fi);
+      stageFlash(app.env, look.flash);
       look.strobe = Math.min(1, Math.max(0, app.env.strobe));
       look.pulse = Math.max(look.pulse, look.strobe * 0.6);
     }
     this.applyUniforms(ctx, look);
     this.updateOverlay(ctx.camera);
-    this.lights.update(look, app.env.flashPos, app.env.flashIntensity);
+    this.lights.update(look, app.env.flashPos, app.env.flashIntensity * STAGE_FLASH_SHARE);
     this.vault.update(ctx, look);
     try {
       this.crown.update(ctx, look);
@@ -541,6 +539,7 @@ export class MainStageSystem implements System {
     l.uContentMix.value = look.contentMix;
     (l.uContentCol.value as THREE.Color).copy(look.contentColor).multiplyScalar(2.2);
     (l.uContentColS.value as THREE.Color).copy(look.contentColorS).multiplyScalar(2.2);
+    (l.uContentCol2.value as THREE.Color).copy(look.contentColor2).multiplyScalar(2.2);
     // every panel content mode (incl. the absolute fire / ice / ember looks) follows the master level;
     // under 'ember' the castle panels stay low so only the dragon reads
     l.uContentGain.value = M * (1 - 0.8 * look.ember);

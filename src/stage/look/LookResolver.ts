@@ -123,6 +123,8 @@ interface ContentTarget {
   led: THREE.Color;
   led2: THREE.Color;
   col: THREE.Color;
+  /** second colour of the look (the recesses of the castle print on the panels) */
+  col2: THREE.Color;
   banner: number;
   skull: number;
   emblem: number;
@@ -134,6 +136,7 @@ const newTarget = (): ContentTarget => ({
   led: new THREE.Color(),
   led2: new THREE.Color(),
   col: new THREE.Color(),
+  col2: new THREE.Color(),
   banner: 0,
   skull: 0,
   emblem: 0,
@@ -315,9 +318,14 @@ export class LookResolver {
         o.ledI = Math.max(ledI, 0.9);
         break;
     }
+    // the panels' castle print: recesses take the second colour (else the content colour itself)
+    o.col2.copy(o.col);
     // optional second colour + pixel pattern of a 'color' look (stripes / chase / dashes / split / dots)
     if (mode !== 'off') {
-      if (typeof c.p.color2 === 'string') resolveColor(c.p.color2, pal, o.led2, 'secondary');
+      if (typeof c.p.color2 === 'string') {
+        resolveColor(c.p.color2, pal, o.led2, 'secondary');
+        o.col2.copy(o.led2);
+      }
       if (typeof c.p.pattern === 'string' && CONTENT_PATTERN[c.p.pattern] !== undefined) o.pat = CONTENT_PATTERN[c.p.pattern];
     }
     return o;
@@ -497,6 +505,7 @@ export class LookResolver {
       out.content = A.mode;
       out.contentMix = mixA;
       out.contentColor.copy(A.col);
+      out.contentColor2.copy(A.col2);
       out.led.lerp(A.led, w);
       out.led2.lerp(A.led2, w);
       out.bannerGlow += (A.banner - out.bannerGlow) * w;
@@ -664,9 +673,7 @@ export class LookResolver {
     // ---- 5. app.env: wash, flash, strobe --------------------------------------------------------------
     out.wash.copy(env.stageWashColor);
     out.washIntensity = env.stageWashIntensity;
-    const fi = env.flashIntensity;
-    out.flash.copy(env.flashColor);
-    if (fi > 3) out.flash.multiplyScalar(3 / fi);
+    stageFlash(env, out.flash);
     out.strobe = clamp(env.strobe, 0, 1);
     out.pulse = Math.max(out.pulse, out.strobe * 0.6);
     // master level (blackouts) scales the shared fields the crown reads as well; the pixel LEDs also
@@ -786,6 +793,22 @@ export class LookResolver {
 
 const newScratch = newVals();
 
+/**
+ * Share of the pyro / firework flash (app.env) that reaches the set: shells burst 60-150 m up and the
+ * pyro fires away from the set, so the printed castle and the crown only catch a fraction of it (round 5,
+ * Mac GPU: video 264.75 / 1438.5 / 1047.25 keep a dark set under bursts and gerbs; 0.45 measured best,
+ * 0 loses the pyro-lit set of 876)
+ */
+export const STAGE_FLASH_SHARE = 0.45;
+
+/** the flash colour the set receives this frame (env colour soft-capped at intensity 3, x the set's share) */
+export function stageFlash(env: LightEnv, out: THREE.Color): THREE.Color {
+  const fi = env.flashIntensity * STAGE_FLASH_SHARE;
+  out.copy(env.flashColor).multiplyScalar(STAGE_FLASH_SHARE);
+  if (fi > 3) out.multiplyScalar(3 / fi);
+  return out;
+}
+
 /** index of the latest cue with c.t <= t in a start-sorted list (-1 when none) */
 function latestIndex(s: Cue[], t: number): number {
   let lo = 0,
@@ -809,8 +832,13 @@ function blendTarget(a: ContentTarget, b: ContentTarget, k: number, out: Content
   out.led.lerpColors(a.led, b.led, k);
   out.led2.lerpColors(a.led2, b.led2, k);
   // fading out to 'off': the panels keep showing the outgoing content colour while they dissolve
-  if (b.mode === 0) out.col.copy(a.col);
-  else out.col.lerpColors(a.col, b.col, k);
+  if (b.mode === 0) {
+    out.col.copy(a.col);
+    out.col2.copy(a.col2);
+  } else {
+    out.col.lerpColors(a.col, b.col, k);
+    out.col2.lerpColors(a.col2, b.col2, k);
+  }
   out.banner = a.banner + (b.banner - a.banner) * k;
   out.skull = a.skull + (b.skull - a.skull) * k;
   out.emblem = a.emblem + (b.emblem - a.emblem) * k;

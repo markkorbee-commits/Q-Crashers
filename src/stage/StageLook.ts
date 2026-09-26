@@ -106,6 +106,8 @@ export interface StageLookEx extends StageLook {
   contentColor: THREE.Color;
   /** content colour of the side-section panels (sidesColor override on top of the castle's) */
   contentColorS: THREE.Color;
+  /** second colour of the content look (color2, else the content colour): recesses of the castle print */
+  contentColor2: THREE.Color;
   /** 0..1 dissolve of the panels */
   contentMix: number;
   /** 0..1 master level of all castle emitters (blackouts: section 'silence' or state param 'master') */
@@ -179,6 +181,7 @@ export function createStageLookEx(): StageLookEx {
     content: 0,
     contentColor: new THREE.Color('#ff5a12'),
     contentColorS: new THREE.Color('#ff5a12'),
+    contentColor2: new THREE.Color('#ff5a12'),
     contentMix: 0,
     master: 1,
     castleGain: 1,
