@@ -165,6 +165,11 @@ export class CameraRig implements System {
     this.app.postfx.photo.focusDistance = Math.max(0, d);
   }
 
+  /** current photo focus distance (m; 0 = not set): the photo panel mirrors rig-side focus changes */
+  get focusDistance(): number {
+    return this.app.postfx.photo.focusDistance;
+  }
+
   setAperture(a: number): void {
     const ph = this.app.postfx.photo;
     const was = ph.aperture;

@@ -258,6 +258,14 @@ uniform sampler2D tGlare;
 uniform sampler2D tAfter;
 uniform sampler2D tDof;
 uniform sampler2D tVeil;  // coarsest bloom mip: veiling glare
+uniform vec4 uVeilSize;  // its w, h, 1/w, 1/h
+uniform vec4 uGlare;     // scene (pyro) glare: frame-wide lift colour (exposed HDR), wide-PSF gain
+#define GLARE_MAX 12
+uniform int uGN;               // pyro halo line sources in use
+uniform vec4 uGS[GLARE_MAX];   // segment a.xy, b.xy (screen heights from the picture centre)
+uniform vec4 uGC[GLARE_MAX];   // halo colour (premultiplied), radius at a
+uniform float uGRB[GLARE_MAX]; // radius at b
+uniform float uGHalo;          // halo gain
 uniform vec4 uView;      // altered side head motion: offset x, y (screen heights), roll (rad), 1/zoom
 uniform vec4 uBody;      // altered side: heat 0..1, heartbeat pulse 0..1, fade 0..1, veil
 uniform vec4 uRes;       // w, h, 1/w, 1/h
@@ -471,6 +479,27 @@ vec3 tonemap(vec3 c) {
   return tp * ratio;
 }
 
+/** soft r^-3 halos around the pyro line sources (lens veiling glare + lit smoke around the fire) */
+vec3 glareHalos(vec2 p) {
+  vec3 acc = vec3(0.0);
+  for (int i = 0; i < GLARE_MAX; i++) {
+    if (i >= uGN) break;
+    vec4 s = uGS[i];
+    vec4 c = uGC[i];
+    vec2 ab = s.zw - s.xy;
+    vec2 ap = p - s.xy;
+    float t = clamp(dot(ap, ab) / max(dot(ab, ab), 1e-8), 0.0, 1.0);
+    vec2 d = ap - ab * t;
+    float r = mix(c.w, uGRB[i], t);
+    float d2 = dot(d, d) / (r * r);
+    // wide r^-3 scatter tail + a tight, hot core (the flame row itself blows out to white)
+    float q = 1.0 + d2;
+    float qc = 1.0 + d2 * 16.0;
+    acc += c.rgb * (1.0 / (q * sqrt(q)) + 1.5 / (qc * qc));
+  }
+  return acc * uGHalo;
+}
+
 vec3 toSRGB(vec3 c) {
   return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
 }
@@ -531,8 +560,14 @@ void main() {
     col = col * (1.0 - bs * brightShare(col, tk)) + bicubic(tBloom, suv, uBaseSize) * bs;
   }
   if (uFeat.x > 0.0 && p2.y > 0.001) col += texture(tGlare, suv).rgb * (uFeat.x * p2.y);
+  // ---- scene veiling glare (both sides): a lens looking into a flame wall scatters its light over the
+  // whole picture. Wide scatter tail of the real bright pass + a lift in the pyro colour: flat over the
+  // frame plus a broad halo around the fire.
+  if (uGlare.w > 0.0) col += bicubic(tVeil, suv, uVeilSize) * uGlare.w;
+  col += uGlare.rgb;
+  if (uGN > 0) col += glareHalos((suv - 0.5) * vec2(aspect, 1.0));
   // ---- veiling glare: dilated pupils scatter every bright light over the whole picture (milky wash)
-  if (uBody.w > 0.001 && side > 0.5) col += (texture(tVeil, suv).rgb * 0.75 + texture(tVeil, vec2(0.5, 0.55)).rgb * 0.25) * uBody.w;
+  if (uBody.w > 0.001 && side > 0.5) col += (bicubic(tVeil, suv, uVeilSize) * 0.75 + texture(tVeil, vec2(0.5, 0.55)).rgb * 0.25) * uBody.w;
 
   // ---- afterimages: bleached regions no longer lit show the complementary colour
   if (uFeat.y > 0.5 && p2.z > 0.001) {

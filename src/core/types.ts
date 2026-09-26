@@ -44,8 +44,6 @@ export interface QualitySettings {
    * Graphics menu). Most of it is 2-triangle far impostors.
    */
   crowdCount: number;
-  /** crowd members rendered with the detailed mesh near the camera */
-  crowdNearCount: number;
   flagCount: number;
   /** multiplier 0..1 applied to every particle effect's particle count */
   particleScale: number;

@@ -4,6 +4,7 @@ import { AudioSources } from '../audio/AudioSources';
 import type { AudioTrack } from '../audio/AudioTrack';
 import { SilentTrack } from '../audio/AudioTrack';
 import { PostFX } from '../postfx/PostFX';
+import { SceneGlare } from '../postfx/SceneGlare';
 import { ShowClock } from '../show/ShowClock';
 import { ShowEngine, type ResolvedPalette } from '../show/ShowEngine';
 import { Anchors } from './Anchors';
@@ -95,6 +96,8 @@ export class App {
   quality: QualitySettings;
   clock!: ShowClock;
   postfx: PostFX;
+  /** pyro veiling glare driver (pyro light field -> postfx.glare), updated right before rendering */
+  readonly sceneGlare = new SceneGlare();
   palette: ResolvedPalette = ShowEngine.newPalette();
   /** player feet position, maintained by the PlayerController */
   readonly playerPos = new THREE.Vector3(0, 0, 160);
@@ -564,6 +567,8 @@ export class App {
     this.updateSystems(ctx, this.params.has('debug') || this.frame % 30 === 0 || this.frame < 90);
     for (const h of this.frameHooks) h(ctx);
     this.input.endFrame();
+    // after the frame hooks: the fx engine has packed this frame's pyro light field
+    this.sceneGlare.update(this, dt, ctx.seeked);
     this.postfx.render(this.scene, this.camera, dt, ctx.time);
     this.lastRender.calls = this.renderer.info.render.calls;
     this.lastRender.triangles = this.renderer.info.render.triangles;
@@ -630,6 +635,8 @@ export class App {
     ctx.seeked = true;
     ctx.showPlaying = false;
     this.updateSystems(ctx, false);
+    for (const h of this.frameHooks) h(ctx);
+    this.sceneGlare.update(this, 0, true);
     this.postfx.render(this.scene, this.camera, 0, ctx.time);
   }
 }

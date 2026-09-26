@@ -38,6 +38,34 @@ export interface BodyParams {
 }
 
 /**
+ * Scene veiling glare (written each frame by SceneGlare from the pyro light field): a camera looking
+ * into a flame wall scatters its light over the whole picture. Applies to both sides of the compare
+ * split (it is the scene and the lens, not the body).
+ */
+export interface GlareParams {
+  /** 0..1 global glare amount (smoothed): wider bloom, lens scatter tail, faint frame-wide lift */
+  amount: number;
+  /** colour of the frame-wide lift, normalised (max channel 1), linear */
+  r: number;
+  g: number;
+  b: number;
+  /** halo line sources in use (≤ GLARE_MAX) */
+  count: number;
+  /**
+   * per source: segment end points in centred screen units (x, y in screen heights from the picture
+   * centre, +y up): (ax, ay, bx, by)
+   */
+  readonly seg: THREE.Vector4[];
+  /** per source: halo colour (linear, premultiplied, x glareTune.halo) and halo radius at A (screen heights) */
+  readonly col: THREE.Vector4[];
+  /** per source: halo radius at B (screen heights) */
+  readonly rb: number[];
+}
+
+/** maximum number of glare halo line sources (the fx engine packs ≤ 12 pyro lights) */
+export const GLARE_MAX = 12;
+
+/**
  * HDR render pipeline:
  *   scene -> half-float MSAA target (+ depth texture, resolved only when DOF / motion blur read it)
  *   -> [trails feedback] -> MRT prefilter (blurred scene | thresholded bright) at 1/2 res
@@ -83,6 +111,23 @@ export class PostFX {
   readonly tone = { contrast: 1.5, shoulder: 0.95, hdrMax: 64, midIn: 0.18, midOut: 0.19, crosstalk: 10, crossSaturation: 1.6, saturation: 1 };
   /** musical drive for rhythmic perception effects (written by the PerceptionSystem) */
   readonly rhythm = { breath: 0, kick: 0 };
+  /** scene veiling glare from the pyro (written by SceneGlare each frame); identity = amount 0 */
+  readonly glare: GlareParams = {
+    amount: 0,
+    r: 1,
+    g: 0.45,
+    b: 0.15,
+    count: 0,
+    seg: Array.from({ length: GLARE_MAX }, () => new THREE.Vector4()),
+    col: Array.from({ length: GLARE_MAX }, () => new THREE.Vector4()),
+    rb: new Array<number>(GLARE_MAX).fill(0.1),
+  };
+  /**
+   * glare tuning: halo gain (exposed HDR units at full saturation), frame-wide lift, wide-PSF gain,
+   * extra bloom share, wide-mip emphasis, bloom threshold drop (fraction) and exposure lift (fraction)
+   * at amount = 1
+   */
+  readonly glareTune = { halo: 4, flat: 0.04, psf: 0.5, bloom: 0.8, wide: 1.2, threshold: 0.3, exposure: 0.06 };
 
   private readonly sober = PostFX.defaults();
   private readonly hdrType: THREE.TextureDataType;
@@ -105,7 +150,7 @@ export class PostFX {
   private bloomUp: RT[] = [];
   private trail: RT[] = [];
   private after: RT[] = [];
-  private glare: RT | null = null;
+  private starRT: RT | null = null;
   private dof: RT | null = null;
   private trailIdx = 0;
   private trailValid = false;
@@ -176,6 +221,13 @@ export class PostFX {
       tAfter: tex(),
       tDof: tex(),
       tVeil: tex(),
+      uVeilSize: v4(),
+      uGlare: v4(),
+      uGN: { value: 0 },
+      uGS: { value: this.glare.seg },
+      uGC: { value: this.glare.col },
+      uGRB: { value: this.glare.rb },
+      uGHalo: f(1),
       uView: v4(),
       uBody: v4(),
       uRes: v4(),
@@ -348,6 +400,7 @@ export class PostFX {
     if (b.heat > 0.003) fx.push('heat');
     if (b.fade > 0.003) fx.push('fade');
     if (b.veil > 0.003) fx.push('veil');
+    if (this.glare.amount > 0.003) fx.push(`glare${this.glare.amount.toFixed(2)}`);
     if (Math.abs(b.roll) > 1e-4 || Math.abs(b.offX) > 1e-4 || Math.abs(b.offY) > 1e-4) fx.push('view');
     return {
       postfx: on ? 'on' : 'off',
@@ -397,9 +450,15 @@ export class PostFX {
     const p = this.perception;
     const split = p.split >= 0 ? clamp(p.split, 0, 1) : -1;
     const photo = this.photo.enabled;
-    const baseEx = this.exposure * (photo ? this.photo.exposure : 1);
+    const gp = this.glare;
+    const gt = this.glareTune;
+    const G = clamp(gp.amount, 0, 1);
+    const photoEx = photo ? this.photo.exposure : 1;
+    // pyro glare: the camera's iris opens a touch into the lit smoke, and the bright pass reaches
+    // further down so the whole fire cloud blooms
+    const baseEx = this.exposure * photoEx * (1 + gt.exposure * G);
     const ls = clamp(p.lightSensitivity, 0, 1);
-    const thA = this.bloomThreshold;
+    const thA = this.bloomThreshold * (1 - gt.threshold * G);
     const knA = this.bloomKnee;
     const thB = thA * (1 - 0.72 * ls);
     const knB = knA * (1 + 0.6 * ls);
@@ -456,8 +515,10 @@ export class PostFX {
         this.down(s, i - 1, this.bloomDown[i]);
         s = this.bloomDown[i].texture;
       }
+      // under pyro glare the wide mips gain weight: the lens' long scatter tail becomes visible
+      const wide = gt.wide * G;
       let wsum = 0;
-      for (let i = 0; i < n; i++) wsum += this.bloomWeights[i] ?? 0.85;
+      for (let i = 0; i < n; i++) wsum += this.bloomWeight(i, n, wide);
       const inv = 1 / wsum;
       const u = this.mUp.uniforms;
       u.uRadius.value = this.bloomRadius;
@@ -466,8 +527,8 @@ export class PostFX {
         u.tLow.value = low;
         u.tCur.value = i === 0 ? bright : this.bloomDown[i].texture;
         (u.uLowTexel.value as THREE.Vector2).set(1 / this.levelW(i + 1), 1 / this.levelH(i + 1));
-        u.uLowWeight.value = (i === n - 2 ? (this.bloomWeights[n - 1] ?? 0.85) : 1) * (i === 0 ? inv : 1);
-        u.uCurWeight.value = (this.bloomWeights[i] ?? 0.85) * (i === 0 ? inv : 1);
+        u.uLowWeight.value = (i === n - 2 ? this.bloomWeight(n - 1, n, wide) : 1) * (i === 0 ? inv : 1);
+        u.uCurWeight.value = this.bloomWeight(i, n, wide) * (i === 0 ? inv : 1);
         this.draw(this.mUp, this.bloomUp[i]);
         low = this.bloomUp[i].texture;
       }
@@ -498,7 +559,7 @@ export class PostFX {
     const body = this.body;
     const star = clamp(body.star, 0, 2);
     if (ls > 0.003 && star > 0.003) {
-      const g = (this.glare ??= this.target(this.levelW(0), this.levelH(0)));
+      const g = (this.starRT ??= this.target(this.levelW(0), this.levelH(0)));
       const u = this.mGlare.uniforms;
       u.tSrc.value = bright;
       const w = this.levelW(0);
@@ -553,7 +614,18 @@ export class PostFX {
     u.tAfter.value = afterTex;
     u.tDof.value = dofOn ? this.dof!.texture : null;
     const veil = bloomOn ? clamp(body.veil, 0, 2) : 0;
-    u.tVeil.value = veil > 0.001 ? this.bloomDown[n - 1].texture : null;
+    const psf = bloomOn ? gt.psf * G : 0;
+    u.tVeil.value = veil > 0.001 || psf > 0.001 ? this.bloomDown[n - 1].texture : null;
+    {
+      const wv = this.levelW(n - 1);
+      const hv = this.levelH(n - 1);
+      (u.uVeilSize.value as THREE.Vector4).set(wv, hv, 1 / wv, 1 / hv);
+      // analytic halos / lift in exposed units: they follow the photo exposure like the fire itself
+      const flat = gt.flat * G * photoEx;
+      (u.uGlare.value as THREE.Vector4).set(gp.r * flat, gp.g * flat, gp.b * flat, psf);
+      u.uGN.value = Math.max(0, Math.min(GLARE_MAX, gp.count | 0));
+      this.mComposite.uniforms.uGHalo.value = gt.halo * photoEx;
+    }
     // head lurch / nystagmus: zoom in just enough that the rotated, shifted view never shows an edge
     const aspect = this.width / this.height;
     const roll = clamp(body.roll, -0.2, 0.2);
@@ -587,7 +659,7 @@ export class PostFX {
     const mbAllowed = !this.mobile;
     if (!mbAllowed) (u.uB3.value as THREE.Vector4).y = 0;
     (u.uThr.value as THREE.Vector4).set(thA, knA, thB, knB);
-    (u.uBloom.value as THREE.Vector2).set(bloomOn ? this.bloomStrength : 0, bloomOn ? 1 : 0);
+    (u.uBloom.value as THREE.Vector2).set(bloomOn ? Math.min(0.9, this.bloomStrength * (1 + gt.bloom * G)) : 0, bloomOn ? 1 : 0);
     (u.uLook.value as THREE.Vector4).set(baseEx, photo ? this.photo.vignette : this.vignette, photo ? this.photo.grain : this.grain, viewOn ? 1 : 0);
     (u.uFeat.value as THREE.Vector4).set(glareTex ? star : 0, afterTex ? 1 : 0, dofOn ? 1 : 0, mbAllowed && !cut ? this.motionBlurBase : 0);
     if (cut) (u.uB3.value as THREE.Vector4).y = 0;
@@ -621,6 +693,11 @@ export class PostFX {
     const cut = !this.hasPrev || this.camPos.distanceToSquared(this.prevCamPos) > 36 || this.camDir.dot(this.prevCamDir) < 0.85;
     if (cut) this.prevViewProj.copy(this.viewProj);
     return cut;
+  }
+
+  /** relative weight of bloom mip i of n; `wide` > 0 shifts weight towards the wide mips */
+  private bloomWeight(i: number, n: number, wide: number): number {
+    return (this.bloomWeights[i] ?? 0.85) * (1 + (wide * i) / Math.max(1, n - 1));
   }
 
   private dofActive(camera: THREE.Camera | null): boolean {
@@ -710,7 +787,7 @@ export class PostFX {
     this.d3 = size(this.d3, 2);
     for (let i = 1; i < this.levels; i++) this.bloomDown[i] = size(this.bloomDown[i] ?? null, i);
     for (let i = 0; i < this.levels - 1; i++) this.bloomUp[i] = size(this.bloomUp[i] ?? null, i);
-    if (this.glare) this.glare.setSize(this.levelW(0), this.levelH(0));
+    if (this.starRT) this.starRT.setSize(this.levelW(0), this.levelH(0));
     if (this.dof) this.dof.setSize(this.levelW(0), this.levelH(0));
     if (this.trail.length) this.ensureFeedback(this.trail, w, h);
     if (this.after.length) this.ensureFeedback(this.after, this.levelW(1), this.levelH(1));
@@ -718,13 +795,13 @@ export class PostFX {
   }
 
   private disposeTargets(): void {
-    const all = [this.hdr, this.base, this.d2, this.d3, this.glare, this.dof, ...this.bloomDown, ...this.bloomUp, ...this.trail, ...this.after];
+    const all = [this.hdr, this.base, this.d2, this.d3, this.starRT, this.dof, ...this.bloomDown, ...this.bloomUp, ...this.trail, ...this.after];
     for (const t of all) {
       if (!t) continue;
       t.depthTexture?.dispose();
       t.dispose();
     }
-    this.hdr = this.base = this.d2 = this.d3 = this.glare = this.dof = null;
+    this.hdr = this.base = this.d2 = this.d3 = this.starRT = this.dof = null;
     this.bloomDown = [];
     this.bloomUp = [];
     this.trail = [];
