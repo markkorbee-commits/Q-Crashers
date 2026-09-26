@@ -49,17 +49,19 @@ listed under "Engine behaviour". Unknown params are still ignored.
   `<layer>.keep` (share given to newborns now) and `<layer>.hidden` (emitters left out; normally
   absent).
 * **Flames burn out when the valve closes (round 3).** A continuous flame unit (`flame`,
-  `firewall`, billowing walls, `dragon_breath`, fireball lift jets) stops glowing within ~0.4 s of
+  `firewall`, billowing walls, `dragon_breath`, fireball lift jets) stops glowing within ~0.35 s of
   the end of its emission window: the plume is fed no more (v1509.6–1510.0: the 28 m wall is gone
   well within half a second). The soot the older puffs carry stays behind as smoke. One-shot
-  fireballs are not affected.
+  fireballs are not affected. A plain billowing wall no longer leaves roll-over fireballs at its
+  cut; only `blowout: true` does.
 * **Site glow on smoke and haze (round 3).** `atmos.glow` (`app.env.glowColor`, `app.env.smoke`)
   lights every haze sprite in its colour in all three zones (the brightness knee rises with the
   glow's luminance, so the glow is not squashed like the rig scatter) and all smoke, CO2 and low fog.
   Its `smoke` multiplies the stage and field haze density by (1 + 2 × smoke), adds a bank of its
   own (stage +0.22, field +0.09, sky band +0.12 per unit of smoke, so the air fills even where no
-  haze hung), lets the haze hide the set behind it (occlusion towards 0.8) and brings the veil close
-  to the camera. This completes the pink whiteout (v76) and the red smoke site (v1510–1537).
+  haze hung), tints the haze towards the glow's hue (up to 60 %: the whiteout is pink smoke, not
+  white smoke in a pink light), lets the haze hide the set behind it (occlusion towards 0.8) and
+  brings the veil close to the camera. This completes the pink whiteout (v76) and the red smoke site (v1510–1537).
 * **Saturated smoke stays saturated (round 3).** Colours are linear: a `lowfog` in a saturated
   colour (the red finale bank `#FF2010`) now gets only 2.5 % white instead of 12 % (which turned it
   salmon on screen), and the haze tint of recent coloured `fog.burst` clouds may reach 96 % of

@@ -627,9 +627,10 @@ export class PyroSystem extends CueFxSystem {
       cx.add(pos);
     }
     if (!n) return;
-    // the cut: a row of fireballs where the columns stop (blowout), or a few on long walls
-    for (let u = 0; u < pts.length; u++) {
-      if (steps[u] < 0 || (!blowout && u % 3 !== 1)) continue;
+    // the cut of a blowout: a row of fireballs where the columns stop. A plain wall just burns out
+    // when its valves close (v1509.6-1510.0: nothing rolls on after the 28 m wall)
+    for (let u = 0; blowout && u < pts.length; u++) {
+      if (steps[u] < 0) continue;
       const q = pts[u];
       this.fireball(out, this.sub(cue, 9100 + u), q.x, q.y + Hh * 0.75, q.z, cue.t + steps[u] * stagger + dur - 0.15, 0.2 * Hh, color, inten * 0.6, 0.35, 0.45, u % 6 === 1, 0.4);
     }

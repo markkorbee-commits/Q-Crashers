@@ -404,7 +404,16 @@ export class FogSystem extends CueFxSystem {
       const field = ((0.022 * level + 0.02 * this.stageSmoke) * sk + 0.09 * siteSmoke) * (tribe ? 0.55 : 1);
       const skyD = 0.02 * level + 0.2 * this.skySmoke + 0.12 * siteSmoke;
       this.haze.setDensity(stage, field, skyD);
-      this.haze.setTint(this.smokeTint(t));
+      // the smoke filling the site takes the hue of the light it holds (the pink whiteout is pink
+      // smoke, not white smoke in a pink light): the tint leans to the site glow with its smoke
+      const tint = this.smokeTint(t);
+      const g = env.glowColor;
+      const gm = Math.max(g.r, g.g, g.b);
+      if (siteSmoke > 0 && gm > 1e-3) {
+        const k = 0.6 * siteSmoke;
+        tint.setRGB(tint.r + (g.r / gm - tint.r) * k, tint.g + (g.g / gm - tint.g) * k, tint.b + (g.b / gm - tint.b) * k);
+      }
+      this.haze.setTint(tint);
     }
   }
 

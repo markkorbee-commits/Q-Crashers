@@ -126,13 +126,13 @@ void main() {
     float temp = pow(1.0 - f, 1.1) * (0.66 + 0.26 * rnd(key, 9u));
     float soot = r10.x * smoothstep(r10.y, 0.92, f) * (1.0 - smoothstep(0.9, 1.0, f));
     // valve closed (a continuous projector past its emission window): the plume is fed no more and
-    // burns out within ~0.4 s (v1509.6-1510.0: the 28 m wall is gone well within half a second of
+    // burns out within ~0.35 s (v1509.6-1510.0: the 28 m wall is gone well within half a second of
     // the cut); only the soot the older puffs already carry stays behind as smoke
     float burn = 1.0;
     if (cont && (flags & F_RAMP) != 0) {
       float cut = uTime - (r0.w + r5.z);
       if (cut > 0.0) {
-        burn = 1.0 - smoothstep(0.0, 0.45, cut);
+        burn = 1.0 - smoothstep(0.0, 0.35, cut);
         burn *= burn;
       }
     }
