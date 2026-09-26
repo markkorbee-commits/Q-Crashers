@@ -614,7 +614,9 @@ export class FloodGlow {
     // [FB_*] centre (w = weight) and sigma per axis (density exp(-|d/sigma|^2))
     centres[FB_STAGE] = C(0, 12, -8, 1);
     sig[FB_STAGE] = S(46, 15, 20);
-    centres[FB_STAGE_HIGH] = C(0, 30, -18, 0.55);
+    // (round 5: 0.55 -> 0.28 — the lit cloud high over the set hung as a flat veil over the top of every
+    // storm / red-smoke frame; the video's light sits low, around the fixtures: 1510.5 +4.6, 1012 +3.4, 1243 +1)
+    centres[FB_STAGE_HIGH] = C(0, 30, -18, 0.28);
     sig[FB_STAGE_HIGH] = S(80, 22, 34);
     centres[FB_SIDE_L] = C(-64, 6, -1, 0.9);
     sig[FB_SIDE_L] = S(26, 7, 10);
