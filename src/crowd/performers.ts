@@ -5,7 +5,7 @@ import { BOTTOM, HAIR, HEAD, newLook, packLook, PRINT, PROP, TOP, type Look } fr
 
 /**
  * People on the grounds besides the crowd (show-analysis §0.4, design-bible §9.1):
- *  - the MC / vocalist on the deck during the anthem (335–494 s),
+ *  - the MC / vocalist on the deck during the anthem (335–502 s),
  *  - the Sacred Flame fire-ritual troupe: 10 lantern bearers in red, the lead dancer on a round
  *    pedestal and an aerialist on a strap in the DJ arch (642–733 s),
  *  - the pianist at the white grand piano on the field riser (Domitor Draconis, 882–1098 s),
@@ -33,7 +33,8 @@ interface Win {
  * timeline of scripts/retime-show.py)
  */
 export class PerfTiming {
-  mc: Win = { t0: 332.1, t1: 498 };
+  // the video shows the MC on the deck until v502.08 (research/video-timeline/03.md)
+  mc: Win = { t0: 332.1, t1: 502.1 };
   // the troupe choreography is keyed to TROUPE_T0 (642): 641.8 lands its leap on the burning wings (709.05)
   troupe: Win = { t0: 641.8, t1: 732.8 };
   lead: Win = { t0: 639.5, t1: 733.6 };
@@ -223,8 +224,13 @@ const MC_PATH = new Path([
   { t: 465, x: -4, z: -3.5 },
   { t: 478, x: 8, z: -3.5 },
   { t: 489, x: 12, z: -3.8 },
-  { t: 494, x: 7, z: -5.0 },
-  { t: 498, x: 1.5, z: -7.2 },
+  // the close-ups v496.12 / v497.60 (cameras at (5.6, -3.2) / (0.4, -3.5) aimed at the portal):
+  // he stands on their axes in front of the porch screen (Z −6), then dances on the spot in the
+  // cyan backlight (v498.36–502.04) until the cut to the terrace at the drop
+  { t: 495.6, x: 3.8, z: -5.2 },
+  { t: 496.6, x: 3.6, z: -5.3 },
+  { t: 497.7, x: 2.2, z: -5.4 },
+  { t: 502.2, x: 2.0, z: -5.7 },
 ]);
 const MC_T0 = 332;
 const TROUPE_T0 = 642;
@@ -287,7 +293,7 @@ export class Performers {
       this.perfs.push({ name, k: m ? Number(m[1]) : 0, mode, look: l, height, build, seed: hash32(this.perfs.length * 977 + 31) & 0xffffff });
     };
     add('mc', 'both', (l) => {
-      l.skin = 3; l.hairColor = 0; l.headwear = HEAD.CAP; l.capColor = 0; l.top = TOP.DENIM; l.bottom = BOTTOM.BLACK;
+      l.skin = 3; l.hairColor = 0; l.headwear = HEAD.CAP; l.capColor = 0; l.top = TOP.CHARCOAL; l.bottom = BOTTOM.BLACK;
       l.shoe = 0; l.socks = true; l.props = PROP.MIC; l.wristband = true;
     }, 1.8, 1.12);
     for (let i = 0; i < DANCERS; i++) {
@@ -402,9 +408,9 @@ export class Performers {
       const moving = clamp(pp.speed / 0.8, 0, 1);
       const walkYaw = Math.atan2(pp.dx, pp.dz);
       f.yaw = moving > 0.15 ? lerp(0, walkYaw, 0.55 * moving) : 0.15 * Math.sin(t * 0.3);
-      if (tm < 339 || tm > 493) f.yaw = walkYaw;
+      if (tm < 339) f.yaw = walkYaw;
       // white follow spot from the FOH tower while he performs
-      f.glow = -0.9 * smoothstep(MC_T0 + 4, MC_T0 + 7, tm) * (1 - smoothstep(493, 497, tm));
+      f.glow = -0.9 * smoothstep(MC_T0 + 4, MC_T0 + 7, tm) * (1 - smoothstep(501.4, 502.1, tm));
       walk(p, pp.dist / 1.45, moving);
       // mic at the mouth (left hand)
       setArm(p.armL, 58, -14, 142, 10);
