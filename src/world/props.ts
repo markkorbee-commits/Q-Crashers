@@ -12,7 +12,8 @@ import { patchWorldMaterial } from './worldLights';
  * crowd-and-bars §3.4), the first-aid post, toilet blocks, food trucks / merch stand silhouettes,
  * bins, red-and-black flags on poles (wind from NNW, animated from show time), light masts with red
  * obstruction lights, and amber road lighting. Positions: terrain-analysis §7/§14 (floorplan legend)
- * where known, otherwise ASSUMPTION placed at the field edges.
+ * where known, otherwise ASSUMPTION placed at the field edges. Draw calls: the solid props share one
+ * merged mesh; sign faces, toilets and flag cloth are instanced (4 calls in all).
  */
 
 export interface PropsOut {
@@ -52,6 +53,12 @@ export function buildProps(scene: THREE.Object3D, lowDetail: boolean): PropsOut 
   };
   const place = (x: number, z: number, yaw: number, s = 1) =>
     new THREE.Matrix4().compose(new THREE.Vector3(x, terrainHeight(x, z), z), new THREE.Quaternion().setFromAxisAngle(THREE.Object3D.DEFAULT_UP, yaw), new THREE.Vector3(s, s, s));
+  /**
+   * every small solid prop that shares the vertex-coloured metal material (sign posts, water points, the
+   * first-aid post, stalls, bins, flag poles, masts) is merged into ONE mesh: one draw call instead of
+   * seven, the same triangles (the low-poly props are cheaper merged than culled, also on mobile)
+   */
+  const merged = new GeoBuilder();
 
   // ------------------------------------------------------------------ wayfinding signs (lightboxes)
   {
@@ -73,7 +80,7 @@ export function buildProps(scene: THREE.Object3D, lowDetail: boolean): PropsOut 
       [-35, 150, -10, 120, 1],
       [35, 150, 10, 120, 6],
     ];
-    const post = new GeoBuilder();
+    const post = merged;
     const mats: THREE.Matrix4[] = [];
     const cells = new Float32Array(signs.length * 2);
     signs.forEach(([x, z, tx, tz, cell], i) => {
@@ -87,9 +94,6 @@ export function buildProps(scene: THREE.Object3D, lowDetail: boolean): PropsOut 
       cells[i * 2 + 1] = 3 - Math.floor(cell / 2);
       colliders.push({ kind: 'circle', x, z, r: 1.1, tag: 'sign' });
     });
-    const pm = new THREE.Mesh(post.build(), metal);
-    pm.name = 'sign-posts';
-    add(pm);
     const tex = signAtlas();
     const face = new THREE.PlaneGeometry(2.0, 1.0);
     face.setAttribute('aCell', new THREE.InstancedBufferAttribute(cells, 2));
@@ -120,7 +124,7 @@ export function buildProps(scene: THREE.Object3D, lowDetail: boolean): PropsOut 
       [100, 94, faceYaw(100, 94, 40, 60)],
       [-100, 94, faceYaw(-100, 94, -40, 60)],
     ];
-    const b = new GeoBuilder();
+    const b = merged;
     const blue = lin('#1a5fb4');
     for (const [x, z, yaw] of spots) {
       const m = place(x, z, yaw);
@@ -135,9 +139,6 @@ export function buildProps(scene: THREE.Object3D, lowDetail: boolean): PropsOut 
       put(0.9, 0.9, 0.05, 1.8, 3.1, 0.06, blue);
       colliders.push({ kind: 'circle', x, z, r: 1.9, tag: 'water' });
     }
-    const wm = new THREE.Mesh(b.build(), metal);
-    wm.name = 'water-points';
-    add(wm);
     // emissive drop icons (small bright blue squares on the boards)
     for (const [x, z, yaw] of spots) {
       const p = new THREE.Vector3(1.8, 3.1, 0.1).applyAxisAngle(THREE.Object3D.DEFAULT_UP, yaw);
@@ -150,7 +151,7 @@ export function buildProps(scene: THREE.Object3D, lowDetail: boolean): PropsOut 
     const [x, z] = FIRST_AID;
     const yaw = faceYaw(x, z, 60, 110);
     const m = place(x, z, yaw);
-    const b = new GeoBuilder();
+    const b = merged;
     const white = lin('#d8dadc');
     const put = (g: THREE.BufferGeometry, px: number, py: number, pz: number, s: THREE.Vector3, c: [number, number, number], rotY = 0) =>
       b.add(g, m.clone().multiply(new THREE.Matrix4().compose(new THREE.Vector3(px, py, pz), new THREE.Quaternion().setFromAxisAngle(THREE.Object3D.DEFAULT_UP, rotY), s)), c);
@@ -165,9 +166,6 @@ export function buildProps(scene: THREE.Object3D, lowDetail: boolean): PropsOut 
     // cooling container (heat plan: first-aid posts with air-conditioning, FACT)
     put(GeoBuilder.unit('box'), 5.2, 1.3, -1.0, new THREE.Vector3(2.5, 2.6, 6.0), lin('#9aa3a8'));
     put(GeoBuilder.unit('box'), 5.2, 2.75, -1.0, new THREE.Vector3(1.0, 0.35, 0.8), lin('#5a5f63'));
-    const fm = new THREE.Mesh(b.build(), metal);
-    fm.name = 'first-aid';
-    add(fm);
     colliders.push({ kind: 'box', minX: x - 4.5, maxX: x + 7.5, minZ: z - 4.5, maxZ: z + 4.5, tag: 'firstaid' });
     const p = new THREE.Vector3(0, 2.2, 3.1).applyAxisAngle(THREE.Object3D.DEFAULT_UP, yaw);
     lamps.push({ x: x + p.x, y: terrainHeight(x, z) + p.y, z: z + p.z, color: '#2fe07a', size: 1.2, kind: 0 });
@@ -201,7 +199,7 @@ export function buildProps(scene: THREE.Object3D, lowDetail: boolean): PropsOut 
 
   // ------------------------------------------------------------------ food trucks + merch stand (edge silhouettes)
   {
-    const b = new GeoBuilder();
+    const b = merged;
     const trucks: [number, number, number, string][] = [
       [146, 172, faceYaw(146, 172, 140, 150), '#5b1016'],
       [156, 175, faceYaw(156, 175, 150, 155), '#1b1b1d'],
@@ -236,9 +234,6 @@ export function buildProps(scene: THREE.Object3D, lowDetail: boolean): PropsOut 
       colliders.push({ kind: 'box', minX: x - 3.4, maxX: x + 3.4, minZ: z - 3.4, maxZ: z + 3.4, tag: 'stall' });
       lamps.push({ x, y: terrainHeight(x, z) + 2.5, z: z + 2.4, color: '#ffd9a0', size: 1.5, kind: 0 });
     }
-    const sm = new THREE.Mesh(b.build(), metal);
-    sm.name = 'stalls';
-    add(sm);
   }
 
   // ------------------------------------------------------------------ bins (200 L drums with lids)
@@ -252,22 +247,17 @@ export function buildProps(scene: THREE.Object3D, lowDetail: boolean): PropsOut 
       [60, 130], [-60, 126], [100, 140], [-100, 136], [48, 118], [-48, 118], [96, 96], [-96, 96], [-16, 139], [140, 165], [-140, 110],
       [-80, 168], [110, 124], [-106, 150], [24, 147], [-24, 147], [96, 30], [-96, 30], [102, 60], [-102, 60],
     ];
-    const mats: THREE.Matrix4[] = [];
-    const cols: THREE.Color[] = [];
+    const bin = g.build();
     for (const [gx, gz] of groups) {
       const n = 2 + rng.int(0, 2);
       for (let k = 0; k < n; k++) {
         const x = gx + k * 0.75 + rng.range(-0.1, 0.1),
           z = gz + rng.range(-0.2, 0.2);
-        mats.push(place(x, z, rng.range(0, 6.28)));
-        cols.push(new THREE.Color(rng.pick(['#1b1b1e', '#2a2d31', '#6e1116', '#1b1b1e'])));
+        const m = place(x, z, rng.range(0, 6.28));
+        merged.add(bin, m, lin(rng.pick(['#1b1b1e', '#2a2d31', '#6e1116', '#1b1b1e'])));
       }
       colliders.push({ kind: 'circle', x: gx + 0.75, z: gz, r: 1.2, tag: 'bin' });
     }
-    const mat = patchWorldMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.3 }), { key: 'bins' });
-    const m = inst(g.build(), mat, mats, 'bins');
-    cols.forEach((c, i) => m.setColorAt(i, c));
-    if (m.instanceColor) m.instanceColor.needsUpdate = true;
   }
 
   // ------------------------------------------------------------------ flags on poles (red/black, animated cloth)
@@ -284,6 +274,7 @@ export function buildProps(scene: THREE.Object3D, lowDetail: boolean): PropsOut 
     const used = lowDetail ? poles.filter((_, i) => i % 2 === 0) : poles;
     const pg = new GeoBuilder();
     pg.cylinder(0.045, 1, 0, 0.5, 0, galv, 6);
+    const pole = pg.build();
     const pm: THREE.Matrix4[] = [];
     const fm: THREE.Matrix4[] = [];
     const design = new Float32Array(count);
@@ -297,7 +288,7 @@ export function buildProps(scene: THREE.Object3D, lowDetail: boolean): PropsOut 
       design[i] = rng.int(0, 3);
       colliders.push({ kind: 'circle', x, z, r: 0.3, tag: 'flag' });
     });
-    inst(pg.build(), metal, pm, 'flag-poles');
+    for (const m of pm) merged.add(pole, m);
     const cloth = new THREE.PlaneGeometry(2.4, 1.5, 12, 5);
     cloth.translate(1.2, -0.75, 0);
     cloth.setAttribute('aDesign', new THREE.InstancedBufferAttribute(design, 1));
@@ -331,7 +322,7 @@ export function buildProps(scene: THREE.Object3D, lowDetail: boolean): PropsOut 
 
   // ------------------------------------------------------------------ light masts (off during the show) + obstruction lights
   {
-    const b = new GeoBuilder();
+    const b = merged;
     const masts: [number, number, number][] = [
       [104, 110, 15],
       [-104, 106, 15],
@@ -368,10 +359,10 @@ export function buildProps(scene: THREE.Object3D, lowDetail: boolean): PropsOut 
         lamps.push({ x: x - 0.5, y: y + 7.9, z, color: '#ffa640', size: 1.1, kind: 0 });
       }
     }
-    const mm = new THREE.Mesh(b.build(), metal);
-    mm.name = 'masts';
-    add(mm);
   }
+  const mm = new THREE.Mesh(merged.build(), metal);
+  mm.name = 'props-merged';
+  add(mm);
 
   return {
     colliders,
