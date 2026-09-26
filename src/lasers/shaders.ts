@@ -374,10 +374,14 @@ void main() {
     // Near its plane (and from below) the eye / camera exposes for the blinding edge-on line: the rest
     // of the plane, 10–30x dimmer, falls away into the dark (f017 / f147: a thin crisp band in a dark
     // scene, not a lit floor or a coloured sky). From a drone high above, the whole sea stays readable.
+    // Round 4: this holds up to ~20 m above the plane (the FOH / tower / crane cameras: v1389, v1463 show
+    // a line and violet haze near the deck, not a lit violet floor), and the grazing path length is
+    // capped by the sheet's waviness + scan jitter (~0.045 rad) once the eye is off the plane (next to
+    // it, the crisp edge-on line keeps the thickness cap)
     float planeDist = abs(dot(cameraPosition - vWorld, Nn));
-    float kNear = 40.0 * (1.0 - smoothstep(0.5, 9.0, planeDist));
+    float kNear = 40.0 * (1.0 - smoothstep(0.5, 22.0, planeDist));
     kNear = max(kNear, 10.0 * (1.0 - above));
-    float E = inversesqrt(nv * nv + 0.0005) * exp(-nv * kNear);
+    float E = inversesqrt(nv * nv + mix(0.0005, 0.002, smoothstep(1.0, 4.0, planeDist))) * exp(-nv * kNear);
     float I = uGainS * haze * hazePhase(c) * pow(max(vR, 4.0), -0.75) * E;
     // scan structure: the fan of discrete beams the scanner draws (+ a second, sliding family -> moire)
     float s1 = lines(vU * 41.0 + uTime * 0.21, 5.0);

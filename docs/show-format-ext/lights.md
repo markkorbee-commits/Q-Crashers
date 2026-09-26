@@ -102,6 +102,28 @@ level scales its lamp and its shaft together.
   every second kick with a softer decay. Strobes are at 40 %, blinders at 50 % with a 0.25 s rise,
   floods at 60 % with an attack of at least 0.3 s, and light-bus flashes at 40 %.
 
+## Round 4: light balance on the grounds (no cue change needed)
+Measured with `scripts/similarity.mjs` against the official video: our field was 2–5x brighter than the
+video's in 54 of 64 moments. On the video the grounds read near-black; the light lives in the haze, the
+smoke, the beams and on the set. What changed:
+
+* **Field floods** light the paving only in a soft pool in front of the deck (`FLOOD_GROUND` 0.55 → 0.3,
+  the pool over the back of the field at 20 % instead of 45 %). The flooded air itself (the depth-sliced
+  glow) is unchanged.
+* **World light bus** (`src/world/worldLights.ts`, what the grounds, pillars, fences and trees receive from
+  `app.env`): the stage's light on up-facing surfaces is a pool at the deck lip (about 0.45 at 25 m,
+  0.05 at 100 m on top of 1/d²); a flash bucket whose sources are spread wide (the two arm ends, a gerb
+  row) lights a floor at the grazing angle of its sources, not from a lamp over the middle of the field;
+  flash bounce off the smoke reaches the world materials at 20 % over a 70 m radius (the sky dome, the
+  fog colour and the haze keep all of it); `atmos.glow` colours the smoke and the air, the grounds get a
+  trace (gain 6 → 0.8). Gains: stage 5200 → 2800, flash 3000 → 1100, lanterns 70 → 55, plinth spill 90 → 65
+  (the paving is pale now, albedo about 0.4).
+* **Sky fill**: the hemisphere light fades with the sky to a moonlit minimum (intensity 0.34 → 0.26), and
+  the site glow tints it at 0.12 instead of 0.3.
+* **Close-ups at the deck**: with the camera within about 6–28 m of the lit deck, the stage haze no longer
+  clears in front of the lens: it hangs around it as a milky veil (brighter knee) — the performer
+  close-ups at v362 / v411.
+
 ## Validator (scripts/validate-show.mjs vocabulary, owned by the show and validator side)
 * lights fx: `flood` (`area`: `stage` \| `field` \| `sides` \| `all`; `color`, `intensity`,
   `attack`, `fade`, `kick`) and `festoon` (`mode`: `steady` \| `flicker` \| `chase` \| `twinkle` \|

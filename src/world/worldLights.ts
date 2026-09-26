@@ -64,12 +64,14 @@ vec3 wlSky( vec3 r ) {
  * (albedo ≈ 0.4, was ≈ 0.22), the gains keep the pools at their measured level. */
 const LAMP_GAIN = 55;
 const SPILL_GAIN = 65;
+/** share of the lantern + plinth spill light taken off up-facing surfaces (the floor pools) */
+const LAMP_FLOOR = 0.4;
 /**
  * the stage as one broad soft source. Round 4 (similarity metric against the official video: our floor
  * was 2–5x the video's in 54/64 moments, with a floor that is now ~1.8x paler): the camera exposes for
  * the LEDs, the set's light on the grounds reads dark except at the deck lip (was 5200)
  */
-const STAGE_GAIN = 2800;
+const STAGE_GAIN = 2200;
 /** the set's spill with the rig dark (worklights, LED art reflected by the deck): a trace only */
 const STAGE_IDLE = 0.03;
 /**
@@ -79,7 +81,7 @@ const STAGE_IDLE = 0.03;
  * moments): the light of the show lives in the smoke and the air; the ground under it reads near-black
  * except close to the sources. The spatial part of the pyro light on the floor is the fx FieldLight layer.
  */
-const FLASH_GAIN = 1100;
+const FLASH_GAIN = 800;
 /**
  * Pyro light is burning metal (≈ 2000–2500 K) and the camera is balanced for the LEDs: on the video a
  * gold gerb wall lights the ground deep ORANGE (measured on the field at v600.25: linear G/R ≈ 0.25,
@@ -100,9 +102,12 @@ const BOUNCE_GAIN = 1.6;
 /**
  * share of that bounce that reaches the world materials (the grounds, pillars, trees): the lit cloud
  * itself (sky dome, fog colour, haze) keeps the full bounce, the ground under it a fraction, over a
- * tighter radius (video 1438.5 / 607 / 264.75: bright gerbs and glowing smoke over a dark field)
+ * tighter radius, and only for the big walls: × F / (F + WORLD_BOUNCE_F). Video: single bursts and
+ * gerb rows leave a dark field (1438.5 / 607 / 264.75), the gold gerb wall (600.4, F ≈ 8) and the flame
+ * wall (1509, F ≈ 11) light the whole bowl
  */
-const WORLD_BOUNCE_K = 0.2;
+const WORLD_BOUNCE_K = 0.4;
+const WORLD_BOUNCE_F = 8;
 /** half-strength radius (m) of the bounce on the world materials around the flash centre (+ 0.6 x the spread of the sources) */
 const WORLD_BOUNCE_R = 70;
 /** multiple scattering in a coloured smoke cloud saturates its light further (gold → orange, pink → red) */
@@ -202,7 +207,8 @@ export function updateWorldLights(env: LightEnv, time: number, flashScale = 1): 
   setFlash(env.flashField, k, u.uWFlash2.value, u.uWFlashCol2.value);
   // bounce off the lit smoke around the flash centre (falls to a quarter at WORLD_BOUNCE_R + 0.6 spread)
   flashBounce(env, bounceC);
-  const bk = flashScale * WORLD_BOUNCE_K;
+  const F = env.flashIntensity;
+  const bk = F > 0 ? (flashScale * WORLD_BOUNCE_K * F) / (F + WORLD_BOUNCE_F) : 0;
   u.uWAmbCol.value.set(bounceC.r * bk, bounceC.g * bk, bounceC.b * bk);
   const sp = env.flashSpread;
   const r = WORLD_BOUNCE_R + 0.6 * sp;
@@ -212,6 +218,7 @@ export function updateWorldLights(env: LightEnv, time: number, flashScale = 1): 
 }
 
 const PARS = /* glsl */ `
+#define WL_LAMP_FLOOR ${LAMP_FLOOR.toFixed(3)}
 uniform vec4 uWLamp[${N}];
 uniform vec3 uWLampCol[${N}];
 uniform vec3 uWSpillCol[${N}];
@@ -238,7 +245,14 @@ const APPLY = /* glsl */ `
 {
   IncidentLight wl;
   wl.visible = true;
+  vec3 upV = ( viewMatrix * vec4( 0.0, 1.0, 0.0, 0.0 ) ).xyz;
+  // how much the surface faces up (the ground, deck tops, plinths): the show light that reaches a
+  // floor is the light that comes down steeply — grazing light from far sources barely lights it
+  float wlUp = clamp( dot( geometryNormal, upV ), 0.0, 1.0 );
 #ifdef WL_LAMPS
+  // the lantern's own base and hood shade the floor straight below: the pools on the pale paving stay
+  // soft coloured pools, the shafts and the plinth fences keep the full light
+  float wlLampUp = 1.0 - WL_LAMP_FLOOR * wlUp;
   for ( int i = 0; i < ${N}; i ++ ) {
     vec3 lp = ( viewMatrix * vec4( uWLamp[ i ].xyz, 1.0 ) ).xyz;
     vec3 L = lp - geometryPosition;
@@ -246,7 +260,7 @@ const APPLY = /* glsl */ `
     if ( d2 < 4900.0 ) {
       float win = 1.0 - d2 / 4900.0;
       wl.direction = L * inversesqrt( d2 );
-      wl.color = uWLampCol[ i ] * ( win * win / ( d2 + 3.0 ) );
+      wl.color = uWLampCol[ i ] * ( win * win / ( d2 + 3.0 ) ) * wlLampUp;
       RE_Direct( wl, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );
     }
     vec3 sp = ( viewMatrix * vec4( uWLamp[ i ].x, 0.9, uWLamp[ i ].z, 1.0 ) ).xyz;
@@ -255,17 +269,13 @@ const APPLY = /* glsl */ `
     if ( s2 < 484.0 ) {
       float w2 = 1.0 - s2 / 484.0;
       float nd = max( dot( geometryNormal, S * inversesqrt( s2 ) ), 0.0 ) * 0.85 + 0.15;
-      reflectedLight.directDiffuse += uWSpillCol[ i ] * ( w2 * w2 * nd / ( s2 + 6.0 ) ) * BRDF_Lambert( material.diffuseColor );
+      reflectedLight.directDiffuse += uWSpillCol[ i ] * ( w2 * w2 * nd / ( s2 + 6.0 ) * wlLampUp ) * BRDF_Lambert( material.diffuseColor );
     }
   }
 #endif
   {
     PhysicalMaterial wm = material;
     wm.roughness = max( material.roughness, 0.42 );
-    vec3 upV = ( viewMatrix * vec4( 0.0, 1.0, 0.0, 0.0 ) ).xyz;
-    // how much the surface faces up (the ground, deck tops, plinths): the show light that reaches a
-    // floor is the light that comes down steeply — grazing light from far sources barely lights it
-    float wlUp = clamp( dot( geometryNormal, upV ), 0.0, 1.0 );
     vec3 lp = ( viewMatrix * vec4( uWStage.xyz, 1.0 ) ).xyz;
     vec3 L = lp - geometryPosition;
     float d2 = dot( L, L );
