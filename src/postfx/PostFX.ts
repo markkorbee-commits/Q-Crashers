@@ -125,12 +125,13 @@ export class PostFX {
   /**
    * glare tuning (tuned side by side with the drone / terrace footage at 76 s, 600 s, 1508 s, 1565 s):
    * halo = gain of the line-source halos (exposed HDR units at full saturation), core / coreSharp =
-   * hot core weight and tightness, gateL0 = bright-pass luminance along a light that counts as "fire
+   * optional extra hot core (weight, tightness; off: a thin core draws a flame row as a light-sabre
+   * streak, the fire itself must provide the core), gateL0 = bright-pass luminance along a light that counts as "fire
    * visible" (63 %), flat = frame-wide lift, psf = wide scatter of the real bright pass; bloom, wide,
    * threshold and exposure = extra bloom share, wide-mip emphasis, bloom threshold drop and exposure
    * lift (fractions) at amount = 1
    */
-  readonly glareTune = { halo: 13, core: 5, coreSharp: 25, gateL0: 0.6, flat: 0.03, psf: 0.3, bloom: 0.8, wide: 1.2, threshold: 0.3, exposure: 0 };
+  readonly glareTune = { halo: 16, core: 0, coreSharp: 25, gateL0: 0.6, flat: 0.03, psf: 0.3, bloom: 0.8, wide: 1.2, threshold: 0.3, exposure: 0 };
 
   private readonly sober = PostFX.defaults();
   private readonly hdrType: THREE.TextureDataType;

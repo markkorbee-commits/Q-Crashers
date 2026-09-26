@@ -535,11 +535,15 @@ vec3 glareHalos(vec2 p) {
     vec2 d = ap - ab * t;
     float r = mix(c.w, uGRB[i], t);
     float d2 = dot(d, d) / (r * r);
-    // wide r^-3 scatter tail + a tight, hot core (the flame row itself blows out to white)
+    // r^-3 scatter profile (+ an optional tighter core)
     float q = 1.0 + d2;
-    float qc = 1.0 + d2 * uGHalo.z;
     float gate = uGHalo.w > 0.5 ? texelFetch(tGate, ivec2(i, 0), 0).r : 1.0;
-    acc += c.rgb * (gate * (1.0 / (q * sqrt(q)) + uGHalo.y / (qc * qc)));
+    float h = 1.0 / (q * sqrt(q));
+    if (uGHalo.y > 0.0) {
+      float qc = 1.0 + d2 * uGHalo.z;
+      h += uGHalo.y / (qc * qc);
+    }
+    acc += c.rgb * (gate * h);
   }
   return acc * uGHalo.x;
 }
