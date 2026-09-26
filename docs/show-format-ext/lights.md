@@ -102,6 +102,25 @@ level scales its lamp and its shaft together.
   every second kick with a softer decay. Strobes are at 40 %, blinders at 50 % with a 0.25 s rise,
   floods at 60 % with an attack of at least 0.3 s, and light-bus flashes at 40 %.
 
+## Round 5: atmosphere (no cue change needed)
+Measured with `scripts/similarity.mjs` on the Mac GPU (Show camera exposure 0.5):
+* **Storm haze colour**: the scattered cloud is multiple scattering, so its light is saturated towards the
+  dominant hue of the rig and the wash (`c' = max · (c / max)^4`) at half the old level, and the beams bloom
+  less (soft shafts 0.85 → 0.45). A cool-white storm under a steel wash reads as crisp white beams in
+  steel-blue haze (v1230–1249), not a milky grey veil: 1243 s 29 → 48 %. The lit cloud high over the set
+  (the upper flood blob) is at half its weight.
+* **Laser light in the smoke**: while laser sheets scan a dense low fog (`fog.lowfog` density 0.65 → 0.9),
+  the flood volume over the field and the stage glows in their colour, saturated (the Embers FPV at
+  v1163–1175: the whole frame a deep blue smoke volume): 1169.5 s 29 → 44 %.
+* **Beam volumes near the lens**: with the camera inside or within a few metres of a cone, near its
+  fixture (standing on the podium under the arch downlights, beside a deck head), the cone fades out
+  instead of filling the frame as a flat grey slab.
+* **Pyro glare** (`src/postfx`): no frame-wide lift in the fire colour any more and the line-source halos
+  at half gain; the video's drone shots show crisp flame rows on a dark field (827.25 s 35 → 56 %,
+  729.25 s 41 → 60 %, 484.75 s 39 → 64 %).
+* Stage walk: the booth spot hangs 1.35 m above the vault floor (0, 4.05, −6.35); the arch downlights
+  focus on the walkable floor (the podium).
+
 ## Round 4: light balance on the grounds (no cue change needed)
 Measured with `scripts/similarity.mjs` against the official video: our field was 2–5x brighter than the
 video's in 54 of 64 moments. On the video the grounds read near-black; the light lives in the haze, the
