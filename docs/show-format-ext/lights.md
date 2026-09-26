@@ -103,13 +103,14 @@ level scales its lamp and its shaft together.
   floods at 60 % with an attack of at least 0.3 s, and light-bus flashes at 40 %.
 
 ## Round 6: backlight veil, deck air, arch cans (no cue change needed)
-Measured with `scripts/similarity.mjs` on the Mac GPU (64 moments: 61.0 / 39.4 % → see the round report).
+Measured with `scripts/similarity.mjs` on the Mac GPU (64 moments: 61.0 / 39.4 % → 62.2 / 41.3 % raw / calibrated;
+colour 59.8 → 61.7, light 76.2 → 77.0, shape 50.1 → 50.6).
 * **Backlight arc** (`blinder` target `deck_back`, v409.0–412.1): the 8 lamps hang inside the DJ portal on a
   shallow arc (|X| 0.3–1.9 m, Y 4.95–6.05, Z −8.4), where the film shows them behind the MC — the old row on
   the porch front (X ±4.1…10.7) was outside every close-up. They draw as big hot discs (not festoon dots)
   and light the haze as forward scatter: a tight glow at the lamps plus a wide veil over the deck, cool
   blue-white for a white lamp, strongest for a camera in front of the portal looking into it (the DJ at the
-  booth, beside the lamps, sees a trace). 411.5 s 7 → 58 %, 409.5 s 11 → 56 %.
+  booth, beside the lamps, sees a trace). 411.5 s 7 → 59 %, 409.5 s 11 → 55 %.
 * **Lamps aimed at the lens light the air in front of it**: the flood volume has two near pre-slices
   (1.2–3.2–4 m) in which only the local lamp glows (backlight, booth spot, deck air) are integrated, drawn only
   while one of them is lit. Every other flood keeps the clear air at the lens.
