@@ -655,7 +655,6 @@ export class App {
     ctx.seeked = true;
     ctx.showPlaying = false;
     this.updateSystems(ctx, false);
-    for (const h of this.frameHooks) h(ctx);
     this.sceneGlare.update(this, 0, true);
     this.postfx.render(this.scene, this.camera, 0, ctx.time);
   }

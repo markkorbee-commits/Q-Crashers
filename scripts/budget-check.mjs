@@ -9,7 +9,8 @@
  *
  * Needs a running dev (or preview) server. For every show time x view it seeks the paused show,
  * waits for a few rendered frames and reads the draw calls / triangles of the last frame
- * (app.lastRender). Exit code 0 = within budget, 1 = over budget, 3 = page error / load failure.
+ * (app.lastRender: every draw of the frame, scene + post-processing passes; the report splits them).
+ * Exit code 0 = within budget, 1 = over budget, 3 = page error / load failure.
  * Views: `default` = the start camera (as a phone user sees it), `overview` = a high, wide view
  * over the whole grounds (everything in the frustum: worst case for draw calls).
  */
@@ -72,7 +73,8 @@ try {
           const f0 = a.frame;
           const t0 = performance.now();
           while (a.frame < f0 + 4 && performance.now() - t0 < 120000) await new Promise((res) => setTimeout(res, 50));
-          return { calls: a.lastRender.calls, triangles: a.lastRender.triangles, level: a.quality.level, frames: a.frame - f0 };
+          const passes = Number(a.postfx.stats?.().passes ?? 0);
+          return { calls: a.lastRender.calls, post: passes, triangles: a.lastRender.triangles, level: a.quality.level, frames: a.frame - f0 };
         },
         { t, pose, home },
       );
@@ -93,7 +95,7 @@ try {
 if (errors.length && exitCode === 0) exitCode = 3;
 for (const r of rows) {
   const tag = r.ok ? 'ok  ' : 'OVER';
-  console.log(`${tag} t=${r.t}s ${r.view.padEnd(9)} calls ${String(r.calls).padStart(4)} / ${maxCalls}  triangles ${String(r.triangles).padStart(8)} / ${maxTris}${r.over.length ? '  <- ' + r.over.join(', ') : ''}`);
+  console.log(`${tag} t=${r.t}s ${r.view.padEnd(9)} calls ${String(r.calls).padStart(4)} / ${maxCalls} (scene ${r.calls - r.post} + post ${r.post})  triangles ${String(r.triangles).padStart(8)} / ${maxTris}${r.over.length ? '  <- ' + r.over.join(', ') : ''}`);
 }
 if (errors.length) console.log(`errors:\n  ${errors.slice(0, 20).join('\n  ')}`);
 const summary = { ok: exitCode === 0, budget: { calls: maxCalls, triangles: maxTris }, rows, errors: errors.slice(0, 20) };
