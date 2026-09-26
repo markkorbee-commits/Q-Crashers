@@ -317,8 +317,22 @@ on the same site.
   in the crown, aerialist hang point. Booth desk 4 × 1.1 m at Z −7.5 on the deck, dark-red banner #4A1C1E
   with gold print. **Defqon.1 logo shield** (cream on bronze, reads as a red diamond keystone under red light)
   1.8 × 1.6 m at Y 7.4–9.0, directly under the dragon's chin.
+- **Gold vault, DJ booth and dancers' podium (walkable, round 4; the one source of the numbers is
+  `src/stage/booth/layout.ts`, the walk map `src/world/stageWalk.ts`).** Behind the portal a gold scaled barrel
+  vault runs from the porch screen (front face Z −6, 0.9 m thick) back to the castle facade (Z −11.9): interior
+  an equilateral pointed arch 6.0 m span / apex 7.5 at the first rib, 5 chunky dark-steel ribs (Z −7.3 … −11.1,
+  0.32 m deep, 0.22 m thick) shrinking to 0.9x towards the back; exterior barrel half width 3.5, roof springing
+  Y 4.6, crown Y 8.1. **Vault floor Y 2.7** (deck + 0.8). **Booth desk** 2.76 × 0.9 m, 1.05 m high on the vault
+  floor at Z −9.9 (superseding the older "4 × 1.1 m at Z −7.5 on the deck"); the DJ riser (0.1 m) behind it, Z
+  −10.4 … −11.75, the DJ viewing spot at Z −10.95; the booth spot / blinder of the rig hangs 1.35 m above the
+  vault floor at (0, 4.05, −6.35). **Grey steps** from the landing (Z −5 … −6, at the vault floor) down 3 risers
+  (0.4 m treads) to Z −4.2, 7.8 m wide. **Dancers' podium:** a red 0.3 m riser (top Y 2.2, black fascia), 11.2 m
+  wide from Z −4.2 to −1.35, U-shaped around the lead's pedestal (notch |X| < 1.5 from Z −2.9 to the front), with
+  cheeks beside the steps back to the porch screen and 0.35 m half-height aprons (Y 2.05) along the outer
+  flanks (Z −5.6 … −3.1). The arch-crown downlights focus on this walkable floor (the podium, Y 2.2).
 - Decorative stone staircases (oversized steps) left and right of the portal from the deck (Y 1.9) to the
-  upper castle platform (Y 5.5) at X ±6…±12 (FACT look, dimensions ASSUMPTION).
+  upper castle platform (Y 5.5) at X ±6…±12 (FACT look, dimensions ASSUMPTION); the castle stairs' foot sits
+  inside the stair arch at |X| 7.1 (walkable, round 4).
 - **Subs:** 12 ground-stacked cardioid KS28 blocks (each 2 wide × 3 high = 2.7 × 1.65 × 1.1 m) along
   X −42…+42 at Z +1.2…+2.3 (FACT: black blocks visible in front of the stage; count ASSUMPTION ~72 KS28).
 - **Pit barrier** (ASSUMPTION): 1.2 m steel crowd barrier, polyline (−92, −1) → (−46, 6) → (46, 6) → (92, −1).
@@ -817,6 +831,18 @@ great circle at t0.)* Visible in almost every field and aerial shot from 30 s on
 | 400 | #030A1E | #05051F | 0–3° #7A6450; teal #2E5A6E |
 | 800 | #02060F | #020206 | teal #1E3E52 |
 | 1300+ | #010204 | #010104 | faint teal #122838 |
+
+**Round 4/5 video measurement (supersedes the table's zenith / SE values as shader targets):** the graded
+sky in the top band of the official video's frames is a saturated pure blue, R ≈ 0 and G/B ≈ 0.15–0.4:
+sRGB **[0, 40, 103] at v20**, **[0, 10, 65] at v118**, **[0, 0, 41] at v509** and [5, 0, 10] at v754 (FACT,
+measured). The teal-navy values above carried too much red and green; `src/world/Environment.ts` SKY_KEYS
+follows the measured values. **Round 5:** measured through the current pipeline (Show camera exposure 0.5)
+the rendered sky was still ~3-4x too dark in blue with too much green after v100: the video's top band is
+[0, 3, 65] v118, [0, 0, 55] v215-338, [0, 0, 39] v509, [0, 0, 25] v607, [0, 0, 18] v778-925, and the SE
+horizon of the drone shots teal and darker ([9, 39, 70] v44.75, [0, 25, 47] v142.5, [0, 0, 27] v191.5).
+The dome therefore has its own keys (`DOME_KEYS`, "the sky as filmed"); SKY_KEYS stay the physical sky
+light for the fog colour, the hemisphere fill, the reflections and the cloud shading. Where lasers or the rig light the smoke (Embers 1110–1190: the whole upper half
+a lit blue haze, [0, 0, 93] at v1120.5), that light belongs to the haze and the laser ceiling, not to the sky.
 
 Clouds: broken mid-level deck (coverage 0.5–0.6, base 2.5–3.5 km) with gaps (the moon stays visible, FACT);
 pale haze bands visible in the early sky (FACT f001–f031); cloud undersides pick up stage and pyro colour

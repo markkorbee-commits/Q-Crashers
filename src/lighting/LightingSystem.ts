@@ -87,6 +87,29 @@ const FLOOD_SLICES: Record<string, number> = { ultra: 10, high: 9, medium: 7, mo
 /** dense-haze scatter ("storm haze"): env.haze range over which the lit haze turns into a glowing cloud */
 const SCATTER_H0 = 0.76;
 const SCATTER_H1 = 0.92;
+/**
+ * Round 5 (similarity against the video, 1243 s beam storm: 29 % -> 47 %): the storm cloud is multiple
+ * scattering in dense haze, which saturates its light towards the dominant hue of the rig and the wash
+ * (c' = max · (c / max)^SCATTER_SAT, like the pyro bounce in worldLights): a cool-white rig under a steel
+ * wash lights STEEL-BLUE haze between crisp white beams (video mean sRGB 86 / 128 / 165), not a milky
+ * grey veil over the whole frame (ours was 154 / 170 / 185 with p10 luma 139). SCATTER_GAIN: its level.
+ */
+const SCATTER_SAT = 4;
+const SCATTER_GAIN = 0.5;
+/** storm haze: how far the beams bloom into soft shafts (was 0.85: wide milky shafts; the video's are crisp) */
+const STORM_SOFT = 0.45;
+/**
+ * Laser light held by the smoke (LaserSystem.airLight: sheets scanning a dense low fog) in the flood
+ * volume: the air over the field and the stage glows in the sea colour (Embers v1112-1175: the whole frame
+ * a saturated blue smoke volume, sRGB ≈ [0, 4, 100] where ours was black). Per unit of air light.
+ */
+const LASER_AIR_K = 0.012;
+/**
+ * saturation of that glow (as SCATTER_SAT): the sheets' #2A60FF reads periwinkle in a flat veil; the video's
+ * lit smoke is a deep pure blue. Round 5: 1169.5 s 29 -> 42 %, 1165 26 -> 43 %; a flat periwinkle veil at the
+ * same level lost 2-15 points (it greys the frame out)
+ */
+const LASER_AIR_SAT = 3;
 /** static downlights (arch crown): PAR-can beam half angle and the lit lens face seen off-axis */
 const TAN_CAN = Math.tan((6 * Math.PI) / 180);
 const CAN_GAIN = 5;
@@ -176,6 +199,16 @@ export class LightingSystem implements System {
   private readonly floodSideL = new THREE.Color();
   private readonly floodSideR = new THREE.Color();
   private readonly cF = new THREE.Color();
+  /** saturated wash / rig colour of the storm-haze scatter (scratch) */
+  private readonly cSW = new THREE.Color();
+  private readonly cSR = new THREE.Color();
+  /** this frame's flood colours before the laser air (the frame hook adds it idempotently) */
+  private readonly floodBase: THREE.Vector3[] = Array.from({ length: FLOOD_BLOBS }, () => new THREE.Vector3());
+  private laserSys: { airLight?: unknown } | null | undefined = undefined;
+  /** laser air gain (LASER_AIR_K), exposed for side-by-side calibration */
+  laserAirK = LASER_AIR_K;
+  laserAirSat = LASER_AIR_SAT;
+  private readonly cSL = new THREE.Color();
   private baseHaze = 0.6;
   private hazeCam: { hazeScale?: number } | null = null;
   private festoonLit = 0;
@@ -234,6 +267,8 @@ export class LightingSystem implements System {
       glowScale();
       this.flood.fit(camera);
     };
+    // the lasers update after us: their light in the smoke joins the flood volume once every system ran
+    app.onFrame(() => this.applyLaserAir());
 
     // visual lifetimes: looks fade out, blinders glow down, strobe flashes decay
     app.show.registerLifetime('lights', (c) => {
@@ -375,7 +410,7 @@ export class LightingSystem implements System {
     this.beams.material.uniforms.uGain.value = 1;
     this.beams.material.uniforms.uNoise.value = 0.85;
     // storm haze: beams bloom into soft shafts (energy spread over a wider cone)
-    this.beams.material.uniforms.uSoft.value = 0.85 * smooth01((haze - 0.7) / 0.22);
+    this.beams.material.uniforms.uSoft.value = STORM_SOFT * smooth01((haze - 0.7) / 0.22);
 
     // ---------------------------------------------------------------- cue state
     for (let g = 0; g < this.blends.length; g++) {
@@ -736,6 +771,7 @@ export class LightingSystem implements System {
     const washGlow = env.stageWashIntensity / (1 + 0.45 * env.stageWashIntensity);
     this.glow.update(cam.position, env.stageWashColor, washGlow + strobe * 0.35, this.floorGlow, floorI, 0.02 * hz);
     this.writeFloodGlow(env, haze, sumDim / nf, strobe);
+    for (let i = 0; i < FLOOD_BLOBS; i++) this.floodBase[i].copy(this.flood.cols[i]);
     this.flood.update();
 
     this.dev?.update(ctx);
@@ -1035,17 +1071,44 @@ export class LightingSystem implements System {
     if (sc > 0) {
       const washI = Math.min(1.5, env.stageWashIntensity);
       const rig = Math.min(1, rigOut * 2.2) + strobe * 0.6;
-      const kw = FLOOD_K_STAGE * sc * 0.42 * washI;
-      add(FB_STAGE, env.stageWashColor, kw);
-      add(FB_STAGE_HIGH, env.stageWashColor, kw * 0.8);
-      const kr = FLOOD_K_STAGE * sc * 0.5 * rig;
-      add(FB_STAGE, env.stageColor, kr);
-      add(FB_STAGE_HIGH, env.stageColor, kr * 0.9);
-      add(FB_FIELD, env.stageColor, FLOOD_K_FIELD * sc * 0.5 * (rig + washI * 0.4));
-      add(FB_FIELD, env.stageWashColor, FLOOD_K_FIELD * sc * 0.35 * washI);
+      // multiple scattering saturates the cloud's light (see SCATTER_SAT)
+      const wash = saturateColor(env.stageWashColor, SCATTER_SAT, this.cSW);
+      const rigC = saturateColor(env.stageColor, SCATTER_SAT, this.cSR);
+      const g = sc * SCATTER_GAIN;
+      const kw = FLOOD_K_STAGE * g * 0.42 * washI;
+      add(FB_STAGE, wash, kw);
+      add(FB_STAGE_HIGH, wash, kw * 0.8);
+      const kr = FLOOD_K_STAGE * g * 0.5 * rig;
+      add(FB_STAGE, rigC, kr);
+      add(FB_STAGE_HIGH, rigC, kr * 0.9);
+      add(FB_FIELD, rigC, FLOOD_K_FIELD * g * 0.5 * (rig + washI * 0.4));
+      add(FB_FIELD, wash, FLOOD_K_FIELD * g * 0.35 * washI);
     }
   }
   private scatter = 0;
+
+  /**
+   * flood colours = this frame's floods + the laser light held by the smoke (LaserSystem.airLight, read
+   * after all systems ran; idempotent, so a frame hook that runs twice adds it once)
+   */
+  private applyLaserAir(): void {
+    if (!this.flood || !this.app.isSystemEnabled('lights')) return;
+    const cols = this.flood.cols;
+    for (let i = 0; i < FLOOD_BLOBS; i++) cols[i].copy(this.floodBase[i]);
+    if (this.laserSys === undefined) this.laserSys = (this.app.get('lasers') as unknown as { airLight?: unknown } | undefined) ?? null;
+    const la = this.laserSys && this.app.isSystemEnabled('lasers') ? this.laserSys.airLight : null;
+    if (la instanceof THREE.Color && la.r + la.g + la.b > 1e-4) {
+      // (saturated like the storm scatter: the video's lit smoke is a deep pure blue, not periwinkle)
+      const c = saturateColor(la, this.laserAirSat, this.cSL);
+      const k = this.laserAirK;
+      this.addGlow(FB_FIELD, c, k);
+      this.addGlow(FB_FIELD_FAR, c, k * 1.2);
+      this.addGlow(FB_STAGE, c, k * 0.5);
+      this.addGlow(FB_STAGE_HIGH, c, k * 0.8);
+    }
+    this.flood.update();
+  }
+
   /** add colour x k to a flood glow slot (bound once: no per-frame closure) */
   private readonly addGlow = (slot: number, c: THREE.Color, k: number): void => {
     if (k <= 0) return;
@@ -1286,6 +1349,13 @@ function smooth01(x: number): number {
 
 function lum(c: THREE.Color): number {
   return (c.r + c.g + c.b) * 0.3333;
+}
+
+/** out = max · (c / max)^p per channel: saturates towards the dominant channel, keeps the peak */
+function saturateColor(c: THREE.Color, p: number, out: THREE.Color): THREE.Color {
+  const m = Math.max(c.r, c.g, c.b);
+  if (m <= 1e-6) return out.setRGB(0, 0, 0);
+  return out.setRGB(m * Math.pow(Math.max(0, c.r) / m, p), m * Math.pow(Math.max(0, c.g) / m, p), m * Math.pow(Math.max(0, c.b) / m, p));
 }
 
 /** out = c / max(c) (the hue at full value), black stays black */

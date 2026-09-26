@@ -288,6 +288,7 @@ void main() {
 
 export const SURF_FRAG = /* glsl */ `
 uniform float uGainS;
+uniform vec4 uCeil;
 uniform float uTime;
 ${HAZE_GLSL}
 varying vec3 vWorld;
@@ -370,7 +371,14 @@ void main() {
     // into clumps but stays a readable ceiling.
     float above = step(0.0, nvs * sign(Nn.y + 1e-4));
     float faceOn = smoothstep(0.25, 0.7, nv) * above;
-    float t3 = mix(0.12 + 1.7 * tex * tex, tex * 0.9 + 0.3, faceOn);
+    // far BELOW the plane (a roof projector tilted up over the field, Embers v1110-1128 / v1182-1188):
+    // the camera no longer sees a line to expose for, but the smoke clouds the plane slices through, lit
+    // from inside — a blue ceiling of clouds over the upper half of the frame, the scan lines lost in the
+    // smoke. uCeil: x extra gain, y..z plane distance (m) over which this takes over, w pattern loss
+    float planeDist = abs(dot(cameraPosition - vWorld, Nn));
+    float farBelow = (1.0 - above) * smoothstep(uCeil.y, uCeil.z, planeDist);
+    float texC = smoothstep(0.3, 0.75, n1 * 0.7 + n2 * 0.3);
+    float t3 = mix(mix(0.12 + 1.7 * tex * tex, tex * 0.9 + 0.3, faceOn), 0.1 + 1.6 * texC * texC, farBelow);
     // the air part thins from the stage cloud to the field air (as for the beams: the stage haze drifts
     // back over the set, the far field holds little of it) and the low fog adds half its density here —
     // its lit tops are the sea layer (pushSea). A sheet over the far field is a faint veil, not a lit
@@ -384,11 +392,10 @@ void main() {
     // a line and violet haze near the deck, not a lit violet floor), and the grazing path length is
     // capped by the sheet's waviness + scan jitter (~0.045 rad) once the eye is off the plane (next to
     // it, the crisp edge-on line keeps the thickness cap)
-    float planeDist = abs(dot(cameraPosition - vWorld, Nn));
     float kNear = 40.0 * (1.0 - smoothstep(0.5, 22.0, planeDist));
-    kNear = max(kNear, 10.0 * (1.0 - above));
+    kNear = max(kNear, 10.0 * (1.0 - above) * (1.0 - farBelow));
     float E = inversesqrt(nv * nv + mix(0.0005, 0.002, smoothstep(1.0, 4.0, planeDist))) * exp(-nv * kNear);
-    float I = uGainS * haze * hazePhase(c) * pow(max(vR, 4.0), -0.75) * E;
+    float I = uGainS * haze * hazePhase(c) * pow(max(vR, 4.0), -0.75) * E * (1.0 + farBelow * uCeil.x);
     // scan structure: the fan of discrete beams the scanner draws (+ a second, sliding family -> moire)
     float s1 = lines(vU * 41.0 + uTime * 0.21, 5.0);
     float s2 = lines(vU * 53.0 - uTime * 0.16, 3.0);
@@ -401,6 +408,7 @@ void main() {
     pattern *= 1.0 + 2.0 * exp(-e * 80.0);
     // fine flicker (scanner sampling / speckle)
     pattern *= 0.88 + 0.12 * sin(uTime * 41.0 + vU * 331.0 + vR * 0.7);
+    pattern = mix(pattern, 0.8 + 0.4 * s1, farBelow * uCeil.w);
     col = vColor * I * pattern;
   } else {
     // ---- cone shell (tunnel): the drawn circle = dense scan lines + rotating bright segments

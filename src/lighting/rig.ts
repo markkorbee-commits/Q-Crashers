@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Anchors, type AnchorName } from '../core/Anchors';
 import { hash32 } from '../core/rng';
+import { stageFloorAt } from '../world/stageWalk';
 
 /**
  * The 2026 RED show rig (moving heads, strobes, blinders) laid out in world metres.
@@ -526,7 +527,12 @@ export function buildRig(anchors: Anchors, density: number, own?: Map<string, TH
     add(G_TRUSS, T_ARCH, p, Z, true, k, ARCH_SPOTS, cluster);
     const f = fixtures[fixtures.length - 1];
     f.body = false;
-    f.focus = v3(p.x * 0.45, PORTAL.deckY, PORTAL.frontZ + 2.6);
+    // aimed at the walkable floor under the focus (the dancers' podium, 0.3 m above the deck), so the
+    // pools sit on the surface the performers stand on
+    const fx = p.x * 0.45;
+    const fz = PORTAL.frontZ + 2.6;
+    const fy = stageFloorAt(fx, fz);
+    f.focus = v3(fx, Number.isFinite(fy) ? fy : PORTAL.deckY, fz);
   }
   cluster++;
 
@@ -557,8 +563,11 @@ export function buildRig(anchors: Anchors, density: number, own?: Map<string, TH
   for (const p of pillars) blinder(T_PLINTH, v3(p.top.x, p.capitalY - 1.4, p.top.z + 1.45), Z);
   // backlight row on the porch front, behind the performers, facing the audience (explicit: `deck_back`)
   for (const x of BACKLIGHT_X) for (const s of [-1, 1]) blinder(T_BACK, v3(s * x, PORTAL.backlightY, PORTAL.frontZ + 0.3), Z);
-  // the DJ booth spot at the foot of the portal (explicit: `dj_booth` / `booth`)
-  blinder(T_BOOTH, v3(0, PORTAL.deckY + 1.35, PORTAL.frontZ - 0.35), Z);
+  // the DJ booth spot at the foot of the portal (explicit: `dj_booth` / `booth`): 1.35 m above the walkable
+  // floor there — the raised vault floor (deck + 0.8), so (0, 4.05, −6.35), not buried in it
+  const boothZ = PORTAL.frontZ - 0.35;
+  const boothFloor = stageFloorAt(0, boothZ);
+  blinder(T_BOOTH, v3(0, (Number.isFinite(boothFloor) ? boothFloor : PORTAL.deckY + 0.8) + 1.35, boothZ), Z);
 
   // fan "diverge" coordinate per cluster: position along the fan axis relative to the cluster centre
   computeDiverge(fixtures);

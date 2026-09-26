@@ -119,6 +119,15 @@ any beam that points within about 1–2° of the camera now adds a smaller versi
   cameras the golden corridor (1370.9) flooded the frame; v1373 is dark with bright hatched streaks.
 * The show camera's per-shot haze scale (CameraRig.hazeScale, lower for telephoto shots) also thins the
   laser haze a little (× 0.45 + 0.55 × scale), so beams in long-lens shots stay thin lines.
+* Round 5: a **sheet seen from far below** (12–35 m and more under its plane: a `roof` sheet tilted up over
+  the field, Embers v1110–1128 / v1182–1188) lights the smoke clouds it slices as a blue ceiling, the scan
+  lines lost in the smoke, instead of vanishing (1120.5 s 37 → 44 %). A level sheet a few metres over the
+  camera keeps its crisp line.
+* Round 5: the smoke drift and the low-fog flow of the laser haze follow **show time** (they ran on real
+  time): the laser sea on the ground is a pure function of show time again (seek = same image).
+* Round 5: while sheets scan a dense low fog, `LaserSystem.airLight` (their colour × power, gated by the
+  low-fog density 0.65 → 0.9) makes the lighting's flood volume glow in that colour over the field and the
+  stage (see lights.md, round 5).
 
 ## Proposed cue updates for public/show/endshow-2026.json (tested side by side with the video)
 

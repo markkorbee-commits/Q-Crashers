@@ -373,6 +373,14 @@ export class LaserSystem implements System {
   private seaR = 0;
   private seaG = 0;
   private seaB = 0;
+  /**
+   * Laser light held by the smoke this frame (linear colour x power of the sheets skimming a dense low
+   * fog; 0 without one): the FogSystem's haze glows in it — the lit blue air of Embers (v1112-1175: the
+   * whole frame a saturated blue smoke volume around the sea), read after this system updates
+   */
+  readonly airLight = new THREE.Color(0, 0, 0);
+  /** low-fog density from which the smoke above the bank holds the sheets' light (full at 0.9) */
+  airGate0 = 0.65;
   /** second scan colour (lights the crests) */
   private sea2R = 0;
   private sea2G = 0;
@@ -486,6 +494,7 @@ export class LaserSystem implements System {
     this.audienceWash = 0;
     this.seaR = this.seaG = this.seaB = 0;
     this.sea2R = this.sea2G = this.sea2B = 0;
+    this.airLight.setRGB(0, 0, 0);
     if (!this.terrain) this.terrain = (app.get('terrain') as { heightAt?(x: number, z: number): number } | undefined) ?? {};
 
     this.tribe = this.detectTribe();
@@ -680,11 +689,14 @@ export class LaserSystem implements System {
     }
     this.lowHaze = low;
     u.uLowHaze.value = low * 0.9;
-    const tt = ctx.time;
+    // the smoke drift and the low-fog flow follow SHOW time like everything else (round 5: they ran on
+    // real time, so the laser sea on the ground depended on how long the app had been running and on
+    // the previously rendered moment — 6-7/255 mean pixel difference at 1389.5 / 1169.5 / 1463 / 1145
+    // between forward and reverse seek orders). Paused, the smoke holds still: a seek = the same image
+    const tt = ctx.showTime;
     (u.uDrift.value as THREE.Vector3).set(tt * 0.0042, -tt * 0.0011, tt * 0.0017);
-    // show-driven animation (scan lines, dashes, flicker) follows show time; the air itself drifts in real time
-    u.uTime.value = ctx.showTime;
-    u.uFlow.value = tt % 2000;
+    u.uTime.value = tt;
+    u.uFlow.value = tt;
     const fog = app.scene.fog as (THREE.Fog | THREE.FogExp2 | null);
     if (fog && (fog as THREE.FogExp2).isFogExp2) {
       u.uFogMode.value = 1;
@@ -1661,6 +1673,10 @@ export class LaserSystem implements System {
     // medium bank (0.6–0.7: v1389, v1463) shows the sea only where the fog is thickest
     const x = Math.min(1, Math.max(0, (this.lowHaze - 0.45) / 0.4));
     const gate = x * x * (3 - 2 * x);
+    // the smoke above the bank holds the sheets' light too (a dense bank only: v1389 / v1463 stay dark)
+    const xa = Math.min(1, Math.max(0, (this.lowHaze - this.airGate0) / (0.9 - this.airGate0)));
+    const ga = xa * xa * (3 - 2 * xa);
+    if (!this.tribe) this.airLight.setRGB(this.seaR * ga, this.seaG * ga, this.seaB * ga);
     if (this.tribe || gate < 0.01 || w < 0.01) return;
     const k = 2.0 * gate;
     // (the fog kind carries the crest colour in the wave-phase slots)
