@@ -534,7 +534,7 @@ export class UI {
   arrivalToast(id: string): boolean {
     if (id === 'dj') this.toast('DJ-booth — zo ziet de DJ het veld', 3600, 'music');
     else if (id === 'dancers') this.toast("Dancers' podium — walk up the grey steps into the vault to the DJ booth", 3200, 'pin');
-    else if (id === 'castle') this.toast('Castle gallery — up the stone stairs, over the troupe and the field', 3000, 'pin');
+    else if (id === 'castle') this.toast('Castle gallery — up the stone stairs, between the skull cube and the portal', 3000, 'pin');
     else return false;
     return true;
   }

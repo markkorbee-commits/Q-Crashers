@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { App } from '../core/App';
 import { yawTowards } from '../player/spots';
-import { BOOTH, CREW_STAIRS, PODIUM, podiumRects, STEPS, VAULT, vaultCeiling, vaultHalfWidth } from '../stage/booth/layout';
+import { BOOTH, CASTLE_STAIRS, CREW_STAIRS, PODIUM, podiumRects, STEPS, VAULT, vaultCeiling, vaultHalfWidth } from '../stage/booth/layout';
 import { deckHardware, deckTopAt } from '../stage/deck/hardware';
 import { L } from '../stage/layout';
 import { terrainHeight } from './site';
@@ -180,7 +180,7 @@ function build(w: StageWalk): void {
   // castle stairs through the round arches up to the upper platform (5.5) and the gallery
   const zf = L.porchFrontZ - L.screenT;
   for (const s of [-1, 1]) {
-    surf('castle-stairs', s * L.stairX0, s * L.stairX1, L.stairBackZ, zf, s > 0 ? Y : L.platformY, s > 0 ? L.platformY : Y, 1);
+    surf('castle-stairs', s * CASTLE_STAIRS.footX, s * L.stairX1, L.stairBackZ, zf, s > 0 ? Y : L.platformY, s > 0 ? L.platformY : Y, 1);
     surf('castle-landing', s * L.stairX1, s * L.porchHalf, L.stairBackZ, zf, L.platformY);
     surf('castle-platform', s * L.stairX0, s * (L.porchHalf + 0.7), L.facadeZ, L.stairBackZ, L.platformY);
     surf('castle-gallery', s * (L.porchHalf + 0.7), s * 23, L.facadeZ, L.galleryFrontZ, L.platformY);
@@ -238,7 +238,7 @@ function build(w: StageWalk): void {
     wall('porch-mass', s * VAULT.outerHalf, s * L.stairX0, L.facadeZ, zf, Y, VAULT.massTop, true);
     wall('platform-rail', s * (L.stairX0 - 0.1), s * (L.stairX0 + 0.05), L.facadeZ, L.stairBackZ, L.platformY, L.platformY + 1.1);
     // flight handrail on the screen side (the first metre stays open: the way in through the arch)
-    wall('stair-rail', s * (L.stairX0 + 1.0), s * (L.stairX1 + 0.5), zf - 0.14, zf - 0.02, Y + 0.45, L.platformY + 1.1);
+    wall('stair-rail', s * (CASTLE_STAIRS.footX + CASTLE_STAIRS.railFrom), s * (L.stairX1 + 0.5), zf - 0.14, zf - 0.02, Y + 0.45, L.platformY + 1.1);
     // the platform edge over the recess, the gallery front and ends
     wall('platform-rail', s * (L.stairX0 + 0.1), s * (L.stairX1 - 0.1), L.stairBackZ - 0.12, L.stairBackZ - 0.02, L.platformY, L.platformY + 1.1);
     wall('gallery-rail', s * (L.porchHalf + 0.7), s * 23.1, L.galleryFrontZ, L.galleryFrontZ + 0.12, L.platformY, L.platformY + 1.1);
@@ -255,7 +255,7 @@ function build(w: StageWalk): void {
   // the booth desk (a little inside its gear overhang so the passage beside it stays open)
   wall('booth-desk', -BOOTH.halfW + 0.13, BOOTH.halfW - 0.13, BOOTH.z - BOOTH.halfD, BOOTH.z + BOOTH.halfD, VAULT.floorY, VAULT.floorY + BOOTH.height + 0.15, true);
   // booth monitors on their tripods beside the DJ
-  for (const s of [-1, 1]) post('booth-monitor', s * 1.8, BOOTH.djZ + 0.55, 0.3, VAULT.floorY, VAULT.floorY + 1.8);
+  for (const s of [-1, 1]) post('booth-monitor', s * BOOTH.monitorX, BOOTH.monitorZ, 0.22, VAULT.floorY, VAULT.floorY + 1.8);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -286,5 +286,5 @@ export function registerStageWalk(app: App): void {
   // on the dancers' podium, front edge left of the lead's pedestal
   add('dancers', "Dancers' podium", -2.7, PODIUM.top, PODIUM.frontZ - 0.35, new THREE.Vector3(-1.5, 3, 60), -0.06);
   // the upper castle platform / gallery (up the castle stairs): over the troupe and the field
-  add('castle', 'Castle gallery', -14.2, L.platformY, L.galleryFrontZ - 0.55, new THREE.Vector3(-2, 2, 24), -0.16);
+  add('castle', 'Castle gallery', -15.2, L.platformY, L.galleryFrontZ - 0.45, new THREE.Vector3(-5, 2, 16), -0.2);
 }

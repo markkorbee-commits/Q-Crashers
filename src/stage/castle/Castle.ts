@@ -5,7 +5,7 @@ import { type ArchKind, extrude, frameShape, type Opening, paneShape, wallShape 
 import { L } from '../layout';
 import { LED_KIND } from '../materials/LedMaterial';
 import { GARLAND, type Garlands } from '../dragon/shading';
-import { PODIUM, VAULT } from '../booth/layout';
+import { CASTLE_STAIRS, PODIUM, VAULT } from '../booth/layout';
 
 /**
  * The grey gothic castle core of the 2026 RED (printed scenic flats on scaffold in reality), laid out
@@ -324,13 +324,16 @@ export class CastleBuilder {
     const n = 12;
     const x0 = L.stairX0,
       x1 = L.stairX1;
+    // the flight starts a metre into the recess: a deck-level foot inside the arch, so the stairs can
+    // be walked (in through the arch, turn, climb: world/stageWalk.ts)
+    const f0 = CASTLE_STAIRS.footX;
     const rise = (L.platformY - Y) / n;
-    const run = (x1 - x0) / n;
+    const run = (x1 - f0) / n;
     const zf = L.porchFrontZ - L.screenT;
     const zb = L.stairBackZ;
     for (let i = 0; i < n; i++) {
-      const a = s * (x0 + i * run),
-        b = s * (x0 + (i + 1) * run);
+      const a = s * (f0 + i * run),
+        b = s * (f0 + (i + 1) * run);
       boxMinMax(k.stone, Math.min(a, b), Y, zb, Math.max(a, b), Y + rise * (i + 1), zf, TINT.stair);
       boxMinMax(k.stone, Math.min(a, b), Y + rise * (i + 1) - 0.04, zf - 0.04, Math.max(a, b), Y + rise * (i + 1), zf + 0.02, TINT.trim);
     }
@@ -342,7 +345,7 @@ export class CastleBuilder {
     boxMinMax(k.stone, Math.min(pa, lb), Y, L.facadeZ, Math.max(pa, lb), L.platformY - 0.1, zb, TINT.wall);
     boxMinMax(k.stone, Math.min(pa, lb), L.platformY - 0.1, L.facadeZ, Math.max(pa, lb), L.platformY, zb + 0.05, TINT.stair);
     // railings: along the flight, and along the platform edge over the recess
-    railing(k, [new THREE.Vector3(s * x0, Y, zf - 0.1), new THREE.Vector3(s * x1, L.platformY, zf - 0.1), new THREE.Vector3(s * (L.porchHalf - 0.1), L.platformY, zf - 0.1)], 1.05, 1.0);
+    railing(k, [new THREE.Vector3(s * (f0 + 0.6), Y + 0.6 * (rise / run), zf - 0.1), new THREE.Vector3(s * x1, L.platformY, zf - 0.1), new THREE.Vector3(s * (L.porchHalf - 0.1), L.platformY, zf - 0.1)], 1.05, 1.0);
     railing(k, [new THREE.Vector3(s * (x0 + 0.1), L.platformY, zb - 0.08), new THREE.Vector3(s * (x1 - 0.1), L.platformY, zb - 0.08)], 1.05, 1.2);
     // glowing arcade in the back of the recess (seen through the arch)
     for (const cx of [7.6, 10.2]) {

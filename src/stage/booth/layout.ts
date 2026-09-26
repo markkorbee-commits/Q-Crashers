@@ -100,12 +100,26 @@ export const BOOTH = {
   matBackZ: -11.75,
   /** where the DJ stands (the 'dj' viewing spot) */
   djZ: -10.95,
+  /** booth monitors on tripods at the riser's back corners (the passage along the desk ends stays open) */
+  monitorX: 1.72,
+  monitorZ: -11.5,
 } as const;
 
 /** barrier gates in the front-of-stage barrier: the pit stairs (centre) and the crew stairs at the corners */
 export const GATES = {
   centreHalf: 1.0,
   side: [43.2, 44.8] as readonly [number, number],
+} as const;
+
+/**
+ * the castle stairs behind the stair arches (Castle.ts): the flight rises outwards from footX to
+ * L.stairX1 (5.5); between the porch mass (L.stairX0) and footX the recess floor is the deck, the way
+ * in through the arch
+ */
+export const CASTLE_STAIRS = {
+  footX: 7.1,
+  /** the flight's handrail on the screen side starts this far along it (the open way in) */
+  railFrom: 0.6,
 } as const;
 
 /** crew stairs (black scaffold units) from the pit up to the corner plinths */

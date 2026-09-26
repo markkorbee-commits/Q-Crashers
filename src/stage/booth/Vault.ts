@@ -208,7 +208,8 @@ export class VaultBuilder {
         OUT,
         0.035,
         LED_KIND.bar,
-        ri % 2 === 0 ? 0 : 1,
+        // the first ring in the look's content colour, the deeper rings at the (dimmer) outline level
+        ri === 0 ? 0 : 2,
       );
     }
     bolt.dispose();

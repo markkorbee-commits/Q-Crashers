@@ -269,11 +269,11 @@ export class BoothBuilder {
     this.q.quad(c.clone().add(new THREE.Vector3(0, 0, -0.0005)).addScaledVector(new THREE.Vector3(0, -Math.sin(lean), Math.cos(lean)), -0.001), NX, up, 0.3, 0.19, SCREEN_KIND.laptop, 0, ATLAS.laptop);
   }
 
-  /** booth monitor on a tripod stand beside the desk, aimed at the DJ's head */
+  /** booth monitor on a tripod stand at the back corner of the DJ riser, aimed at the DJ's head */
   private monitor(s: number): void {
     const F = VAULT.floorY;
-    const x = s * 1.8,
-      z = BOOTH.djZ + 0.55;
+    const x = s * BOOTH.monitorX,
+      z = BOOTH.monitorZ;
     const top = F + 1.18;
     this.post(x, F, z, 0.02, 1.18, C.body, 8);
     for (let k = 0; k < 3; k++) {
