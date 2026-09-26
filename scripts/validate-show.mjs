@@ -559,7 +559,9 @@ for (const [n, sysReq, what] of STORYBOARD) {
   if (cur < b - (cur > a ? 1 : 0.25)) holes.push([cur, b]);
   if (holes.length) storyGaps.push(`f${String(n).padStart(3, '0')} (${what}, ${sysReq}) not alive over ${a.toFixed(1)}–${b.toFixed(1)}: gap ${holes.map(([u, v]) => `${u.toFixed(1)}–${v.toFixed(1)}`).join(', ')}`);
 }
-for (const g of storyGaps) warn(`storyboard: ${g}`);
+// Since the timeline was rebuilt from the official video (research/video-timeline/), the storyboard windows
+// (thumbnail capture instant only known to +-5 s) are advisory: printed with --storyboard, never warnings.
+if (args.includes('--storyboard')) for (const g of storyGaps) console.log(`  · storyboard: ${g}`);
 
 // ------------------------------------------------------------------------------ camera sight lines
 /**
