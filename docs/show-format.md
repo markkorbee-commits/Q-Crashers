@@ -159,6 +159,11 @@ lights targets: `truss`, `floor`, `towers`, `field`, `wings`, `deck`, `roof`, `c
   or colour change. A shell with only filter targets fires ONE shell; named anchors fire one per
   point; `x`/`z` give an absolute position. Extra shell type `glitter`.
 * `salvo`: `count`, `spread`, `pattern` (line|v|arc|random), `stagger`.
+* Sync check (`scripts/check-sync.py`) scores the VISIBLE hit: shells and salvos at their break (cue t + `rise`, or the
+  lift formula above from the launch height of the target; `v` / `arc` / `random` salvos break their lowest shells first
+  at about 0.75 / 0.9 / 0.8 × `height`), cakes with a shell `type` at the comet burnout, everything else (comets,
+  plain cakes, mines, flares, finales, pyro, lights) at the cue time. A free-tempo rake (numeric `repeat.every`
+  < 0.4 s) scores only its first shot. Steady tracks: half-beat grid; free tempo: `audio-map.json` onsets.
 * `comet`: `height` = rise above the launch point (default 40); `count` total vs `per` (per point);
   one comet per point with `angle` > 0 makes a V; `end`: none|pearl|crackle|shell type; `serpent`;
   `stagger`; `lean`.
