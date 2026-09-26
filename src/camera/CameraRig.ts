@@ -139,7 +139,8 @@ export class CameraRig implements System {
     this.freeYaw = yaw;
     this.freePitch = pitch;
     this.blend.t = this.blend.dur;
-    if (fov) this.setBaseFov(fov);
+    // tools and ?cam= may frame like a long lens (the official edit uses telephoto shots): photo-mode range
+    if (fov) this.baseFov = clamp(fov, 12, 110);
   }
 
   /** V key / touch button: toggle between the eye view and the third-person avatar view */
