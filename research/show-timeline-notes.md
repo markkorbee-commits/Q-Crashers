@@ -42,7 +42,15 @@ zooms (`fov`→`fovTo`: 797.9 crash zoom, 1001.8, 1098.4, 1460.5, 1551.3) and st
 0.12 s at 1222.6–1225 and 1267.8/1272.4). New one-off hits stay on the half-beat grid (`check-sync.py`: steady
 tracks 100 % within 20 ms). Pyro cues are left for the pyro fixer's own pass (`pyro-cue-updates.py`); note that the
 fireworks list already replaced the static flare bursts of 43–62 s and 313 s by `fireworks.flare` drones, so that
-script's flare-drone conversion there reports MISSING by design. `validate-show` now also reads the module docs'
+script's flare-drone conversion there reports MISSING by design. A render pass of the integrated file against the
+video (≈50 moments) then corrected what cues can fix: the Winter peacock fan hangs 3 s as in v100.8–104 (cake with
+`fill`, was a 1-s volley); the red crackle volley of Sacred Oath stops at 335.0 and the red field/sky/beams at 336.3
+(the terrace telephoto at 337.9 had crackle falling through it); the crash zoom 797.9 already has the set and beams
+out; the L.P.A. strings bloom in lit white fog (567.4, field flood); the teal flood at 594.3 is lower (the set kept
+rendering flat cyan); the Embers terrace shot at 1222.5 is beam-less until the blinder row; the 1267.8 stutter edit
+intercuts the dark close frontal with the terrace telephoto of the strobing strings (25 fps cut metric), the set
+stays dark until 1271.2, and 1272.4 is one shot (its flicker is the strings strobing the fog); the violet emergence
+at 1460.5 frames the whole crown with red rosettes. `validate-show` now also reads the module docs'
 own idioms ("New fx" headings, "lights fx: …" lists, "`param`: add …" / "adds" enumerations) and the lasers' own
 target tokens, so the documented extensions validate.
 
