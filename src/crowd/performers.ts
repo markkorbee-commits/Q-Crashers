@@ -222,10 +222,13 @@ const MC_PATH = new Path([
   { t: 347, x: -4.2, z: -3.9 },
   { t: 351, x: -4.6, z: -4.0 },
   { t: 357, x: -5.5, z: -3.8 },
-  { t: 363, x: -6.4, z: -3.7 },
+  // v357.9–363.9 (low deck camera in front of him, panning from the left wing's arm to the dragon's mouth):
+  // he steps forward so the open mouth over the portal hangs behind-right of his head (v361–363.9)
+  { t: 360.2, x: -5.0, z: -2.5 },
+  { t: 363, x: -5.2, z: -2.4 },
   // v363.96–367.1: filmed from behind, he walks away from the lens towards the front of the deck
-  { t: 364.0, x: -6.0, z: -2.9 },
-  { t: 365.3, x: -5.6, z: -2.0 },
+  { t: 364.0, x: -5.3, z: -2.3 },
+  { t: 365.3, x: -5.5, z: -1.9 },
   { t: 366.9, x: -5.4, z: -1.6 },
   { t: 369.2, x: -5.1, z: -1.8 },
   // v367–374 he faces the lens, the arch behind him at the end: across the deck, not back upstage

@@ -359,6 +359,7 @@ export class CrowdSystem implements System {
       uPixel: { value: 0.001 },
       uLantern: { value: new THREE.Vector4() },
       uKey: { value: new THREE.Vector4() },
+      uArch: { value: new THREE.Vector4() },
       uPerfKey: { value: new THREE.Color() },
       uPerfBack: { value: new THREE.Color() },
       uGroups: { value: new THREE.Vector4() },
@@ -684,6 +685,8 @@ export class CrowdSystem implements System {
     const env = app.env;
     const key = u.uKey.value as THREE.Vector4;
     key.set(env.stageWashColor.r * env.stageWashIntensity * 0.5, env.stageWashColor.g * env.stageWashIntensity * 0.5, env.stageWashColor.b * env.stageWashIntensity * 0.5, 1);
+    // the portal's arch-crown downlights (normalised colour + level, written by LightingSystem this frame)
+    (u.uArch.value as THREE.Vector4).set(env.archSpotColor.r, env.archSpotColor.g, env.archSpotColor.b, clamp(env.archSpotIntensity, 0, 1.5));
     // deck performers in the rig's light (the film's close-ups): a key in the rig colour from the front
     // (x the performer's key level) and a backlight from the set behind them (rig, backlight blinders,
     // strobes, stage-side flashes) that draws coloured edges around a darker front
