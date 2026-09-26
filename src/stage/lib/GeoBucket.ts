@@ -15,6 +15,8 @@ export interface PartOpts {
   uv?: UVMode;
   /** value of the aGroup attribute (only when the bucket was created with groups) */
   group?: number;
+  /** keep the part's own per-vertex `color` attribute (when it has one) instead of the flat tint */
+  keepColor?: boolean;
 }
 
 const _n = new THREE.Vector3();
@@ -41,7 +43,8 @@ export class GeoBucket {
   /** add a geometry (the source geometry is not modified) transformed by `m` */
   add(src: THREE.BufferGeometry, m?: THREE.Matrix4, o: PartOpts = {}): void {
     let g = src.index ? src.toNonIndexed() : src.clone();
-    for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal' && k !== 'uv') g.deleteAttribute(k);
+    const keepCol = o.keepColor === true && !!g.attributes.color && g.attributes.color.itemSize === 3;
+    for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal' && k !== 'uv' && !(keepCol && k === 'color')) g.deleteAttribute(k);
     if (m) g.applyMatrix4(m);
     if (!g.attributes.normal) g.computeVertexNormals();
     const n = g.attributes.position.count;
@@ -50,14 +53,16 @@ export class GeoBucket {
     } else {
       boxUV(g, this.uvScale);
     }
-    const col = o.color ?? WHITE;
-    const ca = new Float32Array(n * 3);
-    for (let i = 0; i < n; i++) {
-      ca[i * 3] = col.r;
-      ca[i * 3 + 1] = col.g;
-      ca[i * 3 + 2] = col.b;
+    if (!keepCol) {
+      const col = o.color ?? WHITE;
+      const ca = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) {
+        ca[i * 3] = col.r;
+        ca[i * 3 + 1] = col.g;
+        ca[i * 3 + 2] = col.b;
+      }
+      g.setAttribute('color', new THREE.BufferAttribute(ca, 3));
     }
-    g.setAttribute('color', new THREE.BufferAttribute(ca, 3));
     if (this.withGroups) g.setAttribute('aGroup', new THREE.BufferAttribute(new Float32Array(n).fill(o.group ?? 0), 1));
     this.triangles += n / 3;
     this.parts.push(g);

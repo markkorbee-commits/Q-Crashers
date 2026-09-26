@@ -2,8 +2,10 @@ import * as THREE from 'three';
 import type { App } from '../core/App';
 import type { AnchorName } from '../core/Anchors';
 import type { FrameContext, QualitySettings, System } from '../core/types';
-import type { Platform, PlayerController } from '../player/PlayerController';
 import { yawTowards } from '../player/spots';
+import { registerStageWalk } from '../world/stageWalk';
+import { BOOTH, VAULT } from './booth/layout';
+import { VaultModule } from './booth/VaultModule';
 import { addCastleGarlands, CastleBuilder, SKULL_CUBE } from './castle/Castle';
 import { addSideGarlands, SidesBuilder } from './castle/Sides';
 import { barrierLayout, barrierRuns, barrierSegmentGeometry, DeckBuilder } from './deck/Deck';
@@ -75,6 +77,7 @@ export class MainStageSystem implements System {
   private app!: App;
   private enabled = true;
   private crown = new DragonCrown();
+  private vault = new VaultModule();
   private mats!: StageMaterials;
   private lights = new StageLights();
   private resolver!: LookResolver;
@@ -107,6 +110,9 @@ export class MainStageSystem implements System {
     new SidesBuilder(kit).build();
     new DeckBuilder(kit).build();
     new SpeakerBuilder(kit).build();
+    // the gold vault + DJ booth (own interior mesh + booth screens; roof scales / LED strips into the kit)
+    this.vault.build(kit, this.mats, q.level === 'mobile');
+    this.root.add(this.vault.group);
     this.buildMeshes(kit);
     const t2 = performance.now();
     this.timing.geometry = t2 - t1;
@@ -218,7 +224,8 @@ export class MainStageSystem implements System {
     set('mines', byX(P.mines));
     set('speaker_hangs', byX(P.speakerHangs));
     set('hang_glitter', byX(P.hangGlitter));
-    set('dj_booth', [new THREE.Vector3(0, L.deckY + 0.3, L.boothZ - 1.0)]);
+    // the (empty) DJ booth in the gold vault: front edge of the desk top
+    set('dj_booth', [new THREE.Vector3(0, VAULT.floorY + BOOTH.height, BOOTH.z + BOOTH.halfD)]);
     set('fixtures_floor', byX(P.fixturesFloor));
     let c: ReturnType<DragonCrown['anchors']> | null = null;
     try {
@@ -271,19 +278,12 @@ export class MainStageSystem implements System {
   }
 
   private registerWorld(app: App): void {
-    // raised walkable deck (the player on it is clamped to this rectangle; only 'deck*' colliders apply)
-    const player = app.get<PlayerController>('player');
-    const deck: Platform = { minX: -L.plinthX1, maxX: L.plinthX1, minZ: L.facadeZ + 0.05, maxZ: -0.05, y: L.deckY };
-    if (player && Array.isArray(player.platforms)) {
-      player.platforms.length = 0;
-      player.platforms.push(deck);
-    }
+    // the walkable stage (deck, podium, grey steps, vault + booth, castle stairs / gallery, pit and crew
+    // stairs) is the walk map of world/stageWalk.ts: the player walks it height-aware; its walls with a
+    // camera flag become 'deckw-cam' colliders for the third-person arm; the stage viewing spots
+    registerStageWalk(app);
     const box = (minX: number, maxX: number, minZ: number, maxZ: number, tag: string) => app.addCollider({ kind: 'box', minX, maxX, minZ, maxZ, tag });
-    // colliders ON the deck: porch (screen, stairs, side walls), portal niche, booth, towers, PA truss bases
-    box(-L.porchHalf - 0.7, -L.portalW / 2 - 0.3, L.facadeZ, L.porchFrontZ, 'deck-porch');
-    box(L.portalW / 2 + 0.3, L.porchHalf + 0.7, L.facadeZ, L.porchFrontZ, 'deck-porch');
-    box(-L.portalW / 2 - 0.3, L.portalW / 2 + 0.3, L.facadeZ, L.porchFrontZ - L.portalDepth, 'deck-portal');
-    box(-2.1, 2.1, L.boothZ - 0.6, L.boothZ + 0.6, 'deck-booth');
+    // colliders ON the deck (players on the stage collide with 'deck*'): skull cubes, wing tusks, PA truss bases
     for (const s of [-1, 1]) {
       // skull cubes either side of the portal + the wing's hooked tusks hanging to the deck
       const C = SKULL_CUBE;
@@ -298,7 +298,6 @@ export class MainStageSystem implements System {
     }
     // stage body for ground walkers: deck + castle + backstage, side sections, corner towers
     box(-L.plinthX1, L.plinthX1, -45, 0.75, 'stage');
-    box(-2.2, 2.2, 0, 2.25, 'stage-stairs');
     for (const s of [-1, 1]) {
       const sx = (a: number, b: number): [number, number] => [Math.min(s * a, s * b), Math.max(s * a, s * b)];
       const [a0, a1] = sx(L.plinthX1, L.corner.x - L.corner.w / 2);
@@ -339,7 +338,6 @@ export class MainStageSystem implements System {
     };
     spot('stage_left', 'Stage left (deck)', -30, -3.4, look, -0.02);
     spot('stage_right', 'Stage right (deck)', 30, -3.4, look, -0.02);
-    spot('dj_booth', 'Behind the decks', 0, L.boothZ - 1.0, new THREE.Vector3(0, 2, 60), 0.02);
   }
 
   // -------------------------------------------------------------------------------------------
@@ -371,6 +369,7 @@ export class MainStageSystem implements System {
     this.applyUniforms(ctx, look);
     this.updateOverlay(ctx.camera);
     this.lights.update(look, app.env.flashPos, app.env.flashIntensity);
+    this.vault.update(ctx, look);
     try {
       this.crown.update(ctx, look);
     } catch (e) {
@@ -397,6 +396,7 @@ export class MainStageSystem implements System {
     l.uPulse.value = 0;
     l.uStrobe.value = 0;
     this.crown.daylight();
+    this.vault.daylight();
     this.daylight!.apply(ctx.camera);
   }
 
@@ -513,7 +513,8 @@ export class MainStageSystem implements System {
       tris: this.kitStats.tris + bTris + crownTris,
       setTris: this.kitStats.tris + bTris,
       crownTris,
-      calls: this.meshes.length + (this.barrier ? 1 : 0) + (this.overlay ? 1 : 0) + crownCalls,
+      calls: this.meshes.length + (this.barrier ? 1 : 0) + (this.overlay ? 1 : 0) + crownCalls + this.vault.calls,
+      vaultTris: Math.round(this.vault.tris),
       overlayTris: this.overlay ? (this.overlay.geometry.attributes.position.count / 3) | 0 : 0,
       lights: this.lights.count,
       ledMetres: this.kitStats.ledMetres,
@@ -540,6 +541,7 @@ export class MainStageSystem implements System {
     this.barrier?.geometry.dispose();
     this.overlay?.geometry.dispose();
     this.overlayMat?.dispose();
+    this.vault.dispose();
     this.mats.dispose();
   }
 }

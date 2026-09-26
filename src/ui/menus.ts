@@ -34,11 +34,15 @@ function rowBtn(ico: string | HTMLElement, title: string, sub: string, meta: str
 // ------------------------------------------------------------------------------------------
 // Positions (T)
 // ------------------------------------------------------------------------------------------
-/** list order: the audience first (closest to the stage first), then the stage and special spots */
+/** list order: ON the stage first (the view you never get as a visitor), then the audience (closest to the stage first), then the grounds */
+const STAGE = ['dj', 'dancers', 'castle', 'stage_left', 'stage_right'];
 const AUDIENCE = ['front', 'crowd', 'dragon_view', 'middle', 'foh', 'photo', 'aisle', 'side_left', 'side_right', 'back'];
-const SPECIAL = ['stage_left', 'stage_right', 'dj_booth', 'piano', 'crest_left', 'decking', 'entrance'];
+const SPECIAL = ['piano', 'crest_left', 'decking', 'entrance'];
 /** one-line description per spot (instead of coordinates) */
 const SPOT_BLURB: Record<string, string> = {
+  dj: 'Behind the decks in the gold vault, facing the field',
+  dancers: 'On the red podium where the dancers perform',
+  castle: 'The gallery at the top of the castle stairs',
   front: 'On the barrier, right under the dragon',
   crowd: 'In the pit with the Tribe, 30 m out',
   dragon_view: 'Looking up at the dragon crown',
@@ -51,7 +55,6 @@ const SPOT_BLURB: Record<string, string> = {
   back: 'The full width of the set, far back',
   stage_left: 'On the deck, looking across the stage',
   stage_right: 'On the deck, looking across the stage',
-  dj_booth: 'Where the DJs stand, facing the field',
   piano: 'The piano riser of Domitor Draconis',
   crest_left: 'Up on the west crest by the bars',
   decking: 'On the decking by the lake',
@@ -68,14 +71,16 @@ function spotGroups(all: readonly NamedSpot[]): { heading: string; spots: NamedS
       used.add(id);
       return [s];
     });
+  const stage = take(STAGE);
   const audience = take(AUDIENCE);
   const special = take(SPECIAL);
   const bars = all.filter((s) => s.id.startsWith('bar_'));
   bars.forEach((s) => used.add(s.id));
   const rest = all.filter((s) => !used.has(s.id));
   return [
+    { heading: 'Stage', spots: stage },
     { heading: 'In the audience', spots: audience },
-    { heading: 'On stage & around the grounds', spots: [...special, ...rest] },
+    { heading: 'Around the grounds', spots: [...special, ...rest] },
     { heading: 'Bars', spots: bars },
   ].filter((g) => g.spots.length);
 }

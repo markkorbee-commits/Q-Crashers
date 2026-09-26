@@ -526,8 +526,17 @@ export class UI {
     if (this.photo.open) this.togglePhoto(false, 'first');
     else if (this.camMode() !== 'first') cameraRig(this.app)?.setMode?.('first');
     if (spot.id.startsWith('bar_')) this.toast(`${spot.label} — walk up to the counter and ${this.touch ? 'tap “Order a drink”' : 'press E'} to order`, 3400, 'cup');
-    else this.toast(`You are now at: ${spot.label}`, 2000, 'pin');
+    else if (!this.arrivalToast(spot.id)) this.toast(`You are now at: ${spot.label}`, 2000, 'pin');
     this.tryLock();
+  }
+
+  /** a spot's own arrival toast (the stage spots); false when the spot has none */
+  arrivalToast(id: string): boolean {
+    if (id === 'dj') this.toast('DJ-booth — zo ziet de DJ het veld', 3600, 'music');
+    else if (id === 'dancers') this.toast("Dancers' podium — walk up the grey steps into the vault to the DJ booth", 3200, 'pin');
+    else if (id === 'castle') this.toast('Castle gallery — up the stone stairs, between the skull cube and the portal', 3000, 'pin');
+    else return false;
+    return true;
   }
 
   goToNearestBar(): void {

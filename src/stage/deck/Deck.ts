@@ -2,9 +2,13 @@ import * as THREE from 'three';
 import { boxMinMax, cyl, drape, METAL, PAINT, railing, type StageKit } from '../kit';
 import { armX, ground, L } from '../layout';
 import { LED_KIND } from '../materials/LedMaterial';
+import { GATES } from '../booth/layout';
+import { deckHardware, deckTopAt } from './hardware';
+import { PodiumBuilder } from './Podium';
 
 const OUT = new THREE.Vector3(0, 0, 1);
 const RIGHT = new THREE.Vector3(1, 0, 0);
+const UP = new THREE.Vector3(0, 1, 0);
 const PIT = new THREE.Color('#6f6d66');
 
 /**
@@ -49,63 +53,71 @@ export class DeckBuilder {
     this.pyro();
     this.subs();
     this.stairs();
-    this.wedges();
     this.pit();
+    // the dancers' podium, the grey steps up to the vault, the crew stairs at the corner plinths
+    new PodiumBuilder(k).build();
   }
 
-  /** deck-lip hardware on the bible anchor positions (terrain-layout.json pyroAnchors / lasers) */
+  /**
+   * deck-lip hardware on the bible anchor positions (terrain-layout.json pyroAnchors / lasers), from
+   * the ONE table the walk map also reads (deck/hardware.ts): units on the dancers' podium stand on it
+   */
   private pyro(): void {
     const k = this.kit;
-    const Y = L.deckY;
     const P = k.pts;
-    // 24 flame heads X −35.65…+35.65 @ 3.1 m, Z −0.4
-    for (let i = 0; i < 24; i++) {
-      const x = -35.65 + i * 3.1;
-      boxMinMax(k.metal, x - 0.28, Y, -0.65, x + 0.28, Y + 0.3, -0.15, METAL.black);
-      cyl(k.metal, x, Y + 0.3, -0.4, 0.07, 0.06, Y + 0.46, 6, METAL.steel);
-      P.deckFront.push(new THREE.Vector3(x, Y, -0.4));
+    let lamp = 0;
+    let laser = 0;
+    for (const it of deckHardware()) {
+      const { x, z } = it;
+      const Y = deckTopAt(x, z);
+      switch (it.kind) {
+        case 'flame':
+          boxMinMax(k.metal, x - 0.28, Y, z - 0.25, x + 0.28, Y + 0.3, z + 0.25, METAL.black);
+          cyl(k.metal, x, Y + 0.3, z, 0.07, 0.06, Y + 0.46, 6, METAL.steel);
+          P.deckFront.push(new THREE.Vector3(x, Y, z));
+          break;
+        case 'gerb':
+          cyl(k.metal, x, Y, z, 0.11, 0.09, Y + 0.32, 6, METAL.black);
+          P.deckGerbs.push(new THREE.Vector3(x, Y + 0.02, z));
+          break;
+        case 'comet':
+          boxMinMax(k.metal, x - 0.22, Y, z - 0.15, x + 0.22, Y + 0.12, z + 0.15, METAL.black);
+          for (const dx of [-0.1, 0.1]) cyl(k.metal, x + dx, Y + 0.12, z, 0.05, 0.05, Y + 0.5, 5, METAL.steel);
+          P.frontComets.push(new THREE.Vector3(x, Y + 0.02, z));
+          break;
+        case 'laser':
+          boxMinMax(k.metal, x - 0.18, Y, z - 0.25, x + 0.18, Y + 0.34, z + 0.25, METAL.black);
+          k.led.rect(new THREE.Vector3(x, Y + 0.22, z + 0.255), RIGHT, UP, 0.08, 0.08, LED_KIND.lamp, (laser++ * 0.31) % 1);
+          P.laserStage.push(new THREE.Vector3(x, Y + 0.3, z + 0.25));
+          break;
+        case 'co2':
+          cyl(k.metal, x, Y, z, 0.16, 0.13, Y + 0.42, 8, METAL.steel);
+          P.co2.push(new THREE.Vector3(x, Y + 0.02, z));
+          break;
+        case 'bengal':
+          cyl(k.metal, x, Y, z, 0.2, 0.18, Y + 0.28, 8, METAL.black);
+          P.bengal.push(new THREE.Vector3(x, Y + 0.02, z));
+          break;
+        case 'mine':
+          boxMinMax(k.metal, x - 0.25, Y, z - 0.2, x + 0.25, Y + 0.18, z + 0.2, METAL.black);
+          P.mines.push(new THREE.Vector3(x, Y + 0.02, z));
+          break;
+        case 'lamp':
+          boxMinMax(k.metal, x - 0.2, Y, z - 0.175, x + 0.2, Y + 0.2, z + 0.175, METAL.black);
+          k.led.rect(new THREE.Vector3(x, Y + 0.12, z + 0.185), RIGHT, new THREE.Vector3(0, 0.906, 0.423), 0.28, 0.2, LED_KIND.lamp, (lamp++ * 0.37) % 1);
+          break;
+        case 'wedge': {
+          const g = new THREE.BoxGeometry(0.62, 0.36, 0.5);
+          k.speaker.add(g, new THREE.Matrix4().makeRotationX(-0.45).setPosition(x, Y + 0.2, z), { uv: 'keep' });
+          g.dispose();
+          break;
+        }
+      }
     }
-    // 20 gerbs X −38…+38 @ 4 m, Z −0.8 (the outer pair on the corner plinths)
-    for (let i = 0; i < 20; i++) {
-      const x = -38 + i * 4;
-      cyl(k.metal, x, Y, -0.85, 0.11, 0.09, Y + 0.32, 6, METAL.black);
-      P.deckGerbs.push(new THREE.Vector3(x, Y + 0.02, -0.85));
-    }
-    // 12 comet racks X −38.5…+38.5 @ 7 m, Z −0.6 (cluster of tubes on a small base)
-    for (let i = 0; i < 12; i++) {
-      const x = -38.5 + i * 7;
-      boxMinMax(k.metal, x - 0.22, Y, -1.25, x + 0.22, Y + 0.12, -0.95, METAL.black);
-      for (const dx of [-0.1, 0.1]) cyl(k.metal, x + dx, Y + 0.12, -1.1, 0.05, 0.05, Y + 0.5, 5, METAL.steel);
-      P.frontComets.push(new THREE.Vector3(x, Y + 0.02, -1.1));
-    }
-    // 12 deck lasers X −33…+33 @ 6 m (housing behind the lip, aperture at Y 2.2)
-    for (let i = 0; i < 12; i++) {
-      const x = -33 + i * 6;
-      boxMinMax(k.metal, x - 0.18, Y, -1.9, x + 0.18, Y + 0.34, -1.4, METAL.black);
-      k.led.rect(new THREE.Vector3(x, Y + 0.22, -1.395), RIGHT, new THREE.Vector3(0, 1, 0), 0.08, 0.08, LED_KIND.lamp, (i * 0.31) % 1);
-      P.laserStage.push(new THREE.Vector3(x, Y + 0.3, -1.4));
-    }
-    // CO2 jets on the deck (X ±5, ±15, ±25, ±35 at Z −1.5 → set back to −2.3 behind the lasers)
-    for (const x of [-35, -25, -15, -5, 5, 15, 25, 35]) {
-      cyl(k.metal, x, Y, -2.3, 0.16, 0.13, Y + 0.42, 8, METAL.steel);
-      P.co2.push(new THREE.Vector3(x, Y + 0.02, -2.3));
-    }
-    // Bengal pots (X ±10, ±30) and flash mines (X ±8, ±20) on the deck
-    for (const x of [-30, -10, 10, 30]) {
-      cyl(k.metal, x, Y, -1.9, 0.2, 0.18, Y + 0.28, 8, METAL.black);
-      P.bengal.push(new THREE.Vector3(x, Y + 0.02, -1.9));
-    }
-    for (const x of [-20, -8, 8, 20]) {
-      boxMinMax(k.metal, x - 0.25, Y, -2.0, x + 0.25, Y + 0.18, -1.6, METAL.black);
-      P.mines.push(new THREE.Vector3(x, Y + 0.02, -1.8));
-    }
-    // deck-front moving heads (bible: 40 beams) + static front-line lamps between them
-    for (let i = 0; i < 40; i++) P.fixturesFloor.push(new THREE.Vector3(-35.1 + i * 1.8, Y + 0.3, -3.0));
-    for (let i = 0; i < 18; i++) {
-      const x = -34 + i * 4;
-      if (Math.abs(x) < 2.5) continue;
-      boxMinMax(k.metal, x - 0.2, Y, -2.95, x + 0.2, Y + 0.2, -2.6, METAL.black);
-      k.led.rect(new THREE.Vector3(x, Y + 0.12, -2.59), RIGHT, new THREE.Vector3(0, 0.906, 0.423), 0.28, 0.2, LED_KIND.lamp, (i * 0.37) % 1);
+    // deck-front moving heads (bible: 40 beams); the ones in front of the vault stand on the podium
+    for (let i = 0; i < 40; i++) {
+      const x = -35.1 + i * 1.8;
+      P.fixturesFloor.push(new THREE.Vector3(x, deckTopAt(x, -3.0) + 0.3, -3.0));
     }
   }
 
@@ -142,16 +154,6 @@ export class DeckBuilder {
       boxMinMax(k.metal, -w, top - 0.02, z1 - 0.05, w, top + 0.005, z1 + 0.005, METAL.alu);
     }
     for (const s of [-1, 1]) railing(k, [new THREE.Vector3(s * (w - 0.05), Y, -0.05), new THREE.Vector3(s * (w - 0.05), rise, 1.85), new THREE.Vector3(s * (w - 0.05), 0, 2.2)], 1.0, 0.9);
-  }
-
-  private wedges(): void {
-    const k = this.kit;
-    const Y = L.deckY;
-    for (const x of [-5.5, -3.2, 3.2, 5.5]) {
-      const g = new THREE.BoxGeometry(0.62, 0.36, 0.5);
-      k.speaker.add(g, new THREE.Matrix4().makeRotationX(-0.45).setPosition(x, Y + 0.2, -4.6), { uv: 'keep' });
-      g.dispose();
-    }
   }
 
   /** paved photo pit on the bank (|X| 40…90, Z −3…3) and the arm service lanes (X ±90…±92) */
@@ -227,7 +229,17 @@ export function barrierRuns(): BarrierRun[] {
   const runs: BarrierRun[] = [];
   const X = L.barrierX;
   const Z = L.barrierZ;
-  runs.push({ a: [-X, Z], b: [X, Z] });
+  // the front line with three gates: the centre gate to the pit stairs and one at each corner plinth's
+  // crew stairs (the walkable stage, world/stageWalk.ts)
+  const [g0, g1] = GATES.side;
+  const c = GATES.centreHalf;
+  for (const [a, b] of [
+    [-X, -g1],
+    [-g0, -c],
+    [c, g0],
+    [g1, X],
+  ])
+    runs.push({ a: [a, Z], b: [b, Z] });
   // runs are written for the right arm (audience on the local +Z = left of a→b); the mirrored left
   // run is reversed so its audience side still faces the field
   const add = (s: number, p: [number, number], q: [number, number]) => runs.push(s > 0 ? { a: p, b: q } : { a: [-q[0], q[1]], b: [-p[0], p[1]] });

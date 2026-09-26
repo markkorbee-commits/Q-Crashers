@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { clamp, hash32, lerp, smoothstep } from '../core/rng';
 import type { ShowEngine } from '../show/ShowEngine';
+import { BOOTH } from '../stage/booth/layout';
+import { stageFloorSmooth } from '../world/stageWalk';
 import { BOTTOM, HAIR, HEAD, newLook, packLook, PRINT, PROP, TOP, type Look } from './constants';
 
 /**
@@ -404,7 +406,7 @@ export class Performers {
       f.visible = true;
       f.x = pp.x;
       f.z = pp.z;
-      f.y = 1.9;
+      f.y = stageFloorSmooth(f.x, f.z);
       const moving = clamp(pp.speed / 0.8, 0, 1);
       const walkYaw = Math.atan2(pp.dx, pp.dz);
       f.yaw = moving > 0.15 ? lerp(0, walkYaw, 0.55 * moving) : 0.15 * Math.sin(t * 0.3);
@@ -445,7 +447,7 @@ export class Performers {
       const pe = smoothstep(enter, enter + 7, tt) * (1 - smoothstep(exit, exit + 7, tt));
       f.x = lerp(0, rx, pe);
       f.z = lerp(-7.5, rz, pe);
-      f.y = 1.9;
+      f.y = stageFloorSmooth(f.x, f.z);
       const moving = tt < enter + 7 || tt > exit ? 1 : 0;
       const walkYaw = tt > exit ? Math.atan2(-rx, -7.5 - rz) : Math.atan2(rx, rz + 7.5);
       const faceIn = Math.atan2(-rx, -2 - rz);
@@ -515,7 +517,7 @@ export class Performers {
       const up = smoothstep(A.t0, A.t0 + 5, t) * (1 - smoothstep(A.t1 - 5, A.t1, t));
       f.x = 0;
       f.z = -6.8;
-      f.y = 1.9 + 2.2 * up;
+      f.y = lerp(stageFloorSmooth(f.x, f.z), 4.1, up);
       f.yaw = (t - A.t0) * 0.7;
       setArm(p.armL, 176, 4, 6, 0);
       setArm(p.armR, 176, 4, 6, 0);
@@ -558,10 +560,11 @@ export class Performers {
       let on = false;
       for (let w = 0; w < T.dj.length && !on; w++) on = inWin(t, T.dj[w]);
       if (!on) return;
+      // (only when a show adds 'dj' windows: behind the decks in the gold vault, facing the field)
       f.visible = true;
-      f.x = 0.4;
-      f.z = -8.3;
-      f.y = 1.9;
+      f.x = 0.15;
+      f.z = BOOTH.djZ;
+      f.y = stageFloorSmooth(f.x, f.z);
       f.yaw = 0;
       setArm(p.armL, 42, 12, 52, -20);
       setArm(p.armR, 42, 12, 52, -20);
@@ -575,7 +578,6 @@ export class Performers {
       const dnOn = t > T.troupe.t0 + 6 && t < T.troupe.t1 - 5;
       if (!mcOn && !dnOn) return;
       f.visible = true;
-      f.y = 1.9;
       if (mcOn) {
         const pp = this.pp;
         MC_PATH.at(t - T.mc.t0 + MC_T0 - 1.2, pp);
@@ -589,6 +591,7 @@ export class Performers {
         f.z = -0.8;
         f.yaw = Math.atan2(-f.x, -2.5 - f.z);
       }
+      f.y = stageFloorSmooth(f.x, f.z);
       setArm(p.armR, 100, 12, 112, 0);
       setArm(p.armL, 70, -24, 118, 0);
       p.head[1] -= 0.25;
