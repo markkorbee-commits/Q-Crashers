@@ -382,6 +382,10 @@ export class LaserSystem implements System {
   private lowHaze = 0;
   /** low-fog "sea" lit by the skimming sheets this frame (colour × power, summed over the sheets) */
   private seaR = 0;
+  /** the sheets' share of the sea (the smoke over the bank holds only their light: airLight) */
+  private airR = 0;
+  private airG = 0;
+  private airB = 0;
   private seaG = 0;
   private seaB = 0;
   /**
@@ -549,6 +553,7 @@ export class LaserSystem implements System {
     this.envR = this.envG = this.envB = this.envPow = 0;
     this.audienceWash = 0;
     this.seaR = this.seaG = this.seaB = 0;
+    this.airR = this.airG = this.airB = 0;
     this.sea2R = this.sea2G = this.sea2B = 0;
     this.airLight.setRGB(0, 0, 0);
     if (!this.terrain) this.terrain = (app.get('terrain') as { heightAt?(x: number, z: number): number } | undefined) ?? {};
@@ -1762,6 +1767,9 @@ export class LaserSystem implements System {
       // colour on the crests)
       const c2 = s.hasColor2 ? s.color2 : c;
       this.seaR += c.r * wSea;
+      this.airR += c.r * wSea;
+      this.airG += c.g * wSea;
+      this.airB += c.b * wSea;
       this.seaG += c.g * wSea;
       this.seaB += c.b * wSea;
       this.sea2R += c2.r * wSea;
@@ -1802,7 +1810,9 @@ export class LaserSystem implements System {
     // the smoke above the bank holds the sheets' light too (a dense bank only: v1389 / v1463 stay dark)
     const xa = Math.min(1, Math.max(0, (this.lowHaze - this.airGate0) / (0.9 - this.airGate0)));
     const ga = xa * xa * (3 - 2 * xa);
-    if (!this.tribe) this.airLight.setRGB(this.seaR * ga, this.seaG * ga, this.seaB * ga);
+    // (the sheets only: a skimming tunnel's beams run through the bank without lighting the whole smoke volume —
+    // v1371-1380 is dark with gold streaks, the air glow turned the frame orange)
+    if (!this.tribe) this.airLight.setRGB(this.airR * ga, this.airG * ga, this.airB * ga);
     if (this.tribe || gate < 0.01 || w < 0.01) return;
     const k = 2.0 * gate;
     // (the fog kind carries the crest colour in the wave-phase slots)
