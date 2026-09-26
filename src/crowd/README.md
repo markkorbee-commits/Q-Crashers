@@ -48,6 +48,9 @@ further chunks go to mid (≤ `midR`, `midN`) or far. That index list is the onl
 Measured at t = 1515 s, spot `middle` (crowd triangles incl. phones + flags / whole frame):
 ultra 1.61M / 3.18M, high 0.95M / 2.34M, medium 0.61M / 1.76M, mobile 0.28M / 0.92M
 (before: high 1.88M / 3.22M with 28k people, mobile 1.04M frame with 6.5k people).
+Round 3, mobile preset (no hero bodies, compacted performers on the near body, 844×390):
+spot `middle` 0.17M / 0.57M (t 843) and 0.17M / 0.62M (t 1515); spot `crowd` 0.20M / 0.61M and
+0.20M / 0.65M; show camera 0.04M / 0.45M and 0.04M / 0.49M — all under the 0.8M mobile budget.
 
 Lighting (shaders.ts `LIGHTING`): the rig, its strobes and blinders face the audience, so they only
 reach surfaces facing the stage (max(N·L, 0), no wrap); backs get the dim sky and a directional haze
