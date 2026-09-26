@@ -5,6 +5,7 @@ import {
   P_BALLYHOO,
   P_CIRCLE,
   P_CROSSHATCH,
+  P_CURTAIN,
   P_DARK,
   P_FAN,
   P_PULSE,
@@ -24,6 +25,7 @@ import {
   T_CORNER,
   T_DECK,
   T_DRAGON,
+  T_EXPLICIT,
   T_FOH,
   T_PA,
   T_PILLAR,
@@ -58,6 +60,7 @@ const PARTICIPATION: number[] = [
   T_ALL, // sky
   T_ALL, // pulse
   T_ALL, // still
+  T_SPAR | T_ROOF | T_DECK | T_SIDE | T_CORNER | T_TOWER | T_PA | T_PILLAR | T_FOH, // curtain
 ];
 
 /** rows with 1.3–1.7 m head pitch (wing leading edges, castle roofline, deck lip, side walls) */
@@ -67,7 +70,7 @@ const T_DENSE = T_SPAR | T_ROOF | T_DECK | T_SIDE;
  * per wing side by side read as a picket fence, f007–f009 show a few beams at most).
  * dark, ambient, sweep, fan, ballyhoo, circle, tilt_wave, audience, crosshatch, sky, pulse, still
  */
-const DENSE_SHARE = [1, 1, 0.5, 1, 1, 0.5, 0.5, 1, 0.5, 0.5, 1, 0.5];
+const DENSE_SHARE = [1, 1, 0.5, 1, 1, 0.5, 0.5, 1, 0.5, 0.5, 1, 0.5, 1];
 
 /**
  * Moving-head look presets. Every preset is a PURE function of (show time, fixture, cue params,
@@ -85,6 +88,8 @@ export interface AimOut {
   mix: number;
   /** tan(beam half-angle) */
   tan: number;
+  /** gobo (0 open, 1 dots) */
+  gobo: number;
 }
 
 const TAU = Math.PI * 2;
@@ -137,6 +142,17 @@ function setFan(f: Fixture, ang: number, lean: number, o: AimOut): void {
   o.z /= n;
 }
 
+/** aim at a world point */
+function setToward(f: Fixture, x: number, y: number, z: number, o: AimOut): void {
+  const dx = x - f.pos.x;
+  const dy = y - f.pos.y;
+  const dz = z - f.pos.z;
+  const n = Math.hypot(dx, dy, dz) || 1;
+  o.x = dx / n;
+  o.y = dy / n;
+  o.z = dz / n;
+}
+
 function setRest(f: Fixture, o: AimOut): void {
   o.x = f.rest.x;
   o.y = f.rest.y;
@@ -150,6 +166,7 @@ const sin = Math.sin;
 export function evalLook(c: LightCue | null, f: Fixture, t: number, beat: BeatInfo, o: AimOut): void {
   o.mix = 0;
   o.tan = c ? c.tan : TAN_NARROW;
+  o.gobo = c ? c.gobo : 0;
   if (!c || c.preset === P_DARK) {
     setRest(f, o);
     o.dim = 0;
@@ -286,17 +303,44 @@ export function evalLook(c: LightCue | null, f: Fixture, t: number, beat: BeatIn
       break;
     }
     case P_STILL: {
-      // static positions: the structure's heads stand in a raised fan over the audience (a quiet look
-      // must not stare into the crowd — at 7° every head flared straight into the eye line)
-      const base = g === G_TOWERS ? 20 : g === G_FIELD ? 16 : g === G_FLOOR ? 4 : 22;
-      setAim(f, (c.pan ?? 0) + f.cx * 3 * f.rx, c.tilt ?? base, o);
+      if (c.aim) {
+        // every head on one world point (a focus / follow spot, floor pools under the pillars …)
+        setToward(f, c.aim.x, c.aim.y, c.aim.z, o);
+      } else if (f.focus && c.tilt === null && c.pan === null) {
+        setToward(f, f.focus.x, f.focus.y, f.focus.z, o);
+      } else {
+        // static positions: the structure's heads stand in a raised fan over the audience (a quiet look
+        // must not stare into the crowd — at 7° every head flared straight into the eye line)
+        const base = g === G_TOWERS ? 20 : g === G_FIELD ? 16 : g === G_FLOOR ? 4 : 22;
+        setAim(f, (c.pan ?? 0) + f.cx * 3 * f.rx, c.tilt ?? base, o);
+      }
       o.mix = f.k & 1;
+      break;
+    }
+    case P_CURTAIN: {
+      // every beam exactly parallel in WORLD space (the floor-head "curtains" of Embers v1170–1177):
+      // elevation `tilt` (default 78°), heading `pan` (0 = towards the audience, 180 = leaning back over
+      // the stage; default 180), optional slow `sway` (deg) that keeps the curtain parallel
+      const sw = c.sway > 0 ? c.sway * sin(TAU * P) : 0;
+      const el = (c.tilt ?? 78) * D2R;
+      const hd = ((c.pan ?? 180) + sw) * D2R;
+      const h = Math.cos(el);
+      o.x = Math.sin(hd) * h;
+      o.y = Math.sin(el);
+      o.z = Math.cos(hd) * h;
+      o.mix = f.cluster & 1;
       break;
     }
     default:
       setRest(f, o);
   }
-  if ((PARTICIPATION[c.preset] & f.tags) === 0) dim = 0;
+  if (f.tags & T_EXPLICIT) {
+    // explicit-only positions (arch crown downlights) only see looks that name them: every preset
+    // lights them, all heads unless the cue sets a density; static downlights stay on their focus
+    if (c.densitySet && f.sel >= c.density) dim = 0;
+    if (f.focus && c.preset !== P_BALLYHOO && c.preset !== P_CIRCLE && c.preset !== P_SWEEP && !(c.preset === P_STILL && (c.aim || c.tilt !== null || c.pan !== null)))
+      setToward(f, f.focus.x, f.focus.y, f.focus.z, o);
+  } else if ((PARTICIPATION[c.preset] & f.tags) === 0) dim = 0;
   else {
     // share of the heads the look uses (cue `density`, default from its intensity): an evenly spread,
     // mirror-symmetric subset per cluster; the others stay dark but follow the positions

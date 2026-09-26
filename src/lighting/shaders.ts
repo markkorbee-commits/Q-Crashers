@@ -14,14 +14,16 @@ export const BEAM_VERT = /* glsl */ `
 attribute vec4 iPos;   // xyz lens position, w = lens radius (m)
 attribute vec4 iDir;   // xyz unit direction, w = beam length (m)
 attribute vec4 iCol;   // rgb (linear, x dimmer), w = tan(half angle)
-attribute vec4 iMisc;  // x seed, y = 0 ends in the air, else floor height at the hit + 1
+attribute vec4 iMisc;  // x seed, y = 0 ends in the air, else floor height at the hit + 1, z gobo
 uniform float uPixelAngle;
+uniform float uSoft;   // 0 clear air .. 1 storm haze: beams bloom into wide soft shafts
 varying vec3 vWorld;
 varying vec3 vNormal;
 varying vec3 vAxis;
 varying vec3 vCol;
 varying vec4 vData;    // along, length, radius, energy
 varying vec4 vLocal;   // circle xy, seed, ground end
+varying float vGobo;
 
 void main() {
   vec3 d = iDir.xyz;
@@ -34,7 +36,8 @@ void main() {
   vec3 axisP = iPos.xyz + d * along;
   // keep far / thin beams at least ~1.7 px wide (no shimmering), energy conserved below
   float dist = length(axisP - cameraPosition);
-  float rDraw = max(r, dist * uPixelAngle * 0.85);
+  // in dense haze the multiple scattering spreads every beam into a soft glowing shaft
+  float rDraw = max(r * (1.0 + uSoft * 2.2) + uSoft * 0.25, dist * uPixelAngle * 0.85);
   vec3 radial = t1 * position.x + t2 * position.z;
   vec3 wp = axisP + radial * rDraw;
   vWorld = wp;
@@ -43,6 +46,7 @@ void main() {
   vCol = iCol.rgb;
   vData = vec4(along, L, r, r / rDraw);
   vLocal = vec4(position.x, position.z, iMisc.x, iMisc.y);
+  vGobo = iMisc.z;
   gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
 }
 `;
@@ -53,12 +57,14 @@ uniform float uHaze;
 uniform float uNoise;
 uniform float uGain;
 uniform float uExtinct;
+uniform float uSoft;
 varying vec3 vWorld;
 varying vec3 vNormal;
 varying vec3 vAxis;
 varying vec3 vCol;
 varying vec4 vData;
 varying vec4 vLocal;
+varying float vGobo;
 
 void main() {
   vec3 V = cameraPosition - vWorld;
@@ -70,7 +76,7 @@ void main() {
   float sin2 = max(1.0 - cosT * cosT, 0.03);
   // gaussian beam profile across the cone (b/r)^2 ~ 1 - ndv^2: crisp core, soft glowing edge
   float q2 = 1.0 - ndv * ndv;
-  float prof = exp(-3.2 * q2) + 0.45 * exp(-14.0 * q2) * vData.w;
+  float prof = mix(exp(-3.2 * q2) + 0.45 * exp(-14.0 * q2) * vData.w, exp(-1.6 * q2) * 0.75 + 0.35 * exp(-9.0 * q2) * vData.w, uSoft);
   float chord = min(prof / sin2, 3.0);
   // Henyey-Greenstein forward scattering (haze), normalised to 1 at 90 degrees
   const float g = 0.32;
@@ -96,6 +102,11 @@ void main() {
   // lengthwise striations (gobo / lens breakup), drifting slowly
   float st = texture(tNoise, vec3(vLocal.xy * 0.42 + vLocal.z * 5.0, along * 0.005 - uTime * 0.017)).r;
   haze *= 0.5 + st;
+  // gobo: the beam breaks up into rays (the projected dot pattern seen in the haze)
+  if (vGobo > 0.5) {
+    float rays = texture(tNoise, vec3(vLocal.xy * 1.6 + vLocal.z * 3.0, along * 0.0015)).r;
+    haze *= smoothstep(0.42, 0.62, rays) * 2.4;
+  }
 #endif
   // the beam emerges from the lens glow instead of starting with a hard cut
   float start = smoothstep(0.0, 0.8, along);
@@ -132,11 +143,22 @@ varying float vSeed;
 void main() {
   // uv spans 2.2x the geometric footprint: sharp-ish spot + haze/bounce halo around it
   float d = length(vUv);
-  float edge = mix(0.6, 0.92, vCol.w);
+  float edge = mix(0.6, 0.92, vCol.w > 1.5 ? vCol.w - 2.0 : vCol.w);
   float spot = 1.0 - smoothstep(edge, 1.06, d);
   float core = exp(-d * d * 2.4);
   float halo = exp(-max(d - 0.8, 0.0) * 2.2) * (1.0 - smoothstep(1.7, 2.2, d));
   float v = spot * (0.5 + 0.5 * core) + halo * 0.07;
+  if (vCol.w > 1.5) {
+    // gobo 'dots': a slowly turning field of small sharp spots inside the beam footprint (glitter gobo)
+    float ang = uTime * 0.35 + vSeed * 6.2831;
+    vec2 q = mat2(cos(ang), -sin(ang), sin(ang), cos(ang)) * vUv * 3.4;
+    vec2 id = floor(q);
+    vec2 f = fract(q) - 0.5;
+    float h = fract(sin(dot(id, vec2(127.1, 311.7)) + vSeed * 13.0) * 43758.5453);
+    vec2 o = vec2(h, fract(h * 17.31)) - 0.5;
+    float dots = smoothstep(0.2, 0.09, length(f - o * 0.45)) * step(0.22, h);
+    v = (1.0 - smoothstep(0.9, 1.35, d)) * dots * 2.6 + halo * 0.05;
+  }
 #ifdef USE_NOISE
   float n = texture(tNoise, vec3(vUv * 0.28 + vSeed, uTime * 0.03)).r;
   v *= 0.7 + 0.6 * n;
@@ -146,7 +168,7 @@ void main() {
 `;
 
 // ------------------------------------------------------------------------------------ sprites
-// type 0 = moving-head lens / flare, 1 = blinder (2x2 lamps), 2 = strobe bar
+// type 0 = moving-head lens / flare, 1 = blinder (2x2 lamps), 2 = strobe bar, 3 = festoon bulb / practical
 export const SPRITE_VERT = /* glsl */ `
 attribute vec4 iPos;  // xyz, w = type
 attribute vec4 iDir;  // xyz facing direction, w = beam half angle (rad) or two-sided flag
@@ -176,9 +198,14 @@ void main() {
     size = max(size, px * (uMinPx + hot * uFlarePx));
   } else if (type < 1.5) {
     glow = pow(max(facing, 0.0), 1.3) * 0.94 + 0.06;
-  } else {
+  } else if (type < 2.5) {
     float f = iDir.w > 0.5 ? abs(facing) : facing;
     glow = max(f, 0.0) * 0.72 + 0.28;
+  } else {
+    // festoon bulb / practical lamp: radiates all round, a little brighter towards its front; it stays a
+    // readable dot from the far field (min ~1.6x the lens minimum)
+    glow = 0.8 + 0.2 * max(facing, 0.0);
+    size = max(size, px * uMinPx * 1.25);
   }
   size = max(size, px * uMinPx);
   vec4 mv = viewMatrix * vec4(iPos.xyz, 1.0);
@@ -217,6 +244,10 @@ void main() {
     float star2 = (exp(-abs(pr.y) * 220.0) * exp(-abs(pr.x) * 5.0) + exp(-abs(pr.x) * 220.0) * exp(-abs(pr.y) * 5.0)) * h * 0.35;
     float streak = exp(-abs(p.y) * 70.0) * exp(-abs(p.x) * 1.6) * h * 0.3;
     v = core * mix(3.2, 14.0, h) + halo + star * 0.7 + star2 + streak;
+  } else if (vType > 2.5) {
+    // bulb: small hot filament core, soft round glass glow, faint wide halo
+    float r = sqrt(r2);
+    v = exp(-r2 * 30.0) * 2.6 + exp(-r * 7.0) * 0.09;
   } else if (vType < 1.5) {
     // 2x2 tungsten "molefay": four hot lamps + wide glare halo
     vec2 q = abs(p) - vec2(0.13);
@@ -247,12 +278,77 @@ void main() {
 }
 `;
 
+// ------------------------------------------------------------------------------------ flood glow
+// Depth-sliced analytic haze: slice i is a camera-facing quad at view depth d0 that adds the gaussian
+// in-scatter of the ray segment between view depths d0 and d1. The quad is depth tested, so geometry
+// nearer than d0 hides that segment (and every segment behind it).
+export const FLOOD_VERT = /* glsl */ `
+attribute vec2 aSlice;  // view depth of the slice / of the next slice (m)
+uniform vec2 uTan;      // tan(half fov) x (aspect, 1), with a margin
+varying vec3 vView;
+varying float vRatio;
+void main() {
+  float d = aSlice.x;
+  vec3 vp = vec3(position.xy * uTan * d, -d);
+  vView = vp;
+  vRatio = aSlice.y / aSlice.x;
+  gl_Position = projectionMatrix * vec4(vp, 1.0);
+}
+`;
+
+export const FLOOD_FRAG = /* glsl */ `
+uniform vec4 uBlobC[8];   // centre xyz, w = weight
+uniform vec3 uBlobS[8];   // sigma (m) per axis
+uniform vec3 uBlobCol[8]; // colour x intensity (0 = slot off)
+uniform float uScale;     // camera haze scale (telephoto show shots see less haze)
+varying vec3 vView;
+varying float vRatio;
+
+float erfA(float x) {
+  float s = sign(x);
+  x = abs(x);
+  float t = 1.0 / (1.0 + 0.3275911 * x);
+  float y = 1.0 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * exp(-x * x);
+  return s * y;
+}
+
+void main() {
+  float t0 = length(vView);
+  float t1 = t0 * vRatio;
+  // view ray -> world (the view rotation is orthonormal: inverse = transpose)
+  vec3 rd = (vView / t0) * mat3(viewMatrix);
+  vec3 ro = cameraPosition;
+  // the ground ends every ray that points down (terrain ~ flat around the field)
+  if (rd.y < -1e-3) t1 = min(t1, max(ro.y + 0.5, 0.0) / -rd.y);
+  if (t1 <= t0) discard;
+  vec3 acc = vec3(0.0);
+  for (int i = 0; i < 8; i++) {
+    vec3 col = uBlobCol[i];
+    if (col.r + col.g + col.b <= 0.0) continue;
+    vec3 s = uBlobS[i];
+    vec3 o = (ro - uBlobC[i].xyz) / s;
+    vec3 d = rd / s;
+    float a = dot(d, d);
+    float b = dot(o, d);
+    float c = dot(o, o);
+    float sa = sqrt(a);
+    float m = b / a;
+    float e = c - b * m;
+    if (e > 12.0) continue;
+    float I = exp(-e) * 0.8862269 / sa * (erfA(sa * (t1 + m)) - erfA(sa * (t0 + m)));
+    acc += col * (I * uBlobC[i].w);
+  }
+  gl_FragColor = vec4(acc * uScale, 1.0);
+}
+`;
+
 export const GLOW_FRAG = /* glsl */ `
 uniform vec4 uBlobC[4];   // centre xyz, w = weight
 uniform vec3 uBlobS[4];   // sigma (m) per axis
 uniform vec3 uBlobCol[4]; // colour x intensity
 uniform vec3 uBoxMin;
 uniform vec3 uBoxMax;
+uniform float uScale;
 varying vec3 vWorld;
 
 float erfA(float x) {
@@ -289,6 +385,6 @@ void main() {
     float I = exp(-(c - b * m)) * 0.8862269 / sa * (erfA(sa * (t1 + m)) - erfA(sa * (t0 + m)));
     acc += uBlobCol[i] * (I * uBlobC[i].w);
   }
-  gl_FragColor = vec4(acc, 1.0);
+  gl_FragColor = vec4(acc * uScale, 1.0);
 }
 `;

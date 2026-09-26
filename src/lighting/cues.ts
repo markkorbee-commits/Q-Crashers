@@ -9,7 +9,7 @@ import { matchTarget, parseGroups, parseTargets, type Rig, type TargetFilter } f
  * never allocate.
  */
 
-export const PRESETS = ['dark', 'ambient', 'sweep', 'fan', 'ballyhoo', 'circle', 'tilt_wave', 'audience', 'crosshatch', 'sky', 'pulse', 'still'] as const;
+export const PRESETS = ['dark', 'ambient', 'sweep', 'fan', 'ballyhoo', 'circle', 'tilt_wave', 'audience', 'crosshatch', 'sky', 'pulse', 'still', 'curtain'] as const;
 export type PresetName = (typeof PRESETS)[number];
 export const P_DARK = 0;
 export const P_AMBIENT = 1;
@@ -23,9 +23,10 @@ export const P_CROSSHATCH = 8;
 export const P_SKY = 9;
 export const P_PULSE = 10;
 export const P_STILL = 11;
+export const P_CURTAIN = 12;
 
 /** default speed (cycles per bar) per preset */
-const DEFAULT_SPEED = [0, 0.0625, 0.25, 0.125, 1, 0.25, 0.25, 0.125, 0.125, 0.0625, 0, 0];
+const DEFAULT_SPEED = [0, 0.0625, 0.25, 0.125, 1, 0.25, 0.25, 0.125, 0.125, 0.0625, 0, 0, 0];
 
 /** beam half-angle tangents (design-bible §7.1: narrow 0.8–1.5°, wide 3–6°) */
 export const TAN_NARROW = Math.tan((1.3 * Math.PI) / 180);
@@ -44,6 +45,8 @@ export const LOOK_GAMMA = 1.5;
 
 const num = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v.length > 0 ? v : undefined);
+const vec3 = (v: unknown): THREE.Vector3 | null =>
+  Array.isArray(v) && v.length === 3 && v.every((x) => typeof x === 'number' && Number.isFinite(x)) ? new THREE.Vector3(v[0], v[1], v[2]) : null;
 
 /** Parsed cue with everything the per-frame code needs (colours resolved each frame). */
 export interface LightCue {
@@ -71,8 +74,16 @@ export interface LightCue {
   spread: number | null;
   /** share of the heads used (0..1), explicit `density` or defaultDensity(intensity) */
   density: number;
+  /** the cue set `density` itself (explicit-only fixtures ignore the intensity default) */
+  densitySet: boolean;
   /** look level after the dimmer curve */
   level: number;
+  /** look `aim` [x, y, z]: 'still' / 'curtain' heads aim at this world point */
+  aim: THREE.Vector3 | null;
+  /** curtain: slow sway amplitude (deg) */
+  sway: number;
+  /** gobo wheel: 0 open, 1 'dots' (glitter / breakup spots on the floor, rayed beams) */
+  gobo: number;
   // hit / chase / blinder / strobe
   target: TargetFilter;
   /** hit / chase: 1 per matching fixture; blinder / strobe: 1 per matching emitter (built with the rig) */
@@ -87,6 +98,107 @@ export interface LightCue {
   shaft?: string;
   shaftIntensity: number;
   c3: THREE.Color;
+  /** pillars: per-pillar mask (null = every pillar), built with the rig */
+  pmask: Uint8Array | null;
+  // flood / zone wash / festoon
+  /** flood: AREA_* bitmask; wash: zone mask (AREA_SIDES_L / _R) or 0 = the whole set */
+  area: number;
+  /** flood: rise time (s) */
+  attack: number;
+  /** festoon: FS_* string mask (x2 for the sides) */
+  strings: number;
+}
+
+// flood areas / wash zones
+export const AREA_STAGE = 1;
+export const AREA_FIELD = 2;
+export const AREA_SIDES_L = 4;
+export const AREA_SIDES_R = 8;
+export const AREA_SIDES = AREA_SIDES_L | AREA_SIDES_R;
+export const AREA_ALL = AREA_STAGE | AREA_FIELD | AREA_SIDES;
+
+// festoon strings (bit = kind * 2 + side, side 0 = left / x < 0, 1 = right)
+export const FS_WINGS = 0;
+export const FS_CASTLE = 1;
+export const FS_SIDES = 2;
+export const FS_TORCH = 3;
+export const FS_KINDS = 4;
+export const FESTOON_MODES = ['steady', 'flicker', 'chase', 'twinkle', 'pulse', 'off'] as const;
+export const FM_STEADY = 0;
+export const FM_FLICKER = 1;
+export const FM_CHASE = 2;
+export const FM_TWINKLE = 3;
+export const FM_PULSE = 4;
+export const FM_OFF = 5;
+
+/** cue targets -> festoon string kinds */
+const FESTOON_TARGETS: Record<string, number> = {
+  wings: 1 << FS_WINGS,
+  wing_left: 1 << FS_WINGS,
+  wing_right: 1 << FS_WINGS,
+  wing_tips: 1 << FS_WINGS,
+  castle: 1 << FS_CASTLE,
+  roof: 1 << FS_CASTLE,
+  deck_back: 1 << FS_CASTLE,
+  sides: 1 << FS_SIDES,
+  side_sections: 1 << FS_SIDES,
+  side_front: 1 << FS_SIDES,
+  side_rampart: 1 << FS_SIDES,
+  torches: 1 << FS_TORCH,
+  tower_torches: 1 << FS_TORCH,
+  towers_top: 1 << FS_TORCH,
+  all: (1 << FS_WINGS) | (1 << FS_CASTLE) | (1 << FS_SIDES),
+};
+
+/** festoon target list -> string bitmask (kind * 2 + side) */
+function festoonStrings(targets: readonly string[]): number {
+  let kinds = 0;
+  let left = false;
+  let right = false;
+  for (const t of targets) {
+    kinds |= FESTOON_TARGETS[t] ?? 0;
+    if (t === 'left' || t === 'wing_left') left = true;
+    if (t === 'right' || t === 'wing_right') right = true;
+  }
+  if (!kinds) kinds = FESTOON_TARGETS.all;
+  const sides = left === right ? 3 : left ? 1 : 2;
+  let m = 0;
+  for (let k = 0; k < FS_KINDS; k++) if (kinds & (1 << k)) m |= sides << (k * 2);
+  return m;
+}
+
+/** flood `area` / wash zone target -> AREA_* bitmask */
+function floodArea(c: Cue, fx: string): number {
+  const p = c.p ?? {};
+  const t = c.targets;
+  const left = t.includes('left');
+  const right = t.includes('right');
+  const sideMask = left === right ? AREA_SIDES : left ? AREA_SIDES_L : AREA_SIDES_R;
+  const zone = (name: string | undefined): number => {
+    switch (name) {
+      case 'stage':
+      case 'castle':
+      case 'set':
+        return AREA_STAGE;
+      case 'field':
+      case 'audience':
+        return AREA_FIELD;
+      case 'sides':
+      case 'side_sections':
+      case 'side_front':
+      case 'side_rampart':
+        return sideMask;
+      case 'all':
+        return AREA_ALL;
+      default:
+        return 0;
+    }
+  };
+  if (fx === 'flood') return zone(str(p.area)) || t.reduce((m, n) => m | zone(n), 0) || AREA_ALL;
+  // wash: only a side-section target makes it a zone wash; everything else washes the whole set
+  let m = 0;
+  for (const n of t) if (n !== 'all' && zone(n) & AREA_SIDES) m |= sideMask;
+  return m;
 }
 
 export const PM_STEADY = 0;
@@ -124,17 +236,28 @@ function parse(c: Cue, show: ShowEngine): LightCue {
     pan: typeof p.pan === 'number' ? p.pan : null,
     spread: typeof p.spread === 'number' ? p.spread : null,
     density: typeof p.density === 'number' && Number.isFinite(p.density) ? Math.min(1, Math.max(0.05, p.density)) : defaultDensity(intensity),
+    densitySet: typeof p.density === 'number' && Number.isFinite(p.density),
     level: Math.pow(Math.min(intensity, 1), LOOK_GAMMA) * Math.max(1, intensity),
+    aim: vec3(p.aim),
+    sway: Math.max(0, num(p.sway, 0)),
+    gobo: p.gobo === 'dots' || p.gobo === 'glitter' || p.gobo === 'breakup' ? 1 : 0,
     target: parseTargets(c.targets, p.groups, { tags: 0, side: 0 }),
     mask: null,
     pattern: str(p.pattern) ?? 'lr',
     every: p.every === 'halfbeat' ? 0.5 : p.every === 'bar' ? 4 : p.every === '2beat' ? 2 : 1,
     rate: Math.max(0.5, Math.min(30, num(p.rate, 12))),
-    mode: Math.max(0, PILLAR_MODES.indexOf(str(p.mode) ?? 'steady')),
+    mode: Math.max(0, (c.fx === 'festoon' ? (FESTOON_MODES as readonly string[]) : PILLAR_MODES).indexOf(str(p.mode) ?? 'steady')),
     shaft: str(p.shaft) ?? str(p.color2),
     shaftIntensity: Math.max(0, num(p.shaftIntensity, 0.8)),
     c3: new THREE.Color(1, 1, 1),
+    pmask: null,
+    area: c.fx === 'flood' || c.fx === 'wash' ? floodArea(c, c.fx) : 0,
+    attack: Math.max(0.01, num(p.attack, 0.08)),
+    strings: c.fx === 'festoon' ? festoonStrings(c.targets) : 0,
   };
+  // floods and festoons release over `fade` (flood default 0.8 s, festoon 0.4 s)
+  if (c.fx === 'flood') lc.fade = Math.max(0, num(p.fade, 0.8));
+  if (c.fx === 'festoon') lc.fade = Math.max(0, num(p.fade, 0.4));
   return lc;
 }
 
@@ -232,7 +355,15 @@ export interface StateBlend {
 export class EventTrack {
   items: LightCue[] = [];
   private maxLife = 0;
-  constructor(private tail: number) {}
+  /** `withFade`: each cue lives dur + its own `fade` (floods) instead of dur + tail */
+  constructor(
+    private tail: number,
+    private withFade = false,
+  ) {}
+
+  private life(c: LightCue): number {
+    return c.dur + (this.withFade ? c.fade : this.tail);
+  }
 
   push(c: LightCue): void {
     this.items.push(c);
@@ -241,7 +372,7 @@ export class EventTrack {
   finish(): void {
     this.items.sort((a, b) => a.t0 - b.t0 || a.cue.id - b.cue.id);
     this.maxLife = 0;
-    for (const c of this.items) this.maxLife = Math.max(this.maxLife, c.dur + this.tail);
+    for (const c of this.items) this.maxLife = Math.max(this.maxLife, this.life(c));
   }
 
   /** cues alive at t (t0 <= t < t0 + dur + tail), oldest first, written into `out` */
@@ -266,7 +397,7 @@ export class EventTrack {
     }
     for (let j = first; j <= idx; j++) {
       const c = a[j];
-      if (t < c.t0 + c.dur + this.tail) out.push(c);
+      if (t < c.t0 + this.life(c)) out.push(c);
     }
     return out;
   }
@@ -280,8 +411,15 @@ export const STROBE_TAIL = 0.2;
 export class LightCueIndex {
   /** one look track per fixture class (group x position tag x side band) */
   looks: StateTrack[] = [];
+  /** the set wash (untargeted / non-zone washes) */
   readonly wash = new StateTrack();
-  readonly pillars = new StateTrack();
+  /** zone washes on the left / right side sections (target sides / side_front …) */
+  readonly washSides = [new StateTrack(), new StateTrack()];
+  /** one lamp state track per lantern pillar (a pillars cue may target a subset) */
+  pillars: StateTrack[] = [];
+  /** festoon strings: kind * 2 + side */
+  readonly festoon: StateTrack[] = Array.from({ length: FS_KINDS * 2 }, () => new StateTrack());
+  readonly floods = new EventTrack(0, true);
   readonly hits = new EventTrack(0);
   readonly chases = new EventTrack(0);
   readonly blinders = new EventTrack(BLINDER_TAIL);
@@ -309,7 +447,10 @@ export class LightCueIndex {
     const classes = rig.classes;
     this.looks = classes.map(() => new StateTrack());
     this.wash.items.length = 0;
-    this.pillars.items.length = 0;
+    for (const w of this.washSides) w.items.length = 0;
+    this.pillars = rig.pillars.map(() => new StateTrack());
+    for (const f of this.festoon) f.items.length = 0;
+    this.floods.items.length = 0;
     this.hits.items.length = 0;
     this.chases.items.length = 0;
     this.blinders.items.length = 0;
@@ -327,10 +468,21 @@ export class LightCueIndex {
           }
           break;
         case 'wash':
-          this.wash.push(lc);
+          // a side-section target makes a zone wash (local glow), everything else washes the set
+          if (lc.area & AREA_SIDES) {
+            if (lc.area & AREA_SIDES_L) this.washSides[0].push(lc);
+            if (lc.area & AREA_SIDES_R) this.washSides[1].push(lc);
+          } else this.wash.push(lc);
           break;
         case 'pillars':
-          this.pillars.push(lc);
+          lc.pmask = pillarMask(c, rig);
+          for (let i = 0; i < this.pillars.length; i++) if (!lc.pmask || lc.pmask[i]) this.pillars[i].push(lc);
+          break;
+        case 'flood':
+          this.floods.push(lc);
+          break;
+        case 'festoon':
+          for (let b = 0; b < this.festoon.length; b++) if (lc.strings & (1 << b)) this.festoon[b].push(lc);
           break;
         case 'hit':
           lc.mask = fixtureMask(lc.target, rig);
@@ -357,13 +509,39 @@ export class LightCueIndex {
     }
     for (const t of this.looks) t.finish();
     this.wash.finish();
-    this.pillars.finish();
+    for (const w of this.washSides) w.finish();
+    for (const p of this.pillars) p.finish();
+    for (const f of this.festoon) f.finish();
+    this.floods.finish();
     this.hits.finish();
     this.chases.finish();
     this.blinders.finish();
     this.strobes.finish();
     this.revision = show.revision;
   }
+}
+
+/**
+ * pillars cue subset: `target` left / right / center (aisle side), `rows` (0 = the row nearest the stage)
+ * and / or `index` (anchor order of pillars_top) — number or list. null = every pillar.
+ */
+function pillarMask(c: Cue, rig: Rig): Uint8Array | null {
+  const p = c.p ?? {};
+  const list = (v: unknown): number[] | null => (typeof v === 'number' ? [v] : Array.isArray(v) ? v.filter((x): x is number => typeof x === 'number') : null);
+  const rows = list(p.rows ?? p.row);
+  const index = list(p.index ?? p.pillars);
+  const left = c.targets.includes('left');
+  const right = c.targets.includes('right');
+  if (!rows && !index && left === right) return null;
+  const m = new Uint8Array(rig.pillars.length);
+  rig.pillars.forEach((pl, i) => {
+    let ok = true;
+    if (rows) ok = rows.includes(pl.row);
+    if (index) ok = ok && index.includes(pl.index);
+    if (left !== right) ok = ok && (left ? pl.top.x < 0 : pl.top.x > 0);
+    m[i] = ok ? 1 : 0;
+  });
+  return m;
 }
 
 /** target filter evaluated once per fixture (hits / chases never re-match per frame) */
