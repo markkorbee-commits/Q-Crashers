@@ -43,10 +43,8 @@ export class PerfTiming {
   pianist: Win = { t0: 880.4, t1: 1098.4 };
   tubeHi: Win = { t0: 885.1, t1: 936 };
   tubeLo: Win = { t0: 876.5, t1: 1098.4 };
-  dj: Win[] = [
-    { t0: 938.1, t1: 1098.4 },
-    { t0: 1469.5, t1: 1561 },
-  ];
+  /** no DJ performs in the 2026 Endshow (confirmed by the user): the booth stays empty unless a show adds `performer` who:'dj' cues */
+  dj: Win[] = [];
   /** MC hype windows (crowd jump moods; the show file's jump moods replace these) */
   hype: Win[] = [
     { t0: 330.37, t1: 341.1 },
