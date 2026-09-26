@@ -93,7 +93,8 @@ export class StageMaterials {
       envMap: this.env,
       envMapIntensity: 0.55,
     });
-    patchStageShading(this.stone, this.u, { flood: 1 });
+    // the off-white print of the daytime photos is ~2x the old grey: scaled back in the show
+    patchStageShading(this.stone, this.u, { flood: 1, nightK: 0.487 });
 
     this.paint = new THREE.MeshStandardMaterial({
       name: 'stage-paint',
@@ -146,7 +147,7 @@ export class StageMaterials {
       envMap: this.env,
       envMapIntensity: 0.5,
     });
-    patchStageShading(this.decor, this.u, { flood: 1, glowGroups: true });
+    patchStageShading(this.decor, this.u, { flood: 1, glowGroups: true, nightK: 0.66 });
 
     this.speaker = new THREE.MeshStandardMaterial({
       name: 'stage-speaker',

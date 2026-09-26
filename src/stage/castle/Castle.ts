@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Rng } from '../../core/rng';
-import { boxMinMax, cyl, decorDisc, decorPanel, GLOW, METAL, PAINT, railing, rod, type StageKit, TINT } from '../kit';
+import { boxMinMax, cyl, decorPanel, GLOW, METAL, PAINT, railing, rod, type StageKit, TINT } from '../kit';
 import { type ArchKind, extrude, frameShape, type Opening, paneShape, wallShape } from '../lib/gothic';
 import { L } from '../layout';
 import { LED_KIND } from '../materials/LedMaterial';
@@ -44,12 +44,19 @@ interface TowerSpec {
  * (inner 16, outer 14 with spires to 18) put the towers in front of half of every wing, so both pairs
  * are ~2 m lower here (inner roof 13.3 / pinnacles 15.6, outer 12.2 / spire 16).
  */
-const INNER: TowerSpec = { kind: 'inner', x: 17.3, w: 4.0, frontZ: -12.35, depth: 3.75, body: 13.3, base: 8.6, capTop: 15.6 };
-const OUTER: TowerSpec = { kind: 'outer', x: 25.5, w: 5.0, frontZ: -10.2, depth: 5.0, body: 12.2, base: L.deckY, capTop: 16 };
+/*
+ * Round 3 (daytime photos): the wing arm now arches from the shoulder down to a wrist standing in
+ * front of the outer bays (Z ~ -9), so the inner towers step back behind it (front Z -15: they show
+ * under the arch as in the photos / thumbnail) and the projecting outer towers are gone - the lower
+ * wing, its hooked tusks and the arrays hang where they stood; their banner moved onto the facade.
+ */
+const INNER: TowerSpec = { kind: 'inner', x: 17.3, w: 4.0, frontZ: -15.0, depth: 3.75, body: 13.3, base: 6.8, capTop: 15.4 };
+/** the former outer tower span (X ±23…±28): a plain facade bay under the lower wing now */
+const OUTER = { x: 25.5, w: 5.0 };
+/** skull cubes on the deck either side of the portal (daytime photos: ~4 m white stone blocks with a skull relief) */
+export const SKULL_CUBE = { x: 19.6, z: -8.3, w: 4.2, d: 4.1, top: 7.4 };
 /** stair arches in the porch screen (round, springing 4.5, apex 7.0) */
 const ARCH: Opening = { cx: 8.9, y0: L.deckY, w: 5.0, h: 5.1, kind: 'round' };
-/** medallion (bible Ø 3.5 at Y 6.5; see layout.ts) */
-const MED = { x: 20, y: 7.25, r: 1.62 };
 
 /**
  * Warm festoon swags of the castle core: along the facade eave between the pilasters and over the
@@ -57,7 +64,7 @@ const MED = { x: 20, y: 7.25, r: 1.62 };
  */
 export function addCastleGarlands(g: Garlands): void {
   const z = L.facadeZ + 0.5;
-  const y = L.wallTop - 0.6;
+  const y = L.coreTop - 0.6;
   const runs = [
     [13.35, 16.05, 18.75, 21.8, 23.2],
     [27.8, 30.6, 32.7, 34.8, 36.6],
@@ -90,8 +97,8 @@ export class CastleBuilder {
       this.stairs(s);
       this.gallery(s);
       this.tower(INNER, s);
-      this.tower(OUTER, s);
-      this.medallion(s);
+      this.outerBay(s);
+      this.skullCube(s);
       this.bayDecor(s);
     }
     this.roofAndBack();
@@ -349,18 +356,13 @@ export class CastleBuilder {
     }
     for (const x of [-4.4, 4.4]) this.floodCan(x, Y, z + 0.7);
 
-    // ---- screen piers between portal and arches: bronze shield + small lancet
+    // ---- screen piers between portal and arches: tall flame-eye banners flanking the portal
+    // (daytime photos: an orange / red banner either side of the gilt arch, deck to cornice)
     for (const s of [-1, 1]) {
-      const x = s * 4.6;
-      decorDisc(k, 'shield', x, 4.1, z + 0.04, 0.95, GLOW.none);
-      const tor = new THREE.TorusGeometry(0.98, 0.07, 6, 28);
-      k.gold.add(tor, new THREE.Matrix4().makeTranslation(x, 4.1, z + 0.06));
-      tor.dispose();
-      const o: Opening = { cx: x, y0: 5.7, w: 0.7, h: 1.85, kind: 'lancet' };
-      this.frame(o, z, 0.12, 0.1);
-      const pg = new THREE.ShapeGeometry(paneShape(o, k.seg), k.seg);
-      k.led.geometry(pg, new THREE.Matrix4().makeTranslation(0, 0, z + 0.02), LED_KIND.window, 0.7);
-      pg.dispose();
+      const x = s * 5.05;
+      rod(k.metal, new THREE.Vector3(x - 1.1, H - 0.55, z + 0.1), new THREE.Vector3(x + 1.1, H - 0.55, z + 0.1), 0.06, METAL.black);
+      decorPanel(k, s < 0 ? 'banner2' : 'banner', x, (Y + 0.35 + H - 0.55) / 2, z + 0.12, 2.0, H - 0.55 - Y - 0.35, GLOW.banner);
+      k.led.rect(new THREE.Vector3(x, (Y + 0.35 + H - 0.55) / 2, z + 0.14), RIGHT, UP, 2.0, H - 0.55 - Y - 0.35, LED_KIND.panel, 2.0, H - 0.55 - Y - 0.35);
     }
     // anchors: the DJ booth + portal-side floor fixtures
     k.pts.fixturesFloor.push(new THREE.Vector3(-3.6, Y + 0.3, z + 1.2), new THREE.Vector3(3.6, Y + 0.3, z + 1.2));
@@ -412,16 +414,16 @@ export class CastleBuilder {
     const k = this.kit;
     const z = L.facadeZ;
     const Y = L.deckY;
-    const top = L.wallTop;
+    const top = L.coreTop;
     const holes: Opening[] = [];
     const arcade: Opening[] = [];
     const lancets: Opening[] = [];
     const big: Opening[] = [];
     for (const s of [-1, 1]) {
       for (const cx of [14.7, 17.4, 20.1]) arcade.push({ cx: s * cx, y0: 2.05, w: 1.9, h: 2.85, kind: 'round' });
-      for (const o of [-0.52, 0.52]) lancets.push({ cx: s * 14.85 + o, y0: 6.35, w: 0.72, h: 1.95, kind: 'lancet' });
-      big.push({ cx: s * 30.6, y0: 3.3, w: 3.2, h: 5.5, kind: 'pointed' });
-      for (const o of [-0.45, 0.45]) lancets.push({ cx: s * 35.0 + o, y0: 6.9, w: 0.6, h: 1.7, kind: 'lancet' });
+      for (const o of [-0.52, 0.52]) lancets.push({ cx: s * 14.85 + o, y0: 5.95, w: 0.66, h: 1.5, kind: 'lancet' });
+      big.push({ cx: s * 30.6, y0: 2.9, w: 2.9, h: 4.5, kind: 'pointed' });
+      for (const o of [-0.45, 0.45]) lancets.push({ cx: s * 35.0 + o, y0: 6.0, w: 0.56, h: 1.45, kind: 'lancet' });
     }
     holes.push(...arcade, ...lancets, ...big);
     this.slab(wallShape(-L.coreHalf, L.coreHalf, Y - 0.3, top, holes, k.seg), z, 1.2);
@@ -435,9 +437,9 @@ export class CastleBuilder {
       this.pane(o, z, 0.3, LED_KIND.window);
     }
     for (const s of [-1, 1]) {
-      const hood: Opening = { cx: s * 14.85, y0: 6.35, w: 2.0, h: 2.2, kind: 'pointed' };
+      const hood: Opening = { cx: s * 14.85, y0: 5.95, w: 1.9, h: 1.75, kind: 'pointed' };
       this.frame(hood, z, 0.14, 0.2, TINT.trim);
-      boxMinMax(k.stone, s * 14.85 - 1.15, 6.15, z, s * 14.85 + 1.15, 6.35, z + 0.3, TINT.trim);
+      boxMinMax(k.stone, s * 14.85 - 1.1, 5.75, z, s * 14.85 + 1.1, 5.95, z + 0.3, TINT.trim);
     }
     for (const o of big) {
       this.frame(o, z, 0.3, 0.26);
@@ -448,9 +450,9 @@ export class CastleBuilder {
     // plinth, string course (outer bays), cornice, LED line under it
     boxMinMax(k.stone, -L.coreHalf, Y, z, L.coreHalf, Y + 0.3, z + 0.18, TINT.trim);
     for (const s of [-1, 1]) {
-      const a = s * OUTER.x + s * OUTER.w / 2,
+      const a = s * (OUTER.x - OUTER.w / 2),
         b = s * L.coreHalf;
-      boxMinMax(k.stone, Math.min(a, b), 9.0 - 0.25, z, Math.max(a, b), 9.0, z + 0.26, TINT.trim);
+      boxMinMax(k.stone, Math.min(a, b), 7.65 - 0.2, z, Math.max(a, b), 7.65, z + 0.26, TINT.trim);
     }
     boxMinMax(k.stone, -L.coreHalf, top - 0.3, z - 0.2, L.coreHalf, top, z + 0.36, TINT.trim);
     for (const s of [-1, 1]) {
@@ -459,18 +461,11 @@ export class CastleBuilder {
       k.led.bar(new THREE.Vector3(Math.min(a, b), top - 0.38, z + 0.37), new THREE.Vector3(Math.max(a, b), top - 0.38, z + 0.37), OUT, 0.1);
     }
     k.led.bar(new THREE.Vector3(-L.porchHalf, top - 0.38, z + 0.37), new THREE.Vector3(L.porchHalf, top - 0.38, z + 0.37), OUT, 0.1);
-    // parapet: plain coping over the dragon's chest (|x| < 10.4), the raised battlement block the
-    // right foreleg's talons hook over, merlons elsewhere (not behind the projecting outer towers)
-    const [c0, c1] = L.clawBlock;
+    // parapet: plain coping over the dragon's chest (|x| < 10.4), low merlons outboard
+    const c0 = L.copingHalf;
     boxMinMax(k.stone, -c0, top, z - 1.2, c0, top + 0.28, z + 0.05, TINT.trim);
-    boxMinMax(k.stone, c0, top, z - 0.95, c1, L.clawBlockTop, z + 0.08, TINT.trim);
-    boxMinMax(k.stone, c0 - 0.1, L.clawBlockTop - 0.14, z - 1.0, c1 + 0.1, L.clawBlockTop, z + 0.14, TINT.cream);
-    const ox0 = OUTER.x - OUTER.w / 2,
-      ox1 = OUTER.x + OUTER.w / 2;
-    this.merlons(c1, ox0, top, z + 0.02, 0.4);
-    this.merlons(ox1, L.coreHalf, top, z + 0.02, 0.4);
-    this.merlons(-ox0, -c0, top, z + 0.02, 0.4);
-    this.merlons(-L.coreHalf, -ox1, top, z + 0.02, 0.4);
+    this.merlons(c0, L.coreHalf, top, z + 0.02, 0.4, 0.8);
+    this.merlons(-L.coreHalf, -c0, top, z + 0.02, 0.4, 0.8);
     // pilasters + vertical LED battens + pinnacles through the parapet
     const pil: [number, number, number][] = [
       // [x, y0, y1]
@@ -491,8 +486,7 @@ export class CastleBuilder {
         const st = k.led.newStrip();
         k.led.bar(new THREE.Vector3(x, y0 + 0.25, z + 0.33), new THREE.Vector3(x, y1 - 0.2, z + 0.33), OUT, 0.12, st, 0, LED_KIND.bar, 1);
       }
-      for (const px of [16.5, 28.5, 32.7, 36.6]) this.pinnacle(s * px, top + L.merlonH, z - 0.2, 0.5, 1.8);
-      if (s < 0) this.pinnacle(-13.35, top + L.merlonH, z - 0.2, 0.5, 1.8);
+      for (const px of [13.35, 16.5, 28.5, 32.7, 36.6]) this.pinnacle(s * px, top + 0.8, z - 0.2, 0.5, 1.6);
       // parapet gerbs on the wall walk (bible X ±25.7…±35; the outer towers take ±23…±28 here)
       for (const x of [29.4, 32.4, 35.6]) k.pts.roof.push(new THREE.Vector3(s * x, top + 0.1, z - 0.7));
       // moving heads behind the merlons
@@ -502,6 +496,18 @@ export class CastleBuilder {
       ]) {
         const n = 6;
         for (let i = 0; i < n; i++) k.pts.fixturesTruss.push(new THREE.Vector3(s * (a + ((b - a) * i) / (n - 1)), top + 0.45, z - 0.8));
+      }
+      // the twin 15 m Power Flame torches flanking the head (show-analysis 6.7, f104): pedestals on
+      // the wall walk just outboard of the tusks - in front of the wing arm, which now arches over
+      // the (set-back) inner towers where the bible had them
+      {
+        const tx = s * 11.6;
+        const tz = z - 0.75;
+        cyl(k.stone, tx, top, tz, 0.62, 0.5, top + 0.85, 10, TINT.trim);
+        const bowl = new THREE.TorusGeometry(0.5, 0.11, 6, 16);
+        k.gold.add(bowl, new THREE.Matrix4().makeRotationX(Math.PI / 2).setPosition(tx, top + 0.88, tz));
+        bowl.dispose();
+        k.pts.towerTorches.push(new THREE.Vector3(tx, top + 1.0, tz));
       }
       // lasers on the parapet (bible X ±7, ±32 at Y 10)
       k.pts.laserStage.push(new THREE.Vector3(s * 7, top + 0.3, z - 0.8), new THREE.Vector3(s * 32, top + 0.3, z - 0.8));
@@ -617,10 +623,12 @@ export class CastleBuilder {
         [OUT, 0.71],
       ] as const)
         k.led.rect(new THREE.Vector3(x, py + 1.55, zc), r, UP, 0.95, 1.25, LED_KIND.candle, rnd);
-      k.pts.towerTorches.push(new THREE.Vector3(x, py + 1.1, zc));
-      k.pts.towersTop.push(new THREE.Vector3(x, top, zc));
-      k.pts.laserStage.push(new THREE.Vector3(x, py + 0.35, zf - 0.55));
-      k.pts.fixturesTruss.push(new THREE.Vector3(x - 1.05, py + 0.35, zf - 0.6), new THREE.Vector3(x + 1.05, py + 0.35, zf - 0.6));
+      // rig positions of these towers sit on the wall walk in front of them: the towers stand under
+      // the wing arm / inner membrane now (round 3), fixtures up there would fire through the wing
+      const wz = L.facadeZ - 0.7;
+      k.pts.towersTop.push(new THREE.Vector3(x, L.coreTop + 0.6, wz));
+      k.pts.laserStage.push(new THREE.Vector3(x, L.coreTop + 0.35, wz));
+      k.pts.fixturesTruss.push(new THREE.Vector3(x - 1.05, L.coreTop + 0.35, wz), new THREE.Vector3(x + 1.05, L.coreTop + 0.35, wz));
     } else {
       // slender octagonal needle spire on a drum (to Y 18), lucarne, gold finial
       cyl(k.stone, x, py, zc, 1.35, 1.35, top + 0.3, 8, TINT.trim);
@@ -643,19 +651,53 @@ export class CastleBuilder {
   }
 
   // -------------------------------------------------------------------------------------------
-  // skull medallions (glowing eyes) on the facade
+  // outer bay (where the round-2 outer tower stood): banner on the facade + the rig anchors it carried
 
-  private medallion(s: number): void {
+  private outerBay(s: number): void {
     const k = this.kit;
-    const x = s * MED.x;
+    const x = s * OUTER.x;
     const z = L.facadeZ;
-    const back = new THREE.CylinderGeometry(MED.r + 0.14, MED.r + 0.14, 0.24, 32);
-    k.stone.add(back, new THREE.Matrix4().makeRotationX(Math.PI / 2).setPosition(x, MED.y, z + 0.12), { color: TINT.trim });
-    back.dispose();
-    decorDisc(k, 'medallion', x, MED.y, z + 0.25, MED.r, GLOW.skull);
-    const ring = new THREE.TorusGeometry(MED.r + 0.06, 0.12, 8, 40);
-    k.gold.add(ring, new THREE.Matrix4().makeTranslation(x, MED.y, z + 0.3));
-    ring.dispose();
+    const top = L.coreTop;
+    // flame-eye banner (2.2 x 5.2, backlit) hung under the cornice + LED panel for 'screens'
+    const bx = s * 27.4;
+    const bz = z + 0.36;
+    const by = top - 0.45;
+    rod(k.metal, new THREE.Vector3(bx - 1.25, by, bz + 0.05), new THREE.Vector3(bx + 1.25, by, bz + 0.05), 0.07, METAL.black);
+    decorPanel(k, 'banner', bx, by - 2.6, bz + 0.08, 2.2, 5.2, GLOW.banner);
+    k.led.rect(new THREE.Vector3(bx, by - 2.6, bz + 0.1), RIGHT, UP, 2.2, 5.2, LED_KIND.panel, 2.2, 5.2);
+    this.floodCan(bx, L.deckY, z + 1.1);
+    // rig positions of the former tower roof, now on the wall walk behind the merlons
+    k.pts.towersTop.push(new THREE.Vector3(x, top + 0.6, z - 0.9));
+    k.pts.laserStage.push(new THREE.Vector3(x, top + 0.35, z - 0.7));
+    k.pts.fixturesTruss.push(new THREE.Vector3(x - 1.45, top + 0.35, z - 0.75), new THREE.Vector3(x + 1.45, top + 0.35, z - 0.75));
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // skull cubes: white stone blocks on the deck either side of the portal, a skull relief in an
+  // arched gilt niche on the front and the outward face (the eyes glow at night: GLOW.skull)
+
+  private skullCube(s: number): void {
+    const k = this.kit;
+    const C = SKULL_CUBE;
+    const x = s * C.x;
+    const y0 = L.deckY;
+    const x0 = x - C.w / 2,
+      x1 = x + C.w / 2;
+    const z0 = C.z - C.d / 2,
+      z1 = C.z + C.d / 2;
+    boxMinMax(k.stone, x0, y0, z0, x1, C.top - 0.35, z1, TINT.cream);
+    // plinth + cornice cap
+    boxMinMax(k.stone, x0 - 0.12, y0, z0 - 0.12, x1 + 0.12, y0 + 0.45, z1 + 0.12, TINT.trim);
+    boxMinMax(k.stone, x0 - 0.18, C.top - 0.35, z0 - 0.18, x1 + 0.18, C.top, z1 + 0.18, TINT.trim);
+    // corner quoins
+    for (const cx of [x0, x1]) for (const cz of [z0, z1]) boxMinMax(k.stone, cx - 0.14, y0 + 0.45, cz - 0.14, cx + 0.14, C.top - 0.35, cz + 0.14, TINT.cream);
+    const ny = (y0 + 0.45 + C.top - 0.35) / 2;
+    const nh = C.top - 0.35 - y0 - 0.45 - 0.3;
+    // front face + outward face
+    decorPanel(k, 'skullNiche', x, ny, z1 + 0.02, C.w * 0.78, nh, GLOW.skull);
+    decorPanel(k, 'skullNiche', s * (C.x + C.w / 2 + 0.02), ny, C.z, C.d * 0.76, nh, GLOW.skull, (s * Math.PI) / 2);
+    const fr: Opening = { cx: x, y0: ny - nh / 2, w: C.w * 0.8, h: nh, kind: 'round' };
+    this.frame(fr, z1, 0.14, 0.12, TINT.wall, 'gold');
   }
 
   private bayDecor(s: number): void {
@@ -664,8 +706,12 @@ export class CastleBuilder {
     // skull niche panel in the outer bay + gold sill
     decorPanel(k, 'skullNiche', s * 35.0, 4.35, z - 0.02, 2.3, 3.7, GLOW.skull);
     boxMinMax(k.gold, s * 35 - 1.25, 2.4, z - 0.3, s * 35 + 1.25, 2.52, z + 0.05);
-    // kintsugi stone face in a gold niche in the inner bay's upper storey
-    decorPanel(k, 'faceNiche', s * 18.2, 7.3, L.facadeZ + 0.03, 1.2, 1.92, GLOW.none);
+    // grey stone face relief in a gilt arched niche on the upper storey (daytime photos: a big mask
+    // right of the portal, over the inner bay; a smaller twin on the left)
+    if (s > 0) {
+      boxMinMax(k.stone, 13.8, 5.5, z - 0.3, 16.0, 7.95, z + 0.02, TINT.cream);
+      decorPanel(k, 'faceNiche', 14.9, 6.72, z + 0.04, 1.75, 2.3, GLOW.none);
+    } else decorPanel(k, 'faceNiche', -22.4, 6.75, L.facadeZ + 0.03, 1.2, 1.92, GLOW.none);
     // flood cans under the gallery (they "produce" the virtual flood field)
     for (const x of [15, 19.5]) this.floodCan(s * x, L.deckY, L.galleryFrontZ + 0.6);
   }
@@ -677,10 +723,10 @@ export class CastleBuilder {
     const k = this.kit;
     const zb = L.coreBackZ;
     // black scrim over scaffold (a real set is only printed flats from the front)
-    boxMinMax(k.paint, -L.coreHalf, L.roofY - 0.2, zb, L.coreHalf, L.roofY, L.facadeZ - 1.2, PAINT.black);
-    boxMinMax(k.paint, -L.coreHalf, -1, zb - 0.3, L.coreHalf, L.roofY, zb, PAINT.black);
+    boxMinMax(k.paint, -L.coreHalf, L.coreRoofY - 0.2, zb, L.coreHalf, L.coreRoofY, L.facadeZ - 1.2, PAINT.black);
+    boxMinMax(k.paint, -L.coreHalf, -1, zb - 0.3, L.coreHalf, L.coreRoofY, zb, PAINT.black);
     // core end walls (inside the side sections, closes the volume)
-    for (const s of [-1, 1]) boxMinMax(k.paint, s * L.coreHalf - (s > 0 ? 0.3 : 0), -1, zb, s * L.coreHalf + (s < 0 ? 0.3 : 0), L.roofY, L.facadeZ - 1.2, PAINT.black);
+    for (const s of [-1, 1]) boxMinMax(k.paint, s * L.coreHalf - (s > 0 ? 0.3 : 0), -1, zb, s * L.coreHalf + (s < 0 ? 0.3 : 0), L.coreRoofY, L.facadeZ - 1.2, PAINT.black);
   }
 
   private scaffold(): void {
@@ -698,8 +744,8 @@ export class CastleBuilder {
         [1, 1],
         [-1, 1],
       ])
-        rod(k.metal, new THREE.Vector3(x + (dx * w) / 2, L.roofY, z + (dz * w) / 2), new THREE.Vector3(x + (dx * w) / 2, topY, z + (dz * w) / 2), 0.06, col);
-      for (let y = L.roofY + 0.4; y < topY; y += 1.4) {
+        rod(k.metal, new THREE.Vector3(x + (dx * w) / 2, L.coreRoofY, z + (dz * w) / 2), new THREE.Vector3(x + (dx * w) / 2, topY, z + (dz * w) / 2), 0.06, col);
+      for (let y = L.coreRoofY + 0.4; y < topY; y += 1.4) {
         rod(k.metal, new THREE.Vector3(x - w / 2, y, z + w / 2), new THREE.Vector3(x + w / 2, y + 0.7, z + w / 2), 0.035, col);
         rod(k.metal, new THREE.Vector3(x - w / 2, y + 0.7, z - w / 2), new THREE.Vector3(x + w / 2, y + 1.4, z - w / 2), 0.035, col);
       }

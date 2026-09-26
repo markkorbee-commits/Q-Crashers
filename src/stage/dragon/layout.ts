@@ -13,7 +13,13 @@ import * as THREE from 'three';
  *   rosettes: 3 per wing, diameter ~4.5 m, centres near (±16, 16.5), (±24, 16.5), (±32, 15.5)
  */
 export const HEAD = {
-  hinge: new THREE.Vector3(-1.0, 15.2, -11.6),
+  /**
+   * round 3: the daytime photos (axis telephoto, calibrated on the PA hangs and the portal) show
+   * the head ~15 % bigger than built (horn crown to Y ~23.5, jaw tip resting on the portal crown):
+   * the whole head is scaled about a raised hinge
+   */
+  hinge: new THREE.Vector3(-1.0, 15.9, -11.8),
+  scale: 1.15,
   /** radians, negative = snout turned towards audience-left (-X) */
   yaw: -0.3,
   /** radians, positive = nose down (the head glares down at the field; the jaw hangs almost vertical) */
@@ -25,52 +31,75 @@ export const HEAD = {
 
 export function headMatrix(): THREE.Matrix4 {
   const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(HEAD.pitch, HEAD.yaw, 0, 'YXZ'));
-  return new THREE.Matrix4().compose(HEAD.hinge, q, new THREE.Vector3(1, 1, 1));
+  return new THREE.Matrix4().compose(HEAD.hinge, q, new THREE.Vector3(HEAD.scale, HEAD.scale, HEAD.scale));
 }
 
 export interface WingLayout {
   side: number;
   shoulder: THREE.Vector3;
-  /** knuckle block where the spar roots meet (behind the castle) */
+  /** knuckle where the arm ends and the outer / middle spars rise (low, in front of the castle) */
   wrist: THREE.Vector3;
-  /** base (root) of each finger spar: outer, middle, inner */
+  /** control point of the arched arm (shoulder -> wrist) */
+  armCtrl: THREE.Vector3;
+  /** base (root) of each finger spar: outer, middle, inner (the inner one rises from the arm) */
   bases: THREE.Vector3[];
-  /** finger ends (base of the finial): outer, middle, inner */
+  /** finger ends (the finial's sun disc sits here): outer, middle, inner */
   tips: THREE.Vector3[];
   /** top of the finial spear (highest point) */
   finialTops: THREE.Vector3[];
-  /** where the arm meets the inner finger */
+  /** where the inner finger leaves the arm (= bases[2]) and its arm parameter */
   armJoin: THREE.Vector3;
+  armJoinT: number;
   rosettes: THREE.Vector3[];
 }
 
 /**
- * Round-2 look parity: measured against the official terrace photo (camera fitted on the delay-tower
- * pairs) and the far telephoto shots of the video, the wings stand ~12 % larger than the bible
- * numbers (finial tops ~29-31 m, outer finial ~44 m out) while the shoulders stay on the dragon. The
- * layout is scaled about a pivot on the inner wing root line (x ±14, y 4), in the wing plane.
+ * Round-3 (daytime photos of the real set, telephoto on the axis + ground / drone views): each wing
+ * is a bat wing whose ARM arches from the dragon's shoulder out and down to a WRIST standing low in
+ * front of the outer castle bays (Y ~4.6, Z ~ -8.8, hooked tusks hanging to the deck), with the outer
+ * and middle spars rising from the wrist and the inner spar from the arm; the spars lean back ~30 deg
+ * so the finials stand at Z ~ -21. The outer and middle spars stand near-vertical (the outer one is
+ * the wing's outer edge, ending in hooked spikes by the side sections), the inner spar leans in from
+ * the arm to the head. Finial tops: X from the official photo P (outer tips just outside the row-2
+ * crystals, middle / inner at 0.75 / 0.37 of the outer span: ±39.8 / 29.4 / 14.5, the bible values),
+ * heights from the daytime photos (the outer finial clearly lower than the middle / inner ones) -
+ * the round-2 1.12x scale-up had the outer tips ~4 m too far out and 2.4 m too high.
+ * Under the arm the castle towers show through the arch (thumbnail, day photos).
  */
-export const WING_SCALE = 1.12;
-const WING_PIVOT = { x: 14, y: 4 };
-
 export function wingLayout(side: number): WingLayout {
   const s = side;
-  const k = WING_SCALE;
   const v = (x: number, y: number, z: number) => new THREE.Vector3(x * s, y, z);
-  // scaled wing point (the shoulder is not scaled: it sits on the dragon's yoke)
-  const w = (x: number, y: number, z: number) => v(WING_PIVOT.x + (x - WING_PIVOT.x) * k, WING_PIVOT.y + (y - WING_PIVOT.y) * k, z);
-  const bases = [w(30.6, 4.6, -17.6), w(27.4, 3.9, -17.5), w(24.0, 3.9, -17.4)];
-  const tips = [w(40.2, 23.2, -21.2), w(29.0, 24.7, -21.5), w(14.7, 23.2, -20.9)];
-  const finialTops = [w(40.6, 26.5, -21.3), w(29.1, 28.0, -21.6), w(14.2, 26.5, -21.0)];
-  const armJoin = new THREE.Vector3().lerpVectors(bases[2], tips[2], 0.36);
+  const shoulder = v(6.2, 14.6, -16.6);
+  const wrist = v(26.4, 4.6, -8.8);
+  const armCtrl = v(17.5, 19.5, -12.2);
+  const armJoinT = 0.74;
+  const armJoin = qb(shoulder, armCtrl, wrist, armJoinT);
+  const finialTops = [v(39.8, 26.8, -21.3), v(29.4, 29.9, -21.6), v(14.5, 29.5, -21.0)];
+  const bases = [v(36.2, 6.8, -9.8), v(27.6, 5.2, -9.0), armJoin.clone()];
+  // the finger end sits ~5.6 m below the spear tip along the spar's line
+  const tips = finialTops.map((t, i) => {
+    const d = new THREE.Vector3().subVectors(t, bases[i]).normalize();
+    return t.clone().addScaledVector(d, -5.6);
+  });
   return {
     side,
-    shoulder: v(6.2, 14.6, -16.6),
-    wrist: w(27.3, 3.2, -17.3),
+    shoulder,
+    wrist,
+    armCtrl,
     bases,
     tips,
     finialTops,
     armJoin,
-    rosettes: [w(32.5, 15.6, -19.4), w(23.4, 16.3, -19.4), w(15.4, 17.3, -18.8)],
+    armJoinT,
+    rosettes: [v(33.3, 17.4, -15), v(24.4, 17.9, -15), v(16.2, 17.3, -15)],
   };
+}
+
+function qb(a: THREE.Vector3, c: THREE.Vector3, b: THREE.Vector3, t: number): THREE.Vector3 {
+  const u = 1 - t;
+  return new THREE.Vector3(
+    u * u * a.x + 2 * u * t * c.x + t * t * b.x,
+    u * u * a.y + 2 * u * t * c.y + t * t * b.y,
+    u * u * a.z + 2 * u * t * c.z + t * t * b.z,
+  );
 }

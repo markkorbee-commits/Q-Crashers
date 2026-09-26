@@ -1,12 +1,12 @@
 import * as THREE from 'three';
-import { Polyline, basisZ, bez2, circle, frameY, gem, plate, ring, scaleUv, spike, spline, surface, tube, v2, v3, withFx, type V3 } from './geom';
+import { Polyline, basisZ, bez2, circle, frameY, gem, plate, ring, scaleUv, sickleOutline, spike, spline, tube, v2, v3, withFx, type V3 } from './geom';
 import { wingLayout } from './layout';
 import { PAL, segs, type Kit } from './kit';
 import { BULB } from './shading';
 
 /**
- * Neck, body mass, shoulder yoke (wing roots), chest, forelegs with talons over the castle
- * parapet, and the seated skeletal rider (world space).
+ * Neck / back (leopard hide, dorsal leaf plates, scimitar blades), body mass, shoulder yoke (wing
+ * roots), chest, the mechanical underbody (vertebra discs, copper bars) and the seated rider.
  */
 export interface BodyResult {
   riderEyes: V3[];
@@ -21,11 +21,14 @@ export function buildBody(k: Kit): BodyResult {
 
   // ------------------------------------------------------------------ neck
   const n0 = v3(0, 0.9, -5.2).applyMatrix4(k.HM);
-  const neckCtrl = [n0, v3(3.8, 16.4, -17.4), v3(6.6, 15.4, -18.6), v3(9.6, 13.4, -20.4), v3(12.2, 10.6, -22.6)];
+  // the back arches up behind the crown to the rider's seat (photos: the rider sits high, level
+  // with the horn tips), then falls away to the right behind the wing
+  const neckCtrl = [n0, v3(3.6, 17.9, -17.2), v3(6.6, 17.5, -18.4), v3(9.8, 14.6, -20.2), v3(12.4, 11.0, -22.4)];
   const neckPts = spline(neckCtrl, segs(k, 40, 18));
   const neck = new Polyline(neckPts);
   const neckR = (t: number) => THREE.MathUtils.lerp(2.75, 3.3, t) * (1 + 0.04 * Math.sin(t * 40));
-  W.lava.add(withFx(tube(neckPts, neckR, { radial, vScale: 3.0 }), 1));
+  // leopard / giraffe-patterned hide (daytime photos): ~1 m cells all round the tube
+  W.lava.add(withFx(scaleUv(tube(neckPts, neckR, { radial, vScale: 10 }), 2, 1), 1));
   // armour bands, dorsal spines, LED rings
   const bands = 9;
   for (let i = 0; i < bands; i++) {
@@ -43,12 +46,51 @@ export function buildBody(k: Kit): BodyResult {
       ringPts.push(v3(Math.cos(a) * (r + 0.06), 0.4, Math.sin(a) * (r + 0.06)).applyMatrix4(f));
     }
     W.strips.add(ringPts, 0, 0.12, 0, i * 0.11);
-    // dorsal spine (skip the rider's seat)
-    if (t < 0.2 || t > 0.5) {
-      const up = v3(0, 1, 0).addScaledVector(d, -0.5).normalize();
-      const base = p.clone().addScaledVector(v3(0, 1, 0), neckR(t) * 0.9);
-      W.steel.add(spike(2.2 - t * 0.8, 0.45, { sides: 6, segs: 4, bendZ: -0.4 }), frameY(base, up, 0, 1, d));
+  }
+  // dorsal plates: a crest of big leaf-shaped plates (cream-orange with dark veins) along the back,
+  // from the skull to beyond the rider (skipping his seat)
+  {
+    const leaf = leafPlate();
+    const rib = plate([v2(-0.08, 0.15), v2(0.08, 0.15), v2(0.025, 3.0), v2(-0.025, 3.0)], 0.14, 0);
+    const nL = segs(k, 13, 7);
+    for (let i = 0; i < nL; i++) {
+      const t = 0.02 + (i / (nL - 1)) * 0.9;
+      if (t > 0.27 && t < 0.46) continue;
+      const p = neck.at(t);
+      const d = neck.tangent(t);
+      const side = v3().crossVectors(d, v3(0, 1, 0)).normalize();
+      const up = v3(0, 1, 0).addScaledVector(d, -0.55).normalize();
+      const base = p.clone().addScaledVector(v3(0, 1, 0), neckR(t) * 0.82);
+      const sc = 0.85 + 0.35 * Math.sin(Math.PI * Math.min(1, t * 1.25)) + (rnd() - 0.5) * 0.12;
+      // plate in the plane of the spine (normal = sideways), tipped back, fanned slightly
+      for (const [off, roll] of [
+        [-0.35, -0.22],
+        [0.35, 0.22],
+      ] as const) {
+        const m = basisZ(side.clone().applyAxisAngle(up, roll), up, base.clone().addScaledVector(side, off).addScaledVector(d, off * 0.6));
+        m.scale(v3(sc, sc * 1.1, 1));
+        W.ivory.add(leaf.clone(), m);
+        W.ivory.add(rib.clone(), m, '#3e3a1c');
+      }
     }
+    leaf.dispose();
+    rib.dispose();
+  }
+  // silver scimitar blades standing out along the front / lower flank of the coil
+  {
+    const blade = plate(sickleOutline(2.4, 0.7, 0.9, 7), 0.12, 0.03, [circle(0.05, 0.6, 0.13, 6, true)]);
+    const nB = segs(k, 11, 6);
+    for (let i = 0; i < nB; i++) {
+      const t = 0.08 + (i / (nB - 1)) * 0.74;
+      const p = neck.at(t);
+      const d = neck.tangent(t);
+      const side = v3().crossVectors(d, v3(0, 1, 0)).normalize();
+      if (side.z < 0) side.negate();
+      const out = side.clone().multiplyScalar(0.8).add(v3(0, -0.6, 0)).normalize();
+      const m = basisZ(d, out, p.clone().addScaledVector(out, neckR(t) * 0.92));
+      W.steel.add(blade.clone(), m, 0xdfe2e8);
+    }
+    blade.dispose();
   }
 
   // overlapping armour plates along both flanks of the neck (the "armoured neck plates")
@@ -129,7 +171,7 @@ export function buildBody(k: Kit): BodyResult {
     const gm = frameY(v3(6.6, 12.9, -11.4), v3(0.15, 0.1, 1).normalize());
     const gr = ring(1.3, 0.16, 6, 36);
     gr.rotateX(Math.PI / 2);
-    W.armor.add(gr, gm, PAL.bronze);
+    W.armor.add(gr, gm, 0x6a6e74);
     for (let i = 0; i < 14; i++) {
       const a = (i / 14) * Math.PI * 2;
       W.armor.add(new THREE.BoxGeometry(0.3, 0.3, 0.3), gm.clone().multiply(new THREE.Matrix4().makeRotationY(a).multiply(new THREE.Matrix4().makeTranslation(1.5, 0, 0))), PAL.darkBronze);
@@ -147,97 +189,51 @@ export function buildBody(k: Kit): BodyResult {
 
   // ivory tusks at the wing roots (design bible §5.7), curling down over the castle wall
   for (const sx of [-1, 1]) {
-    for (const [dx, len] of [[0, 3.6], [1.3, 2.8]] as const) {
-      const a = v3(sx * (7.6 + dx), 12.4 - dx * 0.4, -15.2 + dx * 0.3);
-      const pts = spline([a, a.clone().add(v3(sx * 0.6, 0.8, 1.4)), a.clone().add(v3(sx * 1.1, -0.6, 2.6)), a.clone().add(v3(sx * 0.9, -len * 0.75, 2.8))], 12);
-      const g = tube(pts, (t) => THREE.MathUtils.lerp(0.5, 0.03, Math.pow(t, 1.1)), { radial: segs(k, 10, 6), capStart: true });
-      W.ivory.add(g, null, PAL.ivory);
+    // (daytime photos: big silver-white horns hanging down either side of the head, X ~±10, to Y ~6)
+    for (const [dx, len] of [[0, 5.2], [1.5, 3.9]] as const) {
+      const a = v3(sx * (8.2 + dx), 12.6 - dx * 0.4, -14.8 + dx * 0.3);
+      const pts = spline([a, a.clone().add(v3(sx * 0.8, 1.0, 1.5)), a.clone().add(v3(sx * 1.5, -0.7, 2.8)), a.clone().add(v3(sx * 1.2, -len * 0.8, 3.0))], 14);
+      const g = tube(pts, (t) => THREE.MathUtils.lerp(0.72, 0.04, Math.pow(t, 1.1)), { radial: segs(k, 12, 6), capStart: true });
+      W.steel.add(g, null, 0xe6e8ec);
     }
   }
 
-  // ------------------------------------------------------------------ forelegs + talons
-  const talonMat = PAL.talon;
-  const talon = (base: V3, fwd: number, drop: number, x: number) => {
-    // a thick hooked claw: up and over the parapet edge, then curling down and back in
-    const pts = [
-      base,
-      v3(x, base.y + 0.55, base.z + fwd * 0.8),
-      v3(x, base.y + 0.3, base.z + fwd * 1.7),
-      v3(x, base.y - drop * 0.55, base.z + fwd * 2.0),
-      v3(x, base.y - drop, base.z + fwd * 1.35),
-    ];
-    const s = spline(pts, 16);
-    // flattened sideways (a claw is taller than wide) and tapering to a sharp tip
-    W.steel.add(tube(s, (t) => THREE.MathUtils.lerp(0.62, 0.03, Math.pow(t, 1.1)), { radial: segs(k, 12, 7), capStart: true, aspectN: 0.62, up: v3(1, 0, 0) }), null, talonMat);
-    // armoured knuckle cap
-    W.armor.add(tube([base.clone().add(v3(0, -0.1, -0.5)), base.clone().add(v3(0, 0.25, 0.35))], (t) => 0.72 - t * 0.12, { radial: 6, capStart: true, capEnd: true }), null, PAL.plateRed);
-  };
+  // ------------------------------------------------------------------ mechanical underbody
+  // (daytime photos: under the coil right of the head a column of dark grey steel vertebra discs,
+  // a rack of long copper bars running right towards the wing, and flame-crack printed panels
+  // behind them. The bible's "gold perforated foreleg with talons" is not in any daytime photo: the
+  // gold element under the chin is the scaled vault roof in front of the portal - removed.)
   {
-    // right foreleg (viewer right): gold perforated mechanical arm, 3 glossy talons over the parapet
-    // (design bible §5.6: X +8…+16, talons hooked over the wall top at Y 9.5, Z -12)
-    const A0 = v3(7.4, 13.9, -16.2);
-    const A1 = v3(13.9, 14.7, -14.8);
-    const A2 = v3(12.5, 11.3, -13.4);
-    const upper = bez2(A0, v3(10.8, 15.9, -15.8), A1, 12);
-    const fore = bez2(A1, v3(14.2, 13.0, -13.6), A2, 10);
-    W.armor.add(tube(upper, (t) => 1.15 - 0.25 * t, { radial, capStart: true, vScale: 3 }), null, PAL.bronze);
-    W.armor.add(tube(fore, (t) => 0.95 - 0.2 * t, { radial, capEnd: true, vScale: 3 }), null, PAL.bronze);
-    // piston rods (mechanical look) along the upper arm and forearm
-    W.steel.add(tube([A0.clone().add(v3(0.2, -0.9, 0.9)), A1.clone().add(v3(-0.6, -0.8, 0.9))], () => 0.16, { radial: 8, capStart: true, capEnd: true }));
-    W.steel.add(tube([A1.clone().add(v3(0.6, -0.4, 0.8)), A2.clone().add(v3(0.7, 0.3, 0.7))], () => 0.14, { radial: 8, capStart: true, capEnd: true }));
-    // elbow joint: gear disc + gem
-    const em = frameY(A1.clone().add(v3(0, 0, 0.9)), v3(0.1, 0.1, 1).normalize());
-    const er = ring(0.95, 0.14, 6, 28);
-    er.rotateX(Math.PI / 2);
-    W.armor.add(er, em, PAL.darkBronze);
-    W.armor.add(new THREE.CylinderGeometry(0.8, 0.85, 0.3, 18), em, PAL.bronze);
-    W.armor.add(gem(0.5), new THREE.Matrix4().makeTranslation(A1.x, A1.y, A1.z + 1.25), PAL.plateRed);
-    W.bulbs.add(v3(A1.x, A1.y, A1.z + 1.8), BULB.accent, 0, 0.14, 0.3);
-    // perforated plates along the upper arm and forearm
-    const perfPlate = (a: V3, b: V3, h: number, n: number) => {
-      const d = v3().subVectors(b, a);
-      const len = d.length();
-      const outline: THREE.Vector2[] = [v2(0, 0)];
-      for (let i = 0; i <= 12; i++) {
-        const t = i / 12;
-        outline.push(v2(t * len, h * (0.55 + 0.45 * Math.sin(t * Math.PI)) + 0.15 * Math.sin(t * Math.PI * 7)));
-      }
-      outline.push(v2(len, 0));
-      const holes: THREE.Vector2[][] = [];
-      for (let i = 0; i < n; i++) holes.push(circle(((i + 0.8) / (n + 0.6)) * len, h * 0.45, Math.min(0.28, h * 0.22), 10, true));
-      const g = plate(outline, 0.14, 0.04, holes);
-      const x = d.normalize();
-      const m = new THREE.Matrix4().makeBasis(x, v3(0, 1, 0).addScaledVector(x, -x.y).normalize(), v3().crossVectors(x, v3(0, 1, 0).addScaledVector(x, -x.y).normalize()));
-      m.setPosition(a);
-      W.armor.add(g, m, PAL.bronze);
-    };
-    perfPlate(A0.clone().add(v3(0.3, 0.7, 0.6)), A1.clone().add(v3(-0.6, 0.8, 0.6)), 1.5, 5);
-    perfPlate(A1.clone().add(v3(0.2, -0.6, 0.9)).setY(A2.y + 0.4), A1.clone().add(v3(0.8, 0.2, 0.9)), 1.0, 2);
-    // perforated sickle plate on the upper arm
-    const outline: THREE.Vector2[] = [];
-    for (let i = 0; i <= 14; i++) {
-      const t = i / 14;
-      outline.push(v2(t * 5.6, Math.sin(t * Math.PI) * 1.5 + t * 0.6));
+    const disc = new THREE.SphereGeometry(1, radial, Math.round(radial * 0.6));
+    disc.scale(1, 0.55, 1);
+    const spine = spline([v3(7.4, 13.4, -12.6), v3(8.4, 11.6, -12.4), v3(8.9, 9.8, -12.8), v3(9.0, 8.2, -13.4)], 7);
+    for (let i = 0; i < spine.length; i++) {
+      const t = i / (spine.length - 1);
+      const r = THREE.MathUtils.lerp(1.25, 0.8, t);
+      const d = spine[Math.min(spine.length - 1, i + 1)].clone().sub(spine[Math.max(0, i - 1)]).normalize();
+      W.armor.add(disc.clone(), frameY(spine[i], d, 0, 1).multiply(new THREE.Matrix4().makeScale(r, r, r)), i % 2 ? 0x55585e : 0x6a6e74);
+      if (i % 2 === 0) W.armor.add(ring(r * 1.02, 0.08, 4, 20).rotateX(Math.PI / 2), frameY(spine[i], d), PAL.darkBronze);
     }
-    for (let i = 14; i >= 0; i--) {
-      const t = i / 14;
-      outline.push(v2(t * 5.6 + 0.2, Math.sin(t * Math.PI) * 0.7 + t * 0.35));
+    disc.dispose();
+    // copper bars (the ribs of the machine), fanning right and slightly back
+    for (let i = 0; i < 5; i++) {
+      const y = 12.4 - i * 1.15;
+      const a0 = v3(6.0 + i * 0.25, y, -13.6 - i * 0.1);
+      const a1 = v3(14.6 - i * 0.3, y - 0.9 - i * 0.2, -16.2 + i * 0.2);
+      W.copper.add(tube([a0, a0.clone().lerp(a1, 0.5).add(v3(0, 0.25, 0)), a1], () => 0.26, { radial: 8, capStart: true, capEnd: true }), null, i % 2 ? PAL.copper : PAL.copperDeep);
+      W.armor.add(tube([a1.clone().add(v3(-0.25, 0, 0)), a1.clone().add(v3(0.25, 0, 0))], () => 0.36, { radial: 8, capStart: true, capEnd: true }), null, PAL.darkBronze);
     }
-    const holes = [circle(1.4, 1.2, 0.22, 10, true), circle(2.4, 1.45, 0.24, 10, true), circle(3.4, 1.5, 0.24, 10, true), circle(4.4, 1.35, 0.2, 10, true)];
-    const sickle = plate(outline, 0.16, 0.04, holes);
-    const sm = basisZ(v3(0.25, 0.3, 1), v3(0.1, 1, 0), v3(5.8, 12.6, -10.4));
-    sm.multiply(new THREE.Matrix4().makeRotationZ(0.05));
-    W.steel.add(sickle, sm);
-    // knuckle block
-    W.armor.add(new THREE.BoxGeometry(3.4, 1.2, 1.6), new THREE.Matrix4().makeTranslation(A2.x, A2.y, A2.z + 0.2), PAL.bronze);
-    for (const x of [-1.2, 0, 1.2]) talon(v3(A2.x + x, A2.y + 0.1, A2.z + 0.8), 1, 3.6 - Math.abs(x) * 0.4, A2.x + x);
-    // left: red scaled knuckle "orb" left of the portal (design bible ASSUMPTION: Ø 3.5 m at (-10, 8.5, -9))
-    const orb = new THREE.SphereGeometry(1.75, radial, Math.round(radial * 0.7));
-    scaleUv(orb, 3, 2);
-    orb.translate(-10, 8.5, -9);
-    W.shell.add(orb, null, PAL.scaleRed);
-    W.shell.add(tube(bez2(v3(-6.0, 12.6, -14.5), v3(-9.6, 12.4, -12.4), v3(-10, 9.6, -9.6), 10), (t) => 1.05 - 0.2 * t, { radial, capStart: true }), null, PAL.scaleRed);
-    for (const [x, d] of [[-11.1, 2.3], [-10.0, 2.7], [-8.9, 2.3]] as const) talon(v3(x, 8.4, -7.6), 1, d, x);
+    // flame-crack printed panels behind the bars (lava hide: glows with the inner fire)
+    const pg = new THREE.PlaneGeometry(8.4, 6.6, 1, 1);
+    scaleUv(pg, 1.1, 0.9);
+    W.lava.add(withFx(pg, 1), new THREE.Matrix4().makeRotationY(-0.28).setPosition(10.6, 10.0, -17.4));
+    // a dark gear + blade cluster at the right end (the "machine" joint in the photos)
+    const gm = frameY(v3(15.2, 10.8, -17.0), v3(0.25, 0.1, 1).normalize());
+    W.armor.add(ring(1.2, 0.2, 6, 28).rotateX(Math.PI / 2), gm, 0x4a4c50);
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2;
+      W.armor.add(new THREE.BoxGeometry(0.36, 0.3, 0.3), gm.clone().multiply(new THREE.Matrix4().makeRotationY(a).multiply(new THREE.Matrix4().makeTranslation(1.42, 0, 0))), 0x3a3c40);
+    }
   }
 
   // ------------------------------------------------------------------ rider
@@ -249,23 +245,28 @@ function buildRider(k: Kit): { riderEyes: V3[]; riderTop: V3 } {
   const W = k.world;
   const R = W.rider;
   const radial = segs(k, 14, 8);
-  const seat = v3(7.7, 17.7, -18.6);
-  const RM = new THREE.Matrix4().compose(seat, new THREE.Quaternion().setFromEuler(new THREE.Euler(0.05, -0.36, 0)), v3(1.55, 1.55, 1.55));
+  const rnd = k.rnd;
+  // photos (axis telephoto, thumbnail, photo P): the rider sits on the neck just right of the head's
+  // crown (X ~+4..+6), top ~Y 24 - closer in than the bible's +6.5..+7.7
+  const seat = v3(5.6, 20.45, -18.0);
+  const RM = new THREE.Matrix4().compose(seat, new THREE.Quaternion().setFromEuler(new THREE.Euler(0.05, -0.36, 0)), v3(1.7, 1.7, 1.7));
   const add = (g: THREE.BufferGeometry, m: THREE.Matrix4 | null, c: THREE.ColorRepresentation = PAL.riderDark) => R.add(g, m ? RM.clone().multiply(m) : RM, c);
+  /** clean printed colours (cloth, skin, shield face): the untextured ivory material */
+  const paint = (g: THREE.BufferGeometry, m: THREE.Matrix4 | null, c: THREE.ColorRepresentation) => W.ivory.add(g, m ? RM.clone().multiply(m) : RM, c);
   const T = (x: number, y: number, z: number) => new THREE.Matrix4().makeTranslation(x, y, z);
   // saddle
   add(tube(bez2(v3(-0.9, 0.05, -0.9), v3(0, -0.35, 0), v3(0.9, 0.05, 0.9).setX(0).setZ(1.0), 8), () => 0.45, { radial: 10, aspectN: 0.4, up: v3(0, 1, 0), capStart: true, capEnd: true }), null, PAL.darkBronze);
   // pelvis
   add(new THREE.BoxGeometry(1.1, 0.6, 0.85), T(0, 0.35, 0));
-  // legs straddling the neck
+  // legs straddling the neck (armoured greaves, dark boots)
   for (const s of [-1, 1]) {
     const hip = v3(s * 0.45, 0.35, 0.05);
     const knee = v3(s * 1.45, -0.25, 0.85);
     const foot = v3(s * 1.55, -1.65, 0.55);
     add(tube([hip, knee], (t) => 0.34 - t * 0.06, { radial, capStart: true, capEnd: true }), null);
     add(tube([knee, foot], (t) => 0.27 - t * 0.05, { radial, capStart: true, capEnd: true }), null);
-    add(gem(0.3), T(knee.x, knee.y + 0.05, knee.z + 0.15), PAL.bone);
-    add(new THREE.BoxGeometry(0.4, 0.28, 0.75), T(foot.x, foot.y - 0.1, foot.z + 0.2));
+    add(gem(0.3), T(knee.x, knee.y + 0.05, knee.z + 0.15), PAL.steel);
+    add(new THREE.BoxGeometry(0.4, 0.28, 0.75), T(foot.x, foot.y - 0.1, foot.z + 0.2), 0x1c1c1e);
   }
   // torso (loft of rounded rectangles)
   const rings: V3[][] = [];
@@ -302,64 +303,139 @@ function buildRider(k: Kit): { riderEyes: V3[]; riderTop: V3 } {
     torso.computeVertexNormals();
   }
   add(torso, null);
-  // breastplate ridge + belt
-  add(tube([v3(-0.6, 1.0, 0.5), v3(0, 1.1, 0.6), v3(0.6, 1.0, 0.5)], () => 0.12, { radial: 6 }), null, PAL.darkBronze);
-  add(tube(spline([v3(0, 1.3, 0.62), v3(0, 1.8, 0.6), v3(0, 2.1, 0.45)], 6), () => 0.1, { radial: 6 }), null, PAL.bone);
-  // ribs (skeletal)
-  for (let i = 0; i < 4; i++) {
-    const y = 1.35 + i * 0.18;
-    add(tube(bez2(v3(-0.55, y, 0.45), v3(0, y - 0.12, 0.72), v3(0.55, y, 0.45), 6), () => 0.05, { radial: 5 }), null, PAL.bone);
-  }
-  // pauldrons with spikes
+  // red tabard over the armour with a white hem, and a white sash across the chest
+  paint(plate([v2(-0.46, 0), v2(0.46, 0), v2(0.4, 1.35), v2(-0.4, 1.35)], 0.06, 0.01), T(0, 0.55, 0.56), '#a3161a');
+  paint(plate([v2(-0.47, 0), v2(0.47, 0), v2(0.47, 0.14), v2(-0.47, 0.14)], 0.07, 0), T(0, 0.52, 0.58), '#ece6dc');
+  paint(tube([v3(-0.7, 2.05, 0.3), v3(-0.1, 1.55, 0.62), v3(0.55, 0.95, 0.52)], () => 0.1, { radial: 6, up: v3(0, 0, 1), aspectN: 0.35 }), null, '#ece6dc');
+  // cloth flap hanging over the saddle between the legs
+  paint(plate([v2(-0.32, 0), v2(0.32, 0), v2(0.22, -1.1), v2(0, -1.25), v2(-0.22, -1.1)], 0.05, 0.01), T(0, 0.45, 0.62).multiply(new THREE.Matrix4().makeRotationX(-0.35)), '#a3161a');
+  // belt + breastplate ridge
+  add(tube([v3(-0.62, 0.62, 0.45), v3(0, 0.66, 0.6), v3(0.62, 0.62, 0.45)], () => 0.09, { radial: 6 }), null, 0x2a2420);
+  add(tube([v3(-0.6, 1.62, 0.52), v3(0, 1.74, 0.6), v3(0.6, 1.62, 0.52)], () => 0.08, { radial: 6 }), null, PAL.steel);
+  // pauldrons: layered lames with steel spikes
   for (const s of [-1, 1]) {
     const p = v3(s * 0.92, 2.1, 0.02);
-    // layered lames (open half-cylinders stepping down the upper arm)
     for (let i = 0; i < 3; i++) {
       const r = 0.62 - i * 0.07;
       const lame = new THREE.CylinderGeometry(r, r, 0.42, 10, 1, true, 0, Math.PI);
       lame.rotateZ(Math.PI / 2);
       lame.rotateX(-Math.PI / 2);
       const m = new THREE.Matrix4().makeRotationZ(-s * (0.35 + i * 0.25)).setPosition(p.x + s * i * 0.22, p.y - i * 0.24, p.z);
-      add(lame, m, i === 1 ? PAL.darkBronze : PAL.riderDark);
+      add(lame, m, i === 1 ? 0x2c2e32 : PAL.riderDark);
     }
-    for (let i = 0; i < 3; i++) {
-      const d = v3(s * (0.8 - i * 0.2), 0.6 + i * 0.25, -0.1 + i * 0.1).normalize();
-      add(spike(0.7 - i * 0.12, 0.12, { sides: 5, segs: 2 }), frameY(p.clone().addScaledVector(d, 0.45), d), PAL.bone);
+    for (let i = 0; i < 2; i++) {
+      const d = v3(s * (0.8 - i * 0.25), 0.6 + i * 0.3, -0.1 + i * 0.1).normalize();
+      add(spike(0.55 - i * 0.12, 0.1, { sides: 5, segs: 2 }), frameY(p.clone().addScaledVector(d, 0.45), d), PAL.steel);
     }
-    // arms
-    const sh = v3(s * 0.95, 1.95, 0.0);
-    const el = v3(s * 1.1, 1.2, 0.55);
-    const ha = v3(s * 0.42, 1.05, 1.2);
+  }
+  // right arm (viewer's left): forearm forward, gripping a short blade
+  {
+    const sh = v3(-0.95, 1.95, 0.0);
+    const el = v3(-1.15, 1.25, 0.5);
+    const ha = v3(-0.8, 1.15, 1.15);
     add(tube([sh, el], () => 0.2, { radial: 8, capEnd: true }), null);
     add(tube([el, ha], () => 0.17, { radial: 8, capEnd: true }), null);
-    add(gem(0.22), T(ha.x, ha.y, ha.z), PAL.bone);
+    add(gem(0.2), T(ha.x, ha.y, ha.z), 0x2a2420);
+    add(plate([v2(-0.07, 0), v2(0.07, 0), v2(0.05, 1.3), v2(0, 1.5), v2(-0.05, 1.3)], 0.04, 0.01), T(ha.x, ha.y + 0.05, ha.z).multiply(new THREE.Matrix4().makeRotationX(0.25)), PAL.steel);
   }
-  // sword pommel / reins horn held in front
-  add(tube([v3(0, 0.6, 1.3), v3(0, 1.6, 1.35)], (t) => 0.08 + 0.04 * t, { radial: 6, capEnd: true }), null, PAL.darkBronze);
-  add(new THREE.BoxGeometry(1.1, 0.1, 0.14), T(0, 1.1, 1.33), PAL.darkBronze);
-  // head: skull + hood
+  // left arm (viewer's right) carrying the round red sun shield
+  const shieldC = v3(1.42, 1.55, 0.55);
+  {
+    const sh = v3(0.95, 1.95, 0.0);
+    const el = v3(1.25, 1.3, 0.35);
+    add(tube([sh, el], () => 0.2, { radial: 8, capEnd: true }), null);
+    add(tube([el, shieldC.clone().add(v3(-0.25, 0, -0.1))], () => 0.17, { radial: 8, capEnd: true }), null);
+    const sn = v3(0.55, 0.05, 0.84).normalize();
+    const sm = basisZ(sn, v3(0, 1, 0), shieldC);
+    const disc = new THREE.CylinderGeometry(1.0, 1.0, 0.1, 36);
+    disc.rotateX(Math.PI / 2);
+    paint(disc, sm, '#9e1c16');
+    // printed sun: orange rays + a gold boss
+    const rays: THREE.Vector2[] = [];
+    for (let i = 0; i < 32; i++) {
+      const a = (i / 32) * Math.PI * 2;
+      const r = i % 2 ? 0.34 : 0.86;
+      rays.push(v2(Math.cos(a) * r, Math.sin(a) * r));
+    }
+    const rg = new THREE.ShapeGeometry(new THREE.Shape(rays));
+    paint(rg, sm.clone().multiply(T(0, 0, 0.06)), '#e0561e');
+    const boss = new THREE.SphereGeometry(0.26, 12, 8);
+    boss.scale(1, 1, 0.5);
+    add(boss, sm.clone().multiply(T(0, 0, 0.07)), 0xc8962e);
+    add(ring(1.0, 0.06, 4, 36), sm, 0xd0d2d6);
+    // white spiky rim
+    const sp = plate([v2(-0.06, 0), v2(0.06, 0), v2(0, 0.24)], 0.05, 0);
+    for (let i = 0; i < 20; i++) {
+      const g = sp.clone();
+      g.translate(0, 1.02, 0);
+      g.rotateZ((i / 20) * Math.PI * 2);
+      add(g, sm, 0xe8eaee);
+    }
+    sp.dispose();
+  }
+  // head: dark skin, red face wrap, long black dreadlocks
   const headC = v3(0, 2.72, 0.12);
-  const skull = new THREE.SphereGeometry(0.37, 14, 10);
-  skull.scale(0.85, 1.0, 0.95);
-  add(skull, T(headC.x, headC.y, headC.z), PAL.bone);
-  const jaw = new THREE.BoxGeometry(0.4, 0.22, 0.3);
-  add(jaw, T(0, 2.42, 0.18), PAL.bone);
-  // hood: rotated half cone with a peak
-  const hood = surface(18, 8, (u, v, o) => {
-    const a = -Math.PI * 0.82 + u * Math.PI * 1.64; // open at the front
-    const h = v;
-    const r = 0.62 * (1 - Math.pow(h, 1.4)) + 0.03;
-    o.set(Math.sin(a) * r, 2.3 + h * 1.25, -Math.cos(a) * r * 0.95 + 0.05 - h * 0.25);
-  });
-  add(hood, null, PAL.riderDark);
-  // cape draping down the back
-  const cape = surface(10, 10, (u, v, o) => {
-    const x = (u - 0.5) * (1.9 + v * 1.6);
-    o.set(x, 2.25 - v * 3.3, -0.35 - v * 1.5 + Math.sin(u * Math.PI * 5) * 0.12 * v);
-  });
-  add(cape, null, 0x2a2224);
-  const eyes = [v3(-0.13, 2.76, 0.43).applyMatrix4(RM), v3(0.13, 2.76, 0.43).applyMatrix4(RM)];
+  const head = new THREE.SphereGeometry(0.36, 14, 10);
+  head.scale(0.85, 1.0, 0.95);
+  paint(head, T(headC.x, headC.y, headC.z), '#3a2519');
+  paint(new THREE.TorusGeometry(0.3, 0.07, 5, 16, Math.PI * 1.1).rotateX(Math.PI / 2).rotateY(Math.PI * 0.95), T(headC.x, headC.y - 0.08, headC.z + 0.02), '#a3161a');
+  add(new THREE.BoxGeometry(0.5, 0.2, 0.34), T(0, 2.3, 0.1), 0x2a2420);
+  const nLocks = Math.max(10, Math.round(26 * (0.5 + 0.5 * k.detail)));
+  for (let i = 0; i < nLocks; i++) {
+    const a = -Math.PI * 0.85 + (i / (nLocks - 1)) * Math.PI * 1.7; // around the back of the head
+    const start = headC.clone().add(v3(Math.sin(a) * 0.3, 0.22 - Math.abs(Math.cos(a)) * 0.05, -Math.cos(a) * 0.3));
+    const out = v3(Math.sin(a), 0, -Math.cos(a));
+    const len = 1.3 + rnd() * 0.8;
+    const pts = [
+      start,
+      start.clone().addScaledVector(out, 0.22).add(v3(0, -0.15, 0)),
+      start.clone().addScaledVector(out, 0.32).add(v3(0, -len * 0.5, 0)),
+      start.clone().addScaledVector(out, 0.36 + rnd() * 0.12).add(v3((rnd() - 0.5) * 0.12, -len, 0.05)),
+    ];
+    add(tube(spline(pts, 6), (t) => 0.055 - t * 0.02, { radial: 4, capEnd: true }), null, 0x121012);
+  }
+  const eyes = [v3(-0.12, 2.76, 0.42).applyMatrix4(RM), v3(0.12, 2.76, 0.42).applyMatrix4(RM)];
   for (const e of eyes) W.bulbs.add(e, BULB.rider, 0, 0.07, 0.5);
-  const top = v3(0, 3.55, -0.2).applyMatrix4(RM);
+  const top = v3(0, 3.1, 0.1).applyMatrix4(RM);
   return { riderEyes: eyes, riderTop: top };
+}
+
+/**
+ * Dorsal leaf plate (local XY, base at the origin, tip at +Y 3.3): a serrated, pointed leaf with a
+ * vertex-colour print - brown root, orange body, cream tip and a dark green-brown midrib + veins.
+ */
+function leafPlate(): THREE.BufferGeometry {
+  const pts: THREE.Vector2[] = [];
+  const n = 9;
+  const hw = (t: number) => 1.05 * Math.sin(Math.PI * Math.min(1, 0.18 + t * 0.95)) * (1 - 0.35 * t);
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const w = hw(t) * (i % 2 ? 0.86 : 1);
+    pts.push(v2(w, t * 3.3));
+  }
+  for (let i = n - 1; i >= 0; i--) {
+    const t = i / n;
+    const w = hw(t) * (i % 2 ? 0.86 : 1);
+    pts.push(v2(-w, t * 3.3));
+  }
+  const g = plate(pts, 0.1, 0.02);
+  const p = g.getAttribute('position');
+  const col = new Float32Array(p.count * 3);
+  const root = new THREE.Color('#6e3a16');
+  const body = new THREE.Color('#d98c3c');
+  const tip = new THREE.Color('#f1d6a0');
+  const vein = new THREE.Color('#4a4a22');
+  const c = new THREE.Color();
+  for (let i = 0; i < p.count; i++) {
+    const t = THREE.MathUtils.clamp(p.getY(i) / 3.3, 0, 1);
+    const e = Math.min(1, Math.abs(p.getX(i)) / Math.max(0.15, hw(t)));
+    c.copy(root).lerp(body, Math.min(1, t * 2.2)).lerp(tip, Math.max(0, t - 0.45) * 1.6);
+    // dark midrib and a hint of the vein fan near the centre line
+    c.lerp(vein, Math.pow(1 - e, 6) * 0.75 + (1 - e) * 0.12);
+    col[i * 3] = c.r;
+    col[i * 3 + 1] = c.g;
+    col[i * 3 + 2] = c.b;
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  return g;
 }

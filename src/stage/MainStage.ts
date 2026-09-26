@@ -4,10 +4,11 @@ import type { AnchorName } from '../core/Anchors';
 import type { FrameContext, QualitySettings, System } from '../core/types';
 import type { Platform, PlayerController } from '../player/PlayerController';
 import { yawTowards } from '../player/spots';
-import { addCastleGarlands, CastleBuilder } from './castle/Castle';
+import { addCastleGarlands, CastleBuilder, SKULL_CUBE } from './castle/Castle';
 import { addSideGarlands, SidesBuilder } from './castle/Sides';
 import { barrierLayout, barrierRuns, barrierSegmentGeometry, DeckBuilder } from './deck/Deck';
 import { SpeakerBuilder } from './deck/Speakers';
+import { DevDaylight } from './DevDaylight';
 import { DragonCrown } from './DragonCrown';
 import { createKit, type StageKit } from './kit';
 import { armX, L } from './layout';
@@ -20,6 +21,8 @@ import { createStageLookEx, type StageLookEx } from './StageLook';
 const RANK: Record<QualitySettings['level'], number> = { mobile: 0, medium: 1, high: 2, ultra: 3 };
 
 const CANDLE = new THREE.Color('#ffb45a');
+/** LED colour uniforms switched off by the dev `?daylight` view */
+const LED_COLOURS = ['uLed', 'uLed2', 'uAccent', 'uLedS', 'uLed2S', 'uAccentS', 'uWin', 'uArcade', 'uLamp', 'uLantern', 'uCandle', 'uPortal', 'uContentCol'] as const;
 
 /**
  * Castle emitter calibration against the official Endshow footage: the castle is a dark printed set
@@ -85,6 +88,8 @@ export class MainStageSystem implements System {
   private timing = { materials: 0, geometry: 0, crown: 0 };
   private lastFrame = -1;
   private hooked = false;
+  /** DEV `?daylight`: flat afternoon view for art review against the daytime photos (off by default) */
+  private daylight: DevDaylight | null = null;
 
   async init(app: App): Promise<void> {
     const t0 = performance.now();
@@ -136,6 +141,10 @@ export class MainStageSystem implements System {
 
     this.registerAnchors(kit);
     this.registerWorld(app);
+    if (app.params.has('daylight')) {
+      this.daylight = new DevDaylight(app.scene);
+      this.lights.group.visible = false;
+    }
     app.onFrame((ctx) => this.frame(ctx));
     this.hooked = true;
     this.buildMs = performance.now() - t0;
@@ -238,20 +247,21 @@ export class MainStageSystem implements System {
     }
     set('laser_stage', byX(lasers));
     // blue cold-fire plume heads on the castle-terrace roofline (two groups per side): the inner group
-    // on the wall walk + inner tower roof, the outer group on the outer tower roof + wall walk.
+    // on the wall walk + inner tower roof, the outer group on the wall walk of the outer bays (the
+    // round-2 outer towers gave way to the lower wing in round 3).
     // Not (yet) a core AnchorName: registered by name so pyro targets can resolve it.
     {
       const zw = L.facadeZ - 0.9;
       const plumes: THREE.Vector3[] = [];
       for (const s of [-1, 1])
         for (const [x, y, z] of [
-          [13.0, L.wallTop + 0.3, zw],
-          [14.4, L.wallTop + 0.3, zw],
-          [16.1, 13.95, -12.9],
-          [24.0, 12.85, -11.6],
-          [27.0, 12.85, -11.6],
-          [29.9, L.wallTop + 0.3, zw],
-          [31.2, L.wallTop + 0.3, zw],
+          [13.0, L.coreTop + 0.3, zw],
+          [14.4, L.coreTop + 0.3, zw],
+          [16.1, L.coreTop + 0.3, zw],
+          [24.0, L.coreTop + 0.3, zw],
+          [27.0, L.coreTop + 0.3, zw],
+          [29.9, L.coreTop + 0.3, zw],
+          [31.2, L.coreTop + 0.3, zw],
         ])
           plumes.push(new THREE.Vector3(s * x, y, z));
       a.set('roof_plumes' as AnchorName, byX(plumes));
@@ -275,8 +285,10 @@ export class MainStageSystem implements System {
     box(-L.portalW / 2 - 0.3, L.portalW / 2 + 0.3, L.facadeZ, L.porchFrontZ - L.portalDepth, 'deck-portal');
     box(-2.1, 2.1, L.boothZ - 0.6, L.boothZ + 0.6, 'deck-booth');
     for (const s of [-1, 1]) {
-      const ox = 25.5;
-      box(s > 0 ? ox - 2.5 : -ox - 2.5, s > 0 ? ox + 2.5 : -ox + 2.5, -15.2, -10.2, 'deck-tower');
+      // skull cubes either side of the portal + the wing's hooked tusks hanging to the deck
+      const C = SKULL_CUBE;
+      box(s * C.x - C.w / 2 - 0.2, s * C.x + C.w / 2 + 0.2, C.z - C.d / 2 - 0.2, C.z + C.d / 2 + 0.2, 'deck-skullcube');
+      box(s > 0 ? 25.3 : -29.2, s > 0 ? 29.2 : -25.3, -10.2, -7.4, 'deck-wingtusk');
       for (const [hx, hz] of [
         [L.innerHangX + 2.85, L.innerHangZ],
         [L.outerHangX + 2.85, L.outerHangZ],
@@ -364,6 +376,28 @@ export class MainStageSystem implements System {
     } catch (e) {
       if (app.frame % 300 === 1) console.error('[stage] crown update failed', e);
     }
+    if (this.daylight) this.applyDaylight(ctx);
+  }
+
+  /** DEV `?daylight`: every stage emitter off, no virtual floods, bright sky reflections */
+  private applyDaylight(ctx: FrameContext): void {
+    const u = this.mats.u;
+    u.uFloodA.value.setRGB(0, 0, 0);
+    u.uFloodB.value.setRGB(0, 0, 0);
+    u.uFront.value.setRGB(0, 0, 0);
+    u.uBack.value.setRGB(0, 0, 0);
+    u.uFlash.value.setRGB(0, 0, 0);
+    u.uEnvTint.value.setRGB(2.6, 2.7, 2.9);
+    u.uGlow.value.set(0, 0, 0, 0);
+    u.uRegionF.value.set(1, 1, 0, 0);
+    u.uDay.value = 1;
+    const l = this.mats.led.uniforms;
+    for (let i = 0; i < LED_COLOURS.length; i++) (l[LED_COLOURS[i]].value as THREE.Color).setRGB(0, 0, 0);
+    l.uContentGain.value = 0;
+    l.uPulse.value = 0;
+    l.uStrobe.value = 0;
+    this.crown.daylight();
+    this.daylight!.apply(ctx.camera);
   }
 
   /** metres per screen pixel at 1 m for the minimum-width lines of the overlay pass */

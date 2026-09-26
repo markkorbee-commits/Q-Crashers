@@ -57,24 +57,27 @@ type Slot =
   | 'cream'
   | 'bannerGlow';
 
+// round 3 (daytime photos): the reliefs sit on the off-white castle print (light stone, carved
+// skull / face in pale bone and grey), the banners are orange-red; the decor material scales its
+// albedo back by nightK in the show so the night looks keep their level
 const ALBEDO: Record<Slot, string> = {
   void: '#0b0708',
-  stone: '#8e8a84',
-  stoneDark: '#4c4a4a',
+  stone: '#d2cdc2',
+  stoneDark: '#a39d91',
   gold: '#c9a45c',
   goldDark: '#7a5a2a',
   bone: '#ddd6c4',
   boneShade: '#8f8676',
   socket: '#120b0b',
   socketGlow: '#1a0a08',
-  red: '#7c0f18',
-  redDark: '#3e060c',
-  flame: '#f07a22',
-  flameCore: '#ffd27a',
+  red: '#b8281c',
+  redDark: '#6a1010',
+  flame: '#ff8a26',
+  flameCore: '#ffd66e',
   eyeWhite: '#f2e6c8',
   pupil: '#1a0a06',
   bronze: '#8a6a3a',
-  blueStone: '#6e7a8a',
+  blueStone: '#8a8e94',
   cream: '#e8e0cc',
   bannerGlow: '#7c0f18',
 };
