@@ -261,6 +261,9 @@ function parse(c: Cue, show: ShowEngine): LightCue {
   return lc;
 }
 
+/** a cue starting within this of the previous cue's end (s, the show file's ms rounding) touches it */
+const TOUCH_EPS = 0.002;
+
 /**
  * A sorted list of "state" cues (looks, washes, pillar states) where the latest-started alive
  * cue wins and changes are cross-faded over the winner's `fade`.
@@ -268,6 +271,13 @@ function parse(c: Cue, show: ShowEngine): LightCue {
 export class StateTrack {
   items: LightCue[] = [];
   private maxDur = 0;
+  /**
+   * `touch` (round 7, every track): a cue that starts where the previous one ends (within TOUCH_EPS)
+   * cross-fades FROM that previous cue, not from "nothing". Without it a back-to-back change of state
+   * dipped through the null state (looks through dark, pillar lamps through the default blue, the wash
+   * through the palette primary: the gold flood over the isolated wings at 1322.3 after a pink wash).
+   */
+  constructor(private readonly touch = false) {}
 
   push(c: LightCue): void {
     this.items.push(c);
@@ -321,7 +331,8 @@ export class StateTrack {
     if (cur) {
       transT = cur.t0;
       fade = cur.fade;
-      const pw = this.winnerAt(cur.t0, w);
+      let pw = this.winnerAt(cur.t0, w);
+      if (pw < 0 && this.touch) pw = this.winnerAt(cur.t0 - TOUCH_EPS, w);
       from = pw >= 0 ? a[pw] : null;
     }
     // a later-started cue that ended recently (we fell back to an older one or to nothing)
@@ -412,13 +423,13 @@ export class LightCueIndex {
   /** one look track per fixture class (group x position tag x side band) */
   looks: StateTrack[] = [];
   /** the set wash (untargeted / non-zone washes) */
-  readonly wash = new StateTrack();
+  readonly wash = new StateTrack(true);
   /** zone washes on the left / right side sections (target sides / side_front …) */
-  readonly washSides = [new StateTrack(), new StateTrack()];
+  readonly washSides = [new StateTrack(true), new StateTrack(true)];
   /** one lamp state track per lantern pillar (a pillars cue may target a subset) */
   pillars: StateTrack[] = [];
   /** festoon strings: kind * 2 + side */
-  readonly festoon: StateTrack[] = Array.from({ length: FS_KINDS * 2 }, () => new StateTrack());
+  readonly festoon: StateTrack[] = Array.from({ length: FS_KINDS * 2 }, () => new StateTrack(true));
   readonly floods = new EventTrack(0, true);
   readonly hits = new EventTrack(0);
   readonly chases = new EventTrack(0);
@@ -445,10 +456,10 @@ export class LightCueIndex {
 
   rebuild(show: ShowEngine, rig: Rig): void {
     const classes = rig.classes;
-    this.looks = classes.map(() => new StateTrack());
+    this.looks = classes.map(() => new StateTrack(true));
     this.wash.items.length = 0;
     for (const w of this.washSides) w.items.length = 0;
-    this.pillars = rig.pillars.map(() => new StateTrack());
+    this.pillars = rig.pillars.map(() => new StateTrack(true));
     for (const f of this.festoon) f.items.length = 0;
     this.floods.items.length = 0;
     this.hits.items.length = 0;
