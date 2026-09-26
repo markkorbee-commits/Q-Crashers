@@ -114,15 +114,16 @@ smoke, the beams and on the set. What changed:
   `app.env`): the stage's light on up-facing surfaces is a pool at the deck lip (about 0.45 at 25 m,
   0.05 at 100 m on top of 1/d²); a flash bucket whose sources are spread wide (the two arm ends, a gerb
   row) lights a floor at the grazing angle of its sources, not from a lamp over the middle of the field;
-  flash bounce off the smoke reaches the world materials at 20 % over a 70 m radius (the sky dome, the
-  fog colour and the haze keep all of it); `atmos.glow` colours the smoke and the air, the grounds get a
-  trace (gain 6 → 0.8). Gains: stage 5200 → 2800, flash 3000 → 1100, lanterns 70 → 55, plinth spill 90 → 65
-  (the paving is pale now, albedo about 0.4).
+  the flash bounce off the smoke reaches the world materials only for the big walls (× F / (F + 6):
+  the gold gerb wall at v600 and the flame wall at v1509 still light the bowl, single bursts do not),
+  over a 70 m radius; `atmos.glow` colours the smoke and the air, the grounds get a trace (gain 6 → 0.8);
+  the lanterns light their plinths and shafts fully, the floor pools at 60 %. Gains: stage 5200 → 2200,
+  flash 3000 → 1400, lanterns 70 → 55, plinth spill 90 → 65 (the paving is pale now, albedo about 0.4).
 * **Sky fill**: the hemisphere light fades with the sky to a moonlit minimum (intensity 0.34 → 0.26), and
   the site glow tints it at 0.12 instead of 0.3.
-* **Close-ups at the deck**: with the camera within about 6–28 m of the lit deck, the stage haze no longer
-  clears in front of the lens: it hangs around it as a milky veil (brighter knee) — the performer
-  close-ups at v362 / v411.
+* **Close-ups at the deck** (`src/fx/haze.ts`): with the camera within about 6–28 m of the lit deck volume,
+  part of the stage haze stays in front of the lens (a light milky veil, slightly brighter knee) instead of
+  clearing completely — the performer close-ups at v362 / v411. A camera further out is unchanged.
 
 ## Validator (scripts/validate-show.mjs vocabulary, owned by the show and validator side)
 * lights fx: `flood` (`area`: `stage` \| `field` \| `sides` \| `all`; `color`, `intensity`,
