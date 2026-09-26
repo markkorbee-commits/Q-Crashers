@@ -4,7 +4,7 @@ import { boxMinMax, cyl, decorPanel, GLOW, METAL, PAINT, railing, rod, type Stag
 import { type ArchKind, extrude, frameShape, type Opening, paneShape, wallShape } from '../lib/gothic';
 import { L } from '../layout';
 import { LED_KIND } from '../materials/LedMaterial';
-import { GARLAND, type Garlands } from '../dragon/shading';
+import { GARLAND, GARLAND_BULB, type Garlands } from '../dragon/shading';
 import { CASTLE_STAIRS, PODIUM, VAULT } from '../booth/layout';
 
 /**
@@ -73,7 +73,7 @@ export function addCastleGarlands(g: Garlands): void {
   for (const s of [-1, 1]) {
     let u = 0;
     for (const xs of runs)
-      for (let i = 0; i + 1 < xs.length; i++) u = g.swag(new THREE.Vector3(s * xs[i], y, z), new THREE.Vector3(s * xs[i + 1], y, z), 0.45, GARLAND.castle, 0.8, 0.14, u);
+      for (let i = 0; i + 1 < xs.length; i++) u = g.swag(new THREE.Vector3(s * xs[i], y, z), new THREE.Vector3(s * xs[i + 1], y, z), 0.45, GARLAND.castle, 0.8, GARLAND_BULB.set, u);
     // porch screen, between the portal crown and the porch corners
     const zp = L.porchFrontZ + 0.45;
     const yp = L.porchTop - 0.35;
@@ -82,7 +82,7 @@ export function addCastleGarlands(g: Garlands): void {
       [6.6, 9.4],
       [9.4, 12.2],
     ])
-      u = g.swag(new THREE.Vector3(s * a, yp, zp), new THREE.Vector3(s * b, yp, zp), 0.35, GARLAND.castle, 0.8, 0.14, u);
+      u = g.swag(new THREE.Vector3(s * a, yp, zp), new THREE.Vector3(s * b, yp, zp), 0.35, GARLAND.castle, 0.8, GARLAND_BULB.set, u);
   }
 }
 

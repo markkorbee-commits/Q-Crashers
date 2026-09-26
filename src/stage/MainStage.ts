@@ -485,9 +485,12 @@ export class MainStageSystem implements System {
     u.uSkyK.value = CALIB.sky;
     u.uSide.value.set(look.sideL, look.sideR);
     addScaled(u.uFront.value.copy(look.wash).multiplyScalar(wi * CALIB.front), look.pulseColor, 1.2);
-    u.uFront.value.r += look.strobe * 2.5;
-    u.uFront.value.g += look.strobe * 2.5;
-    u.uFront.value.b += look.strobe * 2.5;
+    // strobes light the print white, but a dimmed set (state master < 1: 'the set is a dark silhouette,
+    // only the lamp strings strobe', video 1267.9) keeps its stone dark behind the flashes
+    const strobeSet = look.strobe * 2.5 * look.master;
+    u.uFront.value.r += strobeSet;
+    u.uFront.value.g += strobeSet;
+    u.uFront.value.b += strobeSet;
     addScaled(u.uBack.value.setRGB(0.012, 0.02, 0.045), look.castleLed, 0.06 * look.ledIntensity * Math.min(1, look.castleGain));
     // pyro / firework flash on the print: a soft top light from well above the set (see StageLights)
     u.uFlash.value.copy(look.flash).multiplyScalar(CALIB.flash);
@@ -534,7 +537,7 @@ export class MainStageSystem implements System {
     (l.uCandle.value as THREE.Color).copy(CANDLE).multiplyScalar(1.4 * castle);
     (l.uPortal.value as THREE.Color).copy(look.portal).multiplyScalar((0.5 + 0.8 * look.mouth) * castle);
     l.uPulse.value = look.pulse;
-    l.uStrobe.value = look.strobe;
+    l.uStrobe.value = look.strobe * M;
     l.uContent.value = look.content;
     l.uContentMix.value = look.contentMix;
     (l.uContentCol.value as THREE.Color).copy(look.contentColor).multiplyScalar(2.2);

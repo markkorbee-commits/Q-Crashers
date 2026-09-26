@@ -275,6 +275,12 @@ const WASH_APPLY = /* glsl */ `
 }
 `;
 
+/**
+ * level of the wing print's own uplights at `wings` 1 (round 6: 0.42 -> 0.28, metric-neutral; video 338 /
+ * 1322.5: the membranes read darker than the LED spars and strokes)
+ */
+export const PRINT_UPLIGHT = 0.28;
+
 export interface PatchOpts {
   /** cache key suffix */
   key: string;
@@ -339,6 +345,7 @@ diffuseColor.rgb *= mix(${nk}, 1.0, uDay);`,
       `#include <lights_physical_pars_fragment>
 ${WASH_PARS}
 ${o.membrane ? LED_GLSL + 'uniform float uWings;\nuniform vec3 uPrintTint;' : ''}
+${o.lava && !o.membrane ? 'uniform float uDragonG;\nuniform float uWingG;' : ''}
 ${o.membrane ? 'varying vec3 vMemb;' : ''}`,
     );
     fs = fs.replace('#include <lights_fragment_begin>', `#include <lights_fragment_begin>\n${WASH_APPLY}`);
@@ -352,11 +359,15 @@ iblIrradiance *= uEnvTint * max(crownWashReg(), 0.03);`,
     );
     let emissive = '';
     if (o.lava) {
+      // the cracks glow with the dragon's inner fire: a dragon emitter, so a mask that darkens the
+      // dragon's LEDs darkens them too (mask 'wings': dragon 0; the wing arms' hide also goes out
+      // under 'dragon', where the wings are off). Video 1322.5 / 1392.5: no glowing arms or neck.
       emissive += `
 {
   #ifdef USE_EMISSIVEMAP
   float crack = texture2D(emissiveMap, vEmissiveMapUv).r;
-  totalEmissiveRadiance += uLava * crack * crack * 4.3 * step(0.5, vCrownFx);
+  float crackG = min(1.0, vCrownFx > 1.5 ? min(uDragonG, uWingG) : uDragonG);
+  totalEmissiveRadiance += uLava * crack * crack * 4.3 * step(0.5, vCrownFx) * crackG;
   #endif
 }`;
     }
@@ -392,7 +403,7 @@ iblIrradiance *= uEnvTint * max(crownWashReg(), 0.03);`,
   // the blades / spars (video 1047.25, 1389.5: the skin reads as a dim red-orange ground under the
   // lit blades and the printed suns, never as a glowing orange sheet)
   vec3 print = crownAlb * crownAlb * uPrintTint * ${(o.printGain ?? 1.9).toFixed(3)};
-  totalEmissiveRadiance += print * (0.03 * uEmit + 0.42 * uWings) * em * mix(1.15, 0.4, smoothstep(3.0, 18.0, vMemb.y)) * (1.0 - uDay);
+  totalEmissiveRadiance += print * (0.03 * uEmit + ${PRINT_UPLIGHT.toFixed(3)} * uWings) * em * mix(1.15, 0.4, smoothstep(3.0, 18.0, vMemb.y)) * (1.0 - uDay);
   // printed fabric lets some of the back light (sky, fireworks behind the stage) shine through
   totalEmissiveRadiance += crownAlb * uRim * ${(0.35 * (o.printGain ?? 1.9) / 1.9).toFixed(3)};
 }`;
@@ -721,6 +732,10 @@ export class Bulbs {
 
 /** garland groups (uGarl.x / .y / .z) */
 export const GARLAND = { wings: 0, castle: 1, sides: 2 } as const;
+/** HDR gain of a festoon bulb at level 1 (round 6: 3.2 -> 4.5, the wing strings read as bright white points) */
+const GARLAND_GAIN = 7;
+/** bulb diameter (m) of the wing strings / the castle and side-section strings (round 6: 0.15 -> 0.24 / 0.2) */
+export const GARLAND_BULB = { wings: 0.24, set: 0.2 } as const;
 
 export function createGarlandMaterial(U: CrownUniforms): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
@@ -751,6 +766,7 @@ void main() {
   vInfo = iInfo;
 }`,
     fragmentShader: /* glsl */ `
+#define GARLAND_GAIN ${GARLAND_GAIN.toFixed(3)}
 uniform vec3 uGarl;
 uniform vec3 uGarlCol;
 uniform float uGarlPat;
@@ -767,7 +783,9 @@ void main() {
   if (lvl < 1e-3) discard;
   float r2 = dot(vC, vC) * 2.56;
   float core = exp(-r2 * 8.0);
-  float halo = exp(-r2 * 1.8) * 0.1;
+  // frosted globes bloom in the haze: a soft glare round every bulb (video 582.75 / 1268: bright white
+  // points with halos, not pin-pricks)
+  float halo = exp(-r2 * 1.5) * 0.26;
   float m = core + halo;
   if (m < 0.004) discard;
   // tungsten filaments: slight per-bulb spread
@@ -785,8 +803,8 @@ void main() {
     k *= step(fract(uBeat * uGarlRate), 0.4);
   }
   // hot white filament in a warm glass
-  vec3 c = mix(uGarlCol, vec3(1.0, 0.93, 0.82) * max(uGarlCol.r, max(uGarlCol.g, uGarlCol.b)), core * 0.55);
-  gl_FragColor = vec4(c * m * lvl * k * vFade * 3.2, 1.0);
+  vec3 c = mix(uGarlCol, vec3(1.0, 0.96, 0.9) * max(uGarlCol.r, max(uGarlCol.g, uGarlCol.b)), min(1.0, core * 1.1));
+  gl_FragColor = vec4(c * m * lvl * k * vFade * GARLAND_GAIN, 1.0);
 }`,
   });
 }

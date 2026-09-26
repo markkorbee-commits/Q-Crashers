@@ -36,6 +36,8 @@ interface StateVals {
   /** wash rig share on the wings / the dragon (mask isolations) */
   wingWash: number;
   dragonWash: number;
+  /** 0..1 the state's mask isolates the crown ('crown' / 'wings'): its LEDs stay lit without screen content */
+  crownIso: number;
   /** region colour overrides (w = 0..1 weight of the override over the content / section colour) */
   castleCol: THREE.Color;
   castleColW: number;
@@ -74,6 +76,7 @@ const newVals = (): StateVals => ({
   wingLed: 1,
   wingWash: 1,
   dragonWash: 1,
+  crownIso: 0,
   castleCol: new THREE.Color(),
   castleColW: 0,
   sidesCol: new THREE.Color(),
@@ -359,6 +362,7 @@ export class LookResolver {
     base.wingLed = 1;
     base.wingWash = 1;
     base.dragonWash = 1;
+    base.crownIso = 0;
     base.castleColW = 0;
     base.sidesColW = 0;
     base.crownColW = 0;
@@ -516,6 +520,10 @@ export class LookResolver {
     }
     // ember: the dragon + inner wings glow on their own even when the pixel content is off
     if (cur.ember > 0) ledI += (Math.max(ledI, 0.35 + 0.65 * cur.wings) - ledI) * cur.ember;
+    // a mask that isolates the crown ('crown' / 'wings') makes the crown the look: its LED outlines stay
+    // lit at the wing glow level even when the panel content is off (video 1320.75-1323.5: only the wing
+    // outlines + the pink throat; the castle stays dark through its own region level)
+    out.crownLedFloor = cur.crownIso > 0 ? cur.crownIso * (0.35 + 0.65 * cur.wings) : 0;
     // fire looks: the backlit banners flicker (deterministic in t)
     if (out.mode === 'rage' || pat === 5) out.bannerGlow *= 0.8 + 0.25 * Math.sin(t * 7.3) * Math.sin(t * 3.1 + 1) + 0.1 * Math.sin(t * 17.9);
     out.ledPatternX = pat;
@@ -642,6 +650,9 @@ export class LookResolver {
       default:
         out.arcade.copy(pal.secondary).lerp(COLD_BLUE, 0.35).lerp(out.castleLed2, 0.3);
     }
+    // a castle colour override also takes the glowing arcade in the ground-floor recesses (video 338:
+    // castleColor blue -> a blue castle with blue bars in the openings, not magenta arches)
+    if (cw > 0) out.arcade.lerp(cur.castleCol, ZONE_PANEL * cw);
     out.portal.copy(pal.primary).lerp(out.eyes, 0.35);
     // front-line fixture lenses: coloured dots in the side-section colour (the "row of small blue /
     // cyan lamp dots along the stage front" of the footage), a little white in the core
@@ -662,6 +673,16 @@ export class LookResolver {
     out.sidesAccent.copy(out.accent);
     if (sw > 0) out.sidesAccent.lerp(_c.copy(cur.sidesCol).lerp(WHITE, 0.2), sw);
 
+    // an isolated crown without screen content (mask 'crown' / 'wings', content off) takes the look's own
+    // crown accent, the rosette colour, instead of the section palette (video 1320.75-1323.5: pink / red
+    // wing outlines under the gold 'cold_gold' palette); a crownColor still wins
+    if (cur.crownIso > 0) {
+      const noContent = cur.crownIso * (1 - out.contentMix);
+      if (noContent > 0) {
+        out.led.lerp(cur.rosettes, noContent);
+        out.led2.lerp(_c.copy(cur.rosettes).multiplyScalar(0.55), noContent);
+      }
+    }
     // crown: crownColor tints the dragon + wings, wingColor the wings only
     if (cur.crownColW > 0) {
       out.led.lerp(cur.crownCol, cur.crownColW);
@@ -686,6 +707,7 @@ export class LookResolver {
       out.windows *= M;
     }
     out.ledIntensity *= out.emit;
+    out.crownLedFloor *= out.emit;
     return out;
   }
 
@@ -749,6 +771,7 @@ export class LookResolver {
     v.wingLed = clamp2(p.wingLed, 1);
     v.wingWash = 1;
     v.dragonWash = 1;
+    v.crownIso = 0;
     v.castleColW = colorOverride(p.castleColor, pal, v.castleCol);
     v.sidesColW = colorOverride(p.sidesColor, pal, v.sidesCol);
     v.crownColW = colorOverride(p.crownColor, pal, v.crownCol);
@@ -762,12 +785,14 @@ export class LookResolver {
       case 'crown':
         v.castle = 0;
         v.sides = 0;
+        v.crownIso = 1;
         break;
       case 'wings':
         v.castle = 0;
         v.sides = 0;
         v.dragon = 0;
         v.dragonWash = 0.25;
+        v.crownIso = 1;
         break;
       case 'dragon':
         v.castle = 0;
@@ -863,6 +888,7 @@ function copyVals(dst: StateVals, src: StateVals): void {
   dst.wingLed = src.wingLed;
   dst.wingWash = src.wingWash;
   dst.dragonWash = src.dragonWash;
+  dst.crownIso = src.crownIso;
   dst.castleCol.copy(src.castleCol);
   dst.castleColW = src.castleColW;
   dst.sidesCol.copy(src.sidesCol);
@@ -888,6 +914,7 @@ function copyIsolation(dst: StateVals, src: StateVals): void {
   dst.wingLed = src.wingLed;
   dst.wingWash = src.wingWash;
   dst.dragonWash = src.dragonWash;
+  dst.crownIso = src.crownIso;
   dst.castleCol.copy(src.castleCol);
   dst.castleColW = src.castleColW;
   dst.sidesCol.copy(src.sidesCol);
@@ -937,6 +964,7 @@ function lerpVals(a: StateVals, b: StateVals, k: number, out: StateVals): void {
   out.wingLed = lerpN(a.wingLed, b.wingLed, k);
   out.wingWash = lerpN(a.wingWash, b.wingWash, k);
   out.dragonWash = lerpN(a.dragonWash, b.dragonWash, k);
+  out.crownIso = lerpN(a.crownIso, b.crownIso, k);
   out.castleColW = lerpOverride(a.castleCol, a.castleColW, b.castleCol, b.castleColW, k, out.castleCol);
   out.sidesColW = lerpOverride(a.sidesCol, a.sidesColW, b.sidesCol, b.sidesColW, k, out.sidesCol);
   out.crownColW = lerpOverride(a.crownCol, a.crownColW, b.crownCol, b.crownColW, k, out.crownCol);
