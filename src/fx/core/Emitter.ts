@@ -99,7 +99,8 @@ export const F = {
  * Z0 attack (s), Z1 pearl intensity, Z2 sphere jitter.
  * Puffs: X0 self-light decay, X1 spin (rad/s), X2 noise erosion, X3 ramp time, Y0 soot / albedo,
  * Y1 soot start (life fraction), Y2 fade-in (life fraction), Y3 wind factor, Z0 env-light factor,
- * Z1 flat aspect, Z2 unused, Z3 puff kind (PUFF_*).
+ * Z1 flat aspect / flame body opacity, Z2 velocity stretch, Z3 puff kind (PUFF_*); HZ = end of the
+ * self-light source (absolute show time, see Emitter.litUntil).
  */
 export const PUFF = {
   FLAME: 0,
@@ -273,6 +274,17 @@ export class Emitter {
   }
   hz(v: number): this {
     this.f[R.HZ] = v;
+    return this;
+  }
+  /**
+   * Puffs with F.SELFLIT: absolute show time at which the source that lights the smoke (a flare, a
+   * fountain row, the stars climbing out of a launch cloud) goes out. The self-light fades within
+   * ~0.3 s after it, whatever the puff's own decay (X0) still says: smoke is not lit by a flare that
+   * burnt out (v336.3-338: the red Bengal clouds are dark 1.7 s after the flares). 0 = no cut-off.
+   * (Shares the HZ slot, which the puff shader does not use otherwise.)
+   */
+  litUntil(t: number): this {
+    this.f[R.HZ] = t;
     return this;
   }
   flag(bits: number): this {

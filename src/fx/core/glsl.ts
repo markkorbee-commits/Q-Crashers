@@ -185,7 +185,9 @@ vec3 envLight(vec3 p) {
   // through the pyro light field)
   vec3 df = p - uFlashPos;
   float flashF = 1.0 / (1.0 + (dot(df, df) + uFlashSpread2) * (1.0 / 4900.0));
-  vec3 L = uAmbient + (uStageLight * 0.6 + uStageWash * 0.35) * stageF + uFlashCol * flashF * 0.3;
+  // (the flash share on smoke is small: the smoke right at a burst, a flare or a comet row is lit by
+  // the pyro light field; this term is only the far glow of the site's flashes, v264.75)
+  vec3 L = uAmbient + (uStageLight * 0.6 + uStageWash * 0.35) * stageF + uFlashCol * flashF * 0.2;
   // smoke drifting past a lantern crystal glows in its colour (the puffing crystals of v146 / v206)
   for (int i = 0; i < 8; i++) {
     vec3 d = p - uLampPos[i].xyz;
