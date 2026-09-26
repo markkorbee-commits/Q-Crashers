@@ -866,7 +866,7 @@ ${ALBEDO_HEADER}
 ${LIGHTING}
 ${FOG_F}
 uniform sampler2D tFlags;
-${performer ? 'uniform vec4 uLantern; uniform vec4 uTube; uniform vec4 uKey; varying float vGlow; varying float vKey; varying vec3 vLanL; varying vec3 vLanR; varying vec2 vLanOn;' : ''}
+${performer ? 'uniform vec4 uLantern; uniform vec4 uTube; uniform vec4 uKey; uniform vec3 uPerfKey; uniform vec3 uPerfBack; varying float vGlow; varying float vKey; varying vec3 vLanL; varying vec3 vLanR; varying vec2 vLanOn;' : ''}
 varying vec3 vN; varying vec3 vW; varying vec3 vLocal; flat varying ivec4 vLook; flat varying int vBone; flat varying int vSlot;
 ${lens ? 'varying float vFade;' : ''}
 
@@ -890,7 +890,7 @@ ${lens ? LENS_DITHER : ''}
   alb *= 0.93 + 0.14 * vnoise(vLocal.xy * vec2(46.0, 61.0) + vLocal.z * 37.0);
 ${
   performer
-    ? `  float flick = 0.82 + 0.1 * sin(uClock.y * 23.0 + vW.x * 7.0) + 0.08 * sin(uClock.y * 37.0 + vW.z * 3.0);
+    ? `  float flick = 0.82 + 0.1 * sin(uClock.x * 23.0 + vW.x * 7.0) + 0.08 * sin(uClock.x * 37.0 + vW.z * 3.0); // show time: seek-safe
   if (vSlot == S_LANTERN_L || vSlot == S_LANTERN_R) {
     // small square lantern: blackened frame, warm glass panes around a flickering flame
     float sx = vSlot == S_LANTERN_L ? 1.0 : -1.0;
@@ -900,7 +900,7 @@ ${
     alb = vec3(0.03, 0.026, 0.024);
     if (max(ax, az) > 0.05 && abs(q.y) < 0.053 && u < 0.043) {
       float core = exp(-u * u / 0.0009 - (q.y + 0.012) * (q.y + 0.012) / 0.0014);
-      emit = vec3(1.0, 0.7, 0.34) * (0.8 + 2.2 * core) * flick * vGlow;
+      emit = vec3(1.0, 0.64, 0.28) * (0.6 + 2.0 * core) * flick * vGlow;
     }
   }`
     : ''
@@ -921,7 +921,7 @@ ${
     vec3 d1 = vLanL - vW; float l1 = max(length(d1), 0.05);
     vec3 d2 = vLanR - vW; float l2 = max(length(d2), 0.05);
     float pl = vLanOn.x * max(dot(N, d1 / l1), 0.0) / (0.05 + l1 * l1) + vLanOn.y * max(dot(N, d2 / l2), 0.0) / (0.05 + l2 * l2);
-    light += vec3(1.0, 0.55, 0.22) * flick * pl * 0.085;
+    light += vec3(1.0, 0.55, 0.22) * flick * pl * 0.14;
   }
   vec3 Lt = vec3(0.12, 1.95, 58.75) - vW;
   float dt = length(Lt);
@@ -929,22 +929,39 @@ ${
   // performers on the deck: the set wash spilling onto the deck
   float onDeck = smoothstep(3.0, -0.5, vW.z);
   vec3 Lk = normalize(vec3(0.0, 11.0, 88.0) - vW);
-  light += uKey.rgb * uKey.a * onDeck * (max(dot(N, Lk), 0.0) * 0.9 + 0.12);
-  // follow spot / key light (MC from the FOH tower, pianist from the delay tower on his right)
+  // (the fire troupe, vGlow > 0, stands in the thick red wash of the film: v646–740 red floor, red costumes)
+  // (the MC, vKey > 0 on the deck, is lit by the rig's colour in the film — blue v348–357 in front of the red set —
+  // so the set wash reaches him only a little)
+  light += uKey.rgb * uKey.a * onDeck * (max(dot(N, Lk), 0.0) * 0.9 + 0.12) * (vGlow > 0.0 ? 2.2 : vKey > 0.0 && vW.z < 20.0 ? 0.35 : 1.0);
   if (vKey > 0.0) {
-    vec3 kp = vW.z > 20.0 ? vec3(14.0, 14.0, 42.0) : vec3(0.0, 11.0, 88.0);
-    vec3 Lk2 = normalize(kp - vW);
-    light += vec3(0.93, 0.96, 1.0) * vKey * (max(dot(N, Lk2), 0.0) + 0.06);
-    // separation light from behind (the rig / the laser tube) so the silhouette reads on dark ground
-    col0rim = vKey * 0.35;
-  }`
+    if (vW.z > 20.0) {
+      // pianist: white key from the delay tower on his right + a separation light from behind (the laser tube)
+      vec3 Lk2 = normalize(vec3(14.0, 14.0, 42.0) - vW);
+      light += vec3(0.93, 0.96, 1.0) * vKey * (max(dot(N, Lk2), 0.0) + 0.06);
+      col0rim = vKey * 0.35;
+    } else {
+      // deck (the MC): no white follow spot in the film — the rig's own colour from the front (blue at
+      // v351, red at v403, magenta at v446) plus a faint neutral fill so the face still reads
+      vec3 Lk2 = normalize(vec3(vW.x * 0.3, 7.0, 40.0) - vW);
+      light += (uPerfKey + vec3(0.035, 0.035, 0.04)) * vKey * (max(dot(N, Lk2), 0.0) + 0.08);
+    }
+  }
+  // backlight from the set behind the deck performers (rig, backlight blinders, LED walls): the film's
+  // deck close-ups show coloured edges around a darker front; seen from behind it lights their backs
+  vec3 Lb = normalize(vec3(vW.x * 0.6, vW.y + 5.0, -14.0) - vW);
+  // (the troupe stays in its red wash: the rig behind them only draws their edges)
+  light += uPerfBack * onDeck * max(dot(N, Lb), 0.0) * (vGlow > 0.0 ? 0.15 : 0.45);
+  float nvb = clamp(dot(N, V), 0.0, 1.0);
+  float edge = pow(1.0 - nvb, 2.0) * clamp(dot(N, Lb) * 0.75 + 0.45, 0.0, 1.0) * clamp(dot(Lb, -V) * 0.6 + 0.5, 0.0, 1.0);
+  // the edge glow takes some of the costume's colour (red jumpsuits glow red, the MC's black shirt stays cool)
+  vec3 backRim = uPerfBack * onDeck * edge * 1.8 * mix(vec3(1.0), min(alb * 3.0, vec3(1.5)), 0.5);`
     : ''
 }
   vec3 Hs = normalize(normalize(uStagePos - vW) + V);
   float sheen = pow(max(dot(N, Hs), 0.0), 24.0) * spec * 0.35 + (isHair ? pow(max(dot(N, Hs), 0.0), 10.0) * 0.12 : 0.0);
   vec3 col = alb * light + rimLight(vW, N, V) * (0.4 + 0.6 * smoothstep(0.9, 1.6, vLocal.y)) * (1.0 + spec * 0.5) + (uStageCol + uRimCol * 0.5) * sheen;
   col += vec3(0.85, 0.9, 1.0) * col0rim * pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 2.5);
-  col = crowdTone(col, uLumCap${performer ? ' * 2.6' : ''}) + emit;
+  col = crowdTone(col, uLumCap${performer ? ' * 2.6' : ''}) + emit${performer ? ' + backRim' : ''};
   gl_FragColor = vec4(col, 1.0);
   #include <fog_fragment>
   #include <colorspace_fragment>
