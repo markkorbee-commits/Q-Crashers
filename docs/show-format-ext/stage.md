@@ -131,8 +131,9 @@ Checked side by side with the official video (Show camera, Mac GPU); default 64 
 - **Painted crown shell + content floods.** The dragon's scale hide is a painted surface (metalness 0.5,
   roughness 0.5; was 0.8 / 0.42, which caught coloured light only as a glint). While a `screens.content` cue
   is alive the crown's two low floods also take the look's colours at level 1.5 (flood A the crown LED
-  colour, flood B the content's `color2`): the head reads green / red at 998.25 and violet / blue at
-  1047.25 as in the footage. Stronger floods (2–4) lost points (the show's colour at 167 differs from the
+  colour, flood B the content's `color2`): the head takes a share of the look's colours (998.25 green /
+  red, 1047.25 violet / blue; still darker than the brightly flooded head of the footage). Stronger floods
+  (2–4) lost points (the show's colour at 167 differs from the
   video's; the red portal close-ups want no extra light). Tunable in the page through
   `__app.get('stage').crownTune` (QA tools).
 - **`glowFloor`** (new `stage.state` param, below) keeps the mouth and the portal emblem lit under a dimmed
