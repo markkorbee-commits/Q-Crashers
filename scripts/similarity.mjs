@@ -3,7 +3,7 @@
  * Objective look similarity: our Show camera (which follows the official edit) vs the official video frames.
  *
  *   node scripts/similarity.mjs --frames <dir of video frames NNNNN.jpg at 4 fps> [--port 5173] [--n 64]
- *        [--times 76.3,600.4,...] [--quality medium] [--out .shots/similarity] [--offset 0.036]
+ *        [--times 76.3,600.4,...] [--quality medium] [--out .shots/similarity] [--offset 0.036] [--eval "js"]
  *
  * For each sampled moment it renders our show paused at (video time - offset) through the Show camera, then scores
  * it against the video frame with scripts/similarity-score.py (colour layout ΔE, luminance histogram, structure).
@@ -42,6 +42,8 @@ await page.evaluate(() => {
   document.getElementById('ui')?.style.setProperty('display', 'none');
   window.__app.clock.pause();
 });
+// optional experiment hook, e.g. --eval "__app.postfx.exposure=0.5"
+if (opt('eval', '')) await page.evaluate(opt('eval', ''));
 const pairs = [];
 for (const t of times) {
   await page.evaluate((st) => window.__app.clock.seek(st), t - offset);
