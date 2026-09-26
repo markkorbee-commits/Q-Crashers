@@ -483,7 +483,7 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
       if (k.detail > 0.5) W.armor.add(box(0.3, 0.3, 0.34), new THREE.Matrix4().makeTranslation(0, 0, 0).setPosition(p.clone().addScaledVector(dir, r + 0.1).addScaledVector(nrm, 0.3)), 0x1a1a1e);
       const e0 = v3(0.3, 0, 0.06).applyMatrix4(km);
       const e1 = v3(2.1, 0, 0.06).applyMatrix4(km);
-      W.strips.add([e0, e1], WING_LED, 0.1, t * 20, (fi * 0.3 + i * 0.07) % 1);
+      W.strips.add([e0, e1], WING_FIN, 0.1, t * 20, STEADY_SEED + ((fi * 0.3 + i * 0.07) % 1));
     }
   });
 
@@ -499,6 +499,9 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
   const crescentO = sickleOutline(1.9, 0.5, 0.55, 7);
   const crescent = plate(crescentO, 0.1, 0.02);
   const crescentM = plate(mirrorX(crescentO), 0.1, 0.02);
+  // the convex outer edge of a blade (base -> tip): sickleOutline's first n + 1 points
+  const crescentOuter = crescentO.slice(0, 8);
+  const crescentOuterM = crescentOuter.map((q) => v2(-q.x, q.y));
   const earOutline: THREE.Vector2[] = [];
   for (let i = 0; i <= 10; i++) {
     const a = -0.3 + (i / 10) * 2.0;
@@ -527,11 +530,14 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
       const em = dm.clone().multiply(new THREE.Matrix4().makeRotationZ(e * 2.3)).multiply(new THREE.Matrix4().makeTranslation(0, 1.0, -0.1));
       W.armor.add((e < 0 ? earProtoM : earProto).clone(), em, GOLD);
     }
-    // crescent crown of white blades fanning round the disc
+    // crescent crown of white blades fanning round the disc; each blade carries an LED along its outer
+    // edge in the fin colour (video 582.75 / 509.25: a crown of blue fins round the orange flame)
     for (const a of [-1.35, -0.85, -0.4, 0.4, 0.85, 1.35]) {
       const cm = dm.clone().multiply(new THREE.Matrix4().makeRotationZ(-a)).multiply(new THREE.Matrix4().makeTranslation(0, 0.9, 0.05));
       cm.multiply(new THREE.Matrix4().makeScale(0.9 + 0.25 * (1.35 - Math.abs(a)), 0.9 + 0.25 * (1.35 - Math.abs(a)), 1));
       W.steel.add((a < 0 ? crescentM : crescent).clone(), cm, 0xf2f4f8);
+      const co = a < 0 ? crescentOuterM : crescentOuter;
+      W.strips.add(co.map((q) => v3(q.x, q.y, 0.09).applyMatrix4(cm)), WING_FIN, 0.12, 0, STEADY_SEED + ((0.4 + i * 0.2 + a * 0.1 + 1) % 1));
     }
     // flame blade above the disc (in the wing plane + a smaller cross plate so it reads from the side)
     const fm = basisZ(nrm, d, tip.clone().addScaledVector(d, 1.55));
@@ -540,6 +546,22 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
     const fo = flameOutline.map((p) => v3(p.x, p.y, 0.16).applyMatrix4(fm));
     fo.push(fo[0].clone());
     W.strips.add(fo, WING_LED, 0.1, 0, 0.9);
+    // the glowing flame spire (video 582.75 / 509.25 / 1047.25: every finger ends in a tall flame sheath lit
+    // in the wing colour, ~1.5 m wide and ~4.5 m tall up to the white spear point; round 6 had only the
+    // small dark flame plate above the disc): a bundle of wide, straight LED strips in front of the plates
+    // (straight single segments: a joint of two wide segments would double up into a bright knot)
+    {
+      const lat = v3().crossVectors(nrm, d).normalize();
+      // from the top of the sun disc to the spear point, in front of the disc face and the fin crown
+      const o = tip.clone().addScaledVector(d, 1.1).addScaledVector(nrm, 0.8);
+      const H = 4.5;
+      for (const [x0, t0, x1, t1, w] of SPIRE) {
+        const a = o.clone().addScaledVector(lat, x0).addScaledVector(d, t0 * H);
+        const b = o.clone().addScaledVector(lat, x1).addScaledVector(d, t1 * H);
+        // (seed >= 2: a steady glow in the wing colour, no chase / sparkle pattern)
+        W.strips.add([a, b], WING_SPIRE, w, t0 * H, STEADY_SEED + ((i * 0.13 + x0 * 0.05 + 1) % 1));
+      }
+    }
     // spear point
     const top = L.finialTops[i];
     const sBase = tip.clone().addScaledVector(d, 2.6);
@@ -648,6 +670,30 @@ export const WING_FX = 2;
 /** strip groups of the wing LEDs (crownLed: +2 = wing colours and the wing level) */
 const WING_LED = 2;
 const WING_ACCENT = 3;
+/**
+ * the fins (kunai blades on the spars, the crescent crown round every finial): a steady glow in the look's
+ * second colour at half level (video 582.75: blue fins round orange spires under an orange / blue chase
+ * look; 509.25 blue-white fins that never outshine the spires)
+ */
+const WING_FIN = WING_ACCENT + 0.25;
+/** the finial flame spire: the wing colour, dimmed a little (a large lit area next to thin lines) */
+const WING_SPIRE = WING_LED + 0.12;
+/** strip seeds >= this glow steadily in their colour (crown strip shader: no chase / sparkle pattern) */
+const STEADY_SEED = 2;
+/**
+ * the finial flame spire as straight strips in the wing plane: [lateral x0, height t0, x1, t1 (0..1 of
+ * the spire), width (m)] - soft flame strokes: a tall centre tongue, two tongues leaning in, shorter licks
+ * outside
+ */
+const SPIRE: [number, number, number, number, number][] = [
+  [0, 0, 0, 1, 0.42],
+  [-0.25, 0.02, -0.12, 0.78, 0.36],
+  [0.25, 0.02, 0.14, 0.72, 0.36],
+  [-0.55, 0.05, -0.42, 0.5, 0.3],
+  [0.55, 0.05, 0.45, 0.46, 0.3],
+  [-0.8, 0.08, -0.74, 0.3, 0.24],
+  [0.8, 0.08, 0.72, 0.28, 0.24],
+];
 /**
  * dimmed secondary outlines (crownDim: a fractional group f dims a strip to 1 - 2f): the sagging top
  * edges and the rosette rings. The footage reads the wings by their lit spars and blades; the top

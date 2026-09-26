@@ -120,7 +120,9 @@ export class DragonCrown {
       return m;
     };
     const mats = {
-      shell: std('shell', { metalness: 0.8, roughness: 0.42, envMapIntensity: 1.5, side: THREE.DoubleSide, normalScale: new THREE.Vector2(1.3, 1.3) }, scale),
+      // the scale hide is painted (round 7: 0.8 metal / 0.42 rough caught coloured floods only as a glint;
+      // the footage floods the head in the look's colours, video 998.25 / 1047.25)
+      shell: std('shell', { metalness: SHELL.metal, roughness: SHELL.rough, envMapIntensity: 1.5, side: THREE.DoubleSide, normalScale: new THREE.Vector2(1.3, 1.3) }, scale),
       armor: std('armor', { metalness: 0.82, roughness: 0.55, envMapIntensity: 1.2 }, panel, { key: 'armor' }),
       steel: std('steel', { metalness: 0.95, roughness: 0.7, envMapIntensity: 0.8 }, steel),
       copper: std('copper', { metalness: 0.7, roughness: 0.75, envMapIntensity: 0.9 }, steel),
@@ -178,7 +180,7 @@ export class DragonCrown {
     // albedo of their texture baked into the vertex colour (~9 fewer draw calls; the scale hide and the
     // leopard hide keep their textures). The eyes join the static mix as an emissive part.
     const mixParts: Record<string, LitePart> = {
-      shell: { metal: 0.8, rough: 0.42, env: 1.5, set: scale },
+      shell: { metal: SHELL.metal, rough: SHELL.rough, env: 1.5, set: scale },
       armor: { metal: 0.82, rough: 0.55, env: 1.2, set: panel },
       steel: { metal: 0.95, rough: 0.7, env: 0.8, set: steel },
       copper: { metal: 0.7, rough: 0.75, env: 0.9, set: steel },
@@ -391,9 +393,18 @@ export class DragonCrown {
     // virtual wash rig
     const wi = Math.max(0, look.washIntensity);
     const pulse = U.uPulse.value;
-    const wash = this.tmpC.copy(look.wash).multiplyScalar(wi * 9 * (1 + 0.5 * pulse));
+    const wash = this.tmpC.copy(look.wash).multiplyScalar(wi * 9 * CROWN_TUNE.wash * (1 + 0.5 * pulse));
     U.uWashA.value.copy(wash);
     U.uWashB.value.copy(wash).lerp(this.tmpC2.copy(look.led2).multiplyScalar(wi * 5), 0.18);
+    // content-coloured floods: while a screens content cue is alive the crown's two low floods also
+    // take the look's colours (A: the crown LED colour, B: the content's second colour), as the
+    // official footage floods the sculpture in the content colours (video 998.25: a green / red head
+    // under a dark rig; 1047.25 violet / blue; 167 purple-white)
+    const cf = CROWN_TUNE.contentFlood * look.contentMix * E;
+    if (cf > 0) {
+      addScaled(U.uWashA.value, look.led, cf);
+      addScaled(U.uWashB.value, look.contentColor2, cf);
+    }
     // a faint FOH work light that goes out with the practicals (blackouts: only sky + moon remain)
     addScaled(U.uKey.value.setRGB(0.05, 0.06, 0.1).multiplyScalar(0.35 + 0.65 * E), wash, 0.22);
     // pyro / firework flash: fireworks burst far above the crown and the pyro fires away from it, so
@@ -403,7 +414,7 @@ export class DragonCrown {
     U.uFlash.value.copy(flash).multiplyScalar(0.3);
     addScaled(addScaled(U.uRim.value.setRGB(0.06, 0.08, 0.18), flash, 0.22), look.led, 0.35 * U.uLedI.value);
     // the env map carries the rig's hot fixture spots: dim them with the practicals
-    addScaled(addScaled(U.uEnvTint.value.setRGB(0.3, 0.34, 0.46).multiplyScalar(0.2 + 0.8 * E), look.wash, wi * 0.9), flash, 0.25);
+    addScaled(addScaled(U.uEnvTint.value.setRGB(0.3, 0.34, 0.46).multiplyScalar((0.2 + 0.8 * E) * CROWN_TUNE.envGrey), look.wash, wi * 0.9), flash, 0.25);
     addScaled(U.uAmbient.value.setRGB(0.015, 0.018, 0.03), look.led, 0.05 * U.uLedI.value);
     // inner fire: throat point light + lava cracks
     // throat light: pale pink-red (the mouth interior glows pink / white, not orange), lava stays fiery
@@ -514,6 +525,23 @@ export class DragonCrown {
     for (const t of this.textures) t.dispose();
   }
 }
+
+/** scale-hide shell: metalness / roughness (desktop material and the mobile mix alike; was 0.8 / 0.42) */
+const SHELL = { metal: 0.5, rough: 0.5 };
+
+/** crown calibration (exposed for in-page tuning by the QA tools: `__app.get('stage').crownTune`) */
+export const CROWN_TUNE = {
+  /**
+   * level of the content-coloured floods on the crown (0 = off; round 7: 1.5, metric-neutral on 20 moments,
+   * 2-4 lost ~0.1-0.25 point: the show's colour at 167 differs from the video's, and the red portal
+   * close-ups want no extra flood)
+   */
+  contentFlood: 1.5,
+  /** gain of the lighting wash on the crown */
+  wash: 1,
+  /** level of the neutral (grey-blue) part of the crown's reflections */
+  envGrey: 1,
+};
 
 const FROST = new THREE.Color(0.55, 0.8, 1.0);
 /** warm share of the wing print's uplights (tungsten-ish), mixed into the wing LED hue */

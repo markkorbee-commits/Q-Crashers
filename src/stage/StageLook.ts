@@ -147,6 +147,12 @@ export interface StageLookEx extends StageLook {
    * 1320.75-1323.5: only the wing outlines + the throat); already scaled by the emitter level
    */
   crownLedFloor: number;
+  /**
+   * 0..1 floor of the dragon's mouth / throat and the portal emblem while `master` dims the set (state param
+   * `glowFloor`, already scaled by the dormant presence): video 409-412, both stay pink / red through the
+   * white veil at master 0.1
+   */
+  glowFloor: number;
   /** 0..1 how much the side-section virtual floods take `sidesLed` instead of the lighting wash */
   sidesFloodTint: number;
   /** 0..1 same for the castle core floods (castleColor override) */
@@ -207,6 +213,7 @@ export function createStageLookEx(): StageLookEx {
     sideL: 1,
     sideR: 1,
     crownLedFloor: 0,
+    glowFloor: 0,
     sidesFloodTint: 0,
     castleFloodTint: 0,
     garland: new THREE.Vector3(0, 0, 0),

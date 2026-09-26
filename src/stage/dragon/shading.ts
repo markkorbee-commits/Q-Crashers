@@ -475,6 +475,7 @@ void main() {
 }`,
     fragmentShader: /* glsl */ `
 ${LED_GLSL}
+uniform float uWings;
 varying float vU;
 varying float vAcross;
 varying float vFade;
@@ -493,6 +494,14 @@ void main() {
   // is pushed above the lit haze around the crown, so the wing ribs read as lines of light
   vec3 steady = crownSteady(vInfo.x) * uLedI * 0.7;
   c = max(c, steady * vFar) * (1.0 + 1.2 * vFar);
+  // seed >= 2: a steady emitter (finial flame spires, fins): no pattern, no pixel rows; the look's LED
+  // level x the wing glow level (stage.state wings: a dim look keeps dark finials, video 20.25) + kick pulse
+  // Far away (a strip widened to the minimum pixel width) they fade instead of standing out as bright stars
+  // over the finials (video 509.25: the wide shot reads the spars and suns, not glaring crowns).
+  if (vInfo.z >= 2.0) {
+    c = crownSteady(vInfo.x) * uLedI * uWings * (1.0 + 0.6 * uPulse) * mix(1.0, 0.4, vFar);
+    dots = 1.0;
+  }
   gl_FragColor = vec4(c * core * dots * vFade * 3.2 * crownDim(vInfo.x) * emberMask(vWX) * crownSide(vWX), 1.0);
 }`,
   });
@@ -736,6 +745,8 @@ export const GARLAND = { wings: 0, castle: 1, sides: 2 } as const;
 const GARLAND_GAIN = 7;
 /** bulb diameter (m) of the wing strings / the castle and side-section strings (round 6: 0.15 -> 0.24 / 0.2) */
 export const GARLAND_BULB = { wings: 0.24, set: 0.2 } as const;
+/** minimum glare radius (screen px) of a festoon bulb: far bulbs keep a glaring point */
+const GARLAND_GLARE_PX = 5;
 
 export function createGarlandMaterial(U: CrownUniforms): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
@@ -745,6 +756,7 @@ export function createGarlandMaterial(U: CrownUniforms): THREE.ShaderMaterial {
     blending: THREE.AdditiveBlending,
     side: THREE.DoubleSide,
     vertexShader: /* glsl */ `
+#define GARLAND_GLARE_PX ${GARLAND_GLARE_PX.toFixed(3)}
 attribute vec2 corner;
 attribute vec3 iPos;
 attribute vec4 iInfo; // group, u (m along the string), size, seed
@@ -753,13 +765,18 @@ uniform float uMinPx;
 varying vec2 vC;
 varying vec4 vInfo;
 varying float vFade;
+varying float vQ;
 void main() {
   vec4 mv = modelViewMatrix * vec4(iPos, 1.0);
   float px = max(-mv.z, 0.1) * uPixel;
   float s = max(iInfo.z, 1.1 * uMinPx * px);
   // a far bulb is a point source: most of its light stays on the minimum-size dot
   vFade = clamp(pow(iInfo.z / s, 0.75), 0.3, 1.0);
-  mv.xy += corner * s * 1.6;
+  // the quad also carries a glare of at least GARLAND_GLARE_PX pixels (a camera sees a frosted bulb in the
+  // haze as a glaring point at any distance, video 582.75 / 1047.25)
+  float q = max(1.6 * s, GARLAND_GLARE_PX * px);
+  vQ = q / s;
+  mv.xy += corner * q;
   mv.xyz += normalize(-mv.xyz) * (s - iInfo.z) * 1.5;
   gl_Position = projectionMatrix * mv;
   vC = corner;
@@ -776,17 +793,21 @@ uniform float uShowT;
 varying vec2 vC;
 varying vec4 vInfo;
 varying float vFade;
+varying float vQ;
 float gHash(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 void main() {
   float g = vInfo.x;
   float lvl = g < 0.5 ? uGarl.x : (g < 1.5 ? uGarl.y : uGarl.z);
   if (lvl < 1e-3) discard;
-  float r2 = dot(vC, vC) * 2.56;
+  float rq2 = dot(vC, vC);
+  // (radius in units of the bulb: r2 = (|vC| * q / s)^2 / 0.39, as round 6 with q = 1.6 s)
+  float r2 = rq2 * vQ * vQ;
   float core = exp(-r2 * 8.0);
   // frosted globes bloom in the haze: a soft glare round every bulb (video 582.75 / 1268: bright white
-  // points with halos, not pin-pricks)
+  // points with halos, not pin-pricks) + a faint pixel-sized glare that keeps far bulbs glaring
   float halo = exp(-r2 * 1.5) * 0.26;
-  float m = core + halo;
+  float glare = exp(-rq2 * 5.0) * 0.07;
+  float m = core + halo + glare;
   if (m < 0.004) discard;
   // tungsten filaments: slight per-bulb spread
   float k = 0.82 + 0.3 * gHash(vec2(vInfo.w * 97.0, 3.1));
@@ -802,8 +823,10 @@ void main() {
     // strobe on the beat grid (uGarlRate flashes per beat)
     k *= step(fract(uBeat * uGarlRate), 0.4);
   }
-  // hot white filament in a warm glass
-  vec3 c = mix(uGarlCol, vec3(1.0, 0.96, 0.9) * max(uGarlCol.r, max(uGarlCol.g, uGarlCol.b)), min(1.0, core * 1.1));
+  // hot white filament in a warm glass: the core is white-hot, the halo keeps half the glass tint (round 6
+  // read as cream discs; the footage shows glaring white points with a warm fringe)
+  vec3 hot = vec3(1.0, 0.96, 0.9) * max(uGarlCol.r, max(uGarlCol.g, uGarlCol.b));
+  vec3 c = mix(mix(uGarlCol, hot, 0.5), hot, min(1.0, core * 1.1));
   gl_FragColor = vec4(c * m * lvl * k * vFade * GARLAND_GAIN, 1.0);
 }`,
   });

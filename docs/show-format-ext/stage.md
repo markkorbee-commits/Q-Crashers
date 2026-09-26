@@ -105,6 +105,41 @@ Checked side by side with the official video (Show camera, Mac GPU); default 64 
 - **Seek-exact wings.** The membranes' breeze runs on show time, not wall-clock time (a seek now gives
   the same wing image; before, up to 98/255 differed at 1463 between seek orders).
 
+### Round 7: portal key, finial spires and fins, festoon glare, crown floods (engine change, no cue change needed)
+
+Checked side by side with the official video (Show camera, Mac GPU); default 64 moments 64.7 / 46.5 %
+→ 64.7 / 46.5 % (raw / calibrated; colour 63.7 → 63.8, light 79.4, shape 53.9 → 53.7).
+
+- **Portal key.** The wash-driven part of the two FOH keys is only as warm as the wash: 50 % tungsten under
+  a red / orange wash (as in round 6), none under a violet / blue one (the constant work light stays
+  tungsten). Under a violet / blue wash the facade round the portal now takes the wash colour instead of a
+  beige-grey band (video 509.25, 1047.25: a purple / blue castle); the red washes of the portal close-ups
+  keep their red-orange key (656 / 705). Cone (0.26 rad) and gain are unchanged: a 0.15 rad / gain 2 portal
+  pool measured the same but left the facade darker than the lavender castle of 509.25.
+- **Finial spires.** Every finger ends in a tall glowing flame spire (~1.6 m wide, 4.5 m from the top of the
+  sun disc to the spear point): soft flame strokes lit steadily in the wing colour (no chase / sparkle), at the
+  wing glow level (`wings`) × the LED level. Video 582.75 / 509.25 / 1047.25: orange (violet, blue …)
+  flame-tipped spires; round 6 had only a small dark flame plate above the disc.
+- **Fins.** The crescent crown round every finial disc and the kunai blades along the spars carry a steady
+  LED in the look's second colour (`color2` of `screens.content`, else the palette's secondary) at half
+  level, following `wings` like the spires (video 582.75: blue fins round orange spires). Far away (a strip
+  widened to its minimum pixel width) spires and fins fade to 40 %, so the wide shots read spars and suns,
+  not glaring crowns.
+- **Festoon glare.** Every bulb keeps a glare of at least 5 px on screen and its halo is half white (the core
+  stays white-hot): far bulbs read as glaring points, near ones as white bulbs with a warm fringe instead of
+  cream discs (video 582.75, 1047.25).
+- **Painted crown shell + content floods.** The dragon's scale hide is a painted surface (metalness 0.5,
+  roughness 0.5; was 0.8 / 0.42, which caught coloured light only as a glint). While a `screens.content` cue
+  is alive the crown's two low floods also take the look's colours at level 1.5 (flood A the crown LED
+  colour, flood B the content's `color2`): the head takes a share of the look's colours (998.25 green /
+  red, 1047.25 violet / blue; still darker than the brightly flooded head of the footage). Stronger floods
+  (2–4) lost points (the show's colour at 167 differs from the
+  video's; the red portal close-ups want no extra light). Tunable in the page through
+  `__app.get('stage').crownTune` (QA tools).
+- **`glowFloor`** (new `stage.state` param, below) keeps the mouth and the portal emblem lit under a dimmed
+  `master`.
+- **Anchor `wing_spars`** (new, below): the burning-wing path on the wing surface.
+
 ## `stage.state`: new params
 
 Like every other `stage.state` value, the new params are cross-faded over the cue's `fade`. A param
@@ -129,6 +164,7 @@ region isolation holds for the whole fade. A dragon-only fade-in therefore never
 | `garlandColor` | colour | `#ffb466` (tungsten) | Festoon colour. |
 | `garlandPattern` | `steady` \| `chase` \| `twinkle` \| `strobe` | `steady` | Festoon pattern. |
 | `garlandRate` | > 0 | 2 | Pulses per beat for `chase` / `strobe`. |
+| `glowFloor` | 0..1 | 0 | Round 7. The dragon's mouth / throat glow and the portal emblem keep this share of their own level while `master` dims the set (they follow `max(master, glowFloor)` instead of `master`; a dormant blackout with `windows` / `wings` at 0 still turns them off). Video 409–412: at `master` 0.1 behind the white backlight veil the mouth and the emblem stay visibly pink / red; `glowFloor: 0.6` there. |
 
 Example, red dragon and wings on a blue castle (v519.8–534):
 `{"sys":"stage","fx":"state","p":{…existing…, "castleColor":"#1A20FF","sidesColor":"#1A20FF","crownColor":"#FF1A10"}}`
@@ -174,3 +210,13 @@ There are 14 heads on the castle-terrace roofline. Each side has an inner group 
 ±14.4 at Y 9.8, inner tower roof ±16.1 at Y 13.95) and an outer group (outer tower roof ±24/±27 at
 Y 12.85, wall walk ±29.9/±31.2 at Y 9.8). It is registered by name, so pyro targets can use
 `"roof_plumes"`. It is not yet in the core `AnchorName` list or in the validator's target vocabulary.
+
+## Anchor `wing_spars` (new, round 7)
+
+The burning-wing path on the wing surface: per wing, per finger (outer, middle, inner) three points at
+~35 %, ~60 % and ~82 % of the finger spar, 0.8 m in front of it (18 points, left wing first). Registered by
+name like `roof_plumes`; the validator already knows it as an extended anchor for `p.at`, so a wing
+firewall can use `"target": ["wing_left", "wing_right"], "p": {"at": "wing_spars", …}` (the targets stay
+the contract fallback). Video 101: the fire covers the upper two thirds of the wings, while the 6 m flames
+from the ~60 / ~82 % heads of `wing_left` / `wing_right` stand mostly above the membranes. `wing_left` /
+`wing_right` themselves are unchanged (the lighting rig places its wing fixtures at their mean depth).
