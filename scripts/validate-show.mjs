@@ -21,6 +21,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+const CAMERA_SUBJECTS = ['mc', 'lead', 'aerialist', 'pianist', ...Array.from({ length: 10 }, (_, i) => `dancer${i}`)];
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -463,7 +464,8 @@ function checkParams(c, where) {
     }
     if (p.altEvery !== undefined && (!isNum(p.altEvery) || p.altEvery < 1 / 30 || p.altEvery > 10)) err(`${where}: altEvery must be 0.033..10 s`);
     if (p.ease !== undefined && !CAMERA_EASE.has(p.ease)) err(`${where}: ease "${p.ease}"`);
-    if (p.subject !== undefined && !['mc'].includes(p.subject)) err(`${where}: camera subject "${p.subject}" (known: mc)`);
+    // subjects: 'mc' + src/crowd/performers.ts SUBJECTS (lead, aerialist, pianist, dancer0-9; docs/show-format-ext/core.md)
+    if (p.subject !== undefined && !CAMERA_SUBJECTS.includes(p.subject)) err(`${where}: camera subject "${p.subject}" (known: ${CAMERA_SUBJECTS.join(', ')})`);
     // subject shots: pos / look are offsets from the performer's feet
     if (p.subject === undefined && v3(p.pos) && (p.pos[1] < 0.3 || Math.abs(p.pos[0]) > 700 || p.pos[1] > 400 || Math.abs(p.pos[2]) > 900)) warn(`${where}: camera pos ${p.pos} looks off-site`);
   }
