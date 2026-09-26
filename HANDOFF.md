@@ -319,7 +319,7 @@ echo $CHROME_PATH
 
 ## Stand van zaken
 
-Za 26 sep 2026, ± 23:10 (CEST), lokaal op de MacBook Pro (M4 Max, GPU-render).
+Zo 27 sep 2026, ± 00:50 (CEST), lokaal op de MacBook Pro (M4 Max, GPU-render).
 
 - Stap 1-9 zijn op de Mac uitgevoerd (video + mp3 met kloppende checksums, cutlijst identiek aan de referentie).
 - Gelijkenis op de Mac-GPU (64 momenten, `--settle 500 --min-frames 30`), per moment in
@@ -331,12 +331,18 @@ Za 26 sep 2026, ± 23:10 (CEST), lokaal op de MacBook Pro (M4 Max, GPU-render).
   | + stage-WIP ronde 4 gemerged | 53,6 % | 27,9 % | 54,4 / 64,9 / 42,9 |
   | + Show-camera-exposure 0,5 (`SHOWCAM_EXPOSURE`) | 57,5 % | 34,0 % | 55,6 / 71,3 / 48,7 |
   | + ronde 5 (schermen, performers, pyro, atmosfeer) | 61,0 % | 39,4 % | 59,8 / 76,2 / 50,1 |
+  | + ronde 6 (show/sync, camera, pyro, licht, stage) | 65,5 % | 46,4 % | 65,3 / 79,6 / 54,0 |
 
 - Ronde 5 (findings `docs/handoff/findings/r5_*.md`): schermen tonen kasteelprint i.p.v. vlakke panelen; MC met
   gekleurde key + backlight, close-ups houden de haze, troupe-choreografie en -shots 641-740 s herzien; pyro met
   verlichte rook (flares, serpents, gerb-wolken), lichten per cluster; beam-storm zonder witte sluier, blauwe
   laserlucht, glare-lift weg, hemel naar de video gekeyd, laserzee op showtijd (determinisme), stage-walk-restpunten.
   `scripts/similarity.mjs` doet nu standaard een pre-roll (seek naar t-2 s, 6 frames, dan t).
+- Ronde 6 (findings `r6_*.md`): check-sync scoort vuurwerk op het zichtbare moment (break), vrije tempo 60 → 71 %
+  binnen 100 ms (rest onderbouwd in `research/video-timeline/sync-r6.md`); MC-tegenlicht in haze 409-412 s (411,5:
+  7 → 61 %); roze waaiers 558 s; kadrering van de zwakste momenten (camera); maskers, garlands, FOH-key (stage);
+  witte gerb-licht, rook-flits (pyro); backlight/arch-glow (licht). Samengevoegd showbestand: camera-cues van de
+  cameragroep, overige cues van de showgroep (op cue-niveau samengevoegd).
 
 Eerdere stand (cloud, vóór de overdracht):
 
