@@ -794,6 +794,15 @@ low-to-mid (below).
 - Pyro smoke: 20–60 large billboard puffs above the roof, accumulating after cues, decaying over 20–40 s,
   coloured by the wash. **Drift with the wind: from 340° at 4–5 m/s → world vector (+0.26, 0, −0.97)**: over
   and behind the stage and to the spectator's right (FACT: "smoke drifts right" in f073 and f087).
+- **Round 7 calibration (similarity against the official video, Mac GPU):** inside the site smoke of
+  `atmos.glow smoke` (pink whiteout v76, red smoke v1510–1537) the video keeps the fountains, pillars and set
+  crisp: the smoke is a coloured veil, not a wall. The height fog thickens by 1 + 2 × smoke (was 7) and takes
+  0.25 × smoke of the glow colour (was 0.4): v76.25 +8, v1528 +5, v1530.5 +7 points; v1536.25 −2 (the end of
+  the red-smoke scene is the smokiest moment of the video).
+- **Ground light under aerial breaks:** the field stays dark under firework breaks (v264.75: green breaks at
+  57 m over a black field) and turns orange only under the low walls (v600.4, v1508–1510, flame and gerb rows
+  at 6–25 m). The flash light on the grounds keeps its full share up to a source height of 30 m and falls as
+  1 / (1 + ((y − 30) / 15)²) above it (`src/world/worldLights.ts`).
 
 ---
 
@@ -824,7 +833,10 @@ Moon look: warm white core #F2DCC0 with a pinkish halo (#D7CAE4 in f113), slight
 low altitude; lit limb towards the right (the west, towards the sun), tilted ~7° upward, with the thin unlit
 sliver on the left. *(Review note: this read "lower right"; the direction is computed from the sun–moon
 great circle at t0.)* Visible in almost every field and aerial shot from 30 s on
-(FACT). Stars: none visible (FACT).
+(FACT). Stars: none visible (FACT). *Round 7 check: the low FPV drone of v1163–1175 flies roughly on the
+stage axis looking ≈ 12° down with the moon at x ≈ 0.7, y ≈ 0.08 of the frame; an on-axis render at v1169.5
+puts our moon at x ≈ 0.70 (≈ 18–20° right of the axis, alt 8.3°), so the sky is right. The moon sits left of
+the stage in our Show camera there only because that shot flies the left bank (a camera-cue choice).*
 
 ### 8.3 Sky colour over time (graded video → shader targets)
 

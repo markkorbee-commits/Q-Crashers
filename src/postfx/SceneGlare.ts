@@ -11,6 +11,16 @@ const GLARE_DIST = 350;
 const GLARE_E0 = 7;
 /** the site-wide `atmos.glow` (lit smoke) counts as a light of this intensity per unit of glow */
 const GLOW_WEIGHT = 3;
+/**
+ * size of a fire (m: segment length + reach) that counts fully towards the glare; smaller ones count
+ * (length + reach) / GLARE_SIZE, at least GLARE_SIZE_MIN. Round 7: the fx engine packs the burning wings as
+ * six 12 m torches of full intensity, which drove the glare as hard as a 90 m flame wall (energy 9.9 at
+ * v101 vs 10.5 at the v76 whiteout) and widened the bloom into two orange domes over the wings; the video
+ * keeps the wing fires crisp. Similarity (Mac GPU): 729.25 68.7 -> 71.5 %, 101 +1.0, 264.75 +1.2; the
+ * walls and rows (76.25, 827.25, 1509.5, 1528) unchanged
+ */
+const GLARE_SIZE = 60;
+const GLARE_SIZE_MIN = 0.2;
 /** view-space depth (m) at which a light segment is clipped (a flame row passing the camera) */
 const NEAR = 1.5;
 /** attack / release time constants (s) of the global glare amount (camera iris / eye response) */
@@ -40,9 +50,9 @@ export class SceneGlare {
   /**
    * tuning: `psf` = angular radius of the lens' glare kernel (screen heights; fixed in image space),
    * `src` = visible size of a light around its line (share of its reach: the flames and the smoke they
-   * light), `dist` (m) / `e0` / `glow` as the constants above
+   * light), `dist` (m) / `e0` / `glow` / `size` (m, 0 = off) as the constants above
    */
-  readonly tune = { psf: 0.05, src: 0.35, dist: GLARE_DIST, e0: GLARE_E0, glow: GLOW_WEIGHT };
+  readonly tune = { psf: 0.05, src: 0.35, dist: GLARE_DIST, e0: GLARE_E0, glow: GLOW_WEIGHT, size: GLARE_SIZE };
   /** unsmoothed glare amount of this frame (debug) */
   target = 0;
   /** light energy seen this frame (debug) */
@@ -128,7 +138,10 @@ export class SceneGlare {
       const my = (ay + by) * 0.5;
       const md = (ad + bd) * 0.5;
       const dist = Math.sqrt(mx * mx + my * my + md * md);
-      const df = (1 / (1 + (dist / tn.dist) * (dist / tn.dist))) * zoom;
+      // how big the fire is: a 12 m wing torch is not a 90 m flame wall of the same intensity
+      const len = Math.sqrt((B.x - A.x) * (B.x - A.x) + (B.y - A.y) * (B.y - A.y) + (B.z - A.z) * (B.z - A.z));
+      const sw = tn.size > 0 ? clamp((len + Math.max(1, A.w)) / tn.size, GLARE_SIZE_MIN, 1) : 1;
+      const df = (sw / (1 + (dist / tn.dist) * (dist / tn.dist))) * zoom;
       eVis += I * df * vis;
       cr += C.x * df * vis;
       cg += C.y * df * vis;
