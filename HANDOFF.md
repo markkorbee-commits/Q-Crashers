@@ -333,6 +333,7 @@ Zo 27 sep 2026, ± 00:40 (CEST), lokaal op de MacBook Pro (M4 Max, GPU-render).
   | + ronde 5 (schermen, performers, pyro, atmosfeer) | 61,0 % | 39,4 % | 59,8 / 76,2 / 50,1 |
   | + ronde 6 (show/sync, camera, pyro, licht, stage) | 65,5 % | 46,4 % | 65,3 / 79,6 / 54,0 |
   | meetinstrument gecorrigeerd: exacte frametijden + seeds los van de bestandspositie (zelfde code) | 64,7 % | 46,5 % | 63,7 / 79,4 / 53,8 |
+  | + ronde 7 (8 groepen: show, camera, pyro, fx, lighting, lasers, env, stage) | 67,1 % | 50,2 % | 67,9 / 80,5 / 54,8 |
 
 - Ronde 5 (findings `docs/handoff/findings/r5_*.md`): schermen tonen kasteelprint i.p.v. vlakke panelen; MC met
   gekleurde key + backlight, close-ups houden de haze, troupe-choreografie en -shots 641-740 s herzien; pyro met
@@ -349,6 +350,11 @@ Zo 27 sep 2026, ± 00:40 (CEST), lokaal op de MacBook Pro (M4 Max, GPU-render).
   laatste bronframe per slot); nu `fps=4:round=up` (exact, `f4/.timing`). Cue-seeds hangen niet meer af van de
   positie in het showbestand (samenvoegen of een cue toevoegen gooit de rest niet meer om). Nieuwe baseline:
   `similarity-mac-r7.json`; per moment niet vergelijkbaar met eerdere baselines.
+
+- Ronde 7 (findings `r7_*.md`, 27 sep ± 01:40): kleuren van de looks naar de video (o.a. 167 groen/paars-flikker,
+  509,25 violet, 1047,25, 289,25), blauwe MC-close-ups, eruptie 1508 en rode sluier 1565 ingekort, kasteel/kroon
+  (geverfde kroonschaal, vinnen), troupe-verlichting ontdubbeld, lasers, wash-fallback-bug, grondflits, halo's.
+  Showbestand op cue-niveau samengevoegd met `tools/video/merge-show-cues.py`.
 
 Eerdere stand (cloud, vóór de overdracht):
 
