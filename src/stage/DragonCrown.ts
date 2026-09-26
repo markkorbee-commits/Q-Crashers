@@ -77,7 +77,11 @@ export class DragonCrown {
   readonly garlands = new Garlands();
   private garlandMesh: THREE.Mesh | null = null;
 
-  async build(q: QualitySettings): Promise<void> {
+  /**
+   * @param step optional loading-bar sub-step reporter (label, 0..1 within the crown build); it must
+   * yield to the event loop like the default does
+   */
+  async build(q: QualitySettings, step: (label: string, f: number) => Promise<void> = () => yieldFrame()): Promise<void> {
     const t0 = performance.now();
     this.group.name = 'DragonCrown';
     this.level = q.level;
@@ -87,17 +91,18 @@ export class DragonCrown {
     this.stat.texSize = ts;
 
     // ---------------------------------------------------------------- textures
+    await step('dragon scale textures', 0);
     const scale = scaleTextures(Math.min(ts, 1024), aniso);
-    await yieldFrame();
+    await step('armour + steel textures', 0.2);
     const panel = panelTextures(Math.min(ts, 1024), aniso);
     const steel = steelTextures(Math.max(256, Math.min(ts / 2, 512)), aniso);
-    await yieldFrame();
+    await step('wing print textures', 0.35);
     const flame = flameTexture(Math.min(ts, 2048), Math.min(ts, 2048) / 2, aniso);
     const lava = lavaTextures(Math.max(256, Math.min(ts / 2, 512)), aniso);
     const env = createEnvMap();
     this.textures.push(...texList(scale), ...texList(panel), ...texList(steel), flame, lava.map, lava.emissiveMap, env);
     this.stat.texMs = Math.round(performance.now() - t0);
-    await yieldFrame();
+    await step('dragon head', 0.5);
 
     // ---------------------------------------------------------------- materials
     const U = this.U;
@@ -151,13 +156,13 @@ export class DragonCrown {
     let t1 = performance.now();
     const head = buildHead(kit);
     this.stat.headMs = Math.round(performance.now() - t1);
-    await yieldFrame();
+    await step('body + wings', 0.6);
     t1 = performance.now();
     const body = buildBody(kit);
     const { wings, membrane } = buildWings(kit);
     for (const w of wings) for (const g of w.garlands) this.garlands.string(g, GARLAND.wings, 0.85, 0.15);
     this.stat.bodyWingMs = Math.round(performance.now() - t1);
-    await yieldFrame();
+    await step('merging the crown', 0.85);
     t1 = performance.now();
 
     // head rig: jaw pivot lives in head space

@@ -50,8 +50,10 @@ const CALIB = {
   lantern: 2.3,
   /** decor backlights (banners, skull eyes, emblem) */
   decor: 0.6,
-  /** virtual floods relative to the lighting wash */
-  flood: 0.32,
+  /** virtual floods relative to the lighting wash (0.32 until round 3) */
+  flood: 0.24,
+  /** virtual FOH front wash relative to the lighting wash (0.42 until round 3) */
+  front: 0.26,
   /**
    * share of the world's sky light (hemisphere incl. the site glow, moon, twilight) on the set: the
    * printed castle never reads by sky light in the footage (round 4: sky + env + FOH washes summed
@@ -126,10 +128,13 @@ export class MainStageSystem implements System {
     this.app = app;
     this.root.name = 'MainStage';
     const q = app.quality;
+    // loading-bar sub-steps (shares measured on the medium preset: textures ~45 %, set ~20 %, crown ~35 %)
+    await app.loadStep('stone + decor textures', 0);
     this.mats = await StageMaterials.create(app.renderer, q);
     this.resolver = new LookResolver(app.show);
     const t1 = performance.now();
     this.timing.materials = t1 - t0;
+    await app.loadStep('castle, deck + vault', 0.45);
 
     // ---- geometry --------------------------------------------------------------------------------
     const kit = createKit(RANK[q.level] >= 2 ? 2 : RANK[q.level] === 1 ? 1 : 0);
@@ -159,7 +164,7 @@ export class MainStageSystem implements System {
 
     // ---- crown -----------------------------------------------------------------------------------
     try {
-      await this.crown.build(q);
+      await this.crown.build(q, (label, f) => app.loadStep(label, 0.65 + 0.33 * f));
       // festoon bulb strings: the wings' (added by the crown) + the castle / side-section eaves
       addCastleGarlands(this.crown.garlands);
       addSideGarlands(this.crown.garlands);
@@ -480,7 +485,7 @@ export class MainStageSystem implements System {
       tintTowards(u.uFloodB.value, _glow, k);
     }
     u.uSkyK.value = CALIB.sky;
-    addScaled(u.uFront.value.copy(look.wash).multiplyScalar(wi * 0.42), look.pulseColor, 1.2);
+    addScaled(u.uFront.value.copy(look.wash).multiplyScalar(wi * CALIB.front), look.pulseColor, 1.2);
     u.uFront.value.r += look.strobe * 2.5;
     u.uFront.value.g += look.strobe * 2.5;
     u.uFront.value.b += look.strobe * 2.5;

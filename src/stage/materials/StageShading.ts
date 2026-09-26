@@ -109,8 +109,9 @@ vec3 stageFlood(vec3 wp, vec3 n) {
     vec3 c = mod(idx, 2.0) < 0.5 ? uFloodA : uFloodB;
     acc += c * (beam * prof * lam);
   }
-  // the side sections / arms get a lower flood density than the castle
-  acc *= mix(1.0, 0.4, smoothstep(37.0, 50.0, abs(wp.x)));
+  // the side sections / arms get a lower flood density than the castle (their printed houses stay
+  // dark silhouettes in the footage; round 4: 0.4 -> 0.25)
+  acc *= mix(1.0, 0.25, smoothstep(37.0, 50.0, abs(wp.x)));
   // region isolation: a castle / side colour override re-tints the floods (same brightness), the
   // region levels dim them (castle: 0 leaves the castle dark while the crown keeps its own wash)
   float sw = stageSideW(wp);
