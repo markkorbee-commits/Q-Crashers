@@ -21,6 +21,7 @@ import {
 import { flameTexture, lavaTextures, panelTextures, scaleTextures, steelTextures, type PbrSet } from './dragon/textures';
 import { buildWings, rosetteGear, WING_FX } from './dragon/wings';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { texMean } from './materials/texMean';
 
 /** World positions the crown exposes (registered as anchors by MainStageSystem). */
 export interface CrownAnchors {
@@ -165,16 +166,48 @@ export class DragonCrown {
     this.headRig.add(this.jawPivot);
     this.group.add(this.headRig);
 
-    const addBuckets = (b: PartBuckets, parent: THREE.Object3D, tag: string) => {
+    // MOBILE: the untextured-looking parts (armour, steel, copper, teeth, mouth, rider; on the jaw also
+    // its shell) share ONE material with per-vertex metalness / roughness / reflection level and the
+    // albedo of their texture baked into the vertex colour (~9 fewer draw calls; the scale hide and the
+    // leopard hide keep their textures). The eyes join the static mix as an emissive part.
+    const mixParts: Record<string, LitePart> = {
+      shell: { metal: 0.8, rough: 0.42, env: 1.5, set: scale },
+      armor: { metal: 0.82, rough: 0.55, env: 1.2, set: panel },
+      steel: { metal: 0.95, rough: 0.7, env: 0.8, set: steel },
+      copper: { metal: 0.7, rough: 0.75, env: 0.9, set: steel },
+      ivory: { metal: 0, rough: 0.3, env: 0.5 },
+      flesh: { metal: 0, rough: 0.38, env: 0.4 },
+      rider: { metal: 0.7, rough: 0.75, env: 0.9, set: panel },
+    };
+    const mixMat = lite ? createLiteMixMaterial(env, U) : null;
+    if (mixMat) this.materials.push(mixMat);
+    const addBuckets = (b: PartBuckets, parent: THREE.Object3D, tag: string, extra: THREE.BufferGeometry[] = []) => {
       const pairs: [keyof typeof mats, THREE.Material][] = Object.entries(mats) as [keyof typeof mats, THREE.Material][];
+      const mix: THREE.BufferGeometry[] = [...extra];
       for (const [name, mat] of pairs) {
         const bucket = b[name];
         if (bucket.empty) continue;
         this.stat.tris += bucket.tris;
+        const part = mixParts[name];
+        // the static shell keeps its scale texture; the jaw's shell joins the mix
+        if (mixMat && part && (name !== 'shell' || tag === 'jaw')) {
+          mix.push(toLiteMix(bucket.build(), part, 0));
+          continue;
+        }
         const mesh = new THREE.Mesh(bucket.build(), mat);
         mesh.name = `crown-${tag}-${name}`;
         mesh.castShadow = q.shadows;
         mesh.receiveShadow = q.shadows;
+        mesh.matrixAutoUpdate = false;
+        parent.add(mesh);
+        this.meshes.push(mesh);
+      }
+      if (mixMat && mix.length) {
+        const g = mergeGeometries(mix, false)!;
+        for (const m of mix) m.dispose();
+        g.computeBoundingSphere();
+        const mesh = new THREE.Mesh(g, mixMat);
+        mesh.name = `crown-${tag}-mix`;
         mesh.matrixAutoUpdate = false;
         parent.add(mesh);
         this.meshes.push(mesh);
@@ -196,7 +229,14 @@ export class DragonCrown {
         this.meshes.push(m);
       }
     };
-    addBuckets(kit.world, this.group, 'static');
+    // the jaw's LED strips and pixel dots ride in the static strip / bulb draws, following the jaw
+    // through uJawMat (2 draws less on every preset)
+    const restJaw = new THREE.Matrix4().multiplyMatrices(HM, new THREE.Matrix4().makeRotationX(THREE.MathUtils.lerp(HEAD.jawMin, HEAD.jawMax, 0.6)));
+    this.U.uJawMat.value.copy(restJaw);
+    kit.world.strips.absorb(kit.jaw.strips, restJaw);
+    kit.world.bulbs.absorb(kit.jaw.bulbs, restJaw);
+    // mobile: the eyeballs ride in the static mix (emissive part) instead of their own draw
+    addBuckets(kit.world, this.group, 'static', mixMat ? [toLiteMix(head.eyeballs, EYE_PART, 1)] : []);
     addBuckets(kit.jaw, this.jawPivot, 'jaw');
 
     // membrane
@@ -211,11 +251,13 @@ export class DragonCrown {
     }
     // eyes + throat
     {
-      const eyes = new THREE.Mesh(head.eyeballs, this.eyeMat);
-      eyes.name = 'crown-eyes';
-      eyes.matrixAutoUpdate = false;
-      this.group.add(eyes);
-      this.meshes.push(eyes);
+      if (!mixMat) {
+        const eyes = new THREE.Mesh(head.eyeballs, this.eyeMat);
+        eyes.name = 'crown-eyes';
+        eyes.matrixAutoUpdate = false;
+        this.group.add(eyes);
+        this.meshes.push(eyes);
+      }
       const throat = new THREE.Mesh(head.throat, throatMat);
       throat.name = 'crown-throat';
       throat.matrixAutoUpdate = false;
@@ -364,8 +406,10 @@ export class DragonCrown {
 
     this.eyeMat.color.copy(look.eyes).multiplyScalar(Math.max(0.05 * E, look.eyesIntensity) * 0.45);
 
-    // jaw
+    // jaw (+ the jaw-local LEDs riding in the static strip / bulb draws)
     this.jawPivot.rotation.x = THREE.MathUtils.lerp(HEAD.jawMin, HEAD.jawMax, THREE.MathUtils.clamp(look.jaw, 0, 1));
+    this.jawPivot.updateMatrix();
+    U.uJawMat.value.multiplyMatrices(this.headRig.matrix, this.jawPivot.matrix);
 
     // rosettes: alternate spin direction per rosette
     if (this.rosettes && this.rosetteGlow) {
@@ -470,4 +514,80 @@ function addScaled(c: THREE.Color, o: THREE.Color, s: number): THREE.Color {
 
 function texList(s: PbrSet): THREE.Texture[] {
   return [s.map, s.normalMap, s.roughnessMap];
+}
+
+// ---------------------------------------------------------------------------------------------
+// MOBILE: one shared "mix" material for the crown's secondary parts (draw-call budget)
+// ---------------------------------------------------------------------------------------------
+
+/** a crown material folded into the mobile mix: its scalar PBR values + its texture set (for the mean albedo / roughness) */
+interface LitePart {
+  metal: number;
+  rough: number;
+  /** env-map (reflection) intensity */
+  env: number;
+  set?: PbrSet;
+}
+
+/** the eyeballs: a dark glass the eye colour glows through (emissive flag in the mix) */
+const EYE_PART: LitePart = { metal: 0, rough: 0.3, env: 0.3 };
+
+/**
+ * Prepare a part geometry for the mobile mix: indexed, position / normal / uv / color / fx + `mr`
+ * (metalness, roughness, reflection level, emissive-eye flag); the texture's mean albedo is baked
+ * into the vertex colour and its mean roughness into `mr.y`.
+ */
+function toLiteMix(g: THREE.BufferGeometry, p: LitePart, eye: number): THREE.BufferGeometry {
+  const n = g.getAttribute('position').count;
+  if (!g.index) g.setIndex(Array.from({ length: n }, (_, i) => i));
+  if (!g.getAttribute('normal')) g.computeVertexNormals();
+  if (!g.getAttribute('uv')) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(n * 2), 2));
+  if (!g.getAttribute('fx')) g.setAttribute('fx', new THREE.BufferAttribute(new Float32Array(n), 1));
+  let col = g.getAttribute('color') as THREE.BufferAttribute | undefined;
+  if (!col) {
+    col = new THREE.BufferAttribute(new Float32Array(n * 3).fill(eye ? 0.02 : 1), 3);
+    g.setAttribute('color', col);
+  }
+  const alb = p.set ? texMean(p.set.map) : [1, 1, 1];
+  const rough = p.set ? Math.min(1, Math.max(0.05, p.rough * texMean(p.set.roughnessMap)[1])) : p.rough;
+  for (let i = 0; i < n; i++) col.setXYZ(i, col.getX(i) * alb[0], col.getY(i) * alb[1], col.getZ(i) * alb[2]);
+  const mr = new Float32Array(n * 4);
+  for (let i = 0; i < n; i++) {
+    mr[i * 4] = p.metal;
+    mr[i * 4 + 1] = rough;
+    mr[i * 4 + 2] = p.env;
+    mr[i * 4 + 3] = eye;
+  }
+  g.setAttribute('mr', new THREE.BufferAttribute(mr, 4));
+  for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv', 'color', 'fx', 'mr'].includes(k)) g.deleteAttribute(k);
+  g.morphAttributes = {};
+  g.clearGroups();
+  return g;
+}
+
+/** the mobile mix material: the crown's wash rig (lite) with per-vertex metalness / roughness / reflections */
+function createLiteMixMaterial(env: THREE.Texture, U: CrownUniforms): THREE.MeshStandardMaterial {
+  const m = new THREE.MeshStandardMaterial({ vertexColors: true, envMap: env, metalness: 1, roughness: 1, envMapIntensity: 1, side: THREE.DoubleSide });
+  patchStandard(m, U, { key: 'mix', lite: true });
+  const crown = m.onBeforeCompile;
+  m.onBeforeCompile = (sh, r) => {
+    crown.call(m, sh, r);
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute vec4 mr;\nvarying vec4 vMR;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvMR = mr;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec4 vMR;\nuniform vec3 uEyes;')
+      .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = vMR.y;')
+      .replace('#include <metalnessmap_fragment>', 'float metalnessFactor = vMR.x;')
+      .replace(
+        '#include <lights_fragment_maps>',
+        `#include <lights_fragment_maps>
+#if defined( RE_IndirectSpecular )
+radiance *= vMR.z;
+#endif
+iblIrradiance *= vMR.z;`,
+      )
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += uEyes * 0.45 * vMR.w;');
+  };
+  return m;
 }

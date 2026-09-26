@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { App } from '../core/App';
 import type { AnchorName } from '../core/Anchors';
 import type { FrameContext, QualitySettings, System } from '../core/types';
@@ -143,16 +144,18 @@ export class MainStageSystem implements System {
     const t2 = performance.now();
     this.timing.geometry = t2 - t1;
 
-    // barrier: one instanced mesh
-    const bl = barrierLayout(barrierRuns());
-    const bg = barrierSegmentGeometry();
-    this.barrier = new THREE.InstancedMesh(bg, this.mats.barrier, bl.length);
-    bl.forEach((m, i) => this.barrier!.setMatrixAt(i, m));
-    this.barrier.instanceMatrix.needsUpdate = true;
-    this.barrier.computeBoundingSphere();
-    this.barrier.name = 'stage-barrier';
-    this.root.add(this.barrier);
-    this.kitStats.barrier = bl.length;
+    // barrier: one instanced mesh (mobile: baked into the set mix by buildMeshes)
+    if (!this.mats.setMix) {
+      const bl = barrierLayout(barrierRuns());
+      const bg = barrierSegmentGeometry();
+      this.barrier = new THREE.InstancedMesh(bg, this.mats.barrier, bl.length);
+      bl.forEach((m, i) => this.barrier!.setMatrixAt(i, m));
+      this.barrier.instanceMatrix.needsUpdate = true;
+      this.barrier.computeBoundingSphere();
+      this.barrier.name = 'stage-barrier';
+      this.root.add(this.barrier);
+      this.kitStats.barrier = bl.length;
+    }
 
     // ---- crown -----------------------------------------------------------------------------------
     try {
@@ -197,11 +200,31 @@ export class MainStageSystem implements System {
       this.kitStats.tris += (geo.attributes.position.count / 3) | 0;
     };
     add(kit.stone.build(), m.stone, 'stage-stone');
-    add(kit.paint.build(), m.paint, 'stage-paint');
-    add(kit.metal.build(), m.metal, 'stage-metal');
-    add(kit.gold.build(), m.gold, 'stage-gold');
+    if (m.setMix) {
+      // MOBILE: paint + metal + gold + speakers + the barrier sections in one draw (see StageMaterials)
+      const parts: THREE.BufferGeometry[] = [];
+      const push = (g: THREE.BufferGeometry | null, p: 'paint' | 'metal' | 'gold' | 'speaker' | 'barrier') => {
+        if (g && g.attributes.position && g.attributes.position.count > 0) parts.push(m.toSetMix(g.index ? g.toNonIndexed() : g, p));
+      };
+      push(kit.paint.build(), 'paint');
+      push(kit.metal.build(), 'metal');
+      push(kit.gold.build(), 'gold');
+      push(kit.speaker.build(), 'speaker');
+      const bg = barrierSegmentGeometry();
+      const bl = barrierLayout(barrierRuns());
+      for (const mat of bl) push(bg.clone().applyMatrix4(mat), 'barrier');
+      bg.dispose();
+      this.kitStats.barrier = bl.length;
+      const merged = mergeGeometries(parts, false);
+      for (const g of parts) g.dispose();
+      if (merged) add(merged, m.setMix, 'stage-setmix');
+    } else {
+      add(kit.paint.build(), m.paint, 'stage-paint');
+      add(kit.metal.build(), m.metal, 'stage-metal');
+      add(kit.gold.build(), m.gold, 'stage-gold');
+      add(kit.speaker.build(), m.speaker, 'stage-speaker');
+    }
     add(kit.decor.build(), m.decor, 'stage-decor');
-    add(kit.speaker.build(), m.speaker, 'stage-speaker');
     const ov = kit.led.buildOverlay();
     const led = kit.led.build();
     add(led, m.led, 'stage-led');

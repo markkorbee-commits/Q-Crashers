@@ -135,13 +135,19 @@ export interface PatchOpts {
   flood?: number;
   /** albedo scale in the show (see StageUniforms.uDay) */
   nightK?: number;
+  /**
+   * MOBILE set mix (one draw for paint / metal / gold / speakers / barrier): metalness, roughness,
+   * reflection level and flood strength come per vertex from the `smr` attribute (vec4)
+   */
+  perVertex?: boolean;
 }
 
 /** Patch a MeshStandardMaterial/MeshPhysicalMaterial with the stage flood field + env tint. */
 export function patchStageShading(mat: THREE.MeshStandardMaterial, u: StageUniforms, o: PatchOpts = {}): void {
-  const flood = (o.flood ?? 1).toFixed(3);
+  const pv = o.perVertex === true;
+  const flood = pv ? 'vSMR.w' : (o.flood ?? 1).toFixed(3);
   const nk = (o.nightK ?? 1).toFixed(3);
-  const key = `stage-shading-${o.glowGroups ? 'g' : ''}-${flood}-${nk}`;
+  const key = `stage-shading-${o.glowGroups ? 'g' : ''}-${pv ? 'pv' : flood}-${nk}`;
   mat.customProgramCacheKey = () => key;
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, u);
@@ -150,7 +156,8 @@ export function patchStageShading(mat: THREE.MeshStandardMaterial, u: StageUnifo
         '#include <common>',
         `#include <common>
 varying vec3 vStageWP;
-${o.glowGroups ? 'attribute float aGroup;\nvarying float vGroup;' : ''}`,
+${o.glowGroups ? 'attribute float aGroup;\nvarying float vGroup;' : ''}
+${pv ? 'attribute vec4 smr;\nvarying vec4 vSMR;' : ''}`,
       )
       .replace(
         '#include <project_vertex>',
@@ -162,15 +169,19 @@ ${o.glowGroups ? 'attribute float aGroup;\nvarying float vGroup;' : ''}`,
   #endif
   vStageWP = (modelMatrix * swp).xyz;
 }
-${o.glowGroups ? 'vGroup = aGroup;' : ''}`,
+${o.glowGroups ? 'vGroup = aGroup;' : ''}
+${pv ? 'vSMR = smr;' : ''}`,
       );
     shader.fragmentShader = shader.fragmentShader
       .replace(
         '#include <common>',
         `#include <common>
 ${FLOOD_GLSL}
-${o.glowGroups ? 'uniform vec4 uGlow;\nvarying float vGroup;' : ''}`,
+${o.glowGroups ? 'uniform vec4 uGlow;\nvarying float vGroup;' : ''}
+${pv ? 'varying vec4 vSMR;' : ''}`,
       )
+      .replace('#include <roughnessmap_fragment>', pv ? 'float roughnessFactor = vSMR.y;' : '#include <roughnessmap_fragment>')
+      .replace('#include <metalnessmap_fragment>', pv ? 'float metalnessFactor = vSMR.x;' : '#include <metalnessmap_fragment>')
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
@@ -193,10 +204,10 @@ ${
         '#include <lights_fragment_maps>',
         `#include <lights_fragment_maps>
 #if defined( USE_ENVMAP ) && defined( RE_IndirectSpecular )
-  radiance *= uEnvTint;
+  radiance *= uEnvTint${pv ? ' * vSMR.z' : ''};
 #endif
 #if defined( RE_IndirectDiffuse )
-  iblIrradiance *= uEnvTint;
+  iblIrradiance *= uEnvTint${pv ? ' * vSMR.z' : ''};
   // ambient + hemisphere (the world's sky dome and its site glow): the set takes its own share
   irradiance *= uSkyK;
 #endif`,

@@ -101,7 +101,7 @@ export class StageLights {
           // FOH keys on the portal: they follow the castle level (a dark-castle look keeps them low)
           // and take the wash colour (no white work light on the set)
           l.color.copy(wash).lerp(look.castleLed2, (rig.side > 0 ? 0.25 : 0.1) * E);
-          l.intensity = (28 * E + 75 * wi) * (0.6 + 0.5 * look.energy) * (1 + 0.6 * look.pulse + look.strobe * 2) * (0.1 + 0.9 * Math.min(1.3, look.castleGain));
+          l.intensity = (42 * E + 115 * wi) * (0.6 + 0.5 * look.energy) * (1 + 0.6 * look.pulse + look.strobe * 2) * (0.1 + 0.9 * Math.min(1.3, look.castleGain));
           break;
         case 'base':
           // low lights on the castle base: they belong to the castle (region level / colour)

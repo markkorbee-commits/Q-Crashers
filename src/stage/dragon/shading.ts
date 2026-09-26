@@ -69,6 +69,11 @@ export interface CrownUniforms {
    * show look keeps the brightness it was calibrated for (the photos set the art, not the exposure).
    */
   uDay: THREE.IUniform<number>;
+  /**
+   * jaw-local -> crown space (head frame x jaw rotation, this frame): the jaw's LED strips and pixel
+   * dots ride in the static strip / bulb draws (instances flagged `iJaw`) and follow the jaw here
+   */
+  uJawMat: THREE.IUniform<THREE.Matrix4>;
 }
 
 export function createUniforms(): CrownUniforms {
@@ -113,6 +118,7 @@ export function createUniforms(): CrownUniforms {
     uWingWash: { value: 1 },
     uDragonWash: { value: 1 },
     uDay: { value: 0 },
+    uJawMat: { value: new THREE.Matrix4() },
   };
 }
 
@@ -402,8 +408,10 @@ attribute vec3 iA;
 attribute vec3 iB;
 attribute vec2 iU;
 attribute vec4 iInfo; // group, side, seed, width
+attribute float iJaw; // 1 = rides on the lower jaw (jaw-local points)
 uniform float uPixel;
 uniform float uMinPx;
+uniform mat4 uJawMat;
 varying float vU;
 varying float vAcross;
 varying float vFade;
@@ -411,8 +419,10 @@ varying float vFar;
 varying vec3 vInfo;
 varying float vWX;
 void main() {
-  vec4 mvA = modelViewMatrix * vec4(iA, 1.0);
-  vec4 mvB = modelViewMatrix * vec4(iB, 1.0);
+  vec3 pA = iJaw > 0.5 ? (uJawMat * vec4(iA, 1.0)).xyz : iA;
+  vec3 pB = iJaw > 0.5 ? (uJawMat * vec4(iB, 1.0)).xyz : iB;
+  vec4 mvA = modelViewMatrix * vec4(pA, 1.0);
+  vec4 mvB = modelViewMatrix * vec4(pB, 1.0);
   vec4 mv = mix(mvA, mvB, corner.x);
   vec3 d = mvB.xyz - mvA.xyz;
   float dl = max(length(d), 1e-4);
@@ -437,7 +447,7 @@ void main() {
   vU = mix(iU.x, iU.y, corner.x);
   vAcross = corner.y;
   vInfo = iInfo.xyz;
-  vWX = (modelMatrix * vec4(mix(iA, iB, corner.x), 1.0)).x;
+  vWX = (modelMatrix * vec4(mix(pA, pB, corner.x), 1.0)).x;
 }`,
     fragmentShader: /* glsl */ `
 ${LED_GLSL}
@@ -469,10 +479,28 @@ export interface StripBuild {
   b: number[];
   u: number[];
   info: number[];
+  /** 1 = jaw-local segment (see CrownUniforms.uJawMat) */
+  jaw: number[];
+}
+
+function append(dst: number[], src: number[]): void {
+  for (let i = 0; i < src.length; i++) dst.push(src[i]);
+}
+
+/** grow `box` by the points of a flat xyz list, transformed by `m` when given */
+function boundPoints(box: THREE.Box3, xyz: number[], m: THREE.Matrix4 | null, from = 0): void {
+  const p = new THREE.Vector3();
+  for (let i = from * 3; i < xyz.length; i += 3) {
+    p.set(xyz[i], xyz[i + 1], xyz[i + 2]);
+    if (m) p.applyMatrix4(m);
+    box.expandByPoint(p);
+  }
 }
 
 export class Strips {
-  private d: StripBuild = { a: [], b: [], u: [], info: [] };
+  private d: StripBuild = { a: [], b: [], u: [], info: [], jaw: [] };
+  /** bounds of the absorbed jaw segments (crown space, jaw at rest + margin) */
+  private extra = new THREE.Box3();
   segments = 0;
   private seedN = 0;
   /**
@@ -493,10 +521,28 @@ export class Strips {
       this.d.u.push(u, u + l);
       const side = Math.sign((p.x + q.x) * 0.5) || 1;
       this.d.info.push(group, side, s, width);
+      this.d.jaw.push(0);
       u += l;
       this.segments++;
     }
     return u;
+  }
+  /**
+   * Take over the (jaw-local) segments of `jaw`, flagged to follow CrownUniforms.uJawMat, so the jaw's
+   * LEDs share this draw. `rest` maps jaw-local to crown space at a typical opening (bounds only).
+   */
+  absorb(jaw: Strips, rest: THREE.Matrix4): void {
+    const o = jaw.d;
+    boundPoints(this.extra, o.a, rest);
+    boundPoints(this.extra, o.b, rest);
+    append(this.d.a, o.a);
+    append(this.d.b, o.b);
+    append(this.d.u, o.u);
+    append(this.d.info, o.info);
+    for (let i = 0; i < jaw.segments; i++) this.d.jaw.push(1);
+    this.segments += jaw.segments;
+    jaw.d = { a: [], b: [], u: [], info: [], jaw: [] };
+    jaw.segments = 0;
   }
   build(mat: THREE.Material): THREE.Mesh {
     const g = new THREE.InstancedBufferGeometry();
@@ -506,21 +552,25 @@ export class Strips {
     g.setAttribute('iB', new THREE.InstancedBufferAttribute(new Float32Array(this.d.b), 3));
     g.setAttribute('iU', new THREE.InstancedBufferAttribute(new Float32Array(this.d.u), 2));
     g.setAttribute('iInfo', new THREE.InstancedBufferAttribute(new Float32Array(this.d.info), 4));
+    g.setAttribute('iJaw', new THREE.InstancedBufferAttribute(new Float32Array(this.d.jaw), 1));
     g.instanceCount = this.segments;
-    // bounds from all points
+    // bounds from the static points + the absorbed jaw (at rest, with room for the jaw's travel)
     const box = new THREE.Box3();
     const p = new THREE.Vector3();
     for (let i = 0; i < this.d.a.length; i += 3) {
+      if (this.d.jaw[i / 3] > 0.5) continue;
       box.expandByPoint(p.set(this.d.a[i], this.d.a[i + 1], this.d.a[i + 2]));
       box.expandByPoint(p.set(this.d.b[i], this.d.b[i + 1], this.d.b[i + 2]));
     }
+    if (!this.extra.isEmpty()) box.union(this.extra.clone().expandByScalar(2.5));
     g.boundingBox = box;
     g.boundingSphere = box.getBoundingSphere(new THREE.Sphere());
     const m = new THREE.Mesh(g, mat);
     m.frustumCulled = true;
     // after the haze (renderOrder 10) and the beams: LED outlines pierce the haze instead of being veiled by it
     m.renderOrder = 12;
-    this.d = { a: [], b: [], u: [], info: [] };
+    this.d = { a: [], b: [], u: [], info: [], jaw: [] };
+    this.extra.makeEmpty();
     return m;
   }
 }
@@ -543,14 +593,17 @@ export function createBulbMaterial(U: CrownUniforms): THREE.ShaderMaterial {
 attribute vec2 corner;
 attribute vec3 iPos;
 attribute vec4 iInfo; // type, u, size, seed
+attribute float iJaw; // 1 = rides on the lower jaw (jaw-local position)
 uniform float uPixel;
 uniform float uMinPx;
+uniform mat4 uJawMat;
 varying vec2 vC;
 varying vec4 vInfo;
 varying float vFade;
 varying float vWX;
 void main() {
-  vec4 mv = modelViewMatrix * vec4(iPos, 1.0);
+  vec3 pos = iJaw > 0.5 ? (uJawMat * vec4(iPos, 1.0)).xyz : iPos;
+  vec4 mv = modelViewMatrix * vec4(pos, 1.0);
   float px = max(-mv.z, 0.1) * uPixel;
   float s = max(iInfo.z, 1.1 * uMinPx * px);
   // far away a sparse bulb is a point source: keep a good part of its radiance on the minimum-size
@@ -564,7 +617,7 @@ void main() {
   gl_Position = projectionMatrix * mv;
   vC = corner;
   vInfo = iInfo;
-  vWX = (modelMatrix * vec4(iPos, 1.0)).x;
+  vWX = (modelMatrix * vec4(pos, 1.0)).x;
 }`,
     fragmentShader: /* glsl */ `
 ${LED_GLSL}
@@ -600,11 +653,26 @@ void main() {
 export class Bulbs {
   private pos: number[] = [];
   private info: number[] = [];
+  private jaw: number[] = [];
+  private extra = new THREE.Box3();
   count = 0;
   add(p: THREE.Vector3, type: number, u = 0, size = 0.12, seed = Math.random()): void {
     this.pos.push(p.x, p.y, p.z);
     this.info.push(type, u, size, seed);
+    this.jaw.push(0);
     this.count++;
+  }
+  /** take over the (jaw-local) dots of `jaw`, flagged to follow CrownUniforms.uJawMat (see Strips.absorb) */
+  absorb(jaw: Bulbs, rest: THREE.Matrix4): void {
+    boundPoints(this.extra, jaw.pos, rest);
+    append(this.pos, jaw.pos);
+    append(this.info, jaw.info);
+    for (let i = 0; i < jaw.count; i++) this.jaw.push(1);
+    this.count += jaw.count;
+    jaw.pos = [];
+    jaw.info = [];
+    jaw.jaw = [];
+    jaw.count = 0;
   }
   build(mat: THREE.Material): THREE.Mesh {
     const g = new THREE.InstancedBufferGeometry();
@@ -612,10 +680,12 @@ export class Bulbs {
     g.setIndex([0, 1, 2, 2, 1, 3]);
     g.setAttribute('iPos', new THREE.InstancedBufferAttribute(new Float32Array(this.pos), 3));
     g.setAttribute('iInfo', new THREE.InstancedBufferAttribute(new Float32Array(this.info), 4));
+    g.setAttribute('iJaw', new THREE.InstancedBufferAttribute(new Float32Array(this.jaw), 1));
     g.instanceCount = this.count;
     const box = new THREE.Box3();
     const p = new THREE.Vector3();
-    for (let i = 0; i < this.pos.length; i += 3) box.expandByPoint(p.set(this.pos[i], this.pos[i + 1], this.pos[i + 2]));
+    for (let i = 0; i < this.pos.length; i += 3) if (this.jaw[i / 3] < 0.5) box.expandByPoint(p.set(this.pos[i], this.pos[i + 1], this.pos[i + 2]));
+    if (!this.extra.isEmpty()) box.union(this.extra.clone().expandByScalar(2.5));
     box.expandByScalar(1);
     g.boundingBox = box;
     g.boundingSphere = box.getBoundingSphere(new THREE.Sphere());
@@ -623,6 +693,8 @@ export class Bulbs {
     m.renderOrder = 13;
     this.pos = [];
     this.info = [];
+    this.jaw = [];
+    this.extra.makeEmpty();
     return m;
   }
 }
