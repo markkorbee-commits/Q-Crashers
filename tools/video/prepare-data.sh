@@ -2,23 +2,38 @@
 # One-time preparation of the local video data for the video tools (run from anywhere):
 #
 #   tools/video/prepare-data.sh [--jobs N] [--force] [--skip-frames] [--skip-features]
+#   tools/video/prepare-data.sh --ss 400 --dur 30        (smoke test: ~10 s, only frames + features of that window)
 #
-#   $ENDSHOW_DATA/video/endshow.mp4   (you put it there; default ENDSHOW_DATA = ../endshow-data next to the repo)
+#   $ENDSHOW_DATA/video/endshow.mp4   (you put it there; default ENDSHOW_DATA = endshow-data next to the main checkout)
 #     -> f4/NNNNN.jpg      4 fps 480x270 frames, index = round(video_s*4)      (tools/video/extract-frames.sh)
 #     -> features.npz      25 fps per-frame features, N parallel chunks         (scripts/video-features.py + combine.py)
 #     -> spans/            per-span cue files from the current show file        (tools/video/split.py; kept if present)
 #     -> cuts.json, signals/NN.txt                                               (tools/video/signals.py)
-#   and checks cuts.json / signals against the committed copies in research/video-timeline/data/.
+#   and checks cuts.json / signals against the committed copies in research/video-timeline/data/
+#   (tools/video/check-derived.py: identical, or small drift -> the committed copies are installed and the local
+#   numbers kept as cuts.local.json / signals.local/, or a large difference -> exit 3: a different video?).
 #
+# --ss/--dur: smoke test of the toolchain on one window (video seconds): frames of that window into f4/ (same indices
+#   as a full run) and features into work/smoke/features.npz; spans/cuts/signals/check are skipped.
 # N (parallel chunks) defaults to the CPU count (macOS: sysctl -n hw.ncpu; Linux: nproc).
 # Python: $PYTHON, else $ENDSHOW_DATA/venv/bin/python, else python3 (needs numpy + Pillow).
 # Steps whose output exists are skipped; --force redoes frames and features (spans are never overwritten here:
 # re-split explicitly with `python3 tools/video/split.py --force`).
+# Exit status: 0 = done (read any WARNING line), 1 = error, 3 = cut list differs substantially from the committed one.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
-export ENDSHOW_DATA="${ENDSHOW_DATA:-$REPO/../endshow-data}"
+# default data dir: next to the MAIN checkout (a git worktree such as .claude/worktrees/<name> shares it)
+main_checkout() {
+  local c
+  if c="$(git -C "$REPO" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" && [ "$(basename "$c")" = .git ]; then
+    dirname "$c"
+  else
+    case "$REPO" in */.claude/worktrees/*) echo "${REPO%%/.claude/worktrees/*}" ;; *) echo "$REPO" ;; esac
+  fi
+}
+export ENDSHOW_DATA="${ENDSHOW_DATA:-$(main_checkout)/../endshow-data}"
 mkdir -p "$ENDSHOW_DATA"
 DATA="$(cd "$ENDSHOW_DATA" && pwd)"
 export ENDSHOW_DATA="$DATA"
@@ -27,16 +42,21 @@ JOBS=""
 FORCE=0
 SKIP_FRAMES=0
 SKIP_FEATURES=0
+SS=""
+DUR=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --jobs) JOBS="$2"; shift 2 ;;
     --force) FORCE=1; shift ;;
     --skip-frames) SKIP_FRAMES=1; shift ;;
     --skip-features) SKIP_FEATURES=1; shift ;;
-    -h | --help) sed -n '2,19p' "$0"; exit 0 ;;
+    --ss) SS="$2"; shift 2 ;;
+    --dur | --t) DUR="$2"; shift 2 ;;
+    -h | --help) sed -n '2,24p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
+if [ -n "$SS$DUR" ] && { [ -z "$SS" ] || [ -z "$DUR" ]; }; then echo "--ss and --dur go together" >&2; exit 2; fi
 if [ -z "$JOBS" ]; then
   if [ "$(uname -s)" = "Darwin" ]; then JOBS="$(sysctl -n hw.ncpu)"; else JOBS="$(nproc 2>/dev/null || echo 4)"; fi
 fi
@@ -51,9 +71,22 @@ die() { echo "prepare-data: $*" >&2; exit 1; }
 step "checks (data dir $DATA, $JOBS jobs, python $PY)"
 [ -f "$VIDEO" ] || die "video not found: $VIDEO — download it (HANDOFF.md, step 4) and put it there"
 command -v "${FFMPEG:-ffmpeg}" >/dev/null || die "ffmpeg not found (macOS: brew install ffmpeg)"
-"$PY" -c 'import numpy, PIL' 2>/dev/null || die "$PY lacks numpy/Pillow: python3 -m venv \"$DATA/venv\" && \"$DATA/venv/bin/pip\" install numpy pillow"
+"$PY" -c 'import numpy, PIL' 2>/dev/null || die "$PY lacks numpy/Pillow: python3 -m venv \"$DATA/venv\" && \"$DATA/venv/bin/python\" -m pip install numpy pillow"
 command -v node >/dev/null || die "node not found (brew install node@22)"
 T_ALL=$(date +%s)
+
+# smoke test: one window only
+if [ -n "$SS" ]; then
+  step "smoke test: frames of video ${SS}-$(awk -v s="$SS" -v d="$DUR" 'BEGIN {print s + d}') s -> $DATA/f4"
+  "$HERE/extract-frames.sh" --video "$VIDEO" --out "$DATA/f4" --ss "$SS" --dur "$DUR" --jobs "$JOBS"
+  step "smoke test: features of the same window -> $DATA/work/smoke/features.npz"
+  mkdir -p "$DATA/work/smoke"
+  "$PY" "$REPO/scripts/video-features.py" "$VIDEO" "$DATA/work/smoke/features.npz" --ss "$SS" --t "$DUR"
+  "$PY" -c 'import sys, numpy as np; F = np.load(sys.argv[1]); print("features: %d frames at %d fps, mean luma %.3f" % (len(F["luma"]), int(F["fps"]), float(F["luma"].mean())))' "$DATA/work/smoke/features.npz"
+  echo
+  echo "prepare-data: smoke test OK in $(( $(date +%s) - T_ALL )) s. Now run the full preparation: tools/video/prepare-data.sh"
+  exit 0
+fi
 
 # video duration (s)
 if command -v ffprobe >/dev/null; then
@@ -108,7 +141,7 @@ fi
 
 # 3. spans (the span workflow's working files: never overwritten here)
 if [ -f "$DATA/spans/index.json" ]; then
-  step "spans: $DATA/spans present — kept"
+  step "spans: $DATA/spans present — kept (re-split before a new video-match run: python3 tools/video/split.py --force)"
 else
   step "spans <- public/show/endshow-2026.json"
   "$PY" "$HERE/split.py"
@@ -116,16 +149,18 @@ fi
 
 # 4. cuts + signals
 step "cuts + signals"
+[ -f "$DATA/features.npz" ] || die "features.npz missing in $DATA: run without --skip-features"
 "$PY" "$HERE/signals.py"
 
-# 5. compare with the committed copies (numbers derived from the same video: expected identical)
+# 5. compare with the committed copies (numbers derived from the same video: identical, or a small drift from another
+#    ffmpeg version / CPU architecture, in which case the committed copies are installed as the reference)
 step "check against research/video-timeline/data/"
-REF="$REPO/research/video-timeline/data"
-same=1
-cmp -s "$DATA/cuts.json" "$REF/cuts.json" || { echo "  cuts.json differs from the committed copy"; same=0; }
-for f in "$REF"/signals/*.txt; do
-  cmp -s "$DATA/signals/$(basename "$f")" "$f" || { echo "  signals/$(basename "$f") differs"; same=0; }
-done
-[ "$same" = 1 ] && echo "  cuts.json and signals/*.txt identical to the committed copies"
+rc=0
+"$PY" "$HERE/check-derived.py" || rc=$?
 echo
-echo "prepare-data: done in $(( $(date +%s) - T_ALL )) s. Data dir: $DATA"
+if [ "$rc" = 0 ]; then
+  echo "prepare-data: done in $(( $(date +%s) - T_ALL )) s. Data dir: $DATA"
+else
+  echo "prepare-data: FAILED the check against the committed copies (exit $rc): see the ERROR line above. Data dir: $DATA" >&2
+fi
+exit "$rc"

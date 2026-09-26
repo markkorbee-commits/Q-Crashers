@@ -12,13 +12,18 @@ Cut rule: HSV-histogram distance > 0.28 to the previous frame, the 4x4 luma grid
 import json
 import os
 import sys
-import numpy as np
-from endshow_paths import data, opt
+from endshow_paths import data, opt, use_venv
+
+use_venv('numpy')
+import numpy as np  # noqa: E402
 
 argv = sys.argv[1:]
 feat = opt(argv, 'features', data('features.npz'))
 index = opt(argv, 'index', data('spans', 'index.json'))
 out = opt(argv, 'out', data())
+for need, how in ((feat, 'tools/video/prepare-data.sh (without --skip-features)'), (index, 'tools/video/split.py')):
+    if not os.path.exists(need):
+        sys.exit(f'{need} missing: make it with {how}')
 F = np.load(feat)
 fps = int(F['fps'])
 n = len(F['luma'])

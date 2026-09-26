@@ -10,7 +10,7 @@
  *        [--analysis <dir with frames_000.json ...>] (per-frame shot types -> matching camera pose)
  * The storyboard has one frame every 1581/160 s (frame i at i * 9.88125 s). Reference frames are
  * copyrighted and are NOT part of the repository: pass the folder where you keep them.
- * Needs python3 + Pillow for the final composition (env PYTHON overrides python3).
+ * Needs Python + Pillow for the final composition (env PYTHON, else $ENDSHOW_DATA/venv/bin/python, else python3).
  * Superseded for video matching by tools/video/vcompare.mjs (the 4 fps video frames replace the storyboard).
  * Browser/renderer: scripts/lib/browser.mjs (CHROME_PATH, RENDERER=gpu|swiftshader).
  */
@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { launchBrowser, reportWebGL } from './lib/browser.mjs';
+import { python } from './lib/data.mjs';
 
 const args = process.argv.slice(2);
 const opt = (n, d) => {
@@ -101,5 +102,5 @@ for r,p in enumerate(pairs):
     d.rectangle([0,r*H,230,r*H+18],fill=(0,0,0)); d.text((4,r*H+3),f"#{p['i']} t={p['t']}s  REFERENCE | OURS",fill=(255,255,0))
 sheet.save(out,quality=88)
 `;
-execFileSync(process.env.PYTHON || 'python3', ['-c', py, JSON.stringify(pairs), out]);
+execFileSync(python(), ['-c', py, JSON.stringify(pairs), out]);
 console.log(JSON.stringify({ out, frames, errors }, null, 1));

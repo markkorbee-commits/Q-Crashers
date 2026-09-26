@@ -10,7 +10,9 @@ this folder (`args.findingsDir`, default `docs/handoff/findings`).
 | `r4_stage.md` | round 4: castle facade too bright, LED set vs video, mobile draw calls of the MainStage |
 | `r2_show_contract.txt` | open cue/engine gaps reported after round 2 (see HANDOFF.md, "Open punten" item 8) |
 
-Round 4 was running when the project moved to the Mac: check `git log` for its merges before reusing these briefs.
+Round 4 status at the handoff (per group: merged with its merge commit, or a WIP patch series to finish):
+`docs/handoff/wip/STATUS.md`. The owned file sets of round 4 are in each brief ("Files you own"); pass the same set as
+`owned` when you re-run a group with `tools/workflows/qa-fix.js` (CLAUDE.md, "Running the workflows").
 
 ## Writing a findings file
 

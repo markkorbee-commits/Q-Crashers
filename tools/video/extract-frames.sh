@@ -4,7 +4,8 @@
 #   tools/video/extract-frames.sh [--video <mp4>] [--out <dir>] [--ss <s>] [--dur <s>] [--jobs <n>]
 #
 # Defaults: --video $ENDSHOW_DATA/video/endshow.mp4, --out $ENDSHOW_DATA/f4, whole video, --jobs = CPU count.
-# ENDSHOW_DATA defaults to ../endshow-data next to the repository.
+# ENDSHOW_DATA defaults to endshow-data next to the main checkout (a git worktree shares the main checkout's one).
+# Smoke test (~6 s): tools/video/extract-frames.sh --ss 400 --dur 30   (frames 01600-01719)
 #
 # INDEX CONVENTION (every tool relies on it): file NNNNN.jpg = video time NNNNN/4 s, zero-based
 # (00000.jpg = 0.00 s, 00001.jpg = 0.25 s, ... 06323.jpg = 1580.75 s; 6324 frames for the 1581.19 s video).
@@ -18,7 +19,15 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
-DATA="${ENDSHOW_DATA:-$REPO/../endshow-data}"
+main_checkout() {
+  local c
+  if c="$(git -C "$REPO" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" && [ "$(basename "$c")" = .git ]; then
+    dirname "$c"
+  else
+    case "$REPO" in */.claude/worktrees/*) echo "${REPO%%/.claude/worktrees/*}" ;; *) echo "$REPO" ;; esac
+  fi
+}
+DATA="${ENDSHOW_DATA:-$(main_checkout)/../endshow-data}"
 VIDEO="$DATA/video/endshow.mp4"
 OUT="$DATA/f4"
 SS=0
@@ -31,7 +40,7 @@ while [ $# -gt 0 ]; do
     --ss) SS="$2"; shift 2 ;;
     --dur | --t) DUR="$2"; shift 2 ;;
     --jobs) JOBS="$2"; shift 2 ;;
-    -h | --help) sed -n '2,16p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,17p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done

@@ -13,7 +13,11 @@
  * --min-frames: additionally wait until the app has rendered this many frames after the seek. Some state after a
  *   seek still depends on how many frames were drawn (1047.25 scored 27.3 % and 12.1 % with the same code on the same
  *   SwiftShader box under different CPU load), so fix a frame count when comparing runs across machines.
- * Needs a dev server (npx vite --port <port>) and python3 with numpy + Pillow (env PYTHON overrides python3).
+ * Needs a dev server (npx vite --port <port> --strictPort) and Python with numpy + Pillow (env PYTHON, else
+ * $ENDSHOW_DATA/venv/bin/python, else python3). A missing video frame stops the run before rendering (a baseline over
+ * fewer moments is not comparable); --allow-missing scores the moments that have a frame and says how many were skipped.
+ * --out: a relative path is used as given (default .shots/similarity); use "$ENDSHOW_DATA/work/sim/<name>" for runs
+ *   you want to keep next to the data.
  * Browser/renderer: scripts/lib/browser.mjs (CHROME_PATH, RENDERER=gpu|swiftshader).
  */
 import fs from 'node:fs';
@@ -21,12 +25,11 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { launchBrowser, reportWebGL } from './lib/browser.mjs';
-import { dataPath } from './lib/data.mjs';
+import { checkFrames, dataPath, python } from './lib/data.mjs';
 
 const args = process.argv.slice(2);
 const opt = (n, d) => (args.includes(`--${n}`) ? args[args.indexOf(`--${n}`) + 1] : d);
 const framesDir = opt('frames', dataPath('f4'));
-if (!fs.existsSync(framesDir)) throw new Error(`frames dir not found: ${framesDir} (pass --frames, or run tools/video/extract-frames.sh)`);
 const port = opt('port', '5173');
 const quality = opt('quality', 'medium');
 const out = opt('out', '.shots/similarity');
@@ -39,6 +42,8 @@ const DURATION = 1581;
 const times = opt('times', '')
   ? opt('times', '').split(',').map(Number)
   : Array.from({ length: n }, (_, i) => Math.round((8 + ((DURATION - 16) * (i + 0.5)) / n) * 4) / 4);
+const refOf = (t) => path.join(framesDir, `${String(Math.round(t * 4)).padStart(5, '0')}.jpg`);
+checkFrames(framesDir, times.map(refOf), { allowMissing: args.includes('--allow-missing') });
 
 fs.mkdirSync(out, { recursive: true });
 const browser = await launchBrowser();
@@ -64,10 +69,10 @@ for (const t of times) {
   await page.waitForTimeout(settle);
   const shot = path.join(out, `ours_${String(Math.round(t * 4)).padStart(5, '0')}.png`);
   await page.screenshot({ path: shot, timeout: 240000 });
-  pairs.push({ t, ours: shot, ref: path.join(framesDir, `${String(Math.round(t * 4)).padStart(5, '0')}.jpg`) });
+  pairs.push({ t, ours: shot, ref: refOf(t) });
   process.stdout.write(`\r${pairs.length}/${times.length}`);
 }
 await browser.close();
 const j = path.join(out, 'pairs.json');
 fs.writeFileSync(j, JSON.stringify({ pairs, errors }, null, 1));
-console.log('\n' + execFileSync(process.env.PYTHON || 'python3', [path.join(path.dirname(fileURLToPath(import.meta.url)), 'similarity-score.py'), j, path.join(out, 'report')]).toString());
+console.log('\n' + execFileSync(python(), [path.join(path.dirname(fileURLToPath(import.meta.url)), 'similarity-score.py'), j, path.join(out, 'report')]).toString());

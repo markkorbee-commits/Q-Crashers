@@ -11,8 +11,10 @@ frame is measured against the true previous frame) has those overlapping leading
 import glob
 import os
 import sys
-import numpy as np
-from endshow_paths import data, work, opt
+from endshow_paths import data, work, opt, use_venv
+
+use_venv('numpy')
+import numpy as np  # noqa: E402
 
 argv = sys.argv[1:]
 src = opt(argv, 'dir', work('features'))

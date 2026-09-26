@@ -14,14 +14,16 @@
  *   public/show/endshow-2026.json, through a request override (the repo file is not touched).
  * --settle: ms after each seek before the screenshot (2500 suits SwiftShader; ~500 is plenty on a GPU).
  * --out: a bare file name goes to $ENDSHOW_DATA/work/compare/. The sheet contains video frames: never commit it.
- * Needs a dev server on the port (npx vite --port <port> --strictPort) and python3 with Pillow (env PYTHON).
+ * Needs a dev server on the port (npx vite --port <port> --strictPort) and Python with Pillow (env PYTHON, else
+ * $ENDSHOW_DATA/venv/bin/python, else python3). Missing video frames stop the run before rendering (--allow-missing
+ * renders anyway with black video tiles).
  * Browser/renderer: scripts/lib/browser.mjs (CHROME_PATH, RENDERER=gpu|swiftshader).
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { launchBrowser, reportWebGL } from '../../scripts/lib/browser.mjs';
-import { dataPath, workDir } from '../../scripts/lib/data.mjs';
+import { checkFrames, dataPath, python, workDir } from '../../scripts/lib/data.mjs';
 
 const args = process.argv.slice(2);
 const opt = (n, d) => (args.includes(`--${n}`) ? args[args.indexOf(`--${n}`) + 1] : d);
@@ -37,7 +39,6 @@ const settle = Number(opt('settle', '2500'));
 const offset = Number(opt('offset', '0.036'));
 const frames = opt('frames', dataPath('f4'));
 const showcam = has('showcam');
-if (!fs.existsSync(frames)) console.error(`[vcompare] frames dir not found: ${frames} (left column stays black)`);
 const shots = opt('shots', '')
   .split(';')
   .filter(Boolean)
@@ -47,6 +48,8 @@ const shots = opt('shots', '')
     return { t: Number(t), pose: p ? p.split(',').map(Number) : null };
   });
 if (!shots.length) throw new Error('--shots is required');
+const refOf = (t) => path.join(frames, String(Math.round(t * 4)).padStart(5, '0') + '.jpg');
+checkFrames(frames, shots.map((s) => refOf(s.t)), { allowMissing: has('allow-missing') });
 
 const browser = await launchBrowser();
 const page = await (await browser.newContext({ viewport: { width: 960, height: 540 }, deviceScaleFactor: 1 })).newPage();
@@ -81,7 +84,7 @@ for (const [k, s] of shots.entries()) {
   await page.waitForTimeout(settle);
   const shot = path.join(tmp, `r${k}.png`);
   await page.screenshot({ path: shot, timeout: 240000 });
-  rows.push({ t: s.t, ref: path.join(frames, String(Math.round(s.t * 4)).padStart(5, '0') + '.jpg'), shot });
+  rows.push({ t: s.t, ref: refOf(s.t), shot });
 }
 await browser.close();
 const py = `
@@ -100,6 +103,6 @@ im.save(sys.argv[2],quality=85)
 const j = path.join(tmp, 'rows.json');
 fs.writeFileSync(j, JSON.stringify(rows));
 fs.mkdirSync(path.dirname(path.resolve(out)), { recursive: true });
-execFileSync(process.env.PYTHON || 'python3', ['-c', py, j, out]);
+execFileSync(python(), ['-c', py, j, out]);
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(JSON.stringify({ out, shots: rows.length, errors }));

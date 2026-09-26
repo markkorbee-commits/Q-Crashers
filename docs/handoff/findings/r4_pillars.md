@@ -1,5 +1,5 @@
-> Handoff note: round-4 brief as given to the fixer (lantern pillars + FOH/camera pen). The round was running
-> at the handoff; check `git log` for its merge. Paths: $ENDSHOW_DATA = the local data dir (see HANDOFF.md).
+> Handoff note: round-4 brief as given to the fixer (lantern pillars + FOH/camera pen). Status at the handoff
+> (merged or a WIP patch): docs/handoff/wip/STATUS.md. Paths: $ENDSHOW_DATA = the local data dir (see HANDOFF.md).
 
 # Round 4 — lantern pillars + FOH/camera pen from the user's DAYTIME photos, mobile prop culling
 

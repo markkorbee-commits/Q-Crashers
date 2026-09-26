@@ -1,5 +1,5 @@
-> Handoff note: round-4 brief as given to the fixer (light balance + paving). The round was running at the
-> handoff; check `git log` for its merge. Paths: $ENDSHOW_DATA = the local data dir (see HANDOFF.md).
+> Handoff note: round-4 brief as given to the fixer (light balance + paving). Status at the handoff (merged or a
+> WIP patch): docs/handoff/wip/STATUS.md. Paths: $ENDSHOW_DATA = the local data dir (see HANDOFF.md).
 
 # Round 4 — field light balance vs the official video (objective metric) + field paving
 
@@ -64,5 +64,9 @@ Opposite gap (secondary): close-ups at 411.5 and 362.5 — the video is a bright
 6. Walk-mode / tribe-mode sanity: the field must still be readable enough to walk at eye level in the default
    (non-show-camera) view: check 2 screenshots at eye level on the aisle (cam=0,1.7,60,0,0.05) during a bright look and
    a dark look; if too dark to walk, prefer a subtle eye-adaptation-free minimum (moonlight level) over lighting the floor.
+Files you own (the qa-fix group "lightbalance" of round 4): src/world/worldLights.ts, src/world/Terrain.ts,
+src/world/Grounds.ts, src/world/groundMaps.ts, src/world/Environment.ts, src/lighting/**, src/lasers/**, src/fx/haze.ts,
+src/fx/FogSystem.ts, docs/show-format-ext/lights.md, docs/show-format-ext/lasers.md, research/design-bible.md (paving
+note only).
 Do NOT touch: src/stage/** (castle/deck are being edited by another agent — note castle over-lighting at 1047.25 /
 1438.5 in contractRequests), src/postfx/**, src/core/**, public/show/*.json.

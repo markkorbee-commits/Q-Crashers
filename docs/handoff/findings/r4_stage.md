@@ -1,5 +1,5 @@
-> Handoff note: round-4 brief as given to the fixer (castle/LED look + mobile draw calls). The round was
-> running at the handoff; check `git log` for its merge. Paths: $ENDSHOW_DATA = the local data dir (see HANDOFF.md).
+> Handoff note: round-4 brief as given to the fixer (castle/LED look + mobile draw calls). Status at the handoff
+> (merged or a WIP patch): docs/handoff/wip/STATUS.md. Paths: $ENDSHOW_DATA = the local data dir (see HANDOFF.md).
 
 # Round 4 — MainStage look vs the official video (objective metric) + mobile draw calls
 

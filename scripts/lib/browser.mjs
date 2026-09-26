@@ -8,12 +8,17 @@
  *   3. a Playwright-installed Chromium (npx playwright-core install chromium; honours PLAYWRIGHT_BROWSERS_PATH)
  *   4. /opt/pw-browsers/<chromium-*>/chrome-linux/chrome (the cloud container)
  * Renderer (env RENDERER=gpu|swiftshader overrides the automatic choice):
- *   - gpu:         macOS (Metal via ANGLE), Windows, or Linux with /dev/dri. Flags: --ignore-gpu-blocklist
- *                  (+ --enable-unsafe-swiftshader, which only permits a software fallback, it does not force it).
+ *   - gpu:         macOS (Metal via ANGLE: --use-angle=metal is passed explicitly), Windows, or Linux with /dev/dri.
+ *                  Flags: --ignore-gpu-blocklist (+ --enable-unsafe-swiftshader, which only permits a software
+ *                  fallback, it does not force it).
  *   - swiftshader: Linux without /dev/dri (no GPU): --use-angle=swiftshader --enable-unsafe-swiftshader
  *                  --ignore-gpu-blocklist (CPU rendering: 20-90 s per heavy frame).
- * Extra: env CHROME_ARGS="--flag --flag2" appends flags; env HEADED=1 opens a visible window (use it when the
- * printed WebGL renderer says SwiftShader on a machine that has a GPU).
+ * Extra: env CHROME_ARGS="--flag --flag2" appends flags (they come last, so they win over the defaults); env HEADED=1
+ * (or true/yes) opens a visible window (use it when the printed WebGL renderer says SwiftShader on a machine that has a
+ * GPU); HEADED=0 / unset = headless.
+ * Google Chrome auto-updates and can run ahead of the Chromium this playwright-core release drives (see
+ * node_modules/playwright-core/browsers.json). On "Protocol error" / "Target closed" / screenshot timeouts with
+ * Chrome: `npx playwright-core install chromium` and point CHROME_PATH at it (HANDOFF.md, troubleshooting).
  * The chosen executable + renderer is printed once to stderr, and after the first page load the page's WebGL
  * UNMASKED_RENDERER string (e.g. "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Max, ...)").
  */
@@ -82,8 +87,9 @@ export async function launchBrowser({ extraArgs = [], headless } = {}) {
   const { exe, source } = resolveExecutable();
   const renderer = resolveRenderer();
   const envArgs = (process.env.CHROME_ARGS || '').split(/\s+/).filter(Boolean);
-  const args = [...(renderer === 'swiftshader' ? SWIFTSHADER_ARGS : GPU_ARGS), ...extraArgs, ...envArgs];
-  const head = headless ?? !process.env.HEADED;
+  const base = renderer === 'swiftshader' ? SWIFTSHADER_ARGS : process.platform === 'darwin' ? [...GPU_ARGS, '--use-angle=metal'] : GPU_ARGS;
+  const args = [...base, ...extraArgs, ...envArgs];
+  const head = headless ?? !/^(1|true|yes)$/i.test(process.env.HEADED || '');
   if (!announced) {
     console.error(`[browser] ${exe} (${source}); renderer ${renderer}${head ? '' : ', headed'}; flags ${args.join(' ')}`);
     announced = true;
