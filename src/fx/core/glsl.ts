@@ -32,6 +32,9 @@ uniform vec4 uFxLB[FX_MAX_LIGHTS];
 uniform vec4 uFxLC[FX_MAX_LIGHTS];
 uniform int uFxLN;
 uniform vec3 uFxGlow;
+// atmos.glow: site-wide coloured light (app.env.glowColor, premultiplied) and site smoke 0..1
+uniform vec3 uSiteGlow;
+uniform float uSiteSmoke;
 // the 8 lantern crystals on the field (xyz + chase level) and their colour * intensity
 uniform vec4 uLampPos[8];
 uniform vec3 uLampCol;
@@ -98,6 +101,17 @@ vec3 fibDir(int i, int n, float rot) {
   float r = sqrt(max(0.0, 1.0 - y * y));
   float ph = float(i) * 2.39996323 + rot;
   return vec3(r * cos(ph), y, r * sin(ph));
+}
+
+/**
+ * Recorded particle index of drawn instance i of an emitter the layer thinned (FxLayer: fewer drawn
+ * than recorded). mul = golden-ratio permutation multiplier (slot texel .w): the first n of the
+ * permuted indices are an evenly spread, nested subset. Directions, phases and timing always use the
+ * recorded count, so thinning never moves or re-times a particle.
+ */
+int particleIndex(int i, float mul, int nRec) {
+  uint a = uint(mul + 0.5);
+  return a > 1u ? int((uint(i) * a) % uint(max(nRec, 1))) : i;
 }
 
 /**
@@ -172,7 +186,9 @@ vec3 envLight(vec3 p) {
     L += uLampCol * (uLampPos[i].w * 16.0 / (dot(d, d) + 16.0));
   }
   L = kneeC(L, 0.6, 0.35);
-  return L + kneeC(fxLight(p, 1.0) + uFxGlow, 2.2, 0.3);
+  // the site glow (atmos.glow: the red smoke over the whole grounds, the pink whiteout) lights every
+  // bit of smoke like the pyro light field does
+  return L + kneeC(fxLight(p, 1.0) + uFxGlow + uSiteGlow * 1.1, 2.2, 0.3);
 }
 
 #define CULL() { gl_Position = vec4(0.0, 0.0, 2.0, 1.0); return; }

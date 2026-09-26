@@ -61,6 +61,10 @@ export class FxShared {
       ...this.lights.uniforms,
       uLampPos: { value: Array.from({ length: 8 }, (_, i) => new THREE.Vector4(PILLARS[i]?.x ?? 0, LANTERN_Y + 0.8, PILLARS[i]?.z ?? -999, 0)) },
       uLampCol: { value: new THREE.Color() },
+      // site-wide coloured light of `atmos.glow` (app.env.glowColor, premultiplied by its amount)
+      uSiteGlow: { value: new THREE.Color() },
+      // 0..1 site smoke of `atmos.glow` (app.env.smoke)
+      uSiteSmoke: { value: 0 },
     };
     this.field = new FieldLight(this.uniforms, app.quality.level === 'mobile');
     app.scene.add(this.field.mesh);
@@ -104,6 +108,13 @@ export class FxShared {
       lamps[i].w = typeof c === 'number' && Number.isFinite(c) ? Math.max(0, c) : 1;
     }
     (u.uLampCol.value as THREE.Color).copy(env.pillarLampColor).multiplyScalar(Math.max(0, env.pillarLampIntensity) * 0.9);
+    // atmos.glow: the whole site is lit in one colour (red smoke v1510, pink whiteout v76)
+    const sg = u.uSiteGlow.value as THREE.Color;
+    const gc = env.glowColor;
+    if (gc && Number.isFinite(gc.r + gc.g + gc.b)) sg.setRGB(Math.max(0, gc.r), Math.max(0, gc.g), Math.max(0, gc.b));
+    else sg.setRGB(0, 0, 0);
+    const sm = env.smoke;
+    u.uSiteSmoke.value = typeof sm === 'number' && Number.isFinite(sm) ? Math.min(1, Math.max(0, sm)) : 0;
     // pyro light field: the strongest lights of this frame (fewer on small presets)
     const lv = app.quality.level;
     this.lights.pack(lv === 'mobile' ? 4 : lv === 'medium' ? 8 : 12);
@@ -111,9 +122,12 @@ export class FxShared {
     this.field.mesh.visible = this.fieldLayer && (this.lights.uniforms.uFxLN.value > 0 || g.r + g.g + g.b > 0.01);
   }
 
-  /** spark ribbon layer (additive HDR) */
+  /**
+   * spark ribbon layer (additive HDR). Trail samples per preset (capped by maxSegments): every
+   * ribbon particle is (segments + 3) * 2 vertices, so mobile keeps 2 (a head, a one-segment tail).
+   */
   sparkLayer(name: string, q: QualitySettings, maxParticles: number, maxEmitters: number, renderOrder: number, maxSegments = 6): FxLayer {
-    const seg = Math.min(maxSegments, q.level === 'mobile' ? 3 : q.level === 'medium' ? 4 : 6);
+    const seg = Math.min(maxSegments, q.level === 'mobile' ? 2 : q.level === 'medium' ? 4 : 6);
     const mat = new THREE.ShaderMaterial({
       name: `fx-${name}`,
       uniforms: { ...this.uniforms, uSegments: { value: seg } },

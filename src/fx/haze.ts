@@ -7,7 +7,12 @@ import { GLSL_COMMON } from './core/glsl';
  * with the wind (pure function of show time, wrapping inside their zone with soft edges):
  *   0 = stage haze around the set, 1 = low haze layer over the field, 2 = high firework smoke band.
  * Density per zone comes from the fog cues + accumulated pyro/firework smoke; colour comes from the
- * LightEnv lighting bus, so the haze glows in the wash colour and flashes with every burst.
+ * LightEnv lighting bus, so the haze glows in the wash colour and flashes with every burst, and from
+ * the site glow of `atmos.glow` (the red smoke over the whole grounds, the pink whiteout).
+ *
+ * The field is built once with the sprites of the richest preset; every sprite carries a rank per
+ * zone (a stratified random order) and a preset keeps the ranks below its share (setShare), so a
+ * preset switch changes a uniform instead of rebuilding the mesh.
  */
 export interface HazeZone {
   min: THREE.Vector3;
@@ -21,7 +26,7 @@ export interface HazeZone {
 const VERT = /* glsl */ `
 ${GLSL_COMMON}
 attribute vec3 aCenter;
-attribute vec4 aPar; // size, seed, zone, phase
+attribute vec4 aPar; // size, rank in its zone (0..1), zone, phase
 uniform vec4 uDensity;
 uniform vec3 uZoneMin[3];
 uniform vec3 uZoneSize[3];
@@ -30,6 +35,8 @@ uniform vec3 uZoneOcclusion;
 uniform float uStageBoost;
 uniform vec4 uHazePyro; // gain, knee stage, knee field, knee sky
 uniform vec3 uHazeTint; // colour of the smoke hanging in the air (albedo, from recent smoke cues)
+uniform vec2 uHazeSite; // site glow (atmos.glow) gain, knee lift per unit of glow luminance
+uniform float uHazeKeep; // share of the sprites the preset draws (ranked)
 varying vec2 vUv;
 varying vec3 vLit;
 varying float vAlpha;
@@ -38,6 +45,7 @@ varying float vOcc;
 varying float vWorldY;
 
 void main() {
+  if (aPar.y >= uHazeKeep) CULL();
   int zone = int(aPar.z + 0.5);
   vec3 zmin = uZoneMin[zone];
   vec3 zsz = uZoneSize[zone];
@@ -61,7 +69,9 @@ void main() {
   // distance weighting: haze is only visible as haze over tens of metres. Sprites around the viewer
   // (a spectator inside the field layer) fade out completely within ~10 m and build up slowly, so
   // the air in front of your face stays clear and the veil only sits over the distant stage.
-  float nearF = zone == 1 ? smoothstep(max(size * 0.35, 9.0), size * 1.2 + 14.0, depth)
+  // With site smoke (atmos.glow smoke) the air around the viewer is full of it too.
+  float nearLo = mix(max(size * 0.35, 9.0), 4.0, uSiteSmoke);
+  float nearF = zone == 1 ? smoothstep(nearLo, size * 1.2 + 14.0 - 8.0 * uSiteSmoke, depth)
                           : smoothstep(size * 0.2, size * 0.9 + 6.0, depth);
   float dens = zone == 0 ? uDensity.x : (zone == 1 ? uDensity.y : uDensity.z);
   vAlpha = dens * edge * nearF * (0.7 + 0.6 * fract(aPar.w * 91.7));
@@ -74,10 +84,15 @@ void main() {
   // the low field layer sits right next to the flame units: only a trace of the flash term there
   light += uFlashCol * flashF * (zone == 1 ? 0.1 : 0.28);
   if (zone == 0) light += (min(uStageLight, vec3(2.0)) * 0.25 + uStageWash * 0.3) * uStageBoost;
+  // the site glow (atmos.glow): the smoke over the whole grounds holds this light itself (a red
+  // smoke cloud, a pink-lit whiteout), in every zone. It raises the brightness knee by its own
+  // luminance, so the glow is not squashed like the rig's scatter.
+  vec3 site = uSiteGlow * uHazeSite.x * (zone == 2 ? 0.7 : 1.0);
+  light += site;
   // brightness clamp (soft knee): haze may glow, but never brighter than a dim fraction of the
   // sources it scatters — so the set and the beams stay the brightest things in the frame
   float Lm = max(light.r, max(light.g, light.b));
-  float knee = zone == 2 ? 0.35 : 0.22;
+  float knee = (zone == 2 ? 0.35 : 0.22) + dot(site, vec3(0.2126, 0.7152, 0.0722)) * uHazeSite.y;
   if (Lm > knee) light *= (knee + (Lm - knee) * 0.25) / Lm;
   // the pyro light field lights the haze where it burns (per corner: a flame wall at one end of a
   // 26 m sprite lights that end), with a much higher knee than the rig: the smoke around a fire
@@ -86,7 +101,8 @@ void main() {
   vec3 pyro = (fxLight(wc, zone == 2 ? 0.8 : 1.2) + uFxGlow) * uHazePyro.x * (zone == 2 ? 0.12 : 1.0);
   pyro = kneeC(pyro, zone == 0 ? uHazePyro.y : (zone == 1 ? uHazePyro.z : uHazePyro.w), 0.3);
   vLit = (light + pyro) * uHazeTint * fogT(depth * 0.7);
-  vOcc = zone == 0 ? uZoneOcclusion.x : (zone == 1 ? uZoneOcclusion.y : uZoneOcclusion.z);
+  // site smoke (atmos.glow smoke): the air is thick with it — it hides the set behind it too
+  vOcc = mix(zone == 0 ? uZoneOcclusion.x : (zone == 1 ? uZoneOcclusion.y : uZoneOcclusion.z), 0.8, uSiteSmoke * 0.85);
   vUv = position.xy;
   vNoise = vec3(fract(aPar.w * 13.1) + t * 0.004, fract(aPar.w * 7.3) - t * 0.003, 0.55 + 0.4 * fract(aPar.w * 3.7));
 }
@@ -118,22 +134,37 @@ void main() {
 export class HazeField {
   readonly mesh: THREE.Mesh;
   readonly uniforms: Record<string, THREE.IUniform>;
-  readonly count: number;
+  /** sprites built (richest preset) */
+  readonly total: number;
+  private readonly zoneCounts: number[];
+  /** sprites the current preset draws */
+  count: number;
 
   constructor(shared: Record<string, THREE.IUniform>, zones: HazeZone[], seed = 77) {
     const rng = new Rng(seed);
     const n = zones.reduce((a, z) => a + z.count, 0);
+    this.total = n;
     this.count = n;
+    this.zoneCounts = zones.map((z) => z.count);
     const centers = new Float32Array(n * 3);
     const pars = new Float32Array(n * 4);
     let i = 0;
     zones.forEach((z, zi) => {
+      // stratified ranks in a random order: any share k of a zone keeps ~k * count sprites, spread
+      // over the whole zone
+      const ranks = Array.from({ length: z.count }, (_, k) => (k + 0.5) / z.count);
+      for (let k = ranks.length - 1; k > 0; k--) {
+        const j = Math.floor(rng.next() * (k + 1));
+        const tmp = ranks[k];
+        ranks[k] = ranks[j];
+        ranks[j] = tmp;
+      }
       for (let k = 0; k < z.count; k++, i++) {
         centers[i * 3] = rng.range(z.min.x, z.max.x);
         centers[i * 3 + 1] = rng.range(z.min.y, z.max.y);
         centers[i * 3 + 2] = rng.range(z.min.z, z.max.z);
         pars[i * 4] = rng.range(z.size[0], z.size[1]);
-        pars[i * 4 + 1] = rng.next();
+        pars[i * 4 + 1] = ranks[k];
         pars[i * 4 + 2] = zi;
         pars[i * 4 + 3] = rng.next();
       }
@@ -162,6 +193,9 @@ export class HazeField {
       uStageBoost: { value: 1 },
       uHazePyro: { value: new THREE.Vector4(7, 14, 7, 4) },
       uHazeTint: { value: new THREE.Color(1, 1, 1) },
+      // site glow (atmos.glow) on the haze: gain, knee lift per unit of glow luminance
+      uHazeSite: { value: new THREE.Vector2(1.6, 3) },
+      uHazeKeep: { value: 1.01 },
     };
     const mat = new THREE.ShaderMaterial({
       name: 'fx-haze',
@@ -181,6 +215,15 @@ export class HazeField {
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = 10;
     this.mesh.matrixAutoUpdate = false;
+  }
+
+  /** share of the sprites a preset draws (1 = all) */
+  setShare(k: number): void {
+    const s = Math.max(0, Math.min(1, k));
+    this.uniforms.uHazeKeep.value = s >= 1 ? 1.01 : s;
+    let c = 0;
+    for (const zc of this.zoneCounts) for (let j = 0; j < zc; j++) if ((j + 0.5) / zc < s || s >= 1) c++;
+    this.count = c;
   }
 
   /** albedo tint of the haze (coloured smoke from recent smoke cannons), luminance ~1 */

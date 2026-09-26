@@ -9,6 +9,7 @@ import type { Emitter, FlashSpec } from './Emitter';
 import type { FxLayer } from './FxLayer';
 import type { LightSpec } from './FxLights';
 import { FxShared } from './FxShared';
+import { setFxBudgetLevel } from './budget';
 
 /** Emitters (and light flashes) a single compiled cue expands into. Built once per cue, then cached. */
 export class EmitterSet {
@@ -18,11 +19,19 @@ export class EmitterSet {
   /** spatial pyro light (smoke, haze, floor), see FxLights */
   readonly lights: LightSpec[] = [];
   lastFrame = 0;
+  /** show time of the cue (prefetched sets are kept until their cue has started) */
+  cueT = 0;
+  /** false while the set was only prefetched */
+  used = false;
   add(e: Emitter): Emitter {
     this.emitters.push(e);
     return e;
   }
 }
+
+/** how far ahead cues are expanded in the background, and the CPU time spent on it per frame */
+const PREFETCH_AHEAD = 5;
+const PREFETCH_MS = 1;
 
 const ANCHORS: AnchorName[] = [
   'deck_front',
@@ -57,6 +66,9 @@ export abstract class CueFxSystem implements System {
   protected quality!: QualitySettings;
   protected readonly palette = ShowEngine.newPalette();
   private cache = new Map<number, EmitterSet>();
+  /** cues whose background expansion threw (retried, and reported, when they become active) */
+  private readonly prefetchFailed = new Set<number>();
+  private lastT = -1e9;
   private revision = -1;
   private anchorRefs: THREE.Vector3[][] = [];
   private cueBuf: Cue[] = [];
@@ -82,6 +94,7 @@ export abstract class CueFxSystem implements System {
     this.app = app;
     this.shared = FxShared.get(app);
     this.quality = app.quality;
+    setFxBudgetLevel(app.quality.level);
     this.buildLayers(app.quality);
     app.show.registerLifetime(this.sys, (cue) => {
       try {
@@ -111,17 +124,27 @@ export abstract class CueFxSystem implements System {
     this.checkInvalidation();
     const t = ctx.showTime;
     const layers = this.layers;
+    // a jump of the show clock (a seek back, or more than a second forward): the layers re-derive
+    // their budget shares from the new moment instead of carrying over the old one. The show time
+    // step (0 while paused) paces the release of their budget pressure.
+    const jump = t < this.lastT - 1e-3 || t - this.lastT > 1;
+    if (jump) for (let i = 0; i < layers.length; i++) layers[i].rebase();
+    const dt = jump ? 0 : Math.min(0.1, t - this.lastT);
+    this.lastT = t;
     for (let i = 0; i < layers.length; i++) layers[i].begin();
     const cues = this.app.show.active(this.sys, t, this.cueBuf);
     this.activeCues = cues.length;
     this.flashSum = 0;
     this.lightSum = 0;
     this.lightN = 0;
+    let expanded = 0;
     for (let ci = 0; ci < cues.length; ci++) {
       const cue = cues[ci];
       let set = this.cache.get(cue.id);
       if (!set) {
+        // a cue that was not prefetched (right after a seek): only the alive ones are built now
         set = new EmitterSet();
+        set.cueT = cue.t;
         try {
           this.app.show.paletteAt(cue.t, this.palette);
           this.expand(cue, set);
@@ -130,7 +153,9 @@ export abstract class CueFxSystem implements System {
           if (this.frameNo % 600 === 1) console.warn(`[${this.name}] cue ${cue.fx} failed to expand`, e);
         }
         this.cache.set(cue.id, set);
+        expanded++;
       }
+      set.used = true;
       set.lastFrame = this.frameNo;
       const em = set.emitters;
       for (let k = 0; k < em.length; k++) {
@@ -169,16 +194,18 @@ export abstract class CueFxSystem implements System {
     const kl = (this.lightSum > capL ? (capL * (1 + Math.log(this.lightSum / capL))) / this.lightSum : 1) * (calm < 1 ? 0.6 : 1);
     const lights = this.shared.lights;
     for (let k = 0; k < this.lightN; k++) lights.add(this.lightBuf[k], this.lightI[k] * kl);
-    for (let i = 0; i < layers.length; i++) layers[i].commit();
-    this.prefetch(t);
+    for (let i = 0; i < layers.length; i++) layers[i].commit(dt, t);
+    // the frame that already built alive cues synchronously (a seek) does no background work
+    if (expanded === 0) this.prefetch(t);
     this.afterUpdate(ctx);
-    if (this.frameNo % 120 === 0) this.sweep();
+    if (this.frameNo % 120 === 0) this.sweep(t);
     this.cpuMs = this.cpuMs * 0.9 + (performance.now() - t0) * 0.1;
   }
 
   /**
-   * Expand a few cues that start within the next seconds ahead of time, so a big cue (a finale
-   * with hundreds of shells) never builds its emitters on the frame it fires.
+   * Expand the cues of the next PREFETCH_AHEAD seconds in the background, about PREFETCH_MS of CPU
+   * per frame (at least one cue per frame while any is missing), so a big cue (a finale with
+   * hundreds of shells) never builds its emitters on the frame it fires.
    */
   private prefetch(t: number): void {
     const all = this.app.show.all(this.sys);
@@ -189,23 +216,24 @@ export abstract class CueFxSystem implements System {
       if (all[mid].t <= t) lo = mid + 1;
       else hi = mid;
     }
-    let budget = 2;
-    for (let i = lo; i < all.length && budget > 0; i++) {
+    const start = performance.now();
+    for (let i = lo; i < all.length; i++) {
       const cue = all[i];
-      if (cue.t > t + 2.5) break;
-      if (this.cache.has(cue.id)) continue;
+      if (cue.t > t + PREFETCH_AHEAD) break;
+      if (this.cache.has(cue.id) || this.prefetchFailed.has(cue.id)) continue;
       const set = new EmitterSet();
+      set.cueT = cue.t;
       try {
         this.app.show.paletteAt(cue.t, this.palette);
         this.expand(cue, set);
         this.deriveLights(set);
+        set.lastFrame = this.frameNo;
+        this.cache.set(cue.id, set);
       } catch {
         /* expanded again (and reported) when it becomes active */
-        continue;
+        this.prefetchFailed.add(cue.id);
       }
-      set.lastFrame = this.frameNo + 300;
-      this.cache.set(cue.id, set);
-      budget--;
+      if (performance.now() - start >= PREFETCH_MS) break;
     }
   }
 
@@ -225,9 +253,16 @@ export abstract class CueFxSystem implements System {
     return this.sys === 'fireworks';
   }
 
-  /** drop cached sets not used for a while (bounded memory on long scrubs) */
-  private sweep(): void {
-    for (const [id, set] of this.cache) if (this.frameNo - set.lastFrame > 240) this.cache.delete(id);
+  /**
+   * drop cached sets not used for a while (bounded memory on long scrubs); a prefetched set stays
+   * until its cue has started (or the clock jumped away from it)
+   */
+  private sweep(t: number): void {
+    for (const [id, set] of this.cache) {
+      const stale = set.used ? this.frameNo - set.lastFrame > 240 : set.cueT < t - 2 || set.cueT > t + PREFETCH_AHEAD + 3;
+      if (stale) this.cache.delete(id);
+    }
+    if (this.prefetchFailed.size > 256) this.prefetchFailed.clear();
   }
 
   private checkInvalidation(): void {
@@ -248,9 +283,16 @@ export abstract class CueFxSystem implements System {
 
   protected invalidate(): void {
     this.cache.clear();
+    this.prefetchFailed.clear();
     for (const l of this.layers) l.reset();
   }
 
+  /**
+   * Preset switch. The layers of the new preset are built (JS objects only), then every old layer
+   * that can take over the new budget / trail segments does so and the new one is dropped unused:
+   * no texture re-allocation, no program re-link. The emitter caches are rebuilt (counts depend on
+   * the preset's particle scale).
+   */
   setQuality(q: QualitySettings): void {
     if (!this.app) return;
     if (this.quality && this.quality.level === q.level && this.layers.length) {
@@ -258,9 +300,22 @@ export abstract class CueFxSystem implements System {
       return;
     }
     this.quality = q;
-    for (const l of this.layers) l.dispose();
+    setFxBudgetLevel(q.level);
+    const old: (FxLayer | null)[] = this.layers;
     this.layers = [];
     this.buildLayers(q);
+    const fresh = this.layers;
+    for (let i = 0; i < fresh.length; i++) {
+      const j = old.findIndex((o) => o !== null && o.name === fresh[i].name);
+      if (j < 0) continue;
+      const o = old[j] as FxLayer;
+      if (o.adopt(fresh[i])) {
+        fresh[i].dispose();
+        fresh[i] = o;
+        old[j] = null;
+      }
+    }
+    for (const o of old) o?.dispose();
     this.invalidate();
     for (const l of this.layers) l.mesh.visible = false;
   }
@@ -278,6 +333,8 @@ export abstract class CueFxSystem implements System {
       out[`${l.name}.slots`] = `${l.usedSlots}/${l.maxSlots}`;
       if (l.dropped) out[`${l.name}.dropped`] = l.dropped;
       if (l.scaled < 1) out[`${l.name}.scaled`] = +l.scaled.toFixed(2);
+      if (l.keepNow < 1) out[`${l.name}.keep`] = l.keepNow;
+      if (l.hidden) out[`${l.name}.hidden`] = l.hidden;
     }
     return out;
   }

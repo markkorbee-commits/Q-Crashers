@@ -36,9 +36,14 @@ void main() {
   int flags = int(r8.y + 0.5);
   uint seed = uint(r7.w + 0.5);
   bool cont = (flags & F_CONTINUOUS) != 0;
+  // over budget: a stable, evenly spread subset of the recorded puffs (FxLayer), phases and timing
+  // from the recorded count; the thinner cloud gets a little more opacity / light per puff
+  int nRec = max(int(r5.w + 0.5), 1);
+  i = particleIndex(i, sl.w, nRec);
+  float thinGain = n < nRec ? pow(float(n) / float(nRec), -0.35) : 1.0;
 
   float te; uint cyc;
-  if (!emitTime(r0.w, r5.z, r5.y, r8.w, i, n, seed, cont, te, cyc)) CULL();
+  if (!emitTime(r0.w, r5.z, r5.y, r8.w, i, nRec, seed, cont, te, cyc)) CULL();
   uint key = hashu(seed ^ hashu(uint(i) * 0x9e3779b9u + cyc * 0x85ebca6bu + 1u));
   float life = mix(r5.x, r5.y, rnd(key, 1u));
   float tau = uTime - te;
@@ -120,24 +125,35 @@ void main() {
     // flame fireball: temperature falls with age; soot takes over near the end
     float temp = pow(1.0 - f, 1.1) * (0.66 + 0.26 * rnd(key, 9u));
     float soot = r10.x * smoothstep(r10.y, 0.92, f) * (1.0 - smoothstep(0.9, 1.0, f));
-    vEmis = r3.rgb * r3.w * em * fog * nearF;
+    // valve closed (a continuous projector past its emission window): the plume is fed no more and
+    // burns out within ~0.35 s (v1509.6-1510.0: the 28 m wall is gone well within half a second of
+    // the cut); only the soot the older puffs already carry stays behind as smoke
+    float burn = 1.0;
+    if (cont && (flags & F_RAMP) != 0) {
+      float cut = uTime - (r0.w + r5.z);
+      if (cut > 0.0) {
+        burn = 1.0 - smoothstep(0.0, 0.35, cut);
+        burn *= burn;
+      }
+    }
+    vEmis = r3.rgb * r3.w * em * fog * nearF * thinGain * burn;
     vLit = (r4.rgb * envLight(P) * 1.4 + r3.rgb * r3.w * 0.004) * fog;
     vPar = vec4(smoothstep(0.0, 0.03, f) * em * nearF, temp, soot, 0.0);
     // flame body opacity (Z1): dense rows / billowing walls occlude what lies behind (and each
     // other) instead of summing into a clipped white band
-    vOpac = r11.y;
+    vOpac = r11.y * burn;
   } else if (kind == 3 || kind == 4 || kind == 6) {
     float decay = max(r9.x, 0.01);
     float g = kind == 3 ? exp(-tau / decay)
             : kind == 4 ? (0.75 + 0.5 * rnd(key, uint(floor(uTime * 30.0)) + 40u))
                         : (0.85 + 0.3 * rnd(key, uint(floor(uTime * 12.0)) + 40u));
-    vEmis = r3.rgb * r3.w * g * em * fog * smoothstep(0.0, 0.02, tau) * (1.0 - smoothstep(0.7, 1.0, f)) * nearF;
+    vEmis = r3.rgb * r3.w * g * em * fog * smoothstep(0.0, 0.02, tau) * (1.0 - smoothstep(0.7, 1.0, f)) * nearF * thinGain;
     vPar = vec4(0.0, 0.0, 0.0, float(kind));
   } else {
     // smoke / CO2 / fog: lit by the show's light bus (+ optional self illumination from a burst)
     float fadeIn = smoothstep(0.0, max(r10.z, 0.001), f);
     float fadeOut = 1.0 - smoothstep(kind == 2 ? 0.35 : 0.55, 1.0, f);
-    float alpha = r3.w * fadeIn * fadeOut * em * nearF;
+    float alpha = r3.w * fadeIn * fadeOut * em * nearF * thinGain;
     vec3 light = envLight(P) * r11.x;
     vec3 self = vec3(0.0);
     if ((flags & F_SELFLIT) != 0) self = r4.rgb * exp(-tau / max(r9.x, 0.01));

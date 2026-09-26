@@ -103,15 +103,20 @@ void main() {
   int flags = int(r8.y + 0.5);
   uint seed = uint(r7.w + 0.5);
   bool cont = (flags & F_CONTINUOUS) != 0;
-  int nRec = int(r5.w + 0.5);
+  int nRec = max(int(r5.w + 0.5), 1);
+  // instance -> star through the emitter's index permutation (FxLayer): a layer over budget draws a
+  // stable, evenly spread, nested subset of it, with a little light compensation
+  i = particleIndex(i, sl.w, nRec);
+  float thinGain = n < nRec ? pow(float(n) / float(nRec), -0.3) : 1.0;
 
-  // derived indexing: crossette children, crackle pops and shed sparks share the star maths
+  // derived indexing: crossette children, crackle pops and shed sparks share the star maths (always
+  // from the recorded count: the direction / phase of a star never depends on how many are drawn)
   int bi = i;
-  int bn = n;
+  int bn = nRec;
   int sub = 0;
   int pops = 0;
   int shed = 0;
-  if ((flags & F_CROSSETTE) != 0) { bi = i / 4; bn = max(n / 4, 1); sub = i - bi * 4; }
+  if ((flags & F_CROSSETTE) != 0) { bi = i / 4; bn = max(nRec / 4, 1); sub = i - bi * 4; }
   if ((flags & F_POPS) != 0) {
     pops = max(int(r9.y + 0.5), 1);
     bi = i / pops; bn = max(nRec / pops, 1); sub = i - bi * pops;
@@ -345,7 +350,7 @@ void main() {
   vec3 hotCol = mix(mix(mix(chn, vec3(1.0), 0.5), vec3(1.0, 0.94, 0.82), goldC), mix(chn, vec3(1.0), 0.45), s2);
 
   // sparks die on the ground (no spark ever tunnels through the field)
-  I *= smoothstep(-0.3, 0.25, P.y);
+  I *= smoothstep(-0.3, 0.25, P.y) * thinGain;
   vec4 vp = viewMatrix * vec4(P, 1.0);
   float depth = -vp.z;
   if (depth < 0.15) CULL();
