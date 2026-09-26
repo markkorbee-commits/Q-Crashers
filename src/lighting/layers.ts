@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { BEAM_FRAG, BEAM_VERT, GLOW_FRAG, GLOW_VERT, POOL_FRAG, POOL_VERT, SPRITE_FRAG, SPRITE_VERT } from './shaders';
+import { BEAM_FRAG, BEAM_VERT, FLOOD_FRAG, FLOOD_VERT, GLOW_FRAG, GLOW_VERT, POOL_FRAG, POOL_VERT, SPRITE_FRAG, SPRITE_VERT } from './shaders';
 
 /**
  * GPU layers of the lighting system. Each layer is ONE instanced draw call whose per-instance
@@ -104,7 +104,7 @@ export class BeamLayer {
       name: 'LightBeams',
       vertexShader: BEAM_VERT,
       fragmentShader: BEAM_FRAG,
-      uniforms: { ...shared, uHaze: { value: 0.6 }, uNoise: { value: 1 }, uGain: { value: 1 }, uExtinct: { value: 0.035 } },
+      uniforms: { ...shared, uHaze: { value: 0.6 }, uNoise: { value: 1 }, uGain: { value: 1 }, uExtinct: { value: 0.035 }, uSoft: { value: 0 } },
       transparent: true,
       depthWrite: false,
       depthTest: true,
@@ -156,7 +156,7 @@ export class BeamLayer {
     this.count = 0;
   }
 
-  push(px: number, py: number, pz: number, r0: number, dx: number, dy: number, dz: number, len: number, r: number, g: number, b: number, tan: number, seed: number, grounded: number): void {
+  push(px: number, py: number, pz: number, r0: number, dx: number, dy: number, dz: number, len: number, r: number, g: number, b: number, tan: number, seed: number, grounded: number, gobo = 0): void {
     if (this.count >= this.cap) return;
     const o = this.count * 4;
     const P = this.aPos.array as Float32Array;
@@ -177,6 +177,7 @@ export class BeamLayer {
     C[o + 3] = tan;
     M[o] = seed;
     M[o + 1] = grounded;
+    M[o + 2] = gobo;
     this.count++;
   }
 
@@ -290,6 +291,7 @@ export class PoolLayer {
 export const SPR_LENS = 0;
 export const SPR_BLINDER = 1;
 export const SPR_STROBE = 2;
+export const SPR_BULB = 3;
 
 export class SpriteLayer {
   readonly mesh: THREE.Mesh;
@@ -465,6 +467,13 @@ export class FixtureBodies {
     this.heads!.setMatrixAt(i, m);
   }
 
+  /** fixture i has no body (the set models its housing): collapse both instances */
+  hide(i: number): void {
+    this.m.makeScale(0, 0, 0);
+    this.yokes!.setMatrixAt(i, this.m);
+    this.heads!.setMatrixAt(i, this.m);
+  }
+
   commit(): void {
     if (this.yokes) this.yokes.instanceMatrix.needsUpdate = true;
     if (this.heads) this.heads.instanceMatrix.needsUpdate = true;
@@ -485,32 +494,151 @@ export class FixtureBodies {
 // ------------------------------------------------------------------------------------------ wash glow
 /**
  * The set's decor floods scattering in the stage haze: an analytic glow volume around the stage
- * in the wash colour. One draw call; drawn from outside with the box's front faces (depth tested,
- * so the crowd / pillars in front occlude it) and from inside with its back faces.
+ * in the wash colour. One draw call per frame: drawn from outside with the box's front faces (depth
+ * tested, so the crowd / pillars in front occlude it) and from inside with its back faces. The two
+ * variants are two meshes with FIXED sides (both compiled / warmed at load) toggled by visibility:
+ * switching material.side at runtime would compile a new program mid-show.
  */
 export class WashGlow {
+  readonly group = new THREE.Group();
+  /** outside the box: front faces, depth tested */
   readonly mesh: THREE.Mesh;
+  /** camera inside the box: back faces, no depth test */
+  readonly inner: THREE.Mesh;
   readonly material: THREE.ShaderMaterial;
+  readonly innerMaterial: THREE.ShaderMaterial;
   private readonly min = new THREE.Vector3(-135, -1, -42);
   private readonly max = new THREE.Vector3(135, 58, 64);
-  private readonly cols: THREE.Vector3[];
+  /** per-blob colour x intensity: castle core, left side, right side, low front (floor spill) */
+  readonly cols: THREE.Vector3[];
 
   constructor() {
     const C = (x: number, y: number, z: number, w: number) => new THREE.Vector4(x, y, z, w);
     const S = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
     this.cols = [S(0, 0, 0), S(0, 0, 0), S(0, 0, 0), S(0, 0, 0)];
+    const uniforms = {
+      // the glow hugs the lit set (facade Z −12, towers ≤ 16 m, wing roots): a few metres of haze in
+      // front of the floods, not a 40 m tall coloured cloud over the whole frame
+      uBlobC: { value: [C(0, 11, -6, 1), C(-44, 10, -8, 0.7), C(44, 10, -8, 0.7), C(0, 3.5, 8, 0.1)] },
+      uBlobS: { value: [S(27, 9.5, 9), S(20, 8.5, 9), S(20, 8.5, 9), S(60, 4, 12)] },
+      uBlobCol: { value: this.cols },
+      uBoxMin: { value: this.min },
+      uBoxMax: { value: this.max },
+      uScale: { value: 1 },
+    };
+    const make = (inside: boolean) =>
+      new THREE.ShaderMaterial({
+        name: inside ? 'WashGlowInside' : 'WashGlow',
+        vertexShader: GLOW_VERT,
+        fragmentShader: GLOW_FRAG,
+        uniforms,
+        transparent: true,
+        depthWrite: false,
+        depthTest: !inside,
+        blending: THREE.AdditiveBlending,
+        side: inside ? THREE.BackSide : THREE.FrontSide,
+        fog: false,
+        toneMapped: false,
+      });
+    this.material = make(false);
+    this.innerMaterial = make(true);
+    const size = new THREE.Vector3().subVectors(this.max, this.min);
+    const geo = new THREE.BoxGeometry(size.x, size.y, size.z).translate((this.min.x + this.max.x) / 2, (this.min.y + this.max.y) / 2, (this.min.z + this.max.z) / 2);
+    this.mesh = new THREE.Mesh(geo, this.material);
+    this.inner = new THREE.Mesh(geo, this.innerMaterial);
+    for (const m of [this.mesh, this.inner]) {
+      m.frustumCulled = false;
+      m.renderOrder = 8;
+    }
+    this.mesh.name = 'WashGlow';
+    this.inner.name = 'WashGlowInside';
+    this.inner.visible = false;
+    this.group.name = 'WashGlow';
+    this.group.add(this.mesh, this.inner);
+  }
+
+  /** colour (linear) x intensity per blob; `cam` picks the variant */
+  update(cam: THREE.Vector3, wash: THREE.Color, washI: number, floor: THREE.Color, floorI: number, gain: number): void {
+    const inside = cam.x > this.min.x && cam.x < this.max.x && cam.y > this.min.y && cam.y < this.max.y && cam.z > this.min.z && cam.z < this.max.z;
+    const k = washI * gain;
+    for (let i = 0; i < 3; i++) this.cols[i].set(wash.r * k, wash.g * k, wash.b * k);
+    const kf = floorI * gain;
+    this.cols[3].set(floor.r * kf, floor.g * kf, floor.b * kf);
+    let lit = false;
+    for (let i = 0; i < 4 && !lit; i++) lit = this.cols[i].x + this.cols[i].y + this.cols[i].z > 1e-4;
+    this.mesh.visible = lit && !inside;
+    this.inner.visible = lit && inside;
+  }
+
+  dispose(): void {
+    this.mesh.geometry.dispose();
+    this.material.dispose();
+    this.innerMaterial.dispose();
+  }
+}
+
+// ------------------------------------------------------------------------------------------ flood glow
+/** blob slots of the flood / scatter volume (fixed geometry, colours written per frame) */
+export const FB_STAGE = 0;
+export const FB_STAGE_HIGH = 1;
+export const FB_SIDE_L = 2;
+export const FB_SIDE_R = 3;
+export const FB_FIELD = 4;
+export const FB_FIELD_FAR = 5;
+export const FB_BACK = 6;
+export const FB_BOOTH = 7;
+export const FLOOD_BLOBS = 8;
+
+/**
+ * Light floods and dense lit haze ("the whole frame glows pink / red / teal / blue"): an analytic
+ * gaussian haze volume integrated along each view ray in DEPTH SLICES. Every slice is a camera-facing
+ * quad at a fixed view depth d_i, depth tested against the scene, that adds the in-scatter of the ray
+ * segment [d_i, d_i+1] — so a pillar, a person or the stage in front occludes the glow behind it, the
+ * ground cuts it off and the air right in front of the lens stays clear. One instanced draw call
+ * (N slices), drawn only while a flood / scatter glow is lit.
+ */
+export class FloodGlow {
+  readonly mesh: THREE.Mesh;
+  readonly material: THREE.ShaderMaterial;
+  private geo: THREE.InstancedBufferGeometry | null = null;
+  readonly cols: THREE.Vector3[] = [];
+  private readonly tan = new THREE.Vector2(1, 1);
+  slices = 0;
+
+  constructor() {
+    const C = (x: number, y: number, z: number, w: number) => new THREE.Vector4(x, y, z, w);
+    const S = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
+    for (let i = 0; i < FLOOD_BLOBS; i++) this.cols.push(S(0, 0, 0));
+    const centres: THREE.Vector4[] = [];
+    const sig: THREE.Vector3[] = [];
+    // [FB_*] centre (w = weight) and sigma per axis (density exp(-|d/sigma|^2))
+    centres[FB_STAGE] = C(0, 12, -8, 1);
+    sig[FB_STAGE] = S(46, 15, 20);
+    centres[FB_STAGE_HIGH] = C(0, 30, -18, 0.55);
+    sig[FB_STAGE_HIGH] = S(80, 22, 34);
+    centres[FB_SIDE_L] = C(-64, 6, -1, 0.9);
+    sig[FB_SIDE_L] = S(26, 7, 10);
+    centres[FB_SIDE_R] = C(64, 6, -1, 0.9);
+    sig[FB_SIDE_R] = S(26, 7, 10);
+    // field: brightest just in front of the stage (the pyro / flood sources), thinning out towards FOH
+    centres[FB_FIELD] = C(0, 4, 20, 1.2);
+    sig[FB_FIELD] = S(72, 12, 28);
+    centres[FB_FIELD_FAR] = C(0, 3, 95, 0.4);
+    sig[FB_FIELD_FAR] = S(95, 10, 60);
+    centres[FB_BACK] = C(0, 4.5, -4.5, 1);
+    sig[FB_BACK] = S(12, 4, 3.5);
+    centres[FB_BOOTH] = C(0, 3.2, -4, 1);
+    sig[FB_BOOTH] = S(3.5, 2.5, 3.5);
     this.material = new THREE.ShaderMaterial({
-      name: 'WashGlow',
-      vertexShader: GLOW_VERT,
-      fragmentShader: GLOW_FRAG,
+      name: 'FloodGlow',
+      vertexShader: FLOOD_VERT,
+      fragmentShader: FLOOD_FRAG,
       uniforms: {
-        // the glow hugs the lit set (facade Z −12, towers ≤ 16 m, wing roots): a few metres of haze in
-        // front of the floods, not a 40 m tall coloured cloud over the whole frame
-        uBlobC: { value: [C(0, 11, -6, 1), C(-44, 10, -8, 0.7), C(44, 10, -8, 0.7), C(0, 3.5, 8, 0.1)] },
-        uBlobS: { value: [S(27, 9.5, 9), S(20, 8.5, 9), S(20, 8.5, 9), S(60, 4, 12)] },
+        uBlobC: { value: centres },
+        uBlobS: { value: sig },
         uBlobCol: { value: this.cols },
-        uBoxMin: { value: this.min },
-        uBoxMax: { value: this.max },
+        uTan: { value: this.tan },
+        uScale: { value: 1 },
       },
       transparent: true,
       depthWrite: false,
@@ -520,32 +648,53 @@ export class WashGlow {
       fog: false,
       toneMapped: false,
     });
-    const size = new THREE.Vector3().subVectors(this.max, this.min);
-    const geo = new THREE.BoxGeometry(size.x, size.y, size.z).translate((this.min.x + this.max.x) / 2, (this.min.y + this.max.y) / 2, (this.min.z + this.max.z) / 2);
-    this.mesh = new THREE.Mesh(geo, this.material);
+    this.mesh = new THREE.Mesh(new THREE.BufferGeometry(), this.material);
     this.mesh.frustumCulled = false;
-    this.mesh.renderOrder = 8;
-    this.mesh.name = 'WashGlow';
+    this.mesh.renderOrder = 7;
+    this.mesh.name = 'FloodGlow';
+    this.mesh.visible = false;
   }
 
-  /** colour (linear) x intensity per blob; `cam` decides front/back face rendering */
-  update(cam: THREE.Vector3, wash: THREE.Color, washI: number, floor: THREE.Color, floorI: number, gain: number): void {
-    const inside = cam.x > this.min.x && cam.x < this.max.x && cam.y > this.min.y && cam.y < this.max.y && cam.z > this.min.z && cam.z < this.max.z;
-    const side = inside ? THREE.BackSide : THREE.FrontSide;
-    if (this.material.side !== side) {
-      this.material.side = side;
-      this.material.depthTest = !inside;
-      this.material.needsUpdate = true;
+  /** (re)build the slice set: view-depth edges, geometric from `near` to `far` */
+  build(n: number, near = 4, far = 620): void {
+    this.geo?.dispose();
+    const base = new THREE.PlaneGeometry(2, 2);
+    const geo = new THREE.InstancedBufferGeometry();
+    geo.index = base.index;
+    geo.setAttribute('position', base.getAttribute('position'));
+    const a = new Float32Array(n * 2);
+    for (let i = 0; i < n; i++) {
+      a[i * 2] = near * Math.pow(far / near, i / n);
+      a[i * 2 + 1] = near * Math.pow(far / near, (i + 1) / n);
     }
-    const k = washI * gain;
-    for (let i = 0; i < 3; i++) this.cols[i].set(wash.r * k, wash.g * k, wash.b * k);
-    const kf = floorI * gain;
-    this.cols[3].set(floor.r * kf, floor.g * kf, floor.b * kf);
-    this.mesh.visible = k + kf > 1e-4;
+    geo.setAttribute('aSlice', new THREE.InstancedBufferAttribute(a, 2));
+    geo.instanceCount = n;
+    this.geo = geo;
+    this.mesh.geometry = geo;
+    this.slices = n;
+  }
+
+  /** after writing `cols`: visibility */
+  update(): void {
+    let lit = false;
+    for (let i = 0; i < FLOOD_BLOBS && !lit; i++) lit = this.cols[i].x + this.cols[i].y + this.cols[i].z > 1e-4;
+    this.mesh.visible = lit && this.slices > 0;
+  }
+
+  /**
+   * Fit the slice quads to the camera that is about to draw (call from onBeforeRender: the camera rig
+   * changes fov / aspect after the show systems ran). Reads the projection matrix, so zoom and view
+   * offsets are included; a margin keeps the quads over the whole frustum.
+   */
+  fit(cam: THREE.Camera): void {
+    const e = (cam as THREE.PerspectiveCamera).projectionMatrix.elements;
+    const sx = Math.abs(e[0]) > 1e-6 ? (1 + Math.abs(e[8])) / Math.abs(e[0]) : 1;
+    const sy = Math.abs(e[5]) > 1e-6 ? (1 + Math.abs(e[9])) / Math.abs(e[5]) : 1;
+    this.tan.set(sx * 1.06, sy * 1.06);
   }
 
   dispose(): void {
-    this.mesh.geometry.dispose();
+    this.geo?.dispose();
     this.material.dispose();
   }
 }

@@ -37,6 +37,11 @@ export const T_PILLAR = 1 << 10; // obelisk capitals (delay towers)
 export const T_PLINTH = 1 << 11; // obelisk plinths (blinders)
 export const T_FOH = 1 << 12; // FOH / camera platform
 export const T_ALL = (1 << 13) - 1;
+// ---- explicit-only positions: never part of `all` / untargeted cues, only lit when a cue names them
+export const T_BACK = 1 << 13; // backlight blinders on the porch front, behind the performers (face the audience)
+export const T_BOOTH = 1 << 14; // single spot / blinder on the DJ booth (deck centre)
+export const T_ARCH = 1 << 15; // narrow downlights in the DJ portal arch crown
+export const T_EXPLICIT = T_BACK | T_BOOTH | T_ARCH;
 
 export const GROUP_TAGS = [T_SPAR | T_ARM | T_ROOF | T_TOWER | T_DRAGON | T_PA | T_SIDE | T_ARMEND | T_CORNER, T_DECK, T_PILLAR | T_PLINTH, T_FOH];
 
@@ -61,21 +66,37 @@ const TARGET_TAGS: Record<string, number> = {
   wing_tips: T_SPAR,
   deck: T_DECK,
   deck_front: T_DECK,
-  deck_back: T_DECK,
+  // deck back = the audience-facing backlight row behind the performers (porch front)
+  deck_back: T_BACK,
+  backlight: T_BACK,
+  backlights: T_BACK,
   roof: T_ROOF | T_TOWER | T_DRAGON | T_PA,
   towers_top: T_TOWER,
+  tower_torches: T_TOWER,
   castle: T_ROOF | T_TOWER,
   dragon: T_DRAGON,
   dragon_head: T_DRAGON,
   dragon_mouth: T_DRAGON,
   dragon_eyes: T_DRAGON,
   speaker_hangs: T_PA,
+  hang_glitter: T_PA,
   sides: T_SIDE | T_CORNER | T_ARM | T_ARMEND,
   side_sections: T_SIDE | T_CORNER,
+  // validator-legal anchor names of the side sections / arms (design-bible pyro groups)
+  side_front: T_SIDE | T_CORNER,
+  side_rampart: T_SIDE,
+  corner_fireballs: T_CORNER,
   corners: T_CORNER,
   arms: T_ARM | T_ARMEND,
+  arm_posts: T_ARM,
+  arm_ends: T_ARMEND,
   laser_stage: T_ROOF | T_TOWER | T_SIDE | T_CORNER,
   stage: GROUP_TAGS[0] | GROUP_TAGS[1],
+  // the DJ portal: arch-crown downlights (looks) + the booth spot (blinder)
+  dj_booth: T_ARCH | T_BOOTH,
+  arch: T_ARCH,
+  portal: T_ARCH,
+  booth: T_BOOTH,
 };
 
 /** Resolved cue target filter: tag mask + optional side filter (-1 left, 1 right, 2 centre, 0 none). */
@@ -103,7 +124,8 @@ export function parseTargets(targets: readonly string[], groups: unknown, out: T
       const i = GROUP_NAMES.indexOf(name as (typeof GROUP_NAMES)[number]);
       if (i >= 0) gm |= GROUP_TAGS[i];
     }
-    if (gm) tags = tags && tags !== T_ALL ? tags & gm : gm;
+    // explicit-only positions (arch, booth, backlights) are not part of any group: keep them
+    if (gm) tags = tags && tags !== T_ALL ? (tags & gm) | (tags & T_EXPLICIT) : gm;
   }
   out.tags = tags || T_ALL;
   out.side = center ? 2 : left && !right ? -1 : right && !left ? 1 : 0;
@@ -173,6 +195,10 @@ export interface Fixture {
   rest: THREE.Vector3;
   /** look-resolution class (see classifyFixtures) */
   cls: number;
+  /** fixed focus point of a static downlight (arch crown): the looks aim it there */
+  focus: THREE.Vector3 | null;
+  /** draw a moving-head body (false: the set models the housing, e.g. the arch cans) */
+  body: boolean;
 }
 
 /** A set of fixtures that always resolve to the same look (same group, position tag, side band). */
@@ -276,6 +302,43 @@ const CRYSTAL_TIP = 12.8;
 const CAPITAL_TOP = 9.6;
 /** FOH / camera platform (0, 0.5, 90), 12.8 x 6 m */
 const FOH = v3(0, 0.5, 90);
+/**
+ * DJ portal (src/stage/layout.ts): equilateral pointed arch 5.4 m wide, apex Y 7.2, in the porch screen
+ * wall whose front face is at Z −6 (0.9 m thick); deck Y 1.9. Backlight row on the porch front at
+ * head height behind the performers, clear of the portal frame (±3.3) and the stair arches.
+ */
+const PORTAL = { w: 5.4, apex: 7.2, frontZ: -6, wallT: 0.9, deckY: 1.9, backlightY: 4.3 };
+const BACKLIGHT_X = [4.1, 6.3, 8.5, 10.7];
+const ARCH_SPOTS = 7;
+
+/** downlight positions in the arch soffit: evenly spaced along the upper arch, 0.25 m inside the opening */
+function archSpots(): THREE.Vector3[] {
+  const { w, apex, frontZ, wallT } = PORTAL;
+  const r = w;
+  const half = w / 2;
+  const springY = apex - r * Math.sin(Math.PI / 3);
+  // the left half of the arch is an arc of radius w centred on the right springing (half, springY):
+  // angle π at the left springing, 2π/3 at the apex
+  const at = (u: number, s: number) => {
+    const a = Math.PI - (Math.PI / 3) * u;
+    const x = half + r * Math.cos(a);
+    const y = springY + r * Math.sin(a);
+    // inward = towards the arc centre (half, springY)
+    const ix = (half - x) / r;
+    const iy = (springY - y) / r;
+    return v3(s * (x + ix * 0.25), y + iy * 0.25, frontZ - wallT * 0.45);
+  };
+  const out: THREE.Vector3[] = [];
+  const n = ARCH_SPOTS;
+  const u0 = 0.36;
+  for (let k = 0; k < n; k++) {
+    // -1..1 across the arch, mapped onto the two arcs (u0 at the sides, 1 at the apex)
+    const q = n > 1 ? (k / (n - 1)) * 2 - 1 : 0;
+    const u = u0 + (1 - u0) * (1 - Math.abs(q));
+    out.push(at(u, q < 0 ? -1 : 1));
+  }
+  return out;
+}
 
 export const RIG_SOURCES: AnchorName[] = ['fixtures_truss', 'fixtures_floor', 'pillars_top', 'pillars_base', 'delay_towers', 'foh', 'wing_left', 'wing_right', 'towers_top', 'dragon_head'];
 
@@ -344,6 +407,8 @@ export function buildRig(anchors: Anchors, density: number, own?: Map<string, TH
       sel: 0,
       rest: new THREE.Vector3(),
       cls: 0,
+      focus: null,
+      body: true,
     });
   };
   /** a row of n fixtures centred on c along a (pitch m) — one cluster */
@@ -453,6 +518,18 @@ export function buildRig(anchors: Anchors, density: number, own?: Map<string, TH
   const fohHang = foh.y > 4;
   row(G_FIELD, T_FOH, cnt(6, 2), v3(foh.x, foh.y + (fohHang ? -0.5 : 0.4), foh.z - 2.7), X, 2, MZ, fohHang);
 
+  // ------------------------------------------------------------------------ DJ portal arch crown
+  // 7 narrow downlights hung in the soffit of the pointed portal arch (video 653.75–711: a ring of spots
+  // in the arch crown shining down onto the performers). Explicit-only (target `dj_booth` / `arch`), all
+  // quality levels (7 heads), no moving-head body (the set models the cans).
+  for (const [k, p] of archSpots().entries()) {
+    add(G_TRUSS, T_ARCH, p, Z, true, k, ARCH_SPOTS, cluster);
+    const f = fixtures[fixtures.length - 1];
+    f.body = false;
+    f.focus = v3(p.x * 0.45, PORTAL.deckY, PORTAL.frontZ + 2.6);
+  }
+  cluster++;
+
   // ------------------------------------------------------------------------ strobes & blinders
   // deck lip 40
   for (let k = 0; k < 40; k++) strobe(T_DECK, v3(-36.2 + (72.4 * (k + 0.5)) / 40, 2.0, 0.05), Z);
@@ -478,6 +555,10 @@ export function buildRig(anchors: Anchors, density: number, own?: Map<string, TH
   for (let k = 0; k < 24; k++) blinder(T_DECK, v3(-35.5 + (71 * (k + 0.5)) / 24, 2.6, -0.3), Z);
   // obelisks: one blinder each under the capital, facing +Z (with the delay arrays)
   for (const p of pillars) blinder(T_PLINTH, v3(p.top.x, p.capitalY - 1.4, p.top.z + 1.45), Z);
+  // backlight row on the porch front, behind the performers, facing the audience (explicit: `deck_back`)
+  for (const x of BACKLIGHT_X) for (const s of [-1, 1]) blinder(T_BACK, v3(s * x, PORTAL.backlightY, PORTAL.frontZ + 0.3), Z);
+  // the DJ booth spot at the foot of the portal (explicit: `dj_booth` / `booth`)
+  blinder(T_BOOTH, v3(0, PORTAL.deckY + 1.35, PORTAL.frontZ - 0.35), Z);
 
   // fan "diverge" coordinate per cluster: position along the fan axis relative to the cluster centre
   computeDiverge(fixtures);
@@ -494,6 +575,8 @@ export function buildRig(anchors: Anchors, density: number, own?: Map<string, TH
       .multiplyScalar(Math.cos(0.3))
       .addScaledVector(f.fwd, Math.sin(0.3))
       .normalize();
+    // static downlights rest on their focus (no swing through the sky when they fade in)
+    if (f.focus) f.rest.subVectors(f.focus, f.pos).normalize();
   }
 
   const classes = classifyFixtures(fixtures);
