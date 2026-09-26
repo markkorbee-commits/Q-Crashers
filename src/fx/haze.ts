@@ -37,6 +37,7 @@ uniform vec4 uHazePyro; // gain, knee stage, knee field, knee sky
 uniform vec3 uHazeTint; // colour of the smoke hanging in the air (albedo, from recent smoke cues)
 uniform vec2 uHazeSite; // site glow (atmos.glow) gain, knee lift per unit of glow luminance
 uniform float uHazeKeep; // share of the sprites the preset draws (ranked)
+uniform float uCloseUp; // 0..1: the camera is at the deck (performer close-ups)
 varying vec2 vUv;
 varying vec3 vLit;
 varying float vAlpha;
@@ -73,6 +74,9 @@ void main() {
   float nearLo = mix(max(size * 0.35, 9.0), 4.0, uSiteSmoke);
   float nearF = zone == 1 ? smoothstep(nearLo, size * 1.2 + 14.0 - 8.0 * uSiteSmoke, depth)
                           : smoothstep(size * 0.2, size * 0.9 + 6.0, depth);
+  // a camera at the deck (the performer close-ups, v362 / v411) sits INSIDE the lit stage haze: it
+  // hangs around the lens as a milky veil instead of clearing in front of it
+  if (zone == 0) nearF = max(nearF, uCloseUp * 0.85 * smoothstep(0.8, 5.0, depth));
   float dens = zone == 0 ? uDensity.x : (zone == 1 ? uDensity.y : uDensity.z);
   vAlpha = dens * edge * nearF * (0.7 + 0.6 * fract(aPar.w * 91.7));
   // light scattered by the haze: ambient + a damped share of the stage rig / wash / flashes
@@ -92,7 +96,7 @@ void main() {
   // brightness clamp (soft knee): haze may glow, but never brighter than a dim fraction of the
   // sources it scatters — so the set and the beams stay the brightest things in the frame
   float Lm = max(light.r, max(light.g, light.b));
-  float knee = (zone == 2 ? 0.35 : 0.22) + dot(site, vec3(0.2126, 0.7152, 0.0722)) * uHazeSite.y;
+  float knee = (zone == 2 ? 0.35 : 0.22 + (zone == 0 ? 0.2 * uCloseUp : 0.0)) + dot(site, vec3(0.2126, 0.7152, 0.0722)) * uHazeSite.y;
   if (Lm > knee) light *= (knee + (Lm - knee) * 0.25) / Lm;
   // the pyro light field lights the haze where it burns (per corner: a flame wall at one end of a
   // 26 m sprite lights that end), with a much higher knee than the rig: the smoke around a fire
@@ -196,6 +200,7 @@ export class HazeField {
       // site glow (atmos.glow) on the haze: gain, knee lift per unit of glow luminance
       uHazeSite: { value: new THREE.Vector2(1.6, 3) },
       uHazeKeep: { value: 1.01 },
+      uCloseUp: { value: 0 },
     };
     const mat = new THREE.ShaderMaterial({
       name: 'fx-haze',
@@ -229,6 +234,11 @@ export class HazeField {
   /** albedo tint of the haze (coloured smoke from recent smoke cannons), luminance ~1 */
   setTint(c: THREE.Color): void {
     (this.uniforms.uHazeTint.value as THREE.Color).copy(c);
+  }
+
+  /** 0..1: how close the camera is to the lit deck (the stage haze veils the lens at 1) */
+  setCloseUp(k: number): void {
+    this.uniforms.uCloseUp.value = Math.max(0, Math.min(1, k));
   }
 
   setDensity(stage: number, field: number, sky: number): void {

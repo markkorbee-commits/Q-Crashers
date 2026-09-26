@@ -60,10 +60,16 @@ vec3 wlSky( vec3 r ) {
 `;
 
 /** Per-pillar light gains (HDR) — tuned against the Endshow frames (lanterns read as bright points
- * with coloured pools on the floor, shafts glow orange from the base). */
-const LAMP_GAIN = 70;
-const SPILL_GAIN = 90;
-const STAGE_GAIN = 5200;
+ * with coloured pools on the floor, shafts glow orange from the base). Round 4: the paving is pale now
+ * (albedo ≈ 0.4, was ≈ 0.22), the gains keep the pools at their measured level. */
+const LAMP_GAIN = 55;
+const SPILL_GAIN = 65;
+/**
+ * the stage as one broad soft source. Round 4 (similarity metric against the official video: our floor
+ * was 2–5x the video's in 54/64 moments, with a floor that is now ~1.8x paler): the camera exposes for
+ * the LEDs, the set's light on the grounds reads dark except at the deck lip (was 5200)
+ */
+const STAGE_GAIN = 2800;
 /** the set's spill with the rig dark (worklights, LED art reflected by the deck): a trace only */
 const STAGE_IDLE = 0.03;
 /**
@@ -73,7 +79,7 @@ const STAGE_IDLE = 0.03;
  * moments): the light of the show lives in the smoke and the air; the ground under it reads near-black
  * except close to the sources. The spatial part of the pyro light on the floor is the fx FieldLight layer.
  */
-const FLASH_GAIN = 1800;
+const FLASH_GAIN = 1100;
 /**
  * Pyro light is burning metal (≈ 2000–2500 K) and the camera is balanced for the LEDs: on the video a
  * gold gerb wall lights the ground deep ORANGE (measured on the field at v600.25: linear G/R ≈ 0.25,
@@ -96,7 +102,7 @@ const BOUNCE_GAIN = 1.6;
  * itself (sky dome, fog colour, haze) keeps the full bounce, the ground under it a fraction, over a
  * tighter radius (video 1438.5 / 607 / 264.75: bright gerbs and glowing smoke over a dark field)
  */
-const WORLD_BOUNCE_K = 0.3;
+const WORLD_BOUNCE_K = 0.2;
 /** half-strength radius (m) of the bounce on the world materials around the flash centre (+ 0.6 x the spread of the sources) */
 const WORLD_BOUNCE_R = 70;
 /** multiple scattering in a coloured smoke cloud saturates its light further (gold → orange, pink → red) */
@@ -106,7 +112,7 @@ const BOUNCE_WARM = 3;
  * SMOKE (haze, sky, fog carry it); the lawn and the paving under it only pick up a trace (was 6: the
  * banks glowed green / red with every smoke scene, the video's grounds stay dark)
  */
-const GLOW_GAIN = 1.2;
+const GLOW_GAIN = 0.8;
 
 const tmp = new THREE.Color();
 

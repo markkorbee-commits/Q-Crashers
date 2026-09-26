@@ -662,11 +662,12 @@ void main() {
   vec3 col = wlSky( R ) * F;
   // moon glitter path
   col += vec3( 1.0, 0.8, 0.6 ) * pow( max( dot( R, uWMoonDir ), 0.0 ), 300.0 ) * uWMoonI * 0.25;
-  // reflected glow of the stage and of pyro flashes (broad lobes)
+  // reflected glow of the stage and of pyro flashes (broad lobes; the coefficients undo the round-4
+  // ground-light gains of worldLights: a mirror image of the emitters keeps its brightness)
   vec3 sd = normalize( uWStage.xyz - vW );
-  col += uWStageCol * 0.00002 * pow( max( dot( R, sd ), 0.0 ), 24.0 );
+  col += uWStageCol * 0.000037 * pow( max( dot( R, sd ), 0.0 ), 24.0 );
   vec3 fd = normalize( uWFlash.xyz - vW );
-  col += uWFlashCol * 0.00003 * pow( max( dot( R, fd ), 0.0 ), 12.0 );
+  col += uWFlashCol * 0.00008 * pow( max( dot( R, fd ), 0.0 ), 12.0 );
   col += vec3( 0.004, 0.006, 0.006 ) * ( 1.0 - F );
   gl_FragColor = vec4( col, 1.0 );
   #include <fog_fragment>

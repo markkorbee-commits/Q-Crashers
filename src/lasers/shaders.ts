@@ -365,7 +365,12 @@ void main() {
     float above = step(0.0, nvs * sign(Nn.y + 1e-4));
     float faceOn = smoothstep(0.25, 0.7, nv) * above;
     float t3 = mix(0.12 + 1.7 * tex * tex, tex * 0.9 + 0.3, faceOn);
-    float haze = uHaze * hazeProfile(vWorld.y) * t3;
+    // the air part thins from the stage cloud to the field air (as for the beams: the stage haze drifts
+    // back over the set, the far field holds little of it) and the low fog adds half its density here —
+    // its lit tops are the sea layer (pushSea). A sheet over the far field is a faint veil, not a lit
+    // floor (video v1389 / v1463: violet near the deck lip, the far field dark)
+    float yS = max(vWorld.y, 0.0);
+    float haze = uHaze * ((0.8 * exp(-yS / 34.0) + 0.2 * exp(-yS / 170.0)) * stageHaze(vWorld) + 0.5 * uLowHaze * exp(-yS / 4.5)) * t3;
     // Near its plane (and from below) the eye / camera exposes for the blinding edge-on line: the rest
     // of the plane, 10–30x dimmer, falls away into the dark (f017 / f147: a thin crisp band in a dark
     // scene, not a lit floor or a coloured sky). From a drone high above, the whole sea stays readable.
