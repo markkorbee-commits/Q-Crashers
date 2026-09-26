@@ -28,7 +28,8 @@ Verify with the flag ON: log per-frame mean luminance of the Show camera and fir
 moments (e.g. 411-420, 1243-1250, 1389-1395, 1536-1545) and show that frame-to-frame luminance changes ≥ 10 % do not
 repeat faster than 3 Hz; save the logs and a short report in $ENDSHOW_DATA/work/r8_flash/.
 
-Files you own: src/fx/core/**, src/fireworks/**, src/stage/look/LookResolver.ts, src/stage/DragonCrown.ts,
-src/stage/materials/LedMaterial.ts, src/lasers/**, src/lighting/** (only if a gap remains there), src/core/App.ts
-(the flag getter only, if needed).
-NOT: src/ui/**, src/player/**, src/camera/**, src/audio/**, src/postfx/**, src/world/**, public/show/*.json.
+Files you own: src/fx/core/** EXCEPT placement.ts and FxLights.ts (the pyro group's this round), src/fireworks/**,
+src/stage/look/LookResolver.ts, src/stage/DragonCrown.ts, src/stage/materials/LedMaterial.ts, src/lasers/**,
+docs/show-format-ext/fireworks.md, docs/show-format-ext/lasers.md.
+NOT: src/lighting/** (the lighting group's; it already honours the flag — gaps there go into contractRequests),
+src/ui/**, src/player/**, src/camera/**, src/audio/**, src/postfx/**, src/world/**, src/core/**, public/show/*.json.
