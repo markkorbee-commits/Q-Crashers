@@ -173,6 +173,14 @@ export interface PerceptionParams {
   hueShift: number;
   /** 0..1 generic motion blur along camera motion */
   motionBlur: number;
+  /** -1..1 colour temperature: > 0 warm (XTC glow), < 0 cool (comedown, ketamine); 0 = normal */
+  warmth: number;
+  /** 0..1 soft glow around lit areas (keeps blacks black, unlike the veil) */
+  glow: number;
+  /** 0..1 nausea tint (green-grey) */
+  tint: number;
+  /** 0..1 the world recedes: the picture shrinks towards the centre into a dark surround (ketamine) */
+  recede: number;
   /** <0 = off; otherwise screen x (0..1) of the compare split: left of it sober, right altered */
   split: number;
 }

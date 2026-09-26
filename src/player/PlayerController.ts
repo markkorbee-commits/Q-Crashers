@@ -30,6 +30,11 @@ const GRAVITY = 9.81;
 const TAU = Math.PI * 2;
 /** hard cap on camera roll from sway / bob / jostle (1°): rolled horizons cause simulator sickness */
 const MAX_ROLL = 0.0175;
+/** exaggerated perception preset: the roll cap grows with intoxication sway, to about 3° at full sway */
+const STRONG_ROLL_PER_SWAY = 0.035;
+/** out-of-body drift (ketamine K-hole, motor.detach = 1): the eye floats this far up and back (~1.5 m) */
+const DETACH_UP = 0.9;
+const DETACH_BACK = 1.2;
 /** eye height (m) when sitting / slumped on the ground (perception motor.seated) */
 const SEATED_EYE = 1.0;
 /** localStorage keys (per-viewer conveniences, never required) */
@@ -195,7 +200,7 @@ export class PlayerController implements System {
   private dipV = 0;
   private current: Interactable | null = null;
   private currentLabel: string | null = null;
-  private perception: { motor?: MotorEffects } | null | undefined;
+  private perception: { motor?: MotorEffects; strength?: string } | null | undefined;
   private terrain: HeightProvider | null | undefined;
   private crowd: DensityProvider | null | undefined;
 
@@ -413,8 +418,13 @@ export class PlayerController implements System {
   // ------------------------------------------------------------------------------------------
 
   private motor(): MotorEffects {
-    if (this.perception === undefined) this.perception = (this.app.get('perception') as { motor?: MotorEffects } | undefined) ?? null;
+    if (this.perception === undefined) this.perception = (this.app.get('perception') as { motor?: MotorEffects; strength?: string } | undefined) ?? null;
     return this.perception?.motor ?? SOBER;
+  }
+
+  /** the perception system's exaggerated preset (larger, faster sway and head motion) */
+  private strongPerception(): boolean {
+    return this.perception?.strength === 'strong';
   }
 
   private densityAt(x: number, z: number): number {
@@ -616,6 +626,10 @@ export class PlayerController implements System {
     const sway = motor.sway * m;
     const bal = motor.balance * m;
     const jit = motor.lookJitter * m;
+    // exaggerated preset (round 7): a wider, faster sway and head motion; the realistic preset keeps round 6
+    const strong = this.strongPerception() && !this.reduced;
+    const eyeSway = strong ? 0.1 : 0.07;
+    const detach = motor.detach ?? 0;
     const idle = (1 - this.bobEnv) * m; // standing people breathe and shift their weight a little
     // standing in a crowd / unsteady on your feet: the upper body sways around planted feet
     // (a pure function of real time and the instantaneous density: no accumulated drift)
@@ -624,7 +638,7 @@ export class PlayerController implements System {
     const o = this.eyeOffset;
     o.x =
       ampL * Math.sin(ph) +
-      sway * 0.07 * wobble(t * 0.37, 1) +
+      sway * eyeSway * wobble(t * 0.37, 1) +
       idle * 0.004 * wobble(t * 0.21, 13) +
       still * bal * 0.22 * wobble(t * 0.43, 7) +
       press * 0.035 * wobble(t * 1.7, 11);
@@ -638,13 +652,24 @@ export class PlayerController implements System {
       sway * 0.02 * wobble(t * 0.29, 2) +
       idle * 0.0025 * Math.sin(t * 1.45) -
       0.06 * trip -
-      (PlayerController.EYE_HEIGHT - SEATED_EYE) * seated;
-    o.z = press * 0.045 * wobble(t * 1.3, 5);
+      (PlayerController.EYE_HEIGHT - SEATED_EYE) * seated +
+      // out-of-body (ketamine K-hole): the eye floats up and back behind the head (perception scales it
+      // down to 0.3 m under reduced motion)
+      DETACH_UP * detach;
+    o.z = press * 0.045 * wobble(t * 1.3, 5) + DETACH_BACK * detach;
     const r = this.eyeRot;
-    r.x = 0.0015 * Math.sin(2 * ph) * bob + sway * 0.012 * wobble(t * 0.31, 5) + jit * 0.004 * wobble(t * 6.1, 8) + idle * 0.0006 * wobble(t * 0.33, 14) - 0.052 * trip;
-    r.y = sway * 0.02 * wobble(t * 0.19, 4) + jit * 0.005 * wobble(t * 5.3, 9) + idle * 0.0008 * wobble(t * 0.17, 15);
-    // roll is the most nauseating component: never more than 1°
-    r.z = clamp(0.0022 * Math.sin(ph) * bob + sway * 0.012 * wobble(t * 0.23, 3) + crowd01 * m * 0.004 * wobble(t * 1.9, 12), -MAX_ROLL, MAX_ROLL);
+    if (strong) {
+      r.x = 0.0015 * Math.sin(2 * ph) * bob + sway * 0.02 * wobble(t * 0.9, 5) + jit * 0.006 * wobble(t * 6.1, 8) + idle * 0.0006 * wobble(t * 0.33, 14) - 0.052 * trip;
+      r.y = sway * 0.045 * wobble(t * 0.6, 4) + jit * 0.008 * wobble(t * 5.3, 9) + idle * 0.0008 * wobble(t * 0.17, 15);
+      // the roll cap grows with the sway (about 3° at full sway); reduced motion keeps 1°
+      const cap = MAX_ROLL + STRONG_ROLL_PER_SWAY * sway;
+      r.z = clamp(0.0022 * Math.sin(ph) * bob + sway * 0.04 * wobble(t * 0.8, 3) + crowd01 * m * 0.004 * wobble(t * 1.9, 12), -cap, cap);
+    } else {
+      r.x = 0.0015 * Math.sin(2 * ph) * bob + sway * 0.012 * wobble(t * 0.31, 5) + jit * 0.004 * wobble(t * 6.1, 8) + idle * 0.0006 * wobble(t * 0.33, 14) - 0.052 * trip;
+      r.y = sway * 0.02 * wobble(t * 0.19, 4) + jit * 0.005 * wobble(t * 5.3, 9) + idle * 0.0008 * wobble(t * 0.17, 15);
+      // roll is the most nauseating component: never more than 1°
+      r.z = clamp(0.0022 * Math.sin(ph) * bob + sway * 0.012 * wobble(t * 0.23, 3) + crowd01 * m * 0.004 * wobble(t * 1.9, 12), -MAX_ROLL, MAX_ROLL);
+    }
     this.bodyLean.roll = sway * 0.07 * wobble(t * 0.23, 3);
     this.bodyLean.pitch = sway * 0.04 * wobble(t * 0.31, 5);
   }

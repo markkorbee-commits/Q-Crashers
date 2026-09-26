@@ -58,6 +58,18 @@ export interface PerceptionLike extends System {
   heat?: HeatScenarioLike;
   setActivity?(mode: 'auto' | 'dance' | 'rest'): void;
   setHeatScenario?(id: 'endshow' | 'heatwave'): void;
+  /** ketamine scenario: 0..1 dissociation, 'off' | 'onset' | 'peak' | 'hole' | 'return' | 'after' */
+  ket?: number;
+  ketPhase?: string;
+  setKetamine?(on: boolean): void;
+  /** ketamine risk monitor (0..1, 1 = unimpaired) and its current messages */
+  ketMonitor?: { coordination: number; awareness: number; movement: number };
+  ketWarnings?: readonly string[];
+  /** effect strength: 'strong' (exaggerated, default) or 'realistic' */
+  strength?: string;
+  setStrength?(s: 'strong' | 'realistic', remember?: boolean): void;
+  /** false while the view is not the player's own (Show camera, fly-over, free, photo): effects paused */
+  viewActive?: boolean;
 }
 
 export interface CameraLike extends System {

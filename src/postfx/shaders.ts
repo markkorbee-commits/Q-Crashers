@@ -109,24 +109,36 @@ void main() {
 `;
 
 /**
- * Visual persistence feedback (HDR, before bloom so trails glow too):
- * bright echoes decay geometrically ("light painting"), plus a little true smear.
+ * Light trails (round 7): a feedback buffer of the bright pass at 1/2 resolution (1/4 on mobile).
+ * trail = max(bright_now, tent(reproject(prev)) * k). The previous buffer is reprojected rotation-only (at
+ * infinity), so distant lights stay put during head turns while lasers and moving heads leave streaks; a
+ * 1-texel tent along the reprojection delta turns stepped copies into continuous streaks. The composite adds
+ * only the persisted excess (trail - bright_now) on the altered side.
  */
 export const TRAILS = /* glsl */ `${HEADER}
-uniform sampler2D tCur;
-uniform sampler2D tPrev;
-uniform vec4 uCurRect;  // used part of the scene target (dynamic resolution)
-uniform vec2 uPersist; // per-frame persistence: sober, altered
-uniform float uSplit;
-uniform float uSmear;
+uniform sampler2D tBright; // bright pass now (exposed, thresholded), same size as the trail buffer
+uniform sampler2D tPrev;   // previous trail buffer
+uniform mat4 uReproj;      // current clip -> previous clip (far plane: rotation only in effect)
+uniform vec2 uTexel;       // one texel of the trail buffer
+uniform float uPersist;    // per-frame persistence (0 = reset: first frame, camera cut)
 in vec2 vUv;
 out vec4 fragColor;
 void main() {
-  vec3 cur = sanitize(texture(tCur, min(vUv * uCurRect.xy, uCurRect.zw)).rgb);
-  vec3 prev = texture(tPrev, vUv).rgb;
-  float k = (uSplit < 0.0 || vUv.x >= uSplit) ? uPersist.y : uPersist.x;
-  vec3 o = max(mix(cur, prev, k * uSmear), prev * k);
-  fragColor = vec4(min(o, vec3(4096.0)), 1.0);
+  vec3 now = sanitize(texture(tBright, vUv).rgb);
+  vec3 prev = vec3(0.0);
+  if (uPersist > 0.0) {
+    vec4 q = uReproj * vec4(vUv * 2.0 - 1.0, 1.0, 1.0);
+    if (q.w > 1e-6) {
+      vec2 puv = q.xy / q.w * 0.5 + 0.5;
+      vec2 dt = (puv - vUv) / uTexel;
+      float dl = length(dt);
+      vec2 ax = (dl > 1.0 ? dt / dl : vec2(1.0, 0.0)) * uTexel;
+      vec3 pv = texture(tPrev, puv).rgb * 0.5 + (texture(tPrev, puv + ax).rgb + texture(tPrev, puv - ax).rgb) * 0.25;
+      vec2 e = step(vec2(0.0), puv) * step(puv, vec2(1.0));
+      prev = pv * (uPersist * e.x * e.y);
+    }
+  }
+  fragColor = vec4(min(max(now, prev), vec3(4096.0)), 1.0);
 }
 `;
 
@@ -317,8 +329,18 @@ uniform float uLodScale; // blur chain starts at 1/2 res (1) or 1/4 res on mobil
 uniform float uTime;
 uniform float uFrame;
 uniform float uSplit;
-uniform vec4 uA0, uA1, uA2, uA3;  // sober params
-uniform vec4 uB0, uB1, uB2, uB3;  // altered params
+uniform vec4 uA0, uA1, uA2, uA3, uA4;  // sober params
+uniform vec4 uB0, uB1, uB2, uB3, uB4;  // altered params
+// perception preset constants (uniforms: switching the preset never recompiles; PostFX.percTune)
+uniform vec4 uPW0;       // wobble amplitudes: swim, rotation 1, rotation 2, zoom breathing
+uniform vec4 uPW1;       // wobble drift amplitude, frequency scale: swim, rotation, zoom + drift
+uniform vec4 uPC0;       // chroma factor, peripheral blur factor, wobble edge compensation, -
+uniform vec4 uPC1;       // ghost x, ghost y, double vision at which the ghost mix is full, vergence term
+uniform vec4 uPC2;       // afterimage dim, afterimage add, -, -
+uniform sampler2D tTrail;    // light trail buffer (TRAILS)
+uniform sampler2D tTrailNow; // the bright pass it was built from (same size)
+uniform vec4 uTrailSize;     // w, h, 1/w, 1/h
+uniform vec4 uTrail;         // gain (0 = off), -, -, -
 uniform vec4 uThr;       // bloom threshold/knee: sober xy, altered zw
 uniform vec2 uBloom;     // strength, enabled
 uniform vec4 uLook;      // exposure, vignette, grain, head-motion view transform on
@@ -367,7 +389,7 @@ vec3 scn(vec2 uv) { return texture(tScene, min(uv * uSceneRect.xy, uSceneRect.zw
 
 vec3 fetch(vec2 uv, float chroma) {
   if (chroma < 0.001) return scn(uv);
-  vec2 d = (uv - 0.5) * chroma * 0.018;
+  vec2 d = (uv - 0.5) * chroma * uPC0.x;
   return vec3(scn(uv + d).r, scn(uv).g, scn(uv - d).b);
 }
 
@@ -454,18 +476,23 @@ vec3 blurLayer(vec2 uv, float lod) {
   return mix(b, bicubic(tD3, uv, uD3Size), min(lod - 2.0, 1.0));
 }
 
-/** slow, low-frequency screen swim (alcohol): gentle on purpose (0.03-0.09 Hz) */
+/**
+ * low-frequency screen swim (alcohol): realistic preset 0.03-0.09 Hz, strong preset faster and larger
+ * (amplitudes uPW0 / uPW1.x, frequency scales uPW1.yzw); uPC0.z zooms in with the wobble so the clamped
+ * border never smears in
+ */
 vec2 wobbleOffset(vec2 uv, float w, float aspect) {
   float t = uTime;
+  float fs = uPW1.y, fr = uPW1.z, fz = uPW1.w;
   vec2 o = vec2(
-    sin(uv.y * 3.7 + t * 0.53) * 0.6 + sin(uv.y * 6.9 - t * 0.37 + 1.3) * 0.4,
-    sin(uv.x * 3.1 - t * 0.47 + 0.7) * 0.6 + sin(uv.x * 5.7 + t * 0.31) * 0.4) * 0.0035;
+    sin(uv.y * 3.7 + t * 0.53 * fs) * 0.6 + sin(uv.y * 6.9 - t * 0.37 * fs + 1.3) * 0.4,
+    sin(uv.x * 3.1 - t * 0.47 * fs + 0.7) * 0.6 + sin(uv.x * 5.7 + t * 0.31 * fs) * 0.4) * uPW0.x;
   vec2 c = (uv - 0.5) * vec2(aspect, 1.0);
-  float ang = sin(t * 0.19) * 0.014 + sin(t * 0.07 + 2.0) * 0.008;
+  float ang = sin(t * 0.19 * fr) * uPW0.y + sin(t * 0.07 * fr + 2.0) * uPW0.z;
   vec2 rc = vec2(c.x * cos(ang) - c.y * sin(ang), c.x * sin(ang) + c.y * cos(ang));
-  float zoom = 1.0 - 0.012 * (0.5 + 0.5 * sin(t * 0.29));
-  vec2 rot = (rc * zoom - c) / vec2(aspect, 1.0);
-  return (o + rot + vec2(sin(t * 0.23), cos(t * 0.17)) * 0.0025) * w;
+  float zoom = 1.0 - uPW0.w * (0.5 + 0.5 * sin(t * 0.29 * fz));
+  vec2 rot = (rc * zoom - c * (1.0 + uPC0.z)) / vec2(aspect, 1.0);
+  return (o + rot + vec2(sin(t * 0.23 * fz), cos(t * 0.17 * fz)) * uPW1.x) * w;
 }
 
 /** breathing hexagonal quasi-lattice + 6-fold radial ripple (visual overload) */
@@ -559,12 +586,15 @@ void main() {
   vec4 p0 = mix(uA0, uB0, side); // blur, doubleVision, chroma, wobble
   vec4 p1 = mix(uA1, uB1, side); // tunnel, saturation, contrast, exposure
   vec4 p2 = mix(uA2, uB2, side); // bloomBoost, lightSensitivity, afterimage, patternWarp
-  vec4 p3 = mix(uA3, uB3, side); // hueShift, motionBlur, trails, -
+  vec4 p3 = mix(uA3, uB3, side); // hueShift, motionBlur, trails, warmth
+  vec4 p4 = mix(uA4, uB4, side); // glow, nausea tint, recede, -
   vec2 cp = (uv - 0.5) * vec2(aspect, 1.0);
   float r = length(cp);
 
   // ---- head motion (stumble lurch, nystagmus) + screen-space warps
   vec2 suv = (uLook.w > 0.5 && side > 0.5) ? viewUv(uv, aspect) : uv;
+  // the world recedes (ketamine): the picture shrinks towards the centre into a dark surround
+  if (p4.z > 0.001) suv = 0.5 + (suv - 0.5) * (1.0 + 0.22 * p4.z);
   if (p0.w > 0.001) suv += wobbleOffset(uv, p0.w, aspect);
   if (p2.w > 0.001) suv += patternOffset(cp, r, p2.w, aspect);
 
@@ -576,8 +606,10 @@ void main() {
   vec2 ghostOff = vec2(0.0);
   float ghostMix = 0.0;
   if (p0.y > 0.001) {
-    ghostOff = vec2(0.03 * (0.85 + 0.25 * sin(uTime * 0.31)), 0.005 * sin(uTime * 0.23 + 1.0)) * p0.y;
-    ghostMix = 0.48 * smoothstep(0.0, 0.4, p0.y);
+    // vergence: the eyes keep trying to fuse (~0.35 Hz, strong preset; off under reduced motion)
+    float verg = 1.0 + uPC1.w * sin(uTime * 2.2);
+    ghostOff = vec2(uPC1.x * (0.85 + 0.25 * sin(uTime * 0.31)) * verg, uPC1.y * sin(uTime * 0.23 + 1.0)) * p0.y;
+    ghostMix = 0.48 * smoothstep(0.0, uPC1.z, p0.y);
     col = mix(col, fetch(suv + ghostOff, p0.z), ghostMix);
   }
 
@@ -591,7 +623,8 @@ void main() {
   // ---- blur + tunnel vision (blurred, dark periphery)
   float tun = p1.x;
   float tunMask = tun > 0.001 ? smoothstep(0.6 - 0.38 * tun, 0.98 - 0.3 * tun, r) : 0.0;
-  float lod = (p0.x * 3.0 + tunMask * tun * 2.4) * uLodScale;
+  // peripheral blur (strong preset): the edges get softer than the centre
+  float lod = (p0.x * 3.0 + tunMask * (tun * 2.4 + p0.x * uPC0.y)) * uLodScale;
   if (lod > 0.01) {
     vec3 bl = blurLayer(suv, lod);
     if (ghostMix > 0.0) bl = mix(bl, blurLayer(suv + ghostOff, lod), ghostMix);
@@ -606,6 +639,13 @@ void main() {
     vec2 tk = side > 0.5 ? uThr.zw : uThr.xy;
     // B-spline upsample of the half-res glow: no blocky, stair-stepped halos
     col = col * (1.0 - bs * brightShare(col, tk)) + bicubic(tBloom, suv, uBaseSize) * bs;
+  }
+  // ---- light trails (altered side): only the persisted part of the trail buffer
+  if (uTrail.x > 0.0 && side > 0.5) col += max(bicubic(tTrail, suv, uTrailSize) - bicubic(tTrailNow, suv, uTrailSize), 0.0) * uTrail.x;
+  // ---- soft glow around lit areas (XTC): blurred scene gated by its brightness, blacks stay black
+  if (p4.x > 0.001) {
+    vec3 gl = blurLayer(suv, 1.5) * ex;
+    col += p4.x * gl * smoothstep(0.05, 0.6, dot(gl, LUMA));
   }
   if (uFeat.x > 0.0 && p2.y > 0.001) col += texture(tGlare, suv).rgb * (uFeat.x * p2.y);
   // ---- scene veiling glare (both sides): a lens looking into a flame wall scatters its light over the
@@ -623,15 +663,26 @@ void main() {
     float g = clamp(af.a, 0.0, 1.0) * p2.z;
     vec3 hue = af.rgb / max(maxc(af.rgb), 1e-4);
     vec3 comp = vec3(1.0 + minc(hue)) - hue;
-    col = col * (1.0 - 0.35 * g) + comp * (0.16 * g);
+    col = col * (1.0 - uPC2.x * g) + comp * (uPC2.y * g);
   }
 
   // ---- optics: tunnel darkening + natural vignette (cos^4-like falloff)
   col *= 1.0 - tunMask * tun * 0.88;
+  if (p4.z > 0.001) {
+    vec2 e = min(suv, 1.0 - suv) * vec2(aspect, 1.0);
+    col *= smoothstep(-0.015, 0.06, min(e.x, e.y));
+  }
   float v2 = dot(cp, cp) / (0.25 * (aspect * aspect + 1.0));
   col *= mix(1.0, 1.0 / ((1.0 + 0.9 * v2) * (1.0 + 0.9 * v2)), uLook.y * 1.4);
 
-  // ---- grading (linear): hue, saturation, moire shimmer
+  // ---- grading (linear): warmth + nausea tint (luma kept), hue, saturation, moire shimmer
+  if (abs(p3.w) > 0.001 || p4.y > 0.001) {
+    float l0 = dot(col, LUMA);
+    vec3 k = mix(vec3(1.0), p3.w > 0.0 ? vec3(1.10, 1.02, 0.86) : vec3(0.90, 0.98, 1.12), abs(p3.w));
+    k *= mix(vec3(1.0), vec3(0.94, 1.03, 0.97), p4.y);
+    col *= k;
+    col *= l0 / max(dot(col, LUMA), 1e-6);
+  }
   if (abs(p3.x) > 0.001) col = hueRotate(col, p3.x);
   float l = dot(col, LUMA);
   col = max(mix(vec3(l), col, p1.y), 0.0);

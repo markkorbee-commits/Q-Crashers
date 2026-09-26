@@ -35,6 +35,49 @@ export interface BodyParams {
   veil: number;
   /** multiplier on the star-streak glare (0 = halos only, 1 = full streaks) */
   star: number;
+  /**
+   * steady zoom margin (screen heights, >= 0): the view is zoomed in at least as far as an offX of this size
+   * needs, so the zoom does not pump with a moving offset (spins, look overshoot); 0 = off
+   */
+  margin: number;
+  /** extra view zoom (>= 0, e.g. 0.008 = +0.8 %: the XTC kick pulse); 0 = off */
+  zoom: number;
+}
+
+/**
+ * Perception preset constants of the composite shader (uniforms, so a preset switch never recompiles).
+ * The defaults are the round-6 (`realistic`) literals; the PerceptionSystem copies its preset in.
+ */
+export interface PerceptionTune {
+  /** wobble amplitudes: swim (uv), rotation 1 and 2 (rad), zoom breathing, drift (uv) */
+  swim: number;
+  rot1: number;
+  rot2: number;
+  zoom: number;
+  drift: number;
+  /** wobble frequency scales: swim, rotation, zoom + drift (1 = 0.03-0.09 Hz) */
+  fSwim: number;
+  fRot: number;
+  fZoom: number;
+  /** chromatic aberration: uv shift per unit chroma at the picture edge */
+  chroma: number;
+  /** extra peripheral blur per unit blur (0 = off) */
+  periph: number;
+  /** the wobble zooms in by edge * wobble so the clamped border never shows */
+  edge: number;
+  /** gain of the light trails added in the composite */
+  trailGain: number;
+  /** double vision: ghost offset x / y (screen widths per unit), dv at which the ghost mix is full, vergence term */
+  ghostX: number;
+  ghostY: number;
+  ghostFull: number;
+  vergence: number;
+  /** afterimage: dimming and complementary add per unit ghost strength */
+  afterDim: number;
+  afterAdd: number;
+  /** star glare tap stride factor, desktop / mobile */
+  starStride: number;
+  starStrideM: number;
 }
 
 /**
@@ -113,6 +156,29 @@ export class PostFX {
   readonly tone = { contrast: 1.5, shoulder: 0.95, hdrMax: 64, midIn: 0.18, midOut: 0.19, crosstalk: 10, crossSaturation: 1.6, saturation: 1 };
   /** musical drive for rhythmic perception effects (written by the PerceptionSystem) */
   readonly rhythm = { breath: 0, kick: 0 };
+  /** perception preset constants (the PerceptionSystem copies its strength preset in); defaults = realistic */
+  readonly percTune: PerceptionTune = {
+    swim: 0.0035,
+    rot1: 0.014,
+    rot2: 0.008,
+    zoom: 0.012,
+    drift: 0.0025,
+    fSwim: 1,
+    fRot: 1,
+    fZoom: 1,
+    chroma: 0.018,
+    periph: 0,
+    edge: 0,
+    trailGain: 1,
+    ghostX: 0.03,
+    ghostY: 0.005,
+    ghostFull: 0.4,
+    vergence: 0,
+    afterDim: 0.35,
+    afterAdd: 0.16,
+    starStride: 1,
+    starStrideM: 1,
+  };
   /** scene veiling glare from the pyro (written by SceneGlare each frame); identity = amount 0 */
   readonly glare: GlareParams = {
     amount: 0,
@@ -226,7 +292,7 @@ export class PostFX {
     this.mPrefilter = mat(PREFILTER, { tSrc: tex(), uSrcRect: rect(), uTexel: v2(), uSpread: f(1), uThreshold: v4(), uExposure: v2(), uSplit: f(-1), uKaris: f(0.25) });
     this.mDown = mat(DOWNSAMPLE, { tSrc: tex(), uSrcRect: rect(), uTexel: v2(), uSpread: f(1) });
     this.mUp = mat(UPSAMPLE, { tLow: tex(), tCur: tex(), uLowTexel: v2(), uRadius: f(1), uLowWeight: f(1), uCurWeight: f(1) });
-    this.mTrails = mat(TRAILS, { tCur: tex(), uCurRect: rect(), tPrev: tex(), uPersist: v2(), uSplit: f(-1), uSmear: f(0.35) });
+    this.mTrails = mat(TRAILS, { tBright: tex(), tPrev: tex(), uReproj: { value: new THREE.Matrix4() }, uTexel: v2(), uPersist: f(0) });
     this.mAfter = mat(AFTERIMAGE, { tBright: tex(), tPrev: tex(), uDecay: f(0), uFloor: f(0.6) });
     this.mGlare = mat(GLARE, {
       tSrc: tex(),
@@ -274,10 +340,21 @@ export class PostFX {
       uA1: v4(),
       uA2: v4(),
       uA3: v4(),
+      uA4: v4(),
       uB0: v4(),
       uB1: v4(),
       uB2: v4(),
       uB3: v4(),
+      uB4: v4(),
+      uPW0: v4(),
+      uPW1: v4(),
+      uPC0: v4(),
+      uPC1: v4(),
+      uPC2: v4(),
+      tTrail: tex(),
+      tTrailNow: tex(),
+      uTrailSize: v4(),
+      uTrail: v4(),
       uThr: v4(),
       uBloom: v2(),
       uLook: v4(),
@@ -311,12 +388,16 @@ export class PostFX {
       patternWarp: 0,
       hueShift: 0,
       motionBlur: 0,
+      warmth: 0,
+      glow: 0,
+      tint: 0,
+      recede: 0,
       split: -1,
     };
   }
 
   static bodyDefaults(): BodyParams {
-    return { offX: 0, offY: 0, roll: 0, heat: 0, pulse: 0, fade: 0, veil: 0, star: 1 };
+    return { offX: 0, offY: 0, roll: 0, heat: 0, pulse: 0, fade: 0, veil: 0, star: 1, margin: 0, zoom: 0 };
   }
 
   /** drawing-buffer pixels */
@@ -458,6 +539,9 @@ export class PostFX {
     if (p.afterimage > 0.003) fx.push('afterimage');
     if (p.lightSensitivity > 0.003 && this.body.star > 0.003) fx.push('glare');
     if (p.blur > 0.001 || p.tunnel > 0.001) fx.push('blur');
+    if (p.glow > 0.003) fx.push('glow');
+    if (p.recede > 0.003) fx.push('recede');
+    if (Math.abs(p.warmth) > 0.003 || p.tint > 0.003) fx.push('tint');
     if (this.dofActive(this.last.camera)) fx.push('dof');
     if (this.motionBlurActive()) fx.push('motionblur');
     if (p.split >= 0) fx.push('split');
@@ -466,7 +550,7 @@ export class PostFX {
     if (b.fade > 0.003) fx.push('fade');
     if (b.veil > 0.003) fx.push('veil');
     if (this.glare.amount > 0.003) fx.push(`glare${this.glare.amount.toFixed(2)}`);
-    if (Math.abs(b.roll) > 1e-4 || Math.abs(b.offX) > 1e-4 || Math.abs(b.offY) > 1e-4) fx.push('view');
+    if (Math.abs(b.roll) > 1e-4 || Math.abs(b.offX) > 1e-4 || Math.abs(b.offY) > 1e-4 || b.zoom > 1e-4 || b.margin > 1e-4) fx.push('view');
     return {
       postfx: on ? 'on' : 'off',
       passes: this.passCount,
@@ -549,33 +633,14 @@ export class PostFX {
     const knB = knA * (1 + 0.6 * ls);
     const step = Math.max(dt, 1 / 240);
 
-    // 1. visual persistence feedback (before bloom, so trails glow)
-    let src: THREE.Texture = hdr.texture;
-    const trails = clamp(p.trails, 0, 0.97);
-    if (trails > 0.003) {
-      this.ensureFeedback(this.trail, this.width, this.height);
-      const prev = this.trail[this.trailIdx];
-      const next = this.trail[1 - this.trailIdx];
-      const u = this.mTrails.uniforms;
-      u.tCur.value = src;
-      (u.uCurRect.value as THREE.Vector4).copy(sRect);
-      u.tPrev.value = prev.texture;
-      (u.uPersist.value as THREE.Vector2).set(0, this.trailValid && !cut ? Math.pow(trails, step * 60) : 0);
-      u.uSplit.value = split;
-      this.draw(this.mTrails, next);
-      src = next.texture;
-      if (commit) {
-        this.trailIdx = 1 - this.trailIdx;
-        this.trailValid = true;
-      }
-    } else this.trailValid = false;
+    const src: THREE.Texture = hdr.texture;
 
     // 2. MRT prefilter: blurred scene + bright pass
     {
       const u = this.mPrefilter.uniforms;
       u.tSrc.value = src;
-      // the trails buffer is full size; the scene target is used only in part
-      (u.uSrcRect.value as THREE.Vector4).copy(src === hdr.texture ? sRect : PostFX.FULL_RECT);
+      // the scene target is used only in part (dynamic resolution)
+      (u.uSrcRect.value as THREE.Vector4).copy(sRect);
       (u.uTexel.value as THREE.Vector2).set(1 / this.width, 1 / this.height);
       (u.uThreshold.value as THREE.Vector4).set(thA, knA, thB, knB);
       (u.uExposure.value as THREE.Vector2).set(baseEx * this.sober.exposure, baseEx * p.exposure);
@@ -587,7 +652,7 @@ export class PostFX {
     const bright = base.textures[1];
 
     // 3. scene blur chain (only when something needs it)
-    const needBlur = p.blur > 0.001 || p.tunnel > 0.001;
+    const needBlur = p.blur > 0.001 || p.tunnel > 0.001 || p.glow > 0.001;
     if (needBlur && this.d2 && this.d3) {
       this.down(d1, 0, this.d2);
       this.down(this.d2.texture, 1, this.d3);
@@ -623,6 +688,36 @@ export class PostFX {
       bloomTex = low;
     }
 
+    // 4b. light trails: bright-pass feedback at 1/2 res (1/4 on mobile), reprojected at infinity
+    let trailTex: THREE.Texture | null = null;
+    let trailNow: THREE.Texture | null = null;
+    const trails = clamp(p.trails, 0, 0.97);
+    if (trails > 0.003) {
+      const lvl = this.trailLevel();
+      if (lvl === 0) trailNow = bright;
+      else {
+        if (!bloomOn) this.down(bright, 0, this.bloomDown[1]);
+        trailNow = this.bloomDown[1].texture;
+      }
+      const tw = this.levelW(lvl);
+      const th = this.levelH(lvl);
+      this.ensureFeedback(this.trail, tw, th);
+      const prev = this.trail[this.trailIdx];
+      const next = this.trail[1 - this.trailIdx];
+      const u = this.mTrails.uniforms;
+      u.tBright.value = trailNow;
+      u.tPrev.value = prev.texture;
+      (u.uReproj.value as THREE.Matrix4).multiplyMatrices(this.prevViewProj, this.invViewProj);
+      (u.uTexel.value as THREE.Vector2).set(1 / tw, 1 / th);
+      u.uPersist.value = this.trailValid && !cut ? Math.pow(trails, step * 60) : 0;
+      this.draw(this.mTrails, next);
+      trailTex = next.texture;
+      if (commit) {
+        this.trailIdx = 1 - this.trailIdx;
+        this.trailValid = true;
+      }
+    } else this.trailValid = false;
+
     // 5. afterimage (retinal bleaching) feedback at 1/4 (1/8 mobile)
     let afterTex: THREE.Texture | null = null;
     const afterOn = p.afterimage > 0.003 && bloomOn;
@@ -654,7 +749,7 @@ export class PostFX {
       const h = this.levelH(0);
       (u.uTexel.value as THREE.Vector2).set(1 / w, 1 / h);
       const dirs = u.uDir.value as THREE.Vector2[];
-      const stride = this.mobile ? 1.6 : 1.25;
+      const stride = this.mobile ? 1.6 * this.percTune.starStrideM : 1.25 * this.percTune.starStride;
       if (this.mobile) {
         dirs[0].set(stride * 1.6, 0);
         dirs[1].set(0, stride);
@@ -694,10 +789,9 @@ export class PostFX {
     // 8. composite
     const u = this.mComposite.uniforms;
     u.tScene.value = src;
-    (u.uSceneRect.value as THREE.Vector4).copy(src === hdr.texture ? sRect : PostFX.FULL_RECT);
-    // FXAA steps one rendered texel (in screen uv): the trails buffer has full resolution
-    if (src === hdr.texture) (u.uSceneTexel.value as THREE.Vector2).set(1 / sw, 1 / sh);
-    else (u.uSceneTexel.value as THREE.Vector2).set(1 / this.width, 1 / this.height);
+    (u.uSceneRect.value as THREE.Vector4).copy(sRect);
+    // FXAA steps one rendered texel (in screen uv)
+    (u.uSceneTexel.value as THREE.Vector2).set(1 / sw, 1 / sh);
     u.tDepth.value = hdr.depthTexture;
     (u.uDepthRect.value as THREE.Vector4).copy(sRect);
     u.tD1.value = d1;
@@ -738,13 +832,16 @@ export class PostFX {
     const roll = clamp(body.roll, -0.2, 0.2);
     const ox = clamp(body.offX, -0.1, 0.1);
     const oy = clamp(body.offY, -0.1, 0.1);
-    const viewOn = Math.abs(roll) > 1e-5 || Math.abs(ox) > 1e-6 || Math.abs(oy) > 1e-6;
+    // a steady margin (spins, look overshoot) and the kick zoom
+    const margin = clamp(body.margin, 0, 0.1);
+    const kz = clamp(body.zoom, 0, 0.1);
+    const viewOn = Math.abs(roll) > 1e-5 || Math.abs(ox) > 1e-6 || Math.abs(oy) > 1e-6 || margin > 1e-6 || kz > 1e-6;
     if (viewOn) {
       const cs = Math.cos(roll);
       const sn = Math.abs(Math.sin(roll));
-      const zx = (0.5 * aspect * cs + 0.5 * sn) / Math.max(0.05, 0.5 * aspect - Math.abs(ox));
+      const zx = (0.5 * aspect * cs + 0.5 * sn) / Math.max(0.05, 0.5 * aspect - Math.max(Math.abs(ox), margin));
       const zy = (0.5 * aspect * sn + 0.5 * cs) / Math.max(0.05, 0.5 - Math.abs(oy));
-      (u.uView.value as THREE.Vector4).set(ox, oy, roll, 1 / Math.max(1, zx, zy));
+      (u.uView.value as THREE.Vector4).set(ox, oy, roll, 1 / (Math.max(1, zx, zy) * (1 + kz)));
     } else (u.uView.value as THREE.Vector4).set(0, 0, 0, 1);
     (u.uBody.value as THREE.Vector4).set(clamp(body.heat, 0, 1), clamp(body.pulse, 0, 1), clamp(body.fade, 0, 1), veil);
     (u.uRes.value as THREE.Vector4).set(this.width, this.height, 1 / this.width, 1 / this.height);
@@ -761,8 +858,23 @@ export class PostFX {
     u.uTime.value = time % 10000;
     u.uFrame.value = this.frameNo % 4096;
     u.uSplit.value = split;
-    packParams(this.sober, u.uA0.value, u.uA1.value, u.uA2.value, u.uA3.value);
-    packParams(p, u.uB0.value, u.uB1.value, u.uB2.value, u.uB3.value);
+    packParams(this.sober, u.uA0.value, u.uA1.value, u.uA2.value, u.uA3.value, u.uA4.value);
+    packParams(p, u.uB0.value, u.uB1.value, u.uB2.value, u.uB3.value, u.uB4.value);
+    const pt = this.percTune;
+    (u.uPW0.value as THREE.Vector4).set(pt.swim, pt.rot1, pt.rot2, pt.zoom);
+    (u.uPW1.value as THREE.Vector4).set(pt.drift, pt.fSwim, pt.fRot, pt.fZoom);
+    (u.uPC0.value as THREE.Vector4).set(pt.chroma, pt.periph, pt.edge, 0);
+    (u.uPC1.value as THREE.Vector4).set(pt.ghostX, pt.ghostY, Math.max(0.05, pt.ghostFull), pt.vergence);
+    (u.uPC2.value as THREE.Vector4).set(pt.afterDim, pt.afterAdd, 0, 0);
+    u.tTrail.value = trailTex;
+    u.tTrailNow.value = trailNow;
+    {
+      const lvl = this.trailLevel();
+      const tw = this.levelW(lvl);
+      const th = this.levelH(lvl);
+      (u.uTrailSize.value as THREE.Vector4).set(tw, th, 1 / tw, 1 / th);
+    }
+    (u.uTrail.value as THREE.Vector4).set(trailTex ? Math.max(0, pt.trailGain) : 0, 0, 0, 0);
     const mbAllowed = !this.mobile;
     if (!mbAllowed) (u.uB3.value as THREE.Vector4).y = 0;
     (u.uThr.value as THREE.Vector4).set(thA, knA, thB, knB);
@@ -832,6 +944,11 @@ export class PostFX {
 
   // ------------------------------------------------------------------ targets
 
+  /** blur-pyramid level of the light-trail buffer: 1/2 resolution, 1/4 on mobile */
+  private trailLevel(): number {
+    return this.mobile ? 1 : 0;
+  }
+
   private levelW(i: number): number {
     return Math.max(1, Math.round(this.width / this.baseDiv / (1 << i)));
   }
@@ -896,7 +1013,7 @@ export class PostFX {
     for (let i = 0; i < this.levels - 1; i++) this.bloomUp[i] = size(this.bloomUp[i] ?? null, i);
     if (this.starRT) this.starRT.setSize(this.levelW(0), this.levelH(0));
     if (this.dof) this.dof.setSize(this.levelW(0), this.levelH(0));
-    if (this.trail.length) this.ensureFeedback(this.trail, w, h);
+    if (this.trail.length) this.ensureFeedback(this.trail, this.levelW(this.trailLevel()), this.levelH(this.trailLevel()));
     if (this.after.length) this.ensureFeedback(this.after, this.levelW(1), this.levelH(1));
     this.hasPrev = false;
   }
@@ -941,12 +1058,13 @@ function setDefines(m: THREE.RawShaderMaterial, defines: Record<string, number>)
   if (changed) m.needsUpdate = true;
 }
 
-/** perception params -> 4 vec4 uniforms (layout mirrored in the composite shader) */
-function packParams(p: PerceptionParams, u0: THREE.Vector4, u1: THREE.Vector4, u2: THREE.Vector4, u3: THREE.Vector4): void {
+/** perception params -> 5 vec4 uniforms (layout mirrored in the composite shader) */
+function packParams(p: PerceptionParams, u0: THREE.Vector4, u1: THREE.Vector4, u2: THREE.Vector4, u3: THREE.Vector4, u4: THREE.Vector4): void {
   u0.set(clamp(p.blur, 0, 1), clamp(p.doubleVision, 0, 1), clamp(p.chroma, 0, 1), clamp(p.wobble, 0, 1));
   u1.set(clamp(p.tunnel, 0, 1), clamp(p.saturation, 0, 3), clamp(p.contrast, 0.3, 2), clamp(p.exposure, 0, 8));
   u2.set(Math.max(0, p.bloomBoost), clamp(p.lightSensitivity, 0, 1), clamp(p.afterimage, 0, 1), clamp(p.patternWarp, 0, 1));
-  u3.set(p.hueShift, clamp(p.motionBlur, 0, 1), clamp(p.trails, 0, 0.97), 0);
+  u3.set(p.hueShift, clamp(p.motionBlur, 0, 1), clamp(p.trails, 0, 0.97), clamp(p.warmth, -1, 1));
+  u4.set(clamp(p.glow, 0, 1), clamp(p.tint, 0, 1), clamp(p.recede, 0, 1), 0);
 }
 
 /** Lottes tone curve constants: returns (a, d, b, c) for x^a / (x^(a*d) * b + c) */

@@ -2,8 +2,12 @@
  * Educational texts for the perception simulation (rendered by the UI).
  * Factual, concise, no glamour, and never any usage, dosing or buying information.
  * Sources: Trimbos-instituut (trimbos.nl, drugsinfo.nl, alcoholinfo), Jellinek (jellinek.nl),
- * NIDA (nida.nih.gov, MDMA Research Report), Rijksoverheid (Dutch alcohol limits for drivers).
+ * NIDA (nida.nih.gov, MDMA Research Report, Ketamine), Rijksoverheid (Dutch alcohol limits for drivers).
  */
+
+/** one sentence, shown wherever the strength setting matters (XTC and ketamine disclaimers, alcohol panel) */
+export const EXAGGERATED_NOTE =
+  'In the Exaggerated setting (the default) the effects are shown stronger than they really are, so that you can see them.';
 
 export interface AlcoholTier {
   /** blood alcohol concentration in promille (g/kg) where this tier starts */
@@ -75,7 +79,8 @@ export const XTC_INFO = {
   disclaimer:
     'An educational approximation of commonly reported effects on perception and the body. It is not realistic, ' +
     'not an endorsement and contains no usage information. XTC is illegal in the Netherlands. Effects and risks differ ' +
-    'strongly between people and pills; not using is the only way to avoid the risks.',
+    'strongly between people and pills; not using is the only way to avoid the risks. ' +
+    EXAGGERATED_NOTE,
   effects: [
     'Dilated pupils: strobes and lasers dazzle and wash out the picture; glare and halos around lights',
     'Trails and afterimages behind moving lights',
@@ -109,6 +114,127 @@ export const XTC_INFO = {
   ],
 };
 
+/**
+ * Ketamine (round 7). Based on Trimbos-instituut (drugsinfo.nl: Ketamine, risks, ketamine and bladder problems),
+ * Jellinek (jellinek.nl: What is ketamine, Risks of ketamine) and NIDA (Ketamine). Factual, no glamour, no
+ * usage, amount, route or buying information, no numbers that the sources do not give.
+ */
+export const KETAMINE_INFO = {
+  title: 'Ketamine — perception simulation',
+  what:
+    'Ketamine is an anaesthetic (a narcosis drug used in hospitals and by vets). It is dissociative: you feel detached ' +
+    'from your body and from your surroundings.',
+  disclaimer:
+    'An educational approximation of commonly reported effects on perception and the body — never an encouragement. It ' +
+    'contains no usage information. Effects and risks differ strongly between people, and the strength of what is sold is ' +
+    'unknown; not using is the only way to avoid the risks. ' +
+    EXAGGERATED_NOTE,
+  effects: [
+    'Numbness and a heavy body: pain is hardly felt',
+    'Poor coordination and balance, dizziness, nausea',
+    'A distorted sense of time, space and sound: the world seems far away, sound goes muffled and distant',
+    'Feeling detached from your body and your surroundings (dissociation)',
+    'When the effect is strong, a “K-hole”: hardly able to move or speak, no grip on where you are',
+    'Anxiety, confusion or panic are possible',
+  ],
+  risks: [
+    'Falls and injuries you do not notice, because pain is numbed',
+    'Being unable to move or to call for help in a crowd; losing your friends',
+    'Vomiting while barely conscious: risk of choking',
+    'Heat and thirst go unnoticed',
+    'Mixing with alcohol, GHB, sleeping pills or other depressants strongly raises the risk of unconsciousness and breathing problems',
+    'The strength and content of what is sold are unknown',
+  ],
+  repeated: [
+    'Serious bladder damage (“ketamine bladder”): pain and blood when urinating, having to go very often, cramps. The more and the longer, the worse; in severe cases the damage is lasting and the bladder has to be removed.',
+    'Dependence: with regular use tolerance builds up quickly',
+    'Memory and concentration problems with frequent, heavy use',
+  ],
+  help: [
+    'Someone who cannot move or speak must never be left alone: stay with them in a quiet, safe place, out of the crush of the crowd.',
+    'Someone does not respond? Turn them on their side (recovery position), stay with them and get the first-aid post or call 112.',
+    'Tell first aid honestly what was taken — they help without judgement and without consequences.',
+    'Bladder pain or blood in the urine: see a doctor and tell them about the ketamine.',
+    'Questions? Drugs Infolijn (Trimbos): 0900-1995 · drugsinfo.nl · jellinek.nl',
+  ],
+  sources: [
+    'Trimbos-instituut — drugsinfo.nl (Ketamine; risks; ketamine and bladder problems)',
+    'Jellinek — jellinek.nl (What is ketamine; Risks of ketamine)',
+    'NIDA — Ketamine, nida.nih.gov',
+  ],
+  /** shown before the simulation starts when the player is not sober (alcohol above 0.2‰ or an XTC run) */
+  combination: {
+    title: 'Ketamine on top of alcohol or XTC',
+    body: 'You are not sober in this simulation. In reality, mixing ketamine with other substances is one of its biggest dangers:',
+    points: [
+      'With alcohol, GHB, sleeping pills or other depressants: a much higher risk of unconsciousness and breathing problems',
+      'Vomiting while barely conscious: risk of choking',
+      'Mixing makes the combined effect unpredictable',
+    ],
+    note: 'The simulation does not model the combination; it runs the ketamine scenario as normal.',
+  },
+  /** risk monitor labels */
+  monitor: { coordination: 'Coordination', awareness: 'Awareness', movement: 'Can move' },
+};
+
+/** Live messages of the ketamine risk monitor (constant strings). */
+export const KETAMINE_MESSAGES = {
+  numb: 'Numb and heavy: coordination and balance fail, and a fall does not hurt — you may not notice an injury.',
+  far: 'Sound and surroundings seem far away: stay close to friends who know, so you do not get lost.',
+  hole: 'Cannot move or speak: never leave someone like this alone. Not responding? Recovery position, get first aid or call 112.',
+  nausea: 'Nausea: vomiting while drowsy can cause choking. Stay with a friend, on your side if you lie down.',
+  mixingAlcohol: 'Ketamine + alcohol: a much higher risk of unconsciousness and breathing problems.',
+  mixingXtc: 'Mixing drugs makes the combined effect unpredictable.',
+  heat: 'You hardly notice heat and thirst: rest out of the crowd and sip water.',
+  after: 'Grey and tired afterwards. Repeated use can seriously damage the bladder.',
+  help: 'First aid posts and staff help without judgement.',
+} as const;
+
+/** One-off notices (toasts) of the ketamine simulation. */
+export const KETAMINE_NOTES = {
+  onset: 'Onset: numb and heavy — sound starts to go far away.',
+  hole: 'K-hole: you can hardly move or speak. In a real crowd you could not call for help.',
+  stumble: 'You stumbled: with ketamine you hardly feel your legs — or the pain of a fall.',
+  back: 'Slowly coming back: still unsteady, and nausea comes in waves.',
+  firstAid: 'First-aid post: the team lays you down in a quiet spot and stays with you — no judgement.',
+} as const;
+
+/** Outcome cards of the ketamine simulation (the structure of OUTCOME_CARDS). */
+export const KETAMINE_CARDS: Record<'khole' | 'ketEpilogue', OutcomeCardText> = {
+  khole: {
+    kicker: 'Ketamine · K-hole',
+    title: 'You cannot get up',
+    body: [
+      'Your body does not respond: you can hardly move or speak, and you have no grip on where you are. The crowd keeps moving around you; you cannot call for help, and if you vomit you may not be able to turn over.',
+      'A friend who knows what you took stays with you, keeps people from stepping on you and waves for the first-aid team.',
+    ],
+    help: [
+      'Never leave someone alone who cannot move or respond; stay with them in a quiet, safe spot.',
+      'Not responding? Recovery position (on the side), keep checking the breathing, get first aid or call 112.',
+      'Tell first aid what was taken — no judgement, no consequences.',
+    ],
+    actions: [
+      { id: 'firstaid', label: 'Your friends take you to first aid', primary: true },
+      { id: 'close', label: 'Stay here with your friend' },
+      { id: 'sober', label: 'End the simulation' },
+    ],
+  },
+  ketEpilogue: {
+    kicker: 'After the simulation',
+    title: 'What repeated use does',
+    body: [
+      'The simulation ends here. Repeated ketamine use can seriously damage the bladder (“ketamine bladder”): pain and blood when urinating and having to go very often. The more and the longer, the worse; in severe cases the damage is lasting.',
+      'With regular use tolerance builds up quickly and dependence is possible; frequent, heavy use harms memory and concentration.',
+    ],
+    help: [
+      'Bladder complaints? See a doctor and tell them about the ketamine.',
+      'Worried about yourself or a friend? Drugs Infolijn (Trimbos) 0900-1995 · drugsinfo.nl · jellinek.nl',
+      'Not using is the only way to avoid these risks.',
+    ],
+    actions: [{ id: 'close', label: 'Close', primary: true }],
+  },
+};
+
 export const COMPARE_INFO = {
   title: 'Sober vs. altered',
   text:
@@ -119,7 +245,7 @@ export const COMPARE_INFO = {
 export const TIME_COMPRESSION_NOTE =
   'Time is compressed. Alcohol: 1 real minute = 10 simulated minutes — the body breaks down only about 0.15‰ per hour, ' +
   'so 1‰ still takes 6–7 simulated hours (about 40 real minutes) to disappear; only time sobers you up. ' +
-  'The XTC simulation compresses several hours into about 5 minutes.';
+  'The XTC simulation compresses several hours into about 5 minutes; the ketamine simulation is compressed in the same way.';
 
 /** Short risk messages shown live by the risk model (constant strings: no per-frame allocation). */
 export const RISK_MESSAGES = {
