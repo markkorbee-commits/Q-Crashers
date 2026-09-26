@@ -8,12 +8,12 @@ export const QUALITY_PRESETS: Record<QualityLevel, QualitySettings> = {
     msaa: 4,
     shadows: false,
     shadowMapSize: 2048,
-    crowdCount: 42000,
+    crowdCount: 65000,
     crowdNearCount: 3500,
     flagCount: 420,
     particleScale: 1,
     beamBudget: 420,
-    laserBudget: 1400,
+    laserBudget: 640,
     volumetrics: true,
     bloom: true,
     bloomLevels: 6,
@@ -30,12 +30,12 @@ export const QUALITY_PRESETS: Record<QualityLevel, QualitySettings> = {
     msaa: 4,
     shadows: false,
     shadowMapSize: 1024,
-    crowdCount: 28000,
+    crowdCount: 45000,
     crowdNearCount: 2200,
     flagCount: 300,
     particleScale: 0.75,
     beamBudget: 300,
-    laserBudget: 900,
+    laserBudget: 400,
     volumetrics: true,
     bloom: true,
     bloomLevels: 5,
@@ -52,12 +52,12 @@ export const QUALITY_PRESETS: Record<QualityLevel, QualitySettings> = {
     msaa: 0,
     shadows: false,
     shadowMapSize: 512,
-    crowdCount: 14000,
+    crowdCount: 26000,
     crowdNearCount: 1100,
     flagCount: 160,
     particleScale: 0.5,
     beamBudget: 180,
-    laserBudget: 500,
+    laserBudget: 200,
     volumetrics: false,
     bloom: true,
     bloomLevels: 4,
@@ -74,12 +74,12 @@ export const QUALITY_PRESETS: Record<QualityLevel, QualitySettings> = {
     msaa: 0,
     shadows: false,
     shadowMapSize: 512,
-    crowdCount: 6500,
+    crowdCount: 11000,
     crowdNearCount: 450,
     flagCount: 70,
     particleScale: 0.3,
     beamBudget: 96,
-    laserBudget: 260,
+    laserBudget: 96,
     volumetrics: false,
     bloom: true,
     bloomLevels: 3,
@@ -169,7 +169,13 @@ export class PerfGovernor {
   scale = 1;
   fps = 60;
   frameMs = 16.7;
+  /**
+   * Automatic preset mode (the Graphics menu's "Auto"): preset suggestions ('down' / 'up') are only
+   * made while it is on. A preset the user picked (enabled = false) keeps the resolution adaptation.
+   */
   enabled = true;
+  /** dynamic resolution on/off (off only for QA captures: ?nogovernor) */
+  adaptResolution = true;
   /** index into DYN_SCALES */
   private step = 0;
   private readonly samples = new Float32Array(WINDOW);
@@ -184,6 +190,8 @@ export class PerfGovernor {
   private lightStreak = 0;
   private lastUpWindow = -100;
   private probeWindows = MIN_PROBE_WINDOWS;
+  /** consecutive frames slower than the hitch limit (a device below ~4 fps is overloaded, not hitching) */
+  private hitchRun = 0;
 
   constructor(private targetFps: number) {}
 
@@ -215,8 +223,13 @@ export class PerfGovernor {
    * changes are applied to `scale` directly (the caller watches it).
    */
   sample(dtSec: number): 'down' | 'up' | null {
-    // ignore hitches (tab switch, GC, seek rebuilds): they are not steady-state cost
-    if (!(dtSec > 0) || dtSec > 0.25) return null;
+    if (!(dtSec > 0)) return null;
+    if (dtSec > 0.25) {
+      // a single long frame is a hitch (tab switch, GC, seek rebuild): not steady-state cost. A run of
+      // them is a device that cannot keep up at all: count those frames (capped) so it still adapts.
+      if (++this.hitchRun < 3) return null;
+      dtSec = Math.min(dtSec, 1);
+    } else this.hitchRun = 0;
     this.samples[this.n++] = dtSec * 1000;
     if (this.n < WINDOW) return null;
     this.n = 0;
@@ -225,7 +238,7 @@ export class PerfGovernor {
     this.frameMs = median;
     this.fps = 1000 / median;
     this.window++;
-    if (!this.enabled) return null;
+    if (!this.adaptResolution) return null;
     if (this.cooldown > 0) {
       this.cooldown--;
       return null;
@@ -250,7 +263,7 @@ export class PerfGovernor {
         return null;
       }
       // lowest resolution and still over budget: suggest a lighter preset (applied later, safely)
-      if (++this.heavyStreak >= 3) {
+      if (this.enabled && ++this.heavyStreak >= 3) {
         this.heavyStreak = 0;
         this.cooldown = 2;
         return 'down';
@@ -268,7 +281,7 @@ export class PerfGovernor {
       if (this.step > 0 && this.fastStreak >= 3) {
         this.fastStreak = 0;
         this.up();
-      } else if (this.step === 0 && ++this.lightStreak >= 20) {
+      } else if (this.step === 0 && this.enabled && ++this.lightStreak >= 20) {
         this.lightStreak = 0;
         return 'up';
       }

@@ -100,6 +100,11 @@ export class App {
   readonly playerPos = new THREE.Vector3(0, 0, 160);
   /** set by UI: hides HUD for cinema/photo mode */
   cinema = false;
+  /**
+   * Photosensitivity setting (set by the UI). Show systems read it to cap strobe / blinder rates
+   * (≤ 3 Hz, ~40 %), soften kick strobes and scale their LightEnv flash contributions (~0.4).
+   */
+  reduceFlashing = false;
   ready = false;
   frame = 0;
   private systems: System[] = [];
@@ -152,6 +157,7 @@ export class App {
     // KHR_parallel_shader_compile. Keep them for development (and ?debug), skip them in production.
     this.renderer.debug.checkShaderErrors = !import.meta.env.PROD || this.params.has('debug');
     this.warmup = new GpuWarmup(this.renderer);
+    this.primePixelStore();
 
     this.device = detectDevice(gl);
     this.autoLevel = pickQuality(this.device);
@@ -164,7 +170,10 @@ export class App {
     else level = this.autoHint() ?? this.autoLevel;
     this.quality = { ...QUALITY_PRESETS[level] };
     this.governor = new PerfGovernor(this.device.mobile ? 30 : 58);
+    // `enabled` = automatic preset mode (the Graphics menu's "Auto"). Dynamic resolution stays on for
+    // a preset the user picked (the hitch-free safety net); ?nogovernor (QA, captures) turns both off.
     this.governor.enabled = !forced && !userPick && !this.params.has('nogovernor');
+    this.governor.adaptResolution = !this.params.has('nogovernor');
 
     this.camera = new THREE.PerspectiveCamera(this.device.mobile ? 70 : 72, 1, 0.1, this.quality.drawDistance);
     this.camera.position.set(0, 1.72, 160);
@@ -178,6 +187,19 @@ export class App {
 
   get canvas(): HTMLCanvasElement {
     return this.renderer.domElement;
+  }
+
+  /**
+   * Seed three's pixel-store cache. A partial texture update (texture.updateRanges, used by the
+   * particle emitter rows) reads UNPACK_ROW_LENGTH / SKIP_PIXELS / SKIP_ROWS through state.getParameter,
+   * which falls through to a synchronous gl.getParameter round trip while the value is not cached:
+   * a pipeline flush on the first pyro / firework birth after play (2.1 s on SwiftShader). Setting
+   * them once through the state object caches them.
+   */
+  private primePixelStore(): void {
+    const gl = this.renderer.getContext() as WebGL2RenderingContext;
+    const st = this.renderer.state;
+    for (const p of [gl.UNPACK_ROW_LENGTH, gl.UNPACK_SKIP_PIXELS, gl.UNPACK_SKIP_ROWS, gl.UNPACK_IMAGE_HEIGHT, gl.UNPACK_SKIP_IMAGES]) st.pixelStorei(p, 0);
   }
 
   register(...systems: System[]): void {
@@ -374,6 +396,7 @@ export class App {
       }
       await w.idle();
       if (gen !== this.prepGen) return false;
+      this.primePixelStore(); // in case the warm-up reset the renderer state
       this.gpuPrep.warmMs = Math.round(performance.now() - t0);
       Object.assign(this.loadTimings, { shaders: this.gpuPrep.compileMs, textures: this.gpuPrep.uploadMs, warm: this.gpuPrep.warmMs });
       report('Preparing the first frame', 1);
@@ -403,6 +426,13 @@ export class App {
    */
   setQuality(level: QualityLevel): void {
     this.pendingLevel = null;
+    if (this.ready && level === this.quality.level) {
+      // re-picking the active preset: nothing to rebuild, but start again from full resolution
+      this.governor.reset({ cooldown: 2, forget: true });
+      this.resize();
+      this.events.emit('quality:changed', { level });
+      return;
+    }
     this.quality = { ...QUALITY_PRESETS[level] };
     this.camera.far = this.quality.drawDistance;
     this.camera.updateProjectionMatrix();
@@ -504,7 +534,8 @@ export class App {
       this.lastPerf = now;
       return;
     }
-    const dt = Math.min(0.1, Math.max(0, (now - this.lastPerf) / 1000));
+    const rawDt = Math.max(0, (now - this.lastPerf) / 1000);
+    const dt = Math.min(0.1, rawDt);
     this.lastPerf = now;
     this.frame++;
     this.input.beginFrame();
@@ -528,7 +559,9 @@ export class App {
       ctx.seeked = true;
       ctx.showDt = 0;
     }
-    this.updateSystems(ctx, this.params.has('debug') || this.frame % 30 === 0);
+    // per-system timings: every 30th frame (and every frame for the first seconds, so a slow
+    // renderer or a short QA capture still reports them)
+    this.updateSystems(ctx, this.params.has('debug') || this.frame % 30 === 0 || this.frame < 90);
     for (const h of this.frameHooks) h(ctx);
     this.input.endFrame();
     this.postfx.render(this.scene, this.camera, dt, ctx.time);
@@ -537,13 +570,15 @@ export class App {
 
     // Runtime adaptation is resolution-only; a seek (cache rebuilds) is not steady-state cost.
     if (ctx.seeked) this.governor.reset();
-    const verdict = this.governor.sample(dt);
+    // the governor sees the real frame time (the systems' dt is clamped to 0.1 s)
+    const verdict = this.governor.sample(rawDt);
     if (this.governor.scale !== this.lastScale) {
       this.lastScale = this.governor.scale;
       this.resize();
     }
     if (verdict) this.suggestLevel(verdict);
-    // preset changes rebuild systems: only while the show is not playing (pre-show, paused, ended)
+    // preset changes rebuild systems: only while the show is not playing (pre-show, paused, ended),
+    // and only in automatic mode (a preset the user picked is never overridden)
     if (this.pendingLevel && !this.clock.playing && this.governor.enabled) {
       const level = this.pendingLevel;
       this.setQuality(level);

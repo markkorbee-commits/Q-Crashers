@@ -7,7 +7,7 @@ import { damp, easeInOut, wobble } from '../player/motion';
 import { PlayerController } from '../player/PlayerController';
 import { STAGE_FOCUS } from '../player/spots';
 import { FlyoverPath } from './FlyoverPath';
-import { ShowDirector, type ShotPose } from './ShowDirector';
+import { SHOT_FOV, ShowDirector, type ShotPose } from './ShowDirector';
 
 export type CameraMode = 'first' | 'third' | 'free' | 'flyover' | 'showcam' | 'photo';
 /** keyboard order: 1..6 */
@@ -81,6 +81,8 @@ export class CameraRig implements System {
   private q1 = new THREE.Quaternion();
   private raycaster = new THREE.Raycaster();
   private hits: THREE.Intersection[] = [];
+  private focusTargets: THREE.Object3D[] = [];
+  private tmpV = new THREE.Vector3();
 
   init(app: App): void {
     this.app = app;
@@ -139,8 +141,8 @@ export class CameraRig implements System {
     this.freeYaw = yaw;
     this.freePitch = pitch;
     this.blend.t = this.blend.dur;
-    // tools and ?cam= may frame like a long lens (the official edit uses telephoto shots): photo-mode range
-    if (fov) this.baseFov = clamp(fov, 12, 110);
+    // tools and ?cam= may frame like a long lens (the official edit uses ~6° telephotos): show-camera range
+    if (fov) this.baseFov = clamp(fov, SHOT_FOV.min, SHOT_FOV.max);
   }
 
   /** V key / touch button: toggle between the eye view and the third-person avatar view */
@@ -164,7 +166,11 @@ export class CameraRig implements System {
   }
 
   setAperture(a: number): void {
-    this.app.postfx.photo.aperture = clamp(a, 0, 1);
+    const ph = this.app.postfx.photo;
+    const was = ph.aperture;
+    ph.aperture = clamp(a, 0, 1);
+    // opening the aperture for the first time: focus on the subject first (never a 10 m blur)
+    if (was <= 0 && ph.aperture > 0 && this.mode === 'photo') this.autoFocus();
   }
 
   setExposure(e: number): void {
@@ -172,33 +178,48 @@ export class CameraRig implements System {
   }
 
   /**
-   * Focus on whatever is under the centre of the frame (raycast against visible solid meshes,
-   * ground plane as fallback). Returns the focus distance in metres.
+   * Focus on whatever is under the centre of the frame: raycast against visible SOLID meshes (the
+   * camera-centred sky dome, back faces, beams, haze, glass and anything tagged userData.noFocus are
+   * skipped), then the ground plane; with nothing in the way, the stage when the lens points at it.
+   * Returns the focus distance in metres.
    */
   autoFocus(): number {
     const cam = this.app.camera;
     cam.updateMatrixWorld();
     this.raycaster.setFromCamera(CENTER, cam);
     this.raycaster.far = cam.far;
-    const targets: THREE.Object3D[] = [];
+    const targets = this.focusTargets;
+    targets.length = 0;
     this.app.scene.traverseVisible((o) => {
       const m = o as THREE.Mesh;
-      if (!m.isMesh) return;
+      if (!m.isMesh || o.userData.noFocus || o.name === 'sky') return;
       const mat = (Array.isArray(m.material) ? m.material[0] : m.material) as THREE.Material | undefined;
-      if (!mat || mat.blending === THREE.AdditiveBlending || (mat.transparent && !mat.depthWrite)) return; // beams, haze
+      // beams, haze, glass, sky dome: additive, non-depth-writing, see-through or inside-out
+      if (!mat || mat.blending === THREE.AdditiveBlending || !mat.depthWrite || mat.side === THREE.BackSide || (mat.transparent && mat.opacity < 0.5)) return;
       targets.push(m);
     });
     this.hits.length = 0;
     let d = Infinity;
     try {
       this.raycaster.intersectObjects(targets, false, this.hits);
-      if (this.hits.length) d = this.hits[0].distance;
+      for (const h of this.hits) {
+        if (h.distance > 0.3) {
+          d = h.distance;
+          break;
+        }
+      }
     } catch (e) {
       console.warn('[camera] autofocus raycast failed', e);
     }
+    targets.length = 0;
     const ray = this.raycaster.ray;
     if (!Number.isFinite(d) && ray.direction.y < -1e-4) d = -ray.origin.y / ray.direction.y;
-    if (!Number.isFinite(d)) d = 1000;
+    if (!Number.isFinite(d)) {
+      // nothing solid under the centre (sky, fireworks): focus on the stage if it is in front of us
+      const toStage = this.tmpV.copy(STAGE_FOCUS).sub(ray.origin);
+      const dist = toStage.length();
+      d = toStage.dot(ray.direction) > 0.6 * dist ? dist : 1000;
+    }
     this.setFocus(d);
     return d;
   }
@@ -237,6 +258,8 @@ export class CameraRig implements System {
     if (mode === 'third') {
       this.snapPivot();
       this.arm = this.armLength;
+      // start on the crowd-aware arm (no rise from shoulder height through the neighbours' heads)
+      this.crowdLift = smoothstep(0.6, 2.0, this.player.crowdDensity);
     }
     const b = this.blend;
     if (glide && GLIDE.has(prev) && GLIDE.has(mode)) {
@@ -372,11 +395,12 @@ export class CameraRig implements System {
 
     const yaw = pl.yaw + pl.eyeRot.y * 0.5;
     // in a packed crowd, raised arms (2.1–2.3 m) would fill a shoulder-height frame: the camera
-    // rises above the hands and comes a little closer, tilting down onto the avatar. Looking up
+    // rises well above the hands (≈ 2.9 m) on a slightly longer arm, tilting down onto the avatar. Looking up
     // (at the dragon, at fireworks) no longer swings the arm down between the neighbours: the arm
     // stays level above the heads and only the lens tilts up.
-    const lift = (this.crowdLift += (smoothstep(0.9, 2.4, pl.crowdDensity) - this.crowdLift) * damp(2.5, dt));
-    const pitch = clamp(pl.pitch - 0.2 * lift, -1.2, 1.25 - 1.2 * lift);
+    const lift = (this.crowdLift += (smoothstep(0.6, 2.0, pl.crowdDensity) - this.crowdLift) * damp(2.5, dt));
+    // over a packed crowd the lens looks ~9° further down onto the avatar and the stage beyond
+    const pitch = clamp(pl.pitch - 0.16 * lift, -1.2, 1.25 - 1.2 * lift);
     const armPitch = pitch + (Math.min(pitch, -0.08) - pitch) * lift;
     const rx = Math.cos(yaw),
       rz = -Math.sin(yaw);
@@ -392,9 +416,11 @@ export class CameraRig implements System {
     const fx = -Math.sin(yaw) * cp,
       fy = Math.sin(armPitch),
       fz = -Math.cos(yaw) * cp;
+    // Tribe mode: a crane-like arm ~3.5 m back and ~1.3 m over the head (camera ≈ 2.9 m), so the
+    // frame shows YOU in the crowd and the show, not the neighbours' heads
     const side = 0.34 * (1 - 0.35 * lift),
-      up = 0.28 + 0.34 * lift;
-    const L = this.armLength * (1 - 0.2 * lift);
+      up = 0.28 + 1.0 * lift;
+    const L = this.armLength * (1 + 0.1 * lift);
     // desired camera position and spring-arm collision against the 2D colliders
     const dx = -fx * L + rx * side,
       dz = -fz * L + rz * side;
@@ -406,8 +432,8 @@ export class CameraRig implements System {
     const z = this.pivot.z + dz * k;
     let y = this.pivot.y + (-fy * L + up) * k;
     const floor = this.floorAt(x, z);
-    // over a dense crowd: never below the raised hands (~2.3 m)
-    y = Math.max(y, floor + 0.25, floor + (1.62 + 0.76 * lift + pl.jumpY * 0.6) * lift);
+    // over a dense crowd: well above the raised hands (~2.3 m)
+    y = Math.max(y, floor + 0.25, floor + (1.62 + 1.25 * lift + pl.jumpY * 0.6) * lift);
     cam.position.set(x, y, z);
     cam.rotation.set(pitch, yaw, pl.eyeRot.z * 0.5, 'YXZ');
   }
@@ -522,6 +548,9 @@ export class CameraRig implements System {
       fov: this.app.camera.fov.toFixed(1),
       shot: this.mode === 'showcam' ? this.director.current : '-',
       haze: this.hazeScale.toFixed(2),
+      pos: this.app.camera.position.toArray().map((v) => v.toFixed(1)).join(','),
+      lift: this.mode === 'showcam' ? this.director.lifted.toFixed(2) : '-',
+      nudge: this.mode === 'showcam' ? this.director.nudged.toFixed(2) : '-',
     };
   }
 

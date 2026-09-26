@@ -6,6 +6,8 @@
  *
  * The vocabulary is read from the contract sources themselves (no copy that can drift):
  *   docs/show-format.md     fx per system + enumerated param values (`param`: `a` \| `b` ...)
+ *   docs/show-format-ext/*.md  per-module format extensions (round 2+): their tables, `sys.fx` mentions,
+ *                           backticked params and `EXT_ENUM['sys.fx.param']`: `a`, `b` lines are merged in
  *   src/data/layout.gen.ts  LAYOUT_ANCHORS keys = AnchorName (valid cue targets, + filters all/left/right/center)
  *   src/show/colors.ts      NAMED_COLORS
  *   src/show/ShowTypes.ts   SystemId, SectionKind, RepeatEvery
@@ -44,7 +46,7 @@ const KINDS = new Set(unionOf(typesSrc, 'SectionKind'));
 const EVERY = new Set(unionOf(typesSrc, 'RepeatEvery'));
 const ANCHORS = new Set([
   ...unionOf(read('src/core/Anchors.ts'), 'AnchorName'),
-  ...[...read('src/data/layout.gen.ts').matchAll(/^  ([a-z_]+):/gm)].map((m) => m[1]),
+  ...[...read('src/data/layout.gen.ts').matchAll(/^  ([a-z0-9_]+):/gm)].map((m) => m[1]),
 ]);
 const FILTERS = new Set(['all', 'left', 'right', 'center']);
 const NAMED = new Set([...read('src/show/colors.ts').matchAll(/^\s*([a-z]+):\s*'#[0-9a-fA-F]{6}'/gm)].map((m) => m[1]));
@@ -84,7 +86,7 @@ function parseVocabulary(md) {
         if (!sep) break;
         s = s.slice(sep[0].length);
       }
-      if (vals.length > 1) params[m[1]] = new Set(vals);
+      if (vals.length > 1) params[m[1]] = new Set([...(params[m[1]] ?? []), ...vals]);
     }
     const g = rest.match(/`groups`:\s*subset of\s*((?:`[a-z]+`,?\s*)+)/);
     if (g) params.groups = new Set([...g[1].matchAll(/`([a-z]+)`/g)].map((x) => x[1]));
@@ -92,6 +94,72 @@ function parseVocabulary(md) {
   return vocab;
 }
 const VOCAB = parseVocabulary(read('docs/show-format.md'));
+
+/**
+ * docs/show-format-ext/*.md: each module group documents its round-2+ extensions there (free form).
+ * Read (a) `## sys` tables exactly like show-format.md, (b) every `sys.fx` mention (the fx is then
+ * documented, as are the backticked names on that line), (c) `EXT_ENUM['sys.fx.param']`: `a`, `b`
+ * lines, (d) any other backticked name as a documented param of the systems the file talks about.
+ * The same prose scan runs over the "Implementation extensions" part of show-format.md.
+ */
+const EXT_DOCS = (() => {
+  const dir = path.join(ROOT, 'docs/show-format-ext');
+  let files = [];
+  try {
+    files = fs.readdirSync(dir).filter((f) => f.endsWith('.md')).sort();
+  } catch {
+    /* no extension docs */
+  }
+  return files.map((f) => ({ name: `docs/show-format-ext/${f}`, md: fs.readFileSync(path.join(dir, f), 'utf8') }));
+})();
+/** params documented by an extension doc for a whole system (`sys` → names) or one fx (`sys.fx` → names) */
+const EXT_PARAMS = new Map();
+const extEnumFromDocs = {};
+function addExtParam(key, name) {
+  if (!EXT_PARAMS.has(key)) EXT_PARAMS.set(key, new Set());
+  EXT_PARAMS.get(key).add(name);
+}
+function scanExtProse(md, fileSys) {
+  const talked = new Set(fileSys ? [fileSys] : []);
+  for (const line of md.split('\n')) {
+    const en = line.match(/EXT_ENUM\[\s*'([a-z0-9]+)\.([a-z_]+)\.([a-zA-Z0-9_]+)'\s*\]`?\s*:?\s*(.*)$/);
+    if (en && SYSTEMS.has(en[1])) {
+      const key = `${en[1]}.${en[2]}.${en[3]}`;
+      const vals = [...en[4].matchAll(/`([a-zA-Z0-9_]+)`/g)].map((m) => m[1]);
+      extEnumFromDocs[key] = [...new Set([...(extEnumFromDocs[key] ?? []), ...vals])];
+      talked.add(en[1]);
+      continue;
+    }
+    const names = [...line.matchAll(/`([a-zA-Z][a-zA-Z0-9_]*)`/g)].map((m) => m[1]);
+    for (const m of line.matchAll(/`([a-z0-9]+)\.([a-z_]+)`/g)) {
+      const [, sys, fx] = m;
+      if (!SYSTEMS.has(sys)) continue;
+      talked.add(sys);
+      VOCAB[sys] = VOCAB[sys] ?? {};
+      VOCAB[sys][fx] = VOCAB[sys][fx] ?? {};
+      for (const n of names) addExtParam(`${sys}.${fx}`, n);
+    }
+  }
+  for (const sys of talked) for (const m of md.matchAll(/`([a-zA-Z][a-zA-Z0-9_]*)`/g)) addExtParam(sys, m[1]);
+}
+{
+  const main = read('docs/show-format.md');
+  const i = main.indexOf('## Implementation extensions');
+  if (i >= 0) scanExtProse(main.slice(i), null);
+  for (const { name, md } of EXT_DOCS) {
+    // tables under `## sys` headings (same format as show-format.md) extend the vocabulary
+    const v = parseVocabulary(md);
+    for (const [sys, fxs] of Object.entries(v)) {
+      VOCAB[sys] = VOCAB[sys] ?? {};
+      for (const [fx, params] of Object.entries(fxs)) {
+        const cur = (VOCAB[sys][fx] = VOCAB[sys][fx] ?? {});
+        for (const [k, set] of Object.entries(params)) cur[k] = cur[k] ? new Set([...cur[k], ...set]) : set;
+      }
+    }
+    const base = path.basename(name, '.md');
+    scanExtProse(md, SYSTEMS.has(base) ? base : null);
+  }
+}
 
 /**
  * Contract extensions this show uses (proposed in the module report; the systems ignore what they do
@@ -107,11 +175,14 @@ const EXT_ENUM = {
   'fireworks.comet.end': ['none', 'pearl', 'crackle', 'brocade', 'strobe', 'willow', 'peony', 'crossette', 'palm', 'kamuro'],
   'fireworks.salvo.pattern': ['line', 'v', 'arc', 'random'],
 };
+for (const [k, vals] of Object.entries(extEnumFromDocs)) EXT_ENUM[k] = [...new Set([...(EXT_ENUM[k] ?? []), ...vals])];
 /** preferred extended anchors (p.at) — the cue's `target` is the contract fallback */
 const EXT_ANCHORS = new Set(['flare_pots', 'corner_towers', 'tower_torches', 'arms', 'arm_ends', 'side_fronts', 'wing_spars', 'hang_lines', 'piano']);
 const COLOR_PARAMS = new Set(['color', 'color2', 'eyes', 'rosettes', 'windowColor', 'tint', 'shaft']);
 const CAMERA_EASE = new Set(['linear', 'in', 'out', 'inout']);
 const DEFAULT_DUR = { pyro: 0.8, fireworks: 0.2, strobe: 0.25, lasers: 4, lights: 8, crowd: 2, stage: 4, screens: 8, fog: 6, camera: 6, atmos: 10 };
+/** camera.shot lens range (src/camera/ShowDirector.ts SHOT_FOV; docs/show-format-ext/core.md) */
+const SHOT_FOV = { min: 5, max: 110 };
 
 // ------------------------------------------------------------------------------ helpers
 const errors = [];
@@ -333,14 +404,20 @@ function checkParams(c, where) {
     const v3 = (x) => Array.isArray(x) && x.length === 3 && x.every(isNum);
     if (p.preset === undefined && (!v3(p.pos) || !v3(p.look))) err(`${where}: camera.shot needs pos + look [x,y,z]`);
     for (const k of ['to', 'lookTo']) if (p[k] !== undefined && !v3(p[k])) err(`${where}: camera ${k} must be [x,y,z]`);
-    if (p.fov !== undefined && (!isNum(p.fov) || p.fov < 10 || p.fov > 110)) err(`${where}: fov must be 10..110`);
+    for (const k of ['fov', 'fovTo']) if (p[k] !== undefined && (!isNum(p[k]) || p[k] < SHOT_FOV.min || p[k] > SHOT_FOV.max)) err(`${where}: ${k} must be ${SHOT_FOV.min}..${SHOT_FOV.max}`);
+    if (p.fovTo !== undefined && p.fov === undefined) warn(`${where}: fovTo without fov (zooms from the default 50°)`);
+    if (p.alt !== undefined) {
+      const a = p.alt;
+      if (!a || typeof a !== 'object' || !v3(a.pos) || !v3(a.look)) err(`${where}: camera alt must be { pos: [x,y,z], look: [x,y,z], fov?, roll? }`);
+      else if (a.fov !== undefined && (!isNum(a.fov) || a.fov < SHOT_FOV.min || a.fov > SHOT_FOV.max)) err(`${where}: alt.fov must be ${SHOT_FOV.min}..${SHOT_FOV.max}`);
+    }
+    if (p.altEvery !== undefined && (!isNum(p.altEvery) || p.altEvery < 1 / 30 || p.altEvery > 10)) err(`${where}: altEvery must be 0.033..10 s`);
     if (p.ease !== undefined && !CAMERA_EASE.has(p.ease)) err(`${where}: ease "${p.ease}"`);
     if (v3(p.pos) && (p.pos[1] < 0.3 || Math.abs(p.pos[0]) > 700 || p.pos[1] > 400 || Math.abs(p.pos[2]) > 900)) warn(`${where}: camera pos ${p.pos} looks off-site`);
   }
 }
-const DOC_PARAMS = (() => {
-  // every `name` mentioned in a table row counts as documented for that fx
-  const md = read('docs/show-format.md');
+/** every `name` mentioned in a `## sys` table row counts as documented for that fx */
+function tableParams(md) {
   const out = {};
   let sys = null;
   for (const line of md.split('\n')) {
@@ -356,9 +433,11 @@ const DOC_PARAMS = (() => {
     out[`${sys}.${fx}`] = new Set([...cells.slice(2).join(' ').matchAll(/`([a-zA-Z0-9_]+)`/g)].map((m) => m[1]));
   }
   return out;
-})();
+}
+const DOC_PARAMS = tableParams(read('docs/show-format.md'));
+for (const { md } of EXT_DOCS) for (const [k, set] of Object.entries(tableParams(md))) for (const n of set) addExtParam(k, n);
 function documentedParam(sys, fx, k) {
-  return DOC_PARAMS[`${sys}.${fx}`]?.has(k) ?? false;
+  return (DOC_PARAMS[`${sys}.${fx}`]?.has(k) ?? false) || (EXT_PARAMS.get(`${sys}.${fx}`)?.has(k) ?? false) || (EXT_PARAMS.get(sys)?.has(k) ?? false);
 }
 
 const cues = show.cues ?? [];
@@ -498,7 +577,12 @@ const STORYBOARD = [
 ];
 /** frames the check may not demand (reason recorded; keep this list short) */
 const STORYBOARD_EXCEPT = {
+  10: 'the video shows no pyro after ~102.2 (research/video-timeline/00.md)',
   33: 'kick-2 columns are on the 330.28 downbeat (music first); f033 must be lagged ≥ 4.2 s',
+  60: 'the f060 picture (white side-section bursts, gold deck glare, high drone) is at v599.7–600.9, ≈3 s after the window; no pyro at 595.9–597.9 (video-timeline/04.md)',
+  119: 'fountains + comet heads at v1189.1, ≈10 s after the window (video-timeline/08.md)',
+  129: 'pink/white crackle over the stage from v1287.5 (video-timeline/08.md)',
+  130: '~6 fountains per arm at v1299–1300 (video-timeline/08.md)',
 };
 const FRAME_DT = 9.881;
 const riseOf = (h) => 0.8 + 0.021 * Math.max(0, h - 4);
@@ -653,7 +737,10 @@ if (args.includes('--storyboard')) for (const g of storyGaps) console.log(`  · 
       const t = rayBox(pos, f, bx);
       if (t !== null && t > 0.2 && t < dist * 0.97) out.push(`centre sight line blocked by ${bx.n}`);
     }
-    if (blocked / 144 > 0.17) out.push(`${Math.round((blocked / 144) * 100)} % of the frame covered (${[...hits].sort((a, b) => b[1] - a[1]).slice(0, 2).map(([n, c]) => `${n} ${c}`).join(', ')})`);
+    // structures may frame a picture (the video's own terrace and between-pillar framings): a stricter
+    // limit only when they also block the centre sight line
+    const centreBlocked = out.some((m) => m.startsWith('centre sight line'));
+    if (blocked / 144 > (centreBlocked ? 0.17 : 0.3)) out.push(`${Math.round((blocked / 144) * 100)} % of the frame covered (${[...hits].sort((a, b) => b[1] - a[1]).slice(0, 2).map(([n, c]) => `${n} ${c}`).join(', ')})`);
     return out;
   };
   /** shots whose subject IS the structure (the pianist on the riser, the K close-up of lantern L1, f113): note tag #subject */

@@ -4,7 +4,8 @@ import { Rng } from '../core/rng';
 import type { Collider2D, FrameContext, QualitySettings, System } from '../core/types';
 import { buildSiteMask, SITE_RECT } from './groundMaps';
 import { ARM, BACKSTAGE_Z, LAKE, PILLARS, PIT_Z, terraceHeight, terrainHeight, WATER_Y } from './site';
-import { cloudNoiseTexture, groundDetailTexture, makeCanvas, canvasTexture } from './tex';
+import { TimeSlicer } from '../core/yieldTo';
+import { cloudNoiseTextureAsync, groundDetailTexture, makeCanvas, canvasTexture } from './tex';
 import { Vegetation } from './vegetation';
 import { patchWorldMaterial, SKY_REFLECT_GLSL, worldUniforms } from './worldLights';
 
@@ -40,16 +41,23 @@ export class TerrainSystem implements System {
     const q = app.quality;
     const mobile = q.level === 'mobile';
     const ts = Math.min(1024, q.textureSize);
-    this.siteMask = buildSiteMask(mobile ? 512 : 1024);
-    this.detail = groundDetailTexture(mobile ? 256 : Math.min(512, ts));
+    // the loading screen keeps painting: sub-steps on the bar, ~12 ms slices inside the generators
+    const slicer = new TimeSlicer(12);
+    await app.loadStep('site masks', 0);
+    this.siteMask = await buildSiteMask(mobile ? 512 : 1024, slicer);
+    await app.loadStep('ground detail', 0.3);
+    this.detail = await groundDetailTexture(mobile ? 256 : Math.min(512, ts), slicer);
     this.detail.anisotropy = q.anisotropy;
-    this.macro = cloudNoiseTexture(mobile ? 128 : 256);
+    this.macro = await cloudNoiseTextureAsync(mobile ? 128 : 256, slicer);
     this.macro.anisotropy = q.anisotropy;
     this.siteMask.anisotropy = Math.max(4, q.anisotropy);
+    await app.loadStep('ground', 0.55);
     this.buildGround(mobile);
+    await slicer.maybeYield();
     this.buildWater();
     this.buildPlates();
     this.buildCableRamps();
+    await app.loadStep('trees', 0.75);
     this.vegetation = new Vegetation(q.treeCount, mobile);
     app.scene.add(this.vegetation.group);
     this.registerBounds();

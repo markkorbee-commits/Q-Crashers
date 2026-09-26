@@ -53,10 +53,27 @@ export class ShowEngine {
     if (this.file) this.compile();
   }
 
+  /** Load the show file. Network errors and 5xx answers are retried twice (CDN / Wi-Fi hiccups). */
   async load(url: string): Promise<void> {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`show file ${url}: HTTP ${res.status}`);
-    this.setFile((await res.json()) as ShowFile);
+    let lastErr: unknown = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt) await new Promise((r) => setTimeout(r, 600 * attempt));
+      let res: Response;
+      try {
+        res = await fetch(url);
+      } catch (e) {
+        lastErr = e;
+        continue;
+      }
+      if (res.status >= 500) {
+        lastErr = new Error(`show file ${url}: HTTP ${res.status}`);
+        continue;
+      }
+      if (!res.ok) throw new Error(`show file ${url}: HTTP ${res.status}`);
+      this.setFile((await res.json()) as ShowFile);
+      return;
+    }
+    throw lastErr instanceof Error ? lastErr : new Error(`show file ${url}: ${String(lastErr)}`);
   }
 
   setFile(file: ShowFile): void {
