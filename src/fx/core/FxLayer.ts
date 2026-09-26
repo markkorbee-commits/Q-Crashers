@@ -159,9 +159,32 @@ export class FxLayer {
     // slots
     const S = this.slotSize;
     let need = 0;
-    for (let i = 0; i < n; i++) if (list[i].row >= 0) need += Math.ceil(list[i].count / S);
-    const k = need > this.maxSlots ? this.maxSlots / need : 1;
-    this.scaled = k;
+    let most = 0;
+    let alive = 0;
+    for (let i = 0; i < n; i++) {
+      if (list[i].row < 0) continue;
+      const w = Math.ceil(list[i].count / S);
+      need += w;
+      if (w > most) most = w;
+      alive++;
+    }
+    // over budget: water-filling instead of a uniform scale — every emitter may keep up to `cap`
+    // slots, so small ones (a pillar-top fan, a flare) stay complete and only the biggest (a 60-unit
+    // fountain wall) thin out
+    let cap = most;
+    if (need > this.maxSlots) {
+      let lo = 1,
+        hi = most;
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        let sum = 0;
+        for (let i = 0; i < n; i++) if (list[i].row >= 0) sum += Math.min(mid, Math.ceil(list[i].count / S));
+        if (sum <= this.maxSlots) lo = mid;
+        else hi = mid - 1;
+      }
+      cap = Math.max(1, lo);
+    }
+    this.scaled = need > this.maxSlots ? Math.min(this.maxSlots, alive * cap) / need : 1;
     let slot = 0;
     let dirty = false;
     let particles = 0;
@@ -170,7 +193,7 @@ export class FxLayer {
     for (let i = 0; i < n && slot < this.maxSlots; i++) {
       const e = list[i];
       if (e.row < 0) continue;
-      const eff = k < 1 ? Math.max(1, Math.floor(e.count * k)) : e.count;
+      const eff = Math.min(e.count, cap * S);
       const slots = Math.ceil(eff / S);
       emitters++;
       particles += eff;

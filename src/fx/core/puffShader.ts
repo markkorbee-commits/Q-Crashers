@@ -16,6 +16,7 @@ varying vec3 vNoise;
 varying float vErode;
 varying float vWarm;
 varying vec2 vFloor;
+varying float vOpac;
 
 #define REC(k) texelFetch(uEmit, ivec2(k, row), 0)
 
@@ -113,6 +114,7 @@ void main() {
   vEmis = vec3(0.0);
   vLit = vec3(0.0);
   vWarm = r4.w;
+  vOpac = 0.0;
 
   if (kind == 0) {
     // flame fireball: temperature falls with age; soot takes over near the end
@@ -121,6 +123,9 @@ void main() {
     vEmis = r3.rgb * r3.w * em * fog * nearF;
     vLit = (r4.rgb * envLight(P) * 1.4 + r3.rgb * r3.w * 0.004) * fog;
     vPar = vec4(smoothstep(0.0, 0.03, f) * em * nearF, temp, soot, 0.0);
+    // flame body opacity (Z1): dense rows / billowing walls occlude what lies behind (and each
+    // other) instead of summing into a clipped white band
+    vOpac = r11.y;
   } else if (kind == 3 || kind == 4 || kind == 6) {
     float decay = max(r9.x, 0.01);
     float g = kind == 3 ? exp(-tau / decay)
@@ -155,6 +160,7 @@ varying vec3 vNoise;
 varying float vErode;
 varying float vWarm;
 varying vec2 vFloor;
+varying float vOpac;
 
 vec3 flameRamp(vec3 base, float T, float warm) {
   float t = clamp(T, 0.0, 1.0);
@@ -186,7 +192,8 @@ void main() {
     float T = vPar.y * (1.4 - d * 0.9) + turb * 0.75;
     vec3 e = flameRamp(vEmis, T, vWarm) * shape;
     float soot = clamp(vPar.z * shape * (0.5 + nz2.b * 1.0), 0.0, 0.95);
-    gl_FragColor = vec4((e * (1.0 - soot) + vLit * soot) * vPar.x, soot * vPar.x);
+    float body = vOpac * shape * (0.55 + 0.45 * nz.g);
+    gl_FragColor = vec4((e * (1.0 - soot) + vLit * soot) * vPar.x, clamp(soot + body * (1.0 - soot), 0.0, 0.97) * vPar.x);
   } else if (kind == 3 || kind == 4 || kind == 6) {
     float g = kind == 6 ? exp(-d2 * 3.2) * (0.65 + 0.7 * nz.r) - 0.04
                         : exp(-d2 * 5.0) * (0.8 + 0.4 * nz.r) + exp(-d2 * 28.0) * 0.9;

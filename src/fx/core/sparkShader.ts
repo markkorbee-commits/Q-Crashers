@@ -209,6 +209,8 @@ void main() {
 
     vec3 c1 = pistil ? r4.rgb : r3.rgb;
     if ((flags & F_COLORCHANGE) != 0) c1 = mix(r3.rgb, r4.rgb, smoothstep(r4.w - 0.06, r4.w + 0.06, tS / lifeEnd));
+    // colour-changing fountains: the whole column (every spark in flight) turns at one moment
+    if ((flags & F_ABSCHANGE) != 0) c1 = mix(r3.rgb, r4.rgb, smoothstep(r11.w - 0.04, r11.w + 0.04, uTime));
     col = c1;
     if ((flags & F_COOL) != 0) {
       float cool = clamp(age / max(trail, 0.05), 0.0, 1.0);

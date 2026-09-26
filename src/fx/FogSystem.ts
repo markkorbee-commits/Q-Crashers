@@ -17,6 +17,9 @@ interface LevelSeg {
   fade: number;
   from: number;
   to: number;
+  /** smoke-volume glow (colour * amount) cross-faded with the level */
+  g0: THREE.Color;
+  g1: THREE.Color;
 }
 
 /**
@@ -39,6 +42,11 @@ export class FogSystem extends CueFxSystem {
   private stageSmoke = 0;
   private skySmoke = 0;
   private hazeLevel = DEFAULT_HAZE;
+  private readonly glowNow = new THREE.Color();
+  /** normalised colour of each fog.burst cue (resolved once) for the haze tint */
+  private readonly tintCache = new Map<number, THREE.Color>();
+  private readonly tintSum = new THREE.Color();
+  private readonly tint = new THREE.Color(1, 1, 1);
   private crowdSys: { mode?: unknown } | null | undefined = undefined;
 
   protected override onInit(app: App): void {
@@ -70,16 +78,24 @@ export class FogSystem extends CueFxSystem {
     if (changed && this.app) this.buildHaze(q);
   }
 
+  protected override invalidate(): void {
+    super.invalidate();
+    this.tintCache.clear();
+  }
+
   override setEnabled(on: boolean): void {
     super.setEnabled(on);
     if (this.haze) this.haze.mesh.visible = on;
-    if (!on && this.app) this.app.env.haze = DEFAULT_HAZE;
+    if (!on && this.app) {
+      this.app.env.haze = DEFAULT_HAZE;
+      this.shared.lights.glow.setRGB(0, 0, 0);
+    }
   }
 
   protected lifetime(cue: Omit<Cue, 'life' | 'end'>): number {
     switch (cue.fx) {
       case 'burst':
-        return cue.dur + 22;
+        return cue.dur + Math.min(22, num(cue.p.life, 16, 1, 30) + 6);
       case 'lowfog':
         return cue.dur + 16;
       default:
@@ -92,43 +108,84 @@ export class FogSystem extends CueFxSystem {
     else if (cue.fx === 'lowfog') this.lowfog(cue, out);
   }
 
+  /**
+   * Smoke cannon bursts. Extensions (docs/show-format-ext/pyro.md): `glow` (0..4: the cloud is
+   * self-lit in its colour — a lit CO2 / smoke whiteout, cyan-lit plumes — and lights the haze and
+   * floor around it), `density` (0.2..4 opacity multiplier: a thick bank that hides the set),
+   * `life` (s), `rise` (speed multiplier), `rate` (puffs per second over dur: lantern crystals
+   * puffing smoke; without it one burst over min(dur, 4) s).
+   */
   private burst(cue: Cue, out: EmitterSet): void {
     const p = cue.p;
     const pts = this.app.anchors.resolve(cue.targets, 'wing_tips');
-    const size = num(p.size, 1, 0.2, 6);
+    const size = num(p.size, 1, 0.2, 8);
     const tint = fxColor(p.color, this.palette, this.c1, 'white').clone();
-    const dur = Math.max(0.4, Math.min(cue.dur, 4));
+    const glow = num(p.glow, 0, 0, 4);
+    const density = num(p.density, 1, 0.2, 4);
+    const lifeS = num(p.life, 13, 1, 30);
+    const rise = num(p.rise, 1, 0.2, 4);
+    const rate = num(p.rate, 0, 0, 8);
+    // `lift` (m) raises the nozzle above the anchor; the lantern crystals puff from the top of their hood
+    const lift = num(p.lift, cue.targets.includes('pillars_top') ? 1.8 : 0, -10, 30);
     // a smoke cannon's plume grows sub-linearly with its size class, and many targets share the
     // volume (12 wing heads must not stack into one opaque cloud that hides the fire it frames)
     const sq = Math.sqrt(size);
     const share = 1 / Math.sqrt(Math.max(1, pts.length / 4));
-    pts.forEach((pos, i) => {
-      const n = Math.max(3, Math.round(9 * sq * share * Math.min(1, this.quality.particleScale * 1.5)));
-      out.add(
-        new Emitter(DIST.CONE, F.RAMP)
+    const psc = Math.min(1, this.quality.particleScale * 1.5);
+    // self-lit clouds: the colour glows (decaying over the cloud's first seconds)
+    const self = glow > 0 ? tint.clone().multiplyScalar(glow * 2.2) : null;
+    // one-shot, staggered over the emission window (a continuous emitter would only ever release
+    // emitDur / life of its particles); plain bursts keep roughly their authored (thin) density,
+    // bursts that use the extension params get all of theirs
+    const ext = p.glow !== undefined || p.density !== undefined || p.rate !== undefined || p.life !== undefined;
+    const flags = self ? F.SELFLIT : 0;
+    const alpha = Math.min(0.95, 0.28 * density);
+    const puffs = rate > 0 ? Math.max(1, Math.min(Math.floor(cue.dur * rate) + 1, Math.floor(64 / Math.max(1, pts.length)))) : 1;
+    const dt = rate > 0 ? cue.dur / puffs : 0;
+    // a glowing (lit) burst is a sudden cloud: most of it is out within the first ~0.7 s
+    const emitDur = rate > 0 ? Math.min(0.35, dt * 0.8) : Math.max(0.4, Math.min(cue.dur, glow > 0 ? 0.7 : 4));
+    for (let j = 0; j < puffs; j++) {
+      const t0 = cue.t + j * dt;
+      pts.forEach((pos, i) => {
+        const n0 = Math.max(rate > 0 ? 4 : 3, Math.round(9 * sq * share * psc * Math.sqrt(density) * (rate > 0 ? 0.45 : 1)));
+        const n = ext ? n0 : Math.max(2, Math.round(n0 * Math.min(1, 0.12 + (1.5 * emitDur) / lifeS)));
+        const e = new Emitter(DIST.CONE, flags)
           .on(L_FOG)
-          .originV(pos)
-          .time(cue.t)
+          .origin(pos.x, pos.y + lift, pos.z)
+          .time(t0)
           .dir(0, 1, 0.25, 0.7)
-          .speed(2.5 * sq, 6.5 * sq)
+          .speed(2.5 * sq * rise, 6.5 * sq * rise)
           .physics(1.1, 0.25)
-          .color(tint, 0.28)
-          .life(10, 16)
-          .emit(n, dur)
-          .size(1.5 + 1.2 * sq, 7.5 * sq)
+          .color(tint, rate > 0 ? Math.min(0.95, alpha * 1.5) : alpha)
+          .life(lifeS * 0.62, lifeS)
+          .emit(n, 0, emitDur / n)
+          .size((1.5 + 1.2 * sq) * (rate > 0 ? 0.6 : glow > 0 ? 1.8 : 1), 7.5 * sq * (rate > 0 ? 0.55 : 1))
           .trail(0.45, 0.28)
-          .seed(this.sub(cue, i))
+          .seed(this.sub(cue, i + j * 131))
           .set(R.X1, 0.12)
           .set(R.X2, 0.85)
-          .set(R.X3, 0.2)
           .set(R.Y0, 0.85)
           .set(R.Y2, 0.05)
           .set(R.Y3, 1)
           .set(R.Z0, 1.25)
           .set(R.Z3, PUFF.SMOKE)
-          .window(cue.t, cue.t + dur + 19.5),
-      );
-    });
+          .window(t0, t0 + emitDur + lifeS + 0.5);
+        if (self) e.color2(self, 0).set(R.X0, Math.max(0.6, Math.min(3, cue.dur * 0.6)));
+        out.add(e);
+      });
+    }
+    if (self && pts.length) {
+      // the glowing cloud lights the haze and the floor around it
+      const mn = new THREE.Vector3(Infinity, Infinity, Infinity);
+      const mx = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+      for (const q of pts) {
+        mn.min(q);
+        mx.max(q);
+      }
+      mn.y = mx.y = (mn.y + mx.y) * 0.5 + 4 * sq;
+      const dur = Math.max(0.5, Math.min(cue.dur, 3) + 0.8);
+      out.lights.push({ kind: 1, t0: cue.t, t1: cue.t + dur, decay: dur * 0.6, strobe: 0, color: tint.clone(), peak: glow * 0.7 * sq * Math.min(2, Math.sqrt(pts.length)), pos: mn.clone().add(mx).multiplyScalar(0.5), a: mn.clone(), b: mx.clone(), radius: 8 + 6 * sq });
+    }
   }
 
   private lowfog(cue: Cue, out: EmitterSet): void {
@@ -157,14 +214,20 @@ export class FogSystem extends CueFxSystem {
     const cx = (minX + maxX) / 2;
     const dur = Math.max(1, cue.dur);
     const life = 13;
-    const tint = fxColor(p.color, this.palette, this.c1, 'white').lerp(WHITE, 0.3).clone();
+    // saturated smoke (the red finale bank) keeps its colour; white / pale fog stays neutral
+    const raw = fxColor(p.color, this.palette, this.c1, 'white');
+    const rawSat = 1 - Math.min(raw.r, raw.g, raw.b) / Math.max(raw.r, raw.g, raw.b, 1e-4);
+    const tint = raw.lerp(WHITE, rawSat > 0.6 ? 0.12 : 0.3).clone();
     const regions: [THREE.Vector3, THREE.Vector3, number, number][] = [];
     const deckY = Math.max(0, y - 0.3);
     if (area !== 'field') regions.push([new THREE.Vector3(cx, deckY + 0.5, z - 9), new THREE.Vector3(w, 0.7, 20), 0.35, deckY]);
     if (area !== 'deck' || p.spill !== false) regions.push([new THREE.Vector3(cx, 0.45, z + 16), new THREE.Vector3(w * 0.95, 0.5, 34), area === 'deck' ? 0.55 : 1, 0]);
     if (area === 'field' || area === 'all') regions.push([new THREE.Vector3(0, 0.45, 90), new THREE.Vector3(90, 0.5, 130), 1, 0]);
     regions.forEach(([c, ext, dk, floorY], i) => {
-      const n = Math.max(12, Math.round(((ext.x * ext.z) / 60) * Math.min(1, this.quality.particleScale * 1.3)));
+      // the big field regions use larger, fainter sheets so the bank reads continuous, not as discs
+      const big = ext.x * ext.z > 4000;
+      const sz = big ? 1.5 : 1;
+      const n = Math.max(12, Math.round(((ext.x * ext.z) / (60 * sz)) * Math.min(1, this.quality.particleScale * 1.3)));
       out.add(
         new Emitter(DIST.BOX, F.FLAT | F.RAMP)
           .on(L_FOG)
@@ -174,10 +237,10 @@ export class FogSystem extends CueFxSystem {
           .dir(0, 0.05, 1, 0.8)
           .speed(0.2, 0.7)
           .physics(0.25, 0)
-          .color(tint, 0.42 * density * dk)
+          .color(tint, (0.42 * density * dk) / Math.sqrt(sz))
           .life(life * 0.7, life)
           .emit(Math.min(n, 400), dur + life * 0.5)
-          .size(6.5, 5)
+          .size(6.5 * sz, 5 * sz)
           .trail(0.7, 0.2)
           .seed(this.sub(cue, i))
           .set(R.X1, 0.03)
@@ -200,22 +263,29 @@ export class FogSystem extends CueFxSystem {
   private rebuildLevels(): void {
     this.levels.length = 0;
     let cur = DEFAULT_HAZE;
+    const gCur = new THREE.Color(0, 0, 0);
     for (const c of this.app.show.all('fog')) {
       if (c.fx !== 'level') continue;
       const to = num(c.p.haze, num(c.p.density, cur, 0, 1.5), 0, 1.5);
       const fade = num(c.p.fade, 2, 0, 120);
       // value at the moment this segment starts (previous segment evaluated at c.t)
       const prev = this.levels[this.levels.length - 1];
-      if (prev) cur = evalSeg(prev, c.t);
-      this.levels.push({ t: c.t, fade, from: cur, to });
+      if (prev) {
+        cur = evalSeg(prev, c.t);
+        evalGlow(prev, c.t, gCur);
+      }
+      // `glow` (0..3) + `glowColor`: the whole smoke volume glows in that colour (red pyro scenes)
+      const g = num(c.p.glow, 0, 0, 3);
+      const g1 = g > 0 ? fxColor(c.p.glowColor ?? c.p.color, this.app.show.paletteAt(c.t, this.palette), new THREE.Color(), 'primary').multiplyScalar(g * 0.6) : new THREE.Color(0, 0, 0);
+      this.levels.push({ t: c.t, fade, from: cur, to, g0: gCur.clone(), g1 });
       cur = to;
     }
     this.levelRev = this.app.show.revision;
   }
 
-  private hazeAt(t: number): number {
+  private segAt(t: number): number {
     const L = this.levels;
-    if (!L.length || t < L[0].t) return DEFAULT_HAZE;
+    if (!L.length || t < L[0].t) return -1;
     let lo = 0,
       hi = L.length - 1,
       idx = 0;
@@ -226,7 +296,12 @@ export class FogSystem extends CueFxSystem {
         lo = mid + 1;
       } else hi = mid - 1;
     }
-    return evalSeg(L[idx], t);
+    return idx;
+  }
+
+  private hazeAt(t: number): number {
+    const i = this.segAt(t);
+    return i < 0 ? DEFAULT_HAZE : evalSeg(this.levels[i], t);
   }
 
   /** smoke accumulated from recent cues of a system (analytic, seek-safe) */
@@ -252,6 +327,49 @@ export class FogSystem extends CueFxSystem {
     return s;
   }
 
+  /**
+   * Colour of the smoke hanging in the air: coloured smoke cannons (pink whiteout, red smoke bank)
+   * tint the haze they thicken, weighted like the smoke accumulation (seek-safe).
+   */
+  private smokeTint(t: number): THREE.Color {
+    const all = this.app.show.all('fog');
+    let lo = 0,
+      hi = all.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (all[mid].t < t - 50) lo = mid + 1;
+      else hi = mid;
+    }
+    const sum = this.tintSum.setRGB(0, 0, 0);
+    let W = 0;
+    for (let i = lo; i < all.length; i++) {
+      const c = all[i];
+      if (c.t > t) break;
+      if (c.fx !== 'burst') continue;
+      const w = smokeWeight(c, false);
+      if (w <= 0) continue;
+      const a = t - c.t;
+      const k = w * (1 - Math.exp(-a / 1.2)) * Math.exp(-a / 22);
+      let col = this.tintCache.get(c.id);
+      if (!col) {
+        col = fxColor(c.p.color, this.app.show.paletteAt(c.t, this.palette), new THREE.Color(), 'white');
+        const m = Math.max(col.r, col.g, col.b, 1e-4);
+        col.multiplyScalar(1 / m);
+        this.tintCache.set(c.id, col);
+      }
+      sum.r += col.r * k;
+      sum.g += col.g * k;
+      sum.b += col.b * k;
+      W += k;
+    }
+    this.tint.setRGB(1, 1, 1);
+    if (W > 1e-4) {
+      sum.multiplyScalar(1 / W);
+      this.tint.lerp(sum, Math.min(0.85, W / (W + 0.35)));
+    }
+    return this.tint;
+  }
+
   protected override afterUpdate(ctx: FrameContext): void {
     if (this.levelRev !== this.app.show.revision) this.rebuildLevels();
     const t = ctx.showTime;
@@ -265,6 +383,11 @@ export class FogSystem extends CueFxSystem {
     // env.haze drives beam / laser / crowd-scatter visibility everywhere; pyro smoke hangs around
     // the stage, it does not thicken the air over the whole field — so it only nudges the level
     env.haze = Math.min(1, level + this.stageSmoke * 0.08);
+    // smoke-volume glow of the current level segment (fog.level glow)
+    const si = this.segAt(t);
+    if (si >= 0) evalGlow(this.levels[si], t, this.glowNow);
+    else this.glowNow.setRGB(0, 0, 0);
+    this.shared.lights.glow.copy(this.glowNow);
     if (this.haze) {
       // pyro smoke thickens the stage cloud, but only moderately: a flame ring must not turn the
       // stage into one glowing blob. The field layer is thinner with a crowd present (the bodies
@@ -274,6 +397,7 @@ export class FogSystem extends CueFxSystem {
       const field = (0.022 * level + 0.02 * this.stageSmoke) * (tribe ? 0.55 : 1);
       const skyD = 0.02 * level + 0.2 * this.skySmoke;
       this.haze.setDensity(stage, field, skyD);
+      this.haze.setTint(this.smokeTint(t));
     }
   }
 
@@ -305,6 +429,11 @@ function evalSeg(s: LevelSeg, t: number): number {
   return s.from + (s.to - s.from) * k * k * (3 - 2 * k);
 }
 
+function evalGlow(s: LevelSeg, t: number, out: THREE.Color): THREE.Color {
+  const k = s.fade <= 0 ? 1 : Math.min(1, Math.max(0, (t - s.t) / s.fade));
+  return out.copy(s.g0).lerp(s.g1, k * k * (3 - 2 * k));
+}
+
 /** how much lingering smoke a cue leaves (stage-level or high in the sky) */
 function smokeWeight(c: Cue, sky: boolean): number {
   const p = c.p;
@@ -322,7 +451,7 @@ function smokeWeight(c: Cue, sky: boolean): number {
     if (c.fx === 'finale') return 0.01 * n(p.density, 15) * c.dur;
     return 0;
   }
-  if (c.sys === 'fog') return c.fx === 'burst' ? 0.25 * n(p.size, 1) : 0;
+  if (c.sys === 'fog') return c.fx === 'burst' ? 0.25 * Math.min(8, n(p.size, 1)) * Math.min(3, n(p.density, 1)) * (n(p.rate, 0) > 0 ? 0.4 : 1) : 0;
   switch (c.fx) {
     case 'flame':
       return 0.035 * (n(p.height, 8) / 8) * Math.max(0.4, c.dur);
@@ -336,7 +465,7 @@ function smokeWeight(c: Cue, sky: boolean): number {
     case 'waterfall':
       return 0.03 * c.dur;
     case 'burst':
-      return 0.14 * n(p.size, 1) * (c.dur >= 2 ? c.dur * 0.5 : 1);
+      return 0.14 * n(p.size, 1) * (c.dur >= 2 || p.type === 'bengal' ? Math.max(0.5, c.dur * 0.5) : 1);
     case 'bengal':
       return 0.12 * c.dur;
     default:
