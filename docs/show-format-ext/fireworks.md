@@ -46,6 +46,15 @@ Engine: `src/fireworks/FireworkSystem.ts`, `src/fireworks/shells.ts`, `src/firew
     `per: 6, glitter: 0.6, tailGain: 2.5` the pink V-fans of v550–559 read as dense fans in a pink
     lit cloud (measured on 552.25–558.75: +0.7 points on top of the cue change alone, 558.25 +1.4).
 
+* **Round 7.**
+  * Comet-top breaks (`end` a shell type: `crackle`, `spider`, `strobe`, …) burn out sooner than a
+    shell: burn x r / 16 of the shell's burn time (at least x 0.35; r = the break radius, 3.5–10 m), the
+    crackle spread with it. The red crackle tops of v333.9–336.2 are gone by v336.5–337 instead of
+    popping on to ~338 (measured: 338 +2.4, 336.75 +1.5, 264.75 +2.4 points).
+  * Crossette breaks have no glow ball (flash size 0.45 like the other textured shells): the
+    crossette lines of v553.5 / v557.0 open as spiky star bursts, not as a row of white moons.
+  * New comet param `glow` (below).
+
 ## New params
 
 ### comet, cake and mine: launch positions
@@ -83,6 +92,7 @@ Engine: `src/fireworks/FireworkSystem.ts`, `src/fireworks/shells.ts`, `src/firew
 | `intensity` | brightness multiplier 0..3 (default 1). |
 | `smoke` | `true`: a lingering smoke trail along the climb (puffs stay ~10 s). Default `true` for `serpent` comets (a wriggling, self-lit trail that hangs ~4 s), else `false`. |
 | `pearlTime` | s the pearl head hangs on at the top (with `end: pearl`, default 1). |
+| `glow` | comet only, 0..3 (round 7, default 0): a soft glow in the comet colour travels up with the comets of each fan (soft puffs on the comets' own paths, radius 0.1 x `height`, 1.5–6 m, dying with the heads). A dense fan seen from a distance becomes one glowing mass, as the camera records it: the pink V-fans of v557.9–559.3 (`glow: 1` on the 557.872 and 558.646 fans: 558.25 +1.2, 558.75 +3.2 points). The puffs are world-sized: meant for fans seen from afar (close up they read as soft balls), and not on by default (every per ≥ 3 fan glowing cost 557.75 −3.4 and 264.75 −3.2 points). |
 
 ### cake
 | param | meaning |

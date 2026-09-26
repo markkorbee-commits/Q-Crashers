@@ -75,6 +75,7 @@ export class PyroSystem extends CueFxSystem {
     const smoke = this.shared.puffLayer('pyro-smoke', Math.round(6000 * Math.max(0.35, ps)), 768, 12);
     const fire = this.shared.puffLayer('pyro-fire', Math.round(16000 * Math.max(0.35, ps)), 1024, 13);
     const spark = this.shared.sparkLayer('pyro-sparks', q, Math.round(70000 * Math.max(0.2, ps)), 1024, 14, 2);
+    columnLaw(spark.mesh.material as THREE.ShaderMaterial);
     this.layers = [smoke, fire, spark];
     for (const l of this.layers) this.app.scene.add(l.mesh);
   }
@@ -478,13 +479,13 @@ export class PyroSystem extends CueFxSystem {
     const wK = num(p.width, 1, 0.3, 4);
     const r0 = (wing ? 0.8 : big ? 0.75 + 0.055 * H : 0.28 + 0.03 * H) * wK;
     // coloured (cold-fire / lit-plume) columns billow a little wider than a hydrocarbon jet
-    const rG = (wing ? 0.65 * H : big ? 0.25 * H : 0.13 * H) * wK * (warm ? 1 : 1.35);
+    const rG = (wing ? 0.39 * H : big ? 0.25 * H : 0.13 * H) * wK * (warm ? 1 : 1.35);
     const life = (wing ? 0.75 : 0.5) + (big ? 0.055 : 0.05) * H;
     const k = wing ? 2.0 : 2.4;
     const buoy = 7.5;
     const vT = buoy / k;
     const tr = life * 0.75;
-    const v0 = vT + (((wing ? 0.7 : 0.93) * H - vT * tr) * k) / (1 - Math.exp(-k * tr));
+    const v0 = vT + (((wing ? 0.45 : 0.93) * H - vT * tr) * k) / (1 - Math.exp(-k * tr));
     const rate = wing ? 24 : big ? 52 : 38;
     // fan heads share the unit's fuel a little (a 3-head fan is not three full projectors)
     const count = this.pc((rate * life) / Math.sqrt(fan), 8);
@@ -577,8 +578,9 @@ export class PyroSystem extends CueFxSystem {
       n++;
     }
     if (n > 0) {
-      // roll-over fireballs where the fire reaches the wing tips
-      if (wing) tops.forEach((tp, i) => this.fireball(out, this.sub(cue, 7000 + i), tp.x + Math.sign(tp.x) * 1.5, tp.y + H * 0.7, tp.z, cue.t + 0.12 + 0.05 * i, 0.5 * H, color, 1, 0.2));
+      // roll-over fireballs where the fire reaches the wing tips (at the tips, not a flame length above
+      // them: v101, v713.5, v729.25 the fire licks along the wing outline and stays on the wings)
+      if (wing) tops.forEach((tp, i) => this.fireball(out, this.sub(cue, 7000 + i), tp.x + Math.sign(tp.x) * 1.5, tp.y + H * 0.2, tp.z, cue.t + 0.12 + 0.05 * i, 0.5 * H, color, 1, 0.2));
       // a big power flame rolls into a fireball at its top when it cuts
       if (big) {
         for (let u = 0; u < pts.length; u++)
@@ -1097,8 +1099,11 @@ export class PyroSystem extends CueFxSystem {
     const pattern = str(p.pattern, 'all');
     const stagger = num(p.stagger, pattern === 'all' ? 0 : 0.05, 0, 2);
     const angle = num(p.angle, 0, -80, 80);
-    // big gerbs (15–20 m wall units) throw a wider, fuller plume than a small stage gerb
-    const spread = (num(p.spread, cold ? 7 : Math.min(10, 4 + 0.28 * H), 0, 60) * Math.PI) / 180;
+    // big gerbs (15–20 m wall units) throw a wider, fuller plume than a small stage gerb; the tall wall
+    // units (> 14 m) are straight spikes: their cone narrows to 0.4 x `spread` at 30 m, so a wall reads
+    // as a row of separate columns with the set between them (v1189-1197, v1536), not one sheet
+    const tallK = cold ? 1 : 1 - 0.6 * smooth01(14, 30, H);
+    const spread = ((num(p.spread, cold ? 7 : Math.min(10, 4 + 0.28 * H), 0, 60) * Math.PI) / 180) * tallK;
     const steps = patternSteps(pts, pattern, cue.seed, cue.step);
     const dur = Math.max(0.3, cue.dur);
     const k = cold ? 1.9 : 1.05;
@@ -1117,6 +1122,9 @@ export class PyroSystem extends CueFxSystem {
     for (let u = 0; u < steps.length; u++) if (steps[u] >= 0) nFire++;
     const count = this.pc(rate * lifeMax * Math.min(1, Math.sqrt(28 / Math.max(1, nFire))), 40);
     const intenP = num(p.intensity, 1, 0, 3);
+    // `column`: a dense column keeps its full light when its sparks are smaller than a pixel (a far
+    // drone camera), see columnLaw
+    const column = !cold && bool(p.column, false);
     const smoke = Math.min(3, typeof p.smoke === 'number' ? p.smoke : bool(p.smoke, false) ? 1 : 0);
     // colour sequence over the burn (`colors` + `changes`), else one colour
     const list = colorSpecs(p.colors);
@@ -1164,7 +1172,7 @@ export class PyroSystem extends CueFxSystem {
         const seed = this.sub(cue, u * 4 + ci * 997);
         // continuing colour windows start "hot" (no fade-in ramp): the fountain never stops
         const rampF = ci === 0 ? F.RAMP : 0;
-        const sp = new Emitter(DIST.CONE, F.COOL | F.FLICKER | rampF | (next ? F.ABSCHANGE : 0));
+        const sp = new Emitter(DIST.CONE, F.COOL | F.FLICKER | rampF | (next ? F.ABSCHANGE : 0) | (column ? F_COLUMN : 0));
         if (next) sp.color2(next, 0).set(R.Z3, t0 + wd);
         else sp.color2(coolTo, -1);
         out.add(
@@ -1273,11 +1281,12 @@ export class PyroSystem extends CueFxSystem {
       if (!cold) {
         // The cloud is there at once for a high-intensity wall (`intensity` > 1.5: the glare walls
         // of v600.2) and builds up over ~3 s on a long burn of tall units (v1510-1537, v1522-1537:
-        // 30-34 m); a short normal burst (v69, v1192) stays a row of clean fountains with a little
-        // smoke, and so does a long wall of shorter units (the 20-22 m silver walls of v1437-1456
-        // stand in the pink-lit air of the stage, not in a white cloud of their own).
+        // 30-34 m, and ramping in from 2.5 s burns: the 3.6 s white wall of v1565.3-1568.8); a short
+        // normal burst (v69, v1192) stays a row of clean fountains with a little smoke, and so does a
+        // long wall of shorter units (the 20-22 m silver walls of v1437-1456 stand in the pink-lit air
+        // of the stage, not in a white cloud of their own).
         const sI = Math.min(1, Math.max(0, (intenP - 1.5) / 1.5));
-        const sL = dur >= 4 ? 0.6 * smooth01(18, 30, H) : 0;
+        const sL = 0.6 * smooth01(18, 30, H) * smooth01(2.5, 4, dur);
         const sC = Math.max(sI, sL);
         if (sC > 0.02) this.burnCloud(out, cue, pts, steps, stagger, cue.t, dur, H, firstCol, 4.5 * Math.sqrt(sC) * (hueKs[0] < 1 ? 0.8 : 1), 0.17 * sC, sI >= sL ? 0.12 : 3);
         // silver / white (titanium) sparks of a shorter wall light their smoke far less than their
@@ -1648,6 +1657,26 @@ export class PyroSystem extends CueFxSystem {
       if (c % 3 === 0) out.flashes.push({ kind: 1, t0, t1: t0 + cd * 3 + 0.06, color: color.clone(), peak: (sparkler ? 0.35 : 0.8) * size, decay: 0.06, pos: a.clone(), strobe: 0 });
     }
   }
+}
+
+/** spark flag, pyro spark layer only (glsl.ts F_* end at 16384): a spark of a dense fountain column */
+const F_COLUMN = 32768;
+const SUBPX_LAW = 'gain = pow(wpx / uMinPx, 1.5);';
+
+/**
+ * Far-field law of the dense fountain columns (gerb `column: true`). A spark ribbon thinner than a
+ * pixel is drawn one pixel wide at (w / w_min)^1.5 of its brightness (sparkShader.ts): a lone spark
+ * fades out at a distance instead of turning into a bright dot. That is right for loose sparks, but a
+ * column of thousands of sparks fills its pixels: seen from a far drone (v1565.3-1568.8, the white
+ * wall from 400 m) it must keep its light. Flagged sparks use the energy-conserving law (w / w_min)^1
+ * instead. The spark shader is shared (src/fx/core); the pyro layer patches its own material's copy
+ * of that one line and leaves the shader as it is if the line ever changes.
+ */
+function columnLaw(mat: THREE.ShaderMaterial): void {
+  const vs = mat.vertexShader;
+  if (!vs.includes(SUBPX_LAW)) return;
+  mat.vertexShader = vs.replace(SUBPX_LAW, `gain = (flags & ${F_COLUMN}) != 0 ? wpx / uMinPx : pow(wpx / uMinPx, 1.5);`);
+  mat.needsUpdate = true;
 }
 
 function hashF(seed: number, i: number, salt: number): number {

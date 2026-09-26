@@ -36,6 +36,8 @@ interface ShellOpts {
   liftCol?: THREE.Color | null;
   /** star count multiplier (small comet-top breaks have only a few stars) */
   starsK?: number;
+  /** burn time multiplier (small comet-top breaks burn out sooner) */
+  burnK?: number;
 }
 
 /** How a comet (or a cake shot) looks: resolved once per cue from its params. */
@@ -71,6 +73,8 @@ interface CometLook {
   arc: number;
   /** s a pearl head hangs on at the top */
   pearlTime: number;
+  /** 0..3: soft glow travelling with the heads (the bloom of a dense fan, see fanGlow) */
+  glow: number;
 }
 
 /**
@@ -306,7 +310,10 @@ export class FireworkSystem extends CueFxSystem {
       );
     }
     const k = spec.drag;
-    const burnMean = (spec.burn[0] + spec.burn[1]) * 0.5;
+    const bk = opts.burnK ?? 1;
+    const b0 = spec.burn[0] * bk;
+    const b1 = spec.burn[1] * bk;
+    const burnMean = (b0 + b1) * 0.5;
     const v = (radius * k) / (1 - Math.exp(-k * burnMean));
     const crossette = (spec.flags & F.CROSSETTE) !== 0;
     const nStars = Math.max(4, Math.round(this.pc(spec.stars, spec.minStars) * (opts.starsK ?? 1)));
@@ -318,7 +325,7 @@ export class FireworkSystem extends CueFxSystem {
       if (spec === SHELLS.chrysanthemum || spec === SHELLS.brocade || spec === SHELLS.peony) flags |= F.PISTIL;
       else flags |= F.COLORCHANGE;
     }
-    const tEnd = tb + spec.burn[1] + spec.trail + 0.35;
+    const tEnd = tb + b1 + spec.trail + 0.35;
     const stars = new Emitter(spec.dist, flags)
       .on(L_STARS)
       .originV(B)
@@ -326,7 +333,7 @@ export class FireworkSystem extends CueFxSystem {
       .speed(v * 0.93, v * 1.06)
       .physics(k, spec.grav)
       .color(col, spec.intensity * gain * 2.2)
-      .life(spec.burn[0], spec.burn[1])
+      .life(b0, b1)
       .emit(crossette ? nStars * 4 : nStars)
       .size(spec.head, spec.tailW)
       .trail(spec.trail, spec.glitter)
@@ -350,7 +357,7 @@ export class FireworkSystem extends CueFxSystem {
     out.add(stars);
     if (spec.pops) {
       const pops = spec.pops;
-      const spread = spec.popSpread ?? 0.7;
+      const spread = (spec.popSpread ?? 0.7) * bk;
       const popE = new Emitter(spec.dist, 0).copyFrom(stars);
       popE.f[R.FLAGS] = (spec.flags & ~F.FLICKER) | F.POPS;
       popE
@@ -362,7 +369,7 @@ export class FireworkSystem extends CueFxSystem {
         .set(R.X1, pops)
         .set(R.X2, spread)
         .set(R.X3, radius * 0.3)
-        .window(tb + spec.burn[0], tb + spec.burn[1] + spread + 0.3);
+        .window(tb + b0, tb + b1 + spread + 0.3);
       out.add(popE);
     }
     if (spec.shed) {
@@ -378,7 +385,7 @@ export class FireworkSystem extends CueFxSystem {
         .set(R.X2, 0.35)
         .set(R.X3, 0.8)
         .set(R.Z3, 0.4)
-        .window(tb, tb + spec.burn[1] + 1.1);
+        .window(tb, tb + b1 + 1.1);
       out.add(se);
     }
     // the break flash (a burst of light in the smoke)
@@ -413,7 +420,7 @@ export class FireworkSystem extends CueFxSystem {
           .physics(3, 0.15)
           .color(GREY, 0.1)
           .color2(this.c2.copy(col).multiplyScalar(0.8 * gain), 0)
-          .litUntil(tb + spec.burn[1])
+          .litUntil(tb + b1)
           .life(16, 24)
           .emit(opts.smoke)
           .size(radius * 0.2, radius * 0.5)
@@ -433,7 +440,7 @@ export class FireworkSystem extends CueFxSystem {
     out.flashes.push({
       kind: 0,
       t0: tb,
-      t1: tb + spec.burn[1],
+      t1: tb + b1,
       color: col.clone(),
       peak: (0.35 + radius / 45) * spec.flash * opts.flashK * Math.min(1.5, gain),
       decay: burnMean * 0.45,
@@ -566,6 +573,7 @@ export class FireworkSystem extends CueFxSystem {
       curl: num(p.curl, 0, -1080, 1080) * DEG,
       arc: num(p.arc, 0, 0, 1440) * DEG,
       pearlTime: num(p.pearlTime, 1, 0.05, 4),
+      glow: num(p.glow, 0, 0, 3),
     };
   }
 
@@ -717,7 +725,9 @@ export class FireworkSystem extends CueFxSystem {
       out.add(e);
       tailSparks(e, 1, tc + life);
       const B = curlRate ? curlPoint(new THREE.Vector3(), o, d, side, sp, k, acc, curlRate, life, tArc) : ballistic(new THREE.Vector3(), o, d.multiplyScalar(sp), k, acc, life);
-      // a comet's break is a small burst at its top (the video's crackle / spider tops), not a shell
+      // a comet's break is a small burst at its top (the video's crackle / spider tops), not a shell;
+      // its small stars burn out sooner than a shell's (burn x r / 16, at least x 0.35): the red
+      // crackle tops of v333.9-336.2 are gone by v336.5, not popping on for another second
       const r = look.endSize > 0 ? look.endSize : clamp(rise * 0.16, 3.5, 10);
       this.addShell(out, sd & 0xffffff, breakSpec, o, B, col, gain, {
         tL: tc + life,
@@ -728,9 +738,42 @@ export class FireworkSystem extends CueFxSystem {
         flashK: 0.45,
         col2: null,
         starsK: clamp(Math.pow(r / 16, 1.2), 0.2, 1),
+        burnK: clamp(r / 16, 0.35, 1),
       });
     }
     if (look.smoke) this.cometSmoke(out, seed, o, dir, side, halfAngle, n, t0, stagger, v0, k, tA, col, look);
+  }
+
+  /**
+   * `glow`: a soft glow that travels up with the comets of a fan: soft puffs in the comet colour,
+   * flying the comets' own ballistic paths (same launch speed, drag and gravity) inside the fan's cone
+   * and dying with the heads. A dense many-comet fan seen from a distance is one glowing mass in the
+   * video (the pink V-fans of v557.9-559.3: the camera blooms and the smoke they burn in glows), not
+   * a spray of separate thin lines; the puffs are world-sized, so this is for fans seen from afar.
+   */
+  private fanGlow(out: EmitterSet, seed: number, o: THREE.Vector3, dir: THREE.Vector3, half: number, n: number, t0: number, stagger: number, rise: number, look: CometLook): void {
+    const k = COMET_DRAG;
+    const burn = clamp(0.5 + rise * 0.013, 0.6, 1.8);
+    const v0 = speedForBurnout(rise, k, burn);
+    const R0 = clamp(0.1 * rise, 1.5, 6);
+    const m = Math.max(2, n * 2);
+    out.add(
+      new Emitter(DIST.CONE, 0)
+        .on(L_FLASH)
+        .originV(o)
+        .time(t0)
+        .dirV(dir, Math.max(0.05, half))
+        .speed(v0 * 0.9, v0)
+        .physics(k, -G)
+        .color(this.c2.copy(look.col).lerp(WHITE, 0.2), look.glow * Math.min(1.3, look.gain) * look.intensity)
+        .life(burn * 0.95, burn * 1.05)
+        .emit(m, 0, (stagger * n) / m)
+        .size(R0 * 0.5, R0)
+        .trail(0.8, 1)
+        .seed(seed ^ 0x6f6f1)
+        .set(R.Z3, PUFF.GLOW)
+        .window(t0, t0 + stagger * n + burn * 1.05 + 0.05),
+    );
   }
 
   /**
@@ -882,6 +925,7 @@ export class FireworkSystem extends CueFxSystem {
       if (side.lengthSq() < 1e-6) side.set(1, 0, 0);
       side.normalize();
       this.cometFan(out, seed, o, dir, side, half, per, cue.t, stagger, rise, look);
+      if (look.glow > 0 && look.curl === 0) this.fanGlow(out, seed, o, dir, half, per, cue.t, stagger, rise, look);
       // the launch cloud glows in the comets' colour while they climb out of it
       // (a many-comet fan stands in a denser cloud of its own: v558 pink V-fans)
       this.launchSmoke(out, seed, o, cue.t, Math.min(per, 5), rise, 0.3 + stagger * per, look.col, 1.5 * Math.sqrt(Math.min(per, 6)) * Math.min(1.3, look.gain) * look.intensity, 0.35 + stagger * per);

@@ -131,6 +131,22 @@ listed under "Engine behaviour". Unknown params are still ignored.
   reach of 0.45 H + 2.5 m (was one light over the whole wing, 0.45 H + 6 m), so the glow follows the
   wing shape.
 
+## Engine behaviour, round 7 (no cue changes needed)
+
+* **Tall wall gerbs are spikes.** The spray cone of a gerb narrows with its height above 14 m, to
+  0.4 x its `spread` (default or authored) at 30 m and above: a 30–40 m wall reads as a row of
+  separate thin columns with the set visible between them (v1189–1197, v1536), not one sheet of
+  sparks that hides the stage (1194). Walls up to 14 m are unchanged.
+* **Burning cloud of 2.5–4 s walls.** The burning cloud of a long burn of tall units (round 5/6)
+  ramps in between 2.5 s and 4 s of burn instead of starting at 4 s: the 3.6 s white 32 m wall of
+  v1565.3–1568.8 stands in a little of its own lit cloud. Walls of 4 s and more are unchanged.
+* **Burning wings stay on the wings.** A `firewall` on the wings rises to 0.45 H (was 0.7 H) with
+  narrower tongues (growth 0.39 H, was 0.65 H), and the roll-over fireballs at the finger tips sit
+  0.2 H above the tips (was 0.7 H): the fire licks along the wing outline (v101, v713.5, v729.25)
+  instead of standing a flame length above the wing geometry. Measured: 729.25 +1.3, 100.75–101
+  +1.6, 713.5 +1.7, 734 +1.3 points (the orange domes around the wings are the lens glare of
+  src/postfx/SceneGlare.ts, driven by the wing lights, which are unchanged).
+
 ## pyro — new params
 
 | fx | param | meaning |
@@ -145,6 +161,7 @@ listed under "Engine behaviour". Unknown params are still ignored.
 | flame / firewall | `blowout` | `true` (with billow): the finale version. Adds a white-gold spark wall between the columns, a row of fireballs at the cut and a larger flash. |
 | gerb / sparkular | `colors`, `changes` | a colour sequence over the burn, e.g. `["#FFE0A0","#FF30C0","#FF7020"]`, with switch times in seconds relative to the cue (default: evenly spaced). The whole column turns at once: sparks already in flight change colour too. |
 | gerb | `smoke` | 0..3: a self-lit smoke column per unit (the obelisk capitals) |
+| gerb | `column` | `true` (round 7): a dense column that keeps its full light when its sparks are thinner than a pixel. Sparks under a pixel are normally drawn at (w / w_min)^1.5 of their light (a lone spark fades out at a distance); the sparks of a `column` gerb use the energy-conserving (w / w_min)^1, so a wall seen from a far drone reads as bright columns (the white wall of v1565.3–1568.8 from ~400 m; metric-neutral there while the red site glow still covers that frame). Close up nothing changes. Use it only where the video shows bright columns from far away: on every wall it over-brightens the distant walls of v1190 / v1300 (measured −17 / −7 points). |
 | jet | `count`, `radius` | several jets around each anchor (the piano tower rig), leaning slightly outward |
 | jet | `cloud` | `true`: the plumes merge into one big CO2 cloud over the middle of the rig. It glows in `color` for about 2 s (the green cloud at v767.25). |
 | burst | `type: "bengal"` | Bengal flare for any `dur` (also under 2 s: flares that hover 1.2–1.6 s). `dur` ≥ 2 without a type still means Bengal. |
