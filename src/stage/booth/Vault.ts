@@ -338,8 +338,7 @@ export class VaultBuilder {
         tri(pos, [a[0], a[1], z0], [b[0], b[1], z1], [a[0], a[1], z1], nrm);
       }
       const g = soup(pos);
-      if (k.detail >= 1) k.paint.add(g, undefined, { color: new THREE.Color('#5a1c0c') });
-      else k.gold.add(g);
+      k.paint.add(g, undefined, { color: new THREE.Color(k.detail >= 1 ? '#5a1c0c' : '#d49a2a') });
       g.dispose();
     }
     // the scale rows run on into the screen and the facade (hidden there): no half scales at the ends
@@ -375,10 +374,20 @@ export class VaultBuilder {
     const n = (outline.length - 1) / 2;
     // arc-length parametrisation of each half from its eave (u = 0) to the apex
     const halves = [outline.slice(0, n + 1), outline.slice(n).reverse()];
-    const W = 0.46,
-      H = 0.36,
+    const W = 0.62,
+      H = 0.46,
       Lh = H * 1.45;
     const pos: number[] = [];
+    const col: number[] = [];
+    // painted gold scales (the photos: yellow-gold with an orange rim, dark red-orange between them)
+    const centre = new THREE.Color('#e9bf45');
+    const rim = new THREE.Color('#c9761c');
+    const cc = new THREE.Color();
+    let seed = 11;
+    const rnd = () => {
+      seed = (seed * 16807) % 2147483647;
+      return seed / 2147483647;
+    };
     const p = new THREE.Vector3();
     const nrm = new THREE.Vector3();
     const at = (half: [number, number][], lens: number[], u: number, out: THREE.Vector3, nOut: THREE.Vector3) => {
@@ -414,20 +423,30 @@ export class VaultBuilder {
             const h = 0.012 + 0.045 * b + lift;
             return [p.x + nrm.x * h, p.y + nrm.y * h, zc + a * W];
           };
-          const c = vert(0, 0.5, 0.022);
+          const c = vert(0, 0.5, 0.03);
+          cc.copy(centre).multiplyScalar(0.9 + 0.2 * rnd());
           for (let i = 0; i < ring.length; i++) {
             const A = ring[i],
               B = ring[(i + 1) % ring.length];
             const va = vert(A[0], A[1], 0),
               vb = vert(B[0], B[1], 0);
             at(half, lens, uTop - 0.5 * len, p, nrm);
+            const n0 = pos.length;
             tri(pos, c, va, vb, nrm);
+            // the centre vertex (whichever slot tri() put it in) gets the bright gold, the rim the orange
+            for (let v = 0; v < 3; v++) {
+              const o = n0 + v * 3;
+              const isC = pos[o] === c[0] && pos[o + 1] === c[1] && pos[o + 2] === c[2];
+              const k = isC ? cc : rim;
+              col.push(k.r, k.g, k.b);
+            }
           }
         }
       }
     }
     const g = soup(pos);
-    this.kit.gold.add(g);
+    g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    this.kit.paint.add(g, undefined, { keepColor: true });
     g.dispose();
   }
 }

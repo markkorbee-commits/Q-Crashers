@@ -165,11 +165,16 @@ export class VaultModule {
   private vp: THREE.Vector3[] = [];
   private vc: THREE.Color[] = [];
   private day = false;
+  private small = false;
+  private screens: THREE.Mesh | null = null;
   tris = 0;
 
   build(kit: StageKit, mats: StageMaterials, small: boolean): void {
     this.group.name = 'stage-vault';
-    const vb = new GeoBucket('vault', 0.5);
+    // mobile: the interior joins the stage's metal mesh (no practicals, one draw call less) and the
+    // booth screens are only drawn within 35 m (they are sub-pixel further out)
+    this.small = small;
+    const vb = small ? kit.metal : new GeoBucket('vault', 0.5);
     new VaultBuilder(kit, vb).build();
     const quads = new ScreenQuads();
     const booth = new BoothBuilder(vb, quads, kit.detail);
@@ -212,9 +217,11 @@ export class VaultModule {
 reflectedLight.directDiffuse += material.diffuseColor * vaultPractical(vStageWP, inverseTransformDirection(normal, viewMatrix));`,
         );
     };
-    this.vaultMat = mat;
-    const geo = vb.build();
-    if (geo) this.addMesh(geo, mat, 'stage-vault-interior', true);
+    if (!small) {
+      this.vaultMat = mat;
+      const geo = vb.build();
+      if (geo) this.addMesh(geo, mat, 'stage-vault-interior', true);
+    } else mat.dispose();
 
     this.atlas = makeBoothAtlas(small);
     this.screenMat = new THREE.ShaderMaterial({
@@ -235,10 +242,10 @@ reflectedLight.directDiffuse += material.diffuseColor * vaultPractical(vStageWP,
       fragmentShader: SCREEN_FRAG,
     });
     this.screenMat.uniforms.uAtlas.value = this.atlas;
-    this.addMesh(quads.build(), this.screenMat, 'stage-booth-screens', false);
+    this.screens = this.addMesh(quads.build(), this.screenMat, 'stage-booth-screens', false);
   }
 
-  private addMesh(geo: THREE.BufferGeometry, mat: THREE.Material, name: string, shadows: boolean): void {
+  private addMesh(geo: THREE.BufferGeometry, mat: THREE.Material, name: string, shadows: boolean): THREE.Mesh {
     const m = new THREE.Mesh(geo, mat);
     m.name = name;
     m.matrixAutoUpdate = false;
@@ -247,12 +254,17 @@ reflectedLight.directDiffuse += material.diffuseColor * vaultPractical(vStageWP,
     this.group.add(m);
     this.meshes.push(m);
     this.tris += geo.index ? geo.index.count / 3 : geo.attributes.position.count / 3;
+    return m;
   }
 
   /** per frame (MainStage frame hook, after the look is resolved): practical + screen levels */
   update(ctx: FrameContext, look: StageLookEx): void {
     const sm = this.screenMat;
     if (!sm) return;
+    if (this.small && this.screens) {
+      const c = ctx.camera.position;
+      this.screens.visible = (c.x * c.x + (c.z - BOOTH.z) * (c.z - BOOTH.z)) < 35 * 35;
+    }
     const castle = look.emit * (1 - look.ember);
     const kick = Math.exp(-(ctx.beat.beat - Math.floor(ctx.beat.beat)) * 7);
     const u = sm.uniforms;
