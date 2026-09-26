@@ -50,6 +50,8 @@ interface StateVals {
   /** per-side emitter levels (state param `side`): audience-left (x < 0) / right */
   sideL: number;
   sideR: number;
+  /** 0..1 floor of the mouth / throat and the portal emblem under a dimmed master (state param glowFloor) */
+  glowFloor: number;
   /** persistent festoon level (all groups) + colour / pattern / rate */
   garlands: number;
   garlandCol: THREE.Color;
@@ -87,6 +89,7 @@ const newVals = (): StateVals => ({
   wingColW: 0,
   sideL: 1,
   sideR: 1,
+  glowFloor: 0,
   garlands: 0,
   garlandCol: new THREE.Color(),
   garlandPat: 0,
@@ -369,6 +372,7 @@ export class LookResolver {
     base.wingColW = 0;
     base.sideL = 1;
     base.sideR = 1;
+    base.glowFloor = 0;
     base.garlands = 0;
     base.garlandCol.copy(GARLAND_WARM);
     base.garlandPat = 0;
@@ -700,9 +704,11 @@ export class LookResolver {
     // master level (blackouts) scales the shared fields the crown reads as well; the pixel LEDs also
     // follow the dormant presence (a dormant state with windows / wings at 0 is black)
     const M = out.master;
+    // (glowFloor: the mouth / throat and the portal emblem keep a share of their level under a dimmed master)
+    out.glowFloor = cur.glowFloor * cur.presence;
     if (M < 1) {
       out.eyesIntensity *= M;
-      out.mouth *= M;
+      out.mouth *= Math.max(M, out.glowFloor);
       out.wings *= M;
       out.windows *= M;
     }
@@ -806,6 +812,8 @@ export class LookResolver {
     // per-side isolation: only the audience-left (x < 0) or right half of the set's emitters
     v.sideL = p.side === 'right' ? 0 : 1;
     v.sideR = p.side === 'left' ? 0 : 1;
+    // the mouth / throat and the portal emblem keep this share of their level under a dimmed master
+    v.glowFloor = typeof p.glowFloor === 'number' && Number.isFinite(p.glowFloor) ? Math.max(0, Math.min(1, p.glowFloor)) : 0;
     // warm festoon bulb strings (persistent level; stage.garlands cues add flashes / strobes on top)
     v.garlands = clamp2(p.garlands, 0);
     if (p.garlandColor !== undefined) resolveColor(p.garlandColor, pal, v.garlandCol, 'accent');
@@ -899,6 +907,7 @@ function copyVals(dst: StateVals, src: StateVals): void {
   dst.wingColW = src.wingColW;
   dst.sideL = src.sideL;
   dst.sideR = src.sideR;
+  dst.glowFloor = src.glowFloor;
   dst.garlands = src.garlands;
   dst.garlandCol.copy(src.garlandCol);
   dst.garlandPat = src.garlandPat;
@@ -971,6 +980,7 @@ function lerpVals(a: StateVals, b: StateVals, k: number, out: StateVals): void {
   out.wingColW = lerpOverride(a.wingCol, a.wingColW, b.wingCol, b.wingColW, k, out.wingCol);
   out.sideL = lerpN(a.sideL, b.sideL, k);
   out.sideR = lerpN(a.sideR, b.sideR, k);
+  out.glowFloor = lerpN(a.glowFloor, b.glowFloor, k);
   out.garlands = lerpN(a.garlands, b.garlands, k);
   out.garlandCol.lerpColors(a.garlandCol, b.garlandCol, k);
   out.garlandPat = k < 0.5 ? a.garlandPat : b.garlandPat;

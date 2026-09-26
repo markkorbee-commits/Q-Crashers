@@ -12,7 +12,7 @@ import { addSideGarlands, SidesBuilder } from './castle/Sides';
 import { barrierLayout, barrierRuns, barrierSegmentGeometry, DeckBuilder } from './deck/Deck';
 import { SpeakerBuilder } from './deck/Speakers';
 import { DevDaylight } from './DevDaylight';
-import { DragonCrown } from './DragonCrown';
+import { CROWN_TUNE, DragonCrown } from './DragonCrown';
 import { createKit, type StageKit } from './kit';
 import { armX, L } from './layout';
 import { LookResolver, STAGE_FLASH_SHARE, stageFlash } from './look/LookResolver';
@@ -103,6 +103,9 @@ export class MainStageSystem implements System {
   readonly name = 'stage';
   readonly root = new THREE.Group();
   readonly look: StageLookEx = createStageLookEx();
+  /** emitter calibration (exposed for in-page tuning by the QA tools) */
+  readonly calib = CALIB;
+  readonly crownTune = CROWN_TUNE;
   private app!: App;
   private enabled = true;
   private crown = new DragonCrown();
@@ -298,9 +301,17 @@ export class MainStageSystem implements System {
       set('dragon_head', [c.dragonHead]);
       set('wing_tips', byX(c.wingTips));
       // "burning wings": the spar flames at ~60 % and ~90 % of every finger (crown points 7/8, 10/11, 13/14)
+      // (kept: the lighting rig places its wing fixtures at the mean depth of these points)
       const sparFlames = (pts: THREE.Vector3[]) => (pts.length >= 15 ? [7, 8, 10, 11, 13, 14].map((i) => pts[i]) : pts);
       set('wing_left', sparFlames(c.wingLeft));
       set('wing_right', sparFlames(c.wingRight));
+      // 'wing_spars' (round 7; the validator's extended anchor for `p.at`, registered by name like
+      // roof_plumes): the burning-wing path ON the wing surface, per finger at ~35 / 60 / 82 % of the spar
+      // (crown points 6-14), outer -> inner finger, left wing then right. Video 101 shows the fire covering
+      // the upper two thirds of the wings, while flames of 6 m from the 60 / 82 % heads of wing_left /
+      // wing_right stand mostly above the membranes. Use as `"at": "wing_spars"` on a wing firewall.
+      const spars = (pts: THREE.Vector3[]) => (pts.length >= 15 ? pts.slice(6, 15) : pts);
+      a.set('wing_spars' as AnchorName, [...spars(c.wingLeft), ...spars(c.wingRight)].map((p) => p.clone()));
       // lasers on the dragon's shoulders and on the inner / outer fingers (bible: flanks + wing bases)
       for (const sh of c.shoulders) lasers.push(sh.clone().add(new THREE.Vector3(0, 2.0, 0.2)));
       for (const w of [c.wingLeft, c.wingRight]) if (w.length >= 15) lasers.push(w[8].clone(), w[14].clone());
@@ -535,7 +546,9 @@ export class MainStageSystem implements System {
     (l.uLamp.value as THREE.Color).copy(look.lamp).multiplyScalar(CALIB.lamp * (0.4 + look.ledIntensity) * (0.25 + 0.75 * lampLvl) * castle);
     (l.uLantern.value as THREE.Color).copy(look.lantern).multiplyScalar(CALIB.lantern * (0.65 + 0.35 * look.energy) * lampLvl);
     (l.uCandle.value as THREE.Color).copy(CANDLE).multiplyScalar(1.4 * castle);
-    (l.uPortal.value as THREE.Color).copy(look.portal).multiplyScalar((0.5 + 0.8 * look.mouth) * castle);
+    // (glowFloor: the portal emblem and the mouth stay lit under a dimmed master, video 409-412)
+    const hero = Math.max(castle, look.glowFloor * (1 - look.ember));
+    (l.uPortal.value as THREE.Color).copy(look.portal).multiplyScalar((0.5 + 0.8 * look.mouth) * hero);
     l.uPulse.value = look.pulse;
     l.uStrobe.value = look.strobe * M;
     l.uContent.value = look.content;
@@ -547,6 +560,7 @@ export class MainStageSystem implements System {
     // under 'ember' the castle panels stay low so only the dragon reads
     l.uContentGain.value = M * (1 - 0.8 * look.ember);
     u.uGlow.value.multiplyScalar(castle * CALIB.decor);
+    u.uGlow.value.z = look.emblemGlow * hero * CALIB.decor;
   }
 
   setQuality(q: QualitySettings): void {

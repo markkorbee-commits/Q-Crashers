@@ -17,12 +17,29 @@ const FLASH_MIN_Y = 36;
 /** tungsten follow-spot tint of the FOH keys */
 const WARM_KEY = new THREE.Color(1.0, 0.62, 0.34);
 /**
- * FOH key: gain of its wash-driven part and its tungsten share (round 6: the portal close-ups 656 / 705 show
- * the portal, the stairs and the walls beside it under a bright warm key; the constant work-light part
- * stays low so a dark look keeps a dark castle, video 1438.5)
+ * FOH key: gain of its wash-driven part, its tungsten share and its cone. Round 6: the portal close-ups
+ * 656 / 705 show the portal, the stairs and the walls beside it under a bright warm key (gain 3.5, 50 %
+ * tungsten, 0.26 rad: ~15 m pools at the 57 m throw). Round 7: the tungsten half turned every violet / blue
+ * wash into a beige-grey band across the castle core in the wide shots (video 509.25, 1047.25: a lavender /
+ * purple castle). The wash-driven part is now only as warm as the wash (50 % tungsten under a red / orange
+ * wash as in round 6, none under a violet / blue one; the constant work light stays tungsten), so the core
+ * takes the wash colour. (A 0.15 rad / gain 2 portal pool measured the same on the 64 moments but left the
+ * facade darker than the lavender castle of 509.25 and lost 362.5 / 705.)
+ * The constant work-light part stays low so a dark look keeps a dark castle (video 1438.5).
  */
-const KEY_GAIN = 3.5;
-const KEY_WARM = 0.5;
+export const KEY = {
+  gain: 3.5,
+  /** tungsten share of the work light and of a warm (red / orange) wash part; none for a cool wash (`warmth`) */
+  warm: 0.5,
+  /** cone half-angle (rad) */
+  angle: 0.26,
+};
+
+/** 0..1 how warm a wash colour is: 1 for red / orange, 0 for violet / blue / cyan (the tungsten key share) */
+function warmth(c: THREE.Color): number {
+  const m = Math.max(c.r, c.g, c.b);
+  return m > 1e-4 ? Math.min(1, Math.max(0, (c.r - c.b) / m)) : 0;
+}
 
 /**
  * The few REAL lights aimed at the set (everything else is the virtual flood field + emissives):
@@ -32,6 +49,8 @@ const KEY_WARM = 0.5;
  */
 export class StageLights {
   readonly group = new THREE.Group();
+  /** FOH key calibration (exposed for in-page tuning) */
+  readonly key = KEY;
   private rigs: Rig[] = [];
   private active = 0;
 
@@ -54,11 +73,11 @@ export class StageLights {
     point('flash', 0, 0, new THREE.Vector3(0, 25, -10), 110, 2);
     // uplight on the dragon's chest / head: a tight cone, so it does not paint the castle core behind
     spot('center', 0, 0, new THREE.Vector3(0, 2.3, -1.2), new THREE.Vector3(0, 13, -7), 0.42, 60);
-    // FOH key lights on the portal, the DJ and the dancers (~14 m pools at the deck): the castle
+    // FOH key lights on the portal, the DJ and the dancers (~14 m pools at the deck, KEY.angle): the castle
     // facade beyond them stays the dark printed flat of the official wide shots (round 4: the old
     // 0.5 rad washes over the whole core lit the facade like a floodlit palace)
-    spot('front', 1, -1, new THREE.Vector3(-30, 17, 38), new THREE.Vector3(-4, 4.5, -6), 0.26, 140);
-    spot('front', 1, 1, new THREE.Vector3(30, 17, 38), new THREE.Vector3(4, 4.5, -6), 0.26, 140);
+    spot('front', 1, -1, new THREE.Vector3(-30, 17, 38), new THREE.Vector3(-4, 4.5, -6), KEY.angle, 140);
+    spot('front', 1, 1, new THREE.Vector3(30, 17, 38), new THREE.Vector3(4, 4.5, -6), KEY.angle, 140);
     point('base', 2, -1, new THREE.Vector3(-27, 3.4, -3.2), 26, 1.4);
     point('base', 2, 1, new THREE.Vector3(27, 3.4, -3.2), 26, 1.4);
     spot('rim', 3, 0, new THREE.Vector3(0, 30, -34), new THREE.Vector3(0, 14, -6), 0.7, 90);
@@ -112,9 +131,16 @@ export class StageLights {
           // FOH keys on the portal: they follow the castle level (a dark-castle look keeps them low);
           // the wash colour warmed by the tungsten of the follow spots (video 650 / 705: the portal,
           // the stairs and the troupe under a warm orange-red key, not a pure saturated wash)
-          l.color.copy(wash).lerp(look.castleLed2, (rig.side > 0 ? 0.25 : 0.1) * E).lerp(WARM_KEY, KEY_WARM);
-          // (strobes flash the portal only as far as the set is lit: a dimmed set stays a silhouette)
-          l.intensity = (42 * E + 115 * KEY_GAIN * wi) * (0.6 + 0.5 * look.energy) * (1 + 0.6 * look.pulse + look.strobe * 2 * look.master) * (0.1 + 0.9 * Math.min(1.3, look.castleGain));
+          // (the constant work-light part is tungsten; the wash-driven part only as warm as the wash itself)
+          {
+            const work = 42 * E;
+            const lit = 115 * KEY.gain * wi;
+            const share = (KEY.warm * (work + lit * warmth(wash))) / Math.max(1e-4, work + lit);
+            l.color.copy(wash).lerp(look.castleLed2, (rig.side > 0 ? 0.25 : 0.1) * E).lerp(WARM_KEY, share);
+            (l as THREE.SpotLight).angle = KEY.angle;
+            // (strobes flash the portal only as far as the set is lit: a dimmed set stays a silhouette)
+            l.intensity = (work + lit) * (0.6 + 0.5 * look.energy) * (1 + 0.6 * look.pulse + look.strobe * 2 * look.master) * (0.1 + 0.9 * Math.min(1.3, look.castleGain));
+          }
           break;
         case 'base':
           // low lights on the castle base: they belong to the castle (region level / colour)
