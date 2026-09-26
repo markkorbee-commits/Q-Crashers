@@ -343,10 +343,10 @@ void main() {
     // rise into the sheet catch its light -> bright waves over dark troughs (f116)
     // The noise tile's lowest octave is a 4-cell lattice repeating every 1/scale metres: on the flat fog
     // top, axis-aligned samples showed it as a checkerboard. Sampled on rotated axes with a domain warp
-    // and at the swell scale (lattice cells ~12 x 6 m, ripples ~4 x 2 m), the waves read as rolling fog.
+    // and at the swell scale (lattice cells ~8 x 4 m, ripples ~4 x 2 m), the waves read as rolling fog.
     vec3 qr = vec3(q.x * 0.83 + q.z * 0.56, q.y, q.z * 0.83 - q.x * 0.56);
     vec3 wp = vec3(n1 - 0.5, 0.0, n2 - 0.5) * 0.8;
-    float w1 = texture(uNoise, qr * vec3(0.02, 0.3, 0.04) + wp + uDrift).r;
+    float w1 = texture(uNoise, qr * vec3(0.032, 0.3, 0.064) + wp + uDrift).r;
     // (one octave: the mid-scale haze noise stands in for the ripples, not a flat 0.5 that evens the sea out)
     float w2 = uOct > 1.5 ? texture(uNoise, qr.zyx * vec3(0.11, 0.5, 0.06) - wp * 0.5 - uDrift * 2.0).r : n2;
     float fogTex = smoothstep(0.34, 0.76, w1 * 0.55 + w2 * 0.3 + n1 * 0.15);
@@ -355,7 +355,7 @@ void main() {
     float edgeU = smoothstep(0.0, 0.12, min(vU, 1.0 - vU));
     // most of the sea is dark trough; the light sits on the crests that rise into the sheet (video
     // Embers v1139-1160: bright rolling waves and dark gaps, never an evenly lit floor)
-    float I = uGainS * uLowHaze * (0.008 + 0.3 * crest + 4.0 * crest * crest) * (0.55 + 1.3 * streak) * (0.55 + 0.45 * hazePhase(c))
+    float I = uGainS * uLowHaze * (0.015 + 0.5 * crest + 3.6 * crest * crest) * (0.55 + 1.3 * streak) * (0.55 + 0.45 * hazePhase(c))
       * pow(max(vR, 6.0), -0.55) / max(nv, 0.25) * exp(-vLift / 1.3) * edgeU;
     // deep scan colour in the troughs, the second colour on the lit crests
     col = mix(vColor, vColor2, smoothstep(0.12, 0.6, crest)) * I;

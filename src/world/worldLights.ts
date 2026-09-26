@@ -81,7 +81,7 @@ const STAGE_IDLE = 0.03;
  * moments): the light of the show lives in the smoke and the air; the ground under it reads near-black
  * except close to the sources. The spatial part of the pyro light on the floor is the fx FieldLight layer.
  */
-const FLASH_GAIN = 800;
+const FLASH_GAIN = 1400;
 /**
  * Pyro light is burning metal (≈ 2000–2500 K) and the camera is balanced for the LEDs: on the video a
  * gold gerb wall lights the ground deep ORANGE (measured on the field at v600.25: linear G/R ≈ 0.25,
@@ -106,8 +106,8 @@ const BOUNCE_GAIN = 1.6;
  * gerb rows leave a dark field (1438.5 / 607 / 264.75), the gold gerb wall (600.4, F ≈ 8) and the flame
  * wall (1509, F ≈ 11) light the whole bowl
  */
-const WORLD_BOUNCE_K = 0.4;
-const WORLD_BOUNCE_F = 8;
+const WORLD_BOUNCE_K = 0.6;
+const WORLD_BOUNCE_F = 6;
 /** half-strength radius (m) of the bounce on the world materials around the flash centre (+ 0.6 x the spread of the sources) */
 const WORLD_BOUNCE_R = 70;
 /** multiple scattering in a coloured smoke cloud saturates its light further (gold → orange, pink → red) */

@@ -76,7 +76,7 @@ void main() {
                           : smoothstep(size * 0.2, size * 0.9 + 6.0, depth);
   // a camera at the deck (the performer close-ups, v362 / v411) sits INSIDE the lit stage haze: it
   // hangs around the lens as a milky veil instead of clearing in front of it
-  if (zone == 0) nearF = max(nearF, uCloseUp * 0.85 * smoothstep(0.8, 5.0, depth));
+  if (zone == 0) nearF = max(nearF, uCloseUp * 0.45 * smoothstep(1.5, 8.0, depth));
   float dens = zone == 0 ? uDensity.x : (zone == 1 ? uDensity.y : uDensity.z);
   vAlpha = dens * edge * nearF * (0.7 + 0.6 * fract(aPar.w * 91.7));
   // light scattered by the haze: ambient + a damped share of the stage rig / wash / flashes
@@ -96,7 +96,7 @@ void main() {
   // brightness clamp (soft knee): haze may glow, but never brighter than a dim fraction of the
   // sources it scatters — so the set and the beams stay the brightest things in the frame
   float Lm = max(light.r, max(light.g, light.b));
-  float knee = (zone == 2 ? 0.35 : 0.22 + (zone == 0 ? 0.2 * uCloseUp : 0.0)) + dot(site, vec3(0.2126, 0.7152, 0.0722)) * uHazeSite.y;
+  float knee = (zone == 2 ? 0.35 : 0.22 + (zone == 0 ? 0.12 * uCloseUp : 0.0)) + dot(site, vec3(0.2126, 0.7152, 0.0722)) * uHazeSite.y;
   if (Lm > knee) light *= (knee + (Lm - knee) * 0.25) / Lm;
   // the pyro light field lights the haze where it burns (per corner: a flame wall at one end of a
   // 26 m sprite lights that end), with a much higher knee than the rig: the smoke around a fire
