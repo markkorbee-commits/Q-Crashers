@@ -581,6 +581,15 @@ picture at its edges remain). The pianist close-up (926.7) looks *at* the riser 
 (38°, or 62° as near-vertical up-lights where the reference shows no beams) instead of the rig's default 4°,
 which points them into the front rows and into the lens. The auto director only takes over if a shot is removed.
 
+**MC close-ups follow the MC (round 4).** The objective similarity run (scripts/similarity.mjs) showed the deck
+close-ups of the MC window (332–502) framing empty castle walls: the absolute poses pointed at where the MC was in
+the film, but our walk put him elsewhere (x ±12.5–13.5 at 362 / 389 / 452, while the film's backgrounds — red castle
+348, dragon mouth behind-right 360–363, the arch 373, in front of the head 397, emblem 406, arch lights 409, vault
+ring 452 — keep him within x ±7). Two changes: the MC walk (`src/crowd/performers.ts` MC_PATH) stays near the centre
+between 347 and 460, and 15 close-ups (347.2–458.5) use `"subject": "mc"`: pos / look / to / lookTo are offsets from
+his feet, so the camera moves with him like the handheld deck operator (docs/show-format-ext/core.md). The terrace,
+drone and pit shots of the same span stay absolute.
+
 ## 9. Open points and hand-offs
 
 * **Tempo UNKNOWN** for Domitor Draconis and low-confidence for Embers: when the audio analyser refines the kick
