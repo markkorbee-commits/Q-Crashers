@@ -673,7 +673,9 @@ export class LaserSystem implements System {
     for (const c of fogs) {
       if (c.fx !== 'lowfog') continue;
       const d = typeof c.p.density === 'number' ? c.p.density : 0.6;
-      const a = clamp01((ctx.showTime - c.t) / 3) * clamp01((c.t + c.dur - ctx.showTime) / 3);
+      // the fog needs a few seconds to flow off the deck and build a layer (v1460.5: the sea shows from
+      // ~v1466, not with the cue): 6 s build-up, 3 s release before the cue ends
+      const a = clamp01((ctx.showTime - c.t) / 6) * clamp01((c.t + c.dur - ctx.showTime) / 3);
       low = Math.max(low, d * a);
     }
     this.lowHaze = low;
@@ -1655,13 +1657,16 @@ export class LaserSystem implements System {
    */
   private pushSea(): void {
     const w = this.seaR + this.seaG + this.seaB;
-    // only a dense low fog forms a readable sea (Embers 0.9); a thin drift (0.2–0.4) stays dark
-    const x = Math.min(1, Math.max(0, (this.lowHaze - 0.3) / 0.4));
+    // only a dense low fog forms a readable sea (Embers 0.9); a drift (0.2–0.5) stays dark and a
+    // medium bank (0.6–0.7: v1389, v1463) shows the sea only where the fog is thickest
+    const x = Math.min(1, Math.max(0, (this.lowHaze - 0.45) / 0.4));
     const gate = x * x * (3 - 2 * x);
     if (this.tribe || gate < 0.01 || w < 0.01) return;
     const k = 2.0 * gate;
     // (the fog kind carries the crest colour in the wave-phase slots)
-    this.gfx.pushSurface(0, FOG_TOP, -1, 185, 0, 0, 1, 1.25, 0, 1, 0, SURF_FOG, this.seaR * k, this.seaG * k, this.seaB * k, 0, this.sea2R * k, this.sea2G * k, this.sea2B * k, 0, FOG_ZONE_X, 1, 0);
+    // (range 160: the bank covers the paved field and the hard-standing, it fades out before the road and
+    // the decking — it does not float over the photo terrace)
+    this.gfx.pushSurface(0, FOG_TOP, -1, 160, 0, 0, 1, 1.25, 0, 1, 0, SURF_FOG, this.seaR * k, this.seaG * k, this.seaB * k, 0, this.sea2R * k, this.sea2G * k, this.sea2B * k, 0, FOG_ZONE_X, 1, 0);
   }
 
   /** ground height (terrain system; flat 0 fallback) */

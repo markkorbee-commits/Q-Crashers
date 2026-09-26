@@ -576,7 +576,7 @@ Heightmap: `refs/terrain/ahn_heightmap_redframe_2m.json` (161 × 186 samples, 2 
 
 | Surface | Geometry | Look | Tag |
 |---|---|---|---|
-| Paved field floor | X −44…+44, Z 0…113 | light-grey concrete slabs #A9A99C, gully inlets every ~10 m at X ±29; slightly darker central aisle strip X ±12 (ground cover/cable path) | FACT / ASSUMPTION (strip) |
+| Paved field floor | X −44…+44, Z 0…113 | pale beige-grey concrete paving #A9A99C (the user's 2026 daytime photos: an almost uniform light apron, 4 m slabs with faint sawn joints, a few broad stains), gully inlets every ~10 m at X ±29; **red painted lines (~0.4 m) along both aisle edges X ±15.75** (the inner corners of the pillar plinths) from the pit barrier (Z ≈ 6) to the back of the floor. At night it stays dark: the show light on the ground is local (deck lip, plinth pools, pyro near its source) | FACT (2026 photos) / INFERENCE (line extent) |
 | Service lanes | 2–3 m along X ±43 and Z −2…−4 | #8F8D86 | FACT |
 | Hard-standing | X −44…+44, Z 113…137 | compacted brown gravel #858278 | FACT |
 | Side banks | \|X\| 46…126, Z −20…105 | parched grass #7C7F4A; paved cross-paths at Z ≈ 21; crest service paths at \|X\| 99…107 | FACT / ASSUMPTION (colour) |
@@ -596,7 +596,7 @@ Heightmap: `refs/terrain/ahn_heightmap_redframe_2m.json` (161 × 186 samples, 2 
 | FOH / camera pen | black barrier pen X ±7, Z 87.2–90.4 (riser Y 0.5 inside) | FACT look, INFERENCE ±2 m (§5.11) |
 | Pit barrier | (−92,−1)→(−46,6)→(46,6)→(92,−1), 1.2 m | ASSUMPTION |
 | Backstage/side fences | Z −6 from X ±92 to ±108 (2.0 m Heras + black scrim), continuing up the crest | FACT 2024 position |
-| Cable ramps (optional) | along the tower rows X ±20, Z 3…135, 0.6 m wide, 0.1 m high | ASSUMPTION (2024 red lines) |
+| Cable ramps (optional) | along the outer side of the tower rows X ±23.9, 0.5 m wide, dark rubber (the 2026 red lines are paint at X ±15.75, see §6.3) | ASSUMPTION |
 
 ### 6.5 Bars, water, toilets, first aid (official 2026 floorplan, ±8 m)
 

@@ -101,8 +101,16 @@ any beam that points within about 1–2° of the camera now adds a smaller versi
 * Haze gradient: the haze the beams and cones light is thickest at the set, where the smoke machines
   are, and thins to 0.22 over the field (e-folding length 34 m from the deck; FogSystem makes the field
   about 1/3 of the stage cloud). Figures read brightest near the stage, as filmed. Low fog
-  (`fog.lowfog`) and the sheets are not part of this gradient, so skimming sheets, the chevron and
-  tunnels over a low fog keep their level.
+  (`fog.lowfog`) is not part of this gradient, so the chevron and tunnels over a low fog keep their
+  level.
+* Round 4 (similarity metric against the official video): **sheets** now use the gradient too, and
+  the low fog adds half its density to a sheet (its lit tops are the separate sea layer). Seen from a
+  few metres above, a sheet over the far field is a faint veil instead of a lit violet floor (v1389,
+  v1463: violet near the deck lip, the far field dark).
+* The **laser sea** (lit low-fog tops under a skimming sheet) needs a denser low fog: it starts at
+  `density` 0.45 and is full from 0.85 (was 0.3 → 0.7). Embers (0.9) is unchanged; a 0.6–0.7 bank
+  shows the sea at about 30–70 %. The sea is mostly dark trough with bright crests (no evenly lit
+  floor), also on presets with one noise octave.
 * Beam level: the gain drops from 9 to 7, and a soft knee compresses beams seen end-on. Such a beam is
   20–30× brighter than one seen side-on, and it now reads as a bright coloured line with a flare at
   the source instead of a white-hot bar that floods the bloom. Moderate beams keep about 85 % of

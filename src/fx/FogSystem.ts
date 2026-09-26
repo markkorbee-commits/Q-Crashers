@@ -224,7 +224,9 @@ export class FogSystem extends CueFxSystem {
     const deckY = Math.max(0, y - 0.3);
     if (area !== 'field') regions.push([new THREE.Vector3(cx, deckY + 0.5, z - 9), new THREE.Vector3(w, 0.7, 20), 0.35, deckY]);
     if (area !== 'deck' || p.spill !== false) regions.push([new THREE.Vector3(cx, 0.45, z + 16), new THREE.Vector3(w * 0.95, 0.5, 34), area === 'deck' ? 0.55 : 1, 0]);
-    if (area === 'field' || area === 'all') regions.push([new THREE.Vector3(0, 0.45, 90), new THREE.Vector3(90, 0.5, 130), 1, 0]);
+    // (the bank thins out over the far field: machines on the deck, the fog flows out and settles —
+    // the lit laser sea over it is the lasers' own layer; the video's far field reads dark, v1536)
+    if (area === 'field' || area === 'all') regions.push([new THREE.Vector3(0, 0.45, 90), new THREE.Vector3(90, 0.5, 130), 0.65, 0]);
     regions.forEach(([c, ext, dk, floorY], i) => {
       // the big field regions use larger, fainter sheets so the bank reads continuous, not as discs
       const big = ext.x * ext.z > 4000;
@@ -404,6 +406,14 @@ export class FogSystem extends CueFxSystem {
       const field = ((0.022 * level + 0.02 * this.stageSmoke) * sk + 0.09 * siteSmoke) * (tribe ? 0.55 : 1);
       const skyD = 0.02 * level + 0.2 * this.skySmoke + 0.12 * siteSmoke;
       this.haze.setDensity(stage, field, skyD);
+      // close-ups at the deck: distance from the camera to the lit deck volume (X ±37, Z −30…8, Y ≤ 20)
+      const cp = ctx.camera.position;
+      const ex = Math.max(0, Math.abs(cp.x) - 37);
+      const ez = Math.max(0, cp.z - 8, -30 - cp.z);
+      const ey = Math.max(0, cp.y - 20);
+      const dDeck = Math.sqrt(ex * ex + ey * ey + ez * ez);
+      const cu = 1 - Math.min(1, Math.max(0, (dDeck - 6) / 22));
+      this.haze.setCloseUp(cu * cu * (3 - 2 * cu));
       // the smoke filling the site takes the hue of the light it holds (the pink whiteout is pink
       // smoke, not white smoke in a pink light): the tint leans to the site glow with its smoke
       const tint = this.smokeTint(t);

@@ -530,7 +530,10 @@ float gDamp = 0.0;
   h = mix( h, d2.b * 0.3, road );
   rough = mix( rough, 0.82 + 0.1 * mac2.r, road );
 
-  // --- concrete floor: 4 m slabs, joints, aggregate, tyre marks, gutters with gully grates
+  // --- concrete floor: pale paving (the user's daytime photos: a light beige-grey concrete apron,
+  //     4 m slabs with faint sawn joints, a few broad stains), gutters with gully grates at X ±29 and
+  //     RED painted lines along both aisle edges. Albedo ≈ #A9A99C (design-bible §6.3); at night it
+  //     stays dark in the show light because the show light on the ground is local (worldLights)
   float conc = smoothstep( 0.3, 0.6, m.r );
   if ( conc > 0.0 ) {
     vec2 sl = xz / 4.0;
@@ -543,14 +546,23 @@ float gDamp = 0.0;
     vec2 jl = ( 1.0 - smoothstep( JW - fwm * 0.5, JW + fwm * 0.5, e2 ) ) * min( vec2( 1.0 ), ( 2.0 * JW ) / fwm );
     float joint = max( jl.x, jl.y );
     float tint = gHash( cell );
-    // slab-to-slab variation kept subtle (the floor is poured concrete, not tile); broad dirt, dust
-    // and tyre-worn lanes at 10–60 m scales give it the weathered festival-ground look
-    vec3 cc = vec3( 0.25, 0.245, 0.225 ) * ( 0.94 + 0.12 * tint ) * ( 0.9 + 0.18 * mix( 0.5, d1.r, nearD ) ) * ( 0.84 + 0.28 * mac.b );
-    cc *= 0.8 + 0.32 * smoothstep( 0.2, 0.8, mac2.g );
+    // slab-to-slab variation kept subtle (poured concrete, not tile); broad dust / stains at 10–60 m
+    // scales, very light tyre wear: the photos show an almost uniform pale apron
+    vec3 cc = vec3( 0.40, 0.385, 0.34 ) * ( 0.96 + 0.08 * tint ) * ( 0.93 + 0.14 * mix( 0.5, d1.r, nearD ) ) * ( 0.9 + 0.2 * mac.b );
+    cc *= 0.88 + 0.2 * smoothstep( 0.2, 0.8, mac2.g );
     cc *= m.r < 0.95 ? 0.85 : 1.0;
-    float tyre = smoothstep( 0.72, 1.0, sin( xz.x * 1.7 + mac2.r * 5.0 ) ) * smoothstep( 0.5, 0.8, mac.g ) * 0.22 * ( 0.4 + 0.6 * fine );
-    cc *= 1.0 - tyre - smoothstep( 0.6, 0.92, mix( 0.5, d2.a, nearD ) ) * 0.18 - smoothstep( 0.55, 0.85, mac2.a ) * 0.14;
-    cc *= 1.0 - joint * 0.35;
+    float tyre = smoothstep( 0.72, 1.0, sin( xz.x * 1.7 + mac2.r * 5.0 ) ) * smoothstep( 0.5, 0.8, mac.g ) * 0.1 * ( 0.4 + 0.6 * fine );
+    cc *= 1.0 - tyre - smoothstep( 0.6, 0.92, mix( 0.5, d2.a, nearD ) ) * 0.12 - smoothstep( 0.55, 0.85, mac2.a ) * 0.12;
+    cc *= 1.0 - joint * 0.3;
+    // red painted lines (≈ 0.4 m) along the aisle edges X ±15.75 — the inner corners of the pillar
+    // plinths — from the pit barrier to the back of the paved floor, box-filtered like the joints;
+    // weathered paint (worn patches, dust)
+    const float RW = 0.2;
+    float rl = abs( abs( xz.x ) - 15.75 );
+    float red = ( 1.0 - smoothstep( RW - fwm.x * 0.5, RW + fwm.x * 0.5, rl ) ) * min( 1.0, ( 2.0 * RW ) / fwm.x );
+    red *= smoothstep( 5.5, 6.5, xz.y ) * ( 1.0 - smoothstep( 112.0, 113.0, xz.y ) );
+    red *= 0.78 + 0.22 * smoothstep( 0.25, 0.6, mix( 0.5, d1.g, nearD ) + ( mac2.b - 0.5 ) * 0.4 );
+    cc = mix( cc, vec3( 0.42, 0.05, 0.035 ) * ( 0.9 + 0.2 * mac.b ), red );
     float gd = abs( abs( xz.x ) - 29.0 );
     float inFloor = step( xz.y, 113.0 ) * step( 0.0, xz.y );
     float gut = ( 1.0 - smoothstep( 0.1, 0.45 + fwm.x, gd ) ) * inFloor;
@@ -650,11 +662,12 @@ void main() {
   vec3 col = wlSky( R ) * F;
   // moon glitter path
   col += vec3( 1.0, 0.8, 0.6 ) * pow( max( dot( R, uWMoonDir ), 0.0 ), 300.0 ) * uWMoonI * 0.25;
-  // reflected glow of the stage and of pyro flashes (broad lobes)
+  // reflected glow of the stage and of pyro flashes (broad lobes; the coefficients undo the round-4
+  // ground-light gains of worldLights: a mirror image of the emitters keeps its brightness)
   vec3 sd = normalize( uWStage.xyz - vW );
-  col += uWStageCol * 0.00002 * pow( max( dot( R, sd ), 0.0 ), 24.0 );
+  col += uWStageCol * 0.000037 * pow( max( dot( R, sd ), 0.0 ), 24.0 );
   vec3 fd = normalize( uWFlash.xyz - vW );
-  col += uWFlashCol * 0.00003 * pow( max( dot( R, fd ), 0.0 ), 12.0 );
+  col += uWFlashCol * 0.00008 * pow( max( dot( R, fd ), 0.0 ), 12.0 );
   col += vec3( 0.004, 0.006, 0.006 ) * ( 1.0 - F );
   gl_FragColor = vec4( col, 1.0 );
   #include <fog_fragment>

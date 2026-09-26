@@ -239,14 +239,18 @@ interface SkyUniforms {
 const SKY_T = [0, 120, 400, 800, 1300];
 type RGB = [number, number, number];
 const SKY_KEYS: Record<'zen' | 'se' | 'nw' | 'teal' | 'warm', RGB[]> = {
-  // zenith: #0A2A4E → #06183A → #030A1E → #02060F → #010204
-  zen: [[0.0034, 0.0258, 0.0848], [0.0024, 0.0119, 0.0551], [0.0017, 0.0057, 0.0242], [0.0016, 0.0047, 0.0123], [0.0012, 0.0025, 0.0049]],
-  // horizon over the stage (SE): #0E2D4A → #081E3C → navy → #020206 → #010104 (red kept low: no lavender)
-  se: [[0.005, 0.03, 0.0782], [0.0031, 0.0166, 0.0577], [0.002, 0.004, 0.025], [0.0016, 0.002, 0.0068], [0.001, 0.0012, 0.0028]],
-  // horizon behind the audience (NW) above the glow: #1F4A6B → … → #050A14
-  nw: [[0.0134, 0.0668, 0.1433], [0.0057, 0.0276, 0.069], [0.0037, 0.0157, 0.0382], [0.0027, 0.0109, 0.026], [0.002, 0.0069, 0.0159]],
+  // Round 4: re-measured on the official video frames (top band of the Show-camera frames, sRGB): the
+  // graded sky is a saturated pure blue — R ≈ 0, G/B ≈ 0.15–0.4 — from [0, 40, 103] at v20 through
+  // [0, 10, 65] at v118 and [0, 0, 41] at v509 to [5, 0, 10] at v754. The earlier teal-navy targets
+  // (#0A2A4E …) carried too much red and green.
+  // zenith
+  zen: [[0.001, 0.018, 0.11], [0.0007, 0.008, 0.07], [0.0006, 0.003, 0.03], [0.0006, 0.002, 0.013], [0.0006, 0.0012, 0.005]],
+  // horizon over the stage (SE)
+  se: [[0.0015, 0.02, 0.1], [0.001, 0.009, 0.068], [0.0008, 0.0025, 0.03], [0.0007, 0.0012, 0.008], [0.0006, 0.0008, 0.003]],
+  // horizon behind the audience (NW) above the glow
+  nw: [[0.004, 0.045, 0.16], [0.002, 0.018, 0.08], [0.0015, 0.009, 0.04], [0.0012, 0.006, 0.026], [0.001, 0.004, 0.016]],
   // teal twilight arc 3–10° (added; about half the physical #5E8C9A → #122838, never seen on camera)
-  teal: [[0.08, 0.2, 0.22], [0.05, 0.14, 0.17], [0.018, 0.07, 0.1], [0.008, 0.03, 0.05], [0.004, 0.014, 0.025]],
+  teal: [[0.03, 0.14, 0.24], [0.02, 0.09, 0.18], [0.008, 0.04, 0.1], [0.004, 0.017, 0.05], [0.002, 0.008, 0.025]],
   // warm core of the glow 0–3° (added; #C99A68 → #7A6450 → gone)
   warm: [[0.5, 0.26, 0.1], [0.25, 0.13, 0.06], [0.09, 0.055, 0.03], [0.02, 0.014, 0.01], [0.004, 0.003, 0.002]],
 };
@@ -569,7 +573,7 @@ export class EnvironmentSystem implements System {
 
     // --- fog colour: dark haze over the polder = the horizon over the stage, lit by flashes / strobes
     const se = U.uHorizonSE.value as THREE.Color;
-    this.fog.color.setRGB(se.r * 0.95 + 0.0008, se.g * 0.95 + 0.001, se.b * 0.95 + 0.0015);
+    this.fog.color.setRGB(se.r * 0.95 + 0.0003, se.g * 0.95 + 0.0006, se.b * 0.95 + 0.0015);
     if (fi > 0) {
       this.fog.color.r += env.flashColor.r * 0.0004 * fk;
       this.fog.color.g += env.flashColor.g * 0.0004 * fk;
@@ -592,11 +596,14 @@ export class EnvironmentSystem implements System {
     this.fog.density = this.fogBase * (0.75 + 0.45 * clamp(env.haze, 0, 1.5)) * (1 + 7 * env.smoke);
     (this.app.scene.background as THREE.Color).copy(this.fog.color);
 
-    // --- lights (sky ambient follows the sky; the moon keeps a floor of cool-warm fill)
-    const hl = 0.3 + 0.7 * Math.pow(L, 0.7);
+    // --- lights (sky ambient follows the sky; the moon keeps a floor of cool-warm fill). Round 4: the
+    //     video's grounds read near-black once the blue hour is over (the camera exposes for the LEDs);
+    //     the sky fill fades with the sky to a moonlit minimum that still lets a walker read the
+    //     paving and the silhouettes at eye level
+    const hl = 0.22 + 0.78 * Math.pow(L, 0.8);
     this.hemi.color.setRGB(0.16 * hl, 0.3 * hl, 0.64 * hl);
     this.hemi.groundColor.setRGB(0.04 * hl, 0.032 * hl, 0.024 * hl);
-    this.hemi.intensity = 0.34;
+    this.hemi.intensity = 0.26;
     this.moonLight.position.copy(U.uMoonDir.value).multiplyScalar(500);
     this.moonLight.intensity = 0.14 * smoothstep(0, 1, 1 - cover * 0.6);
     this.twilightLight.position.copy(this.sunDir).setY(0.18).normalize().multiplyScalar(500);
@@ -609,10 +616,11 @@ export class EnvironmentSystem implements System {
       this.hemi.color.b += env.flashColor.b * 0.002 * fk;
     }
     if (li > 0) this.hemi.color.addScalar(li * 0.05);
-    // site glow on everything lit by the sky dome (set, props without the world-light patch)
-    this.hemi.color.r += glow.r * 0.3 + bc.r * 0.05;
-    this.hemi.color.g += glow.g * 0.3 + bc.g * 0.05;
-    this.hemi.color.b += glow.b * 0.3 + bc.b * 0.05;
+    // site glow on everything lit by the sky dome (set, props without the world-light patch): a trace —
+    // the glow is the colour of the smoke in the air, the set and the grounds under it stay dark
+    this.hemi.color.r += glow.r * 0.12 + bc.r * 0.02;
+    this.hemi.color.g += glow.g * 0.12 + bc.g * 0.02;
+    this.hemi.color.b += glow.b * 0.12 + bc.b * 0.02;
 
     // --- stars / planets
     const S = this.starU;

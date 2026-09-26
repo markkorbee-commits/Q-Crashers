@@ -341,16 +341,25 @@ void main() {
     // A ~0.5 m thick glowing layer: its path-length boost is small (1/max(|n.v|, 0.22)).
     // rolling swells (~10 x 5 m) and ripples (~3.5 x 2 m) pushed out from the stage; only the crests that
     // rise into the sheet catch its light -> bright waves over dark troughs (f116)
-    float w1 = texture(uNoise, q * vec3(0.1, 0.3, 0.2) + uDrift).r;
-    float w2 = uOct > 1.5 ? texture(uNoise, q * vec3(0.29, 0.5, 0.52) - uDrift * 2.0).r : 0.5;
+    // The noise tile's lowest octave is a 4-cell lattice repeating every 1/scale metres: on the flat fog
+    // top, axis-aligned samples showed it as a checkerboard. Sampled on rotated axes with a domain warp
+    // and at the swell scale (lattice cells ~8 x 4 m, ripples ~4 x 2 m), the waves read as rolling fog.
+    vec3 qr = vec3(q.x * 0.83 + q.z * 0.56, q.y, q.z * 0.83 - q.x * 0.56);
+    vec3 wp = vec3(n1 - 0.5, 0.0, n2 - 0.5) * 0.8;
+    float w1 = texture(uNoise, qr * vec3(0.032, 0.3, 0.064) + wp + uDrift).r;
+    // (one octave: the mid-scale haze noise stands in for the ripples, not a flat 0.5 that evens the sea out)
+    float w2 = uOct > 1.5 ? texture(uNoise, qr.zyx * vec3(0.11, 0.5, 0.06) - wp * 0.5 - uDrift * 2.0).r : n2;
     float fogTex = smoothstep(0.34, 0.76, w1 * 0.55 + w2 * 0.3 + n1 * 0.15);
     float crest = fogTex * fogTex;
     float streak = lines(vU * 29.0 + uTime * 0.07, 5.0);
     float edgeU = smoothstep(0.0, 0.12, min(vU, 1.0 - vU));
-    float I = uGainS * uLowHaze * (0.025 + 0.8 * crest + 3.4 * crest * crest) * (0.55 + 1.3 * streak) * (0.55 + 0.45 * hazePhase(c))
+    // most of the sea is dark trough; the light sits on the crests that rise into the sheet (video
+    // Embers v1139-1160: bright rolling waves and dark gaps, never an evenly lit floor)
+    float I = uGainS * uLowHaze * (0.015 + 0.5 * crest + 3.6 * crest * crest) * (0.55 + 1.3 * streak) * (0.55 + 0.45 * hazePhase(c))
       * pow(max(vR, 6.0), -0.55) / max(nv, 0.25) * exp(-vLift / 1.3) * edgeU;
-    // deep scan colour in the troughs, the second colour on the lit crests
-    col = mix(vColor, vColor2, smoothstep(0.12, 0.6, crest)) * I;
+    // deep scan colour in the troughs and on most of the swell, the second colour only on the brightest
+    // crests (v1145: a saturated deep-blue sea with pale-blue highlights)
+    col = mix(vColor, vColor2, smoothstep(0.3, 0.9, crest)) * I;
     capI = 2.2;
   } else if (vMode < 0.5) {
     // ---- a scanned sheet ("liquid sky"). Single scattering in a thin plane: radiance ∝ 1/|n.v| (the
@@ -362,14 +371,23 @@ void main() {
     float above = step(0.0, nvs * sign(Nn.y + 1e-4));
     float faceOn = smoothstep(0.25, 0.7, nv) * above;
     float t3 = mix(0.12 + 1.7 * tex * tex, tex * 0.9 + 0.3, faceOn);
-    float haze = uHaze * hazeProfile(vWorld.y) * t3;
+    // the air part thins from the stage cloud to the field air (as for the beams: the stage haze drifts
+    // back over the set, the far field holds little of it) and the low fog adds half its density here —
+    // its lit tops are the sea layer (pushSea). A sheet over the far field is a faint veil, not a lit
+    // floor (video v1389 / v1463: violet near the deck lip, the far field dark)
+    float yS = max(vWorld.y, 0.0);
+    float haze = uHaze * ((0.8 * exp(-yS / 34.0) + 0.2 * exp(-yS / 170.0)) * stageHaze(vWorld) + 0.5 * uLowHaze * exp(-yS / 4.5)) * t3;
     // Near its plane (and from below) the eye / camera exposes for the blinding edge-on line: the rest
     // of the plane, 10–30x dimmer, falls away into the dark (f017 / f147: a thin crisp band in a dark
     // scene, not a lit floor or a coloured sky). From a drone high above, the whole sea stays readable.
+    // Round 4: this holds up to ~20 m above the plane (the FOH / tower / crane cameras: v1389, v1463 show
+    // a line and violet haze near the deck, not a lit violet floor), and the grazing path length is
+    // capped by the sheet's waviness + scan jitter (~0.045 rad) once the eye is off the plane (next to
+    // it, the crisp edge-on line keeps the thickness cap)
     float planeDist = abs(dot(cameraPosition - vWorld, Nn));
-    float kNear = 40.0 * (1.0 - smoothstep(0.5, 9.0, planeDist));
+    float kNear = 40.0 * (1.0 - smoothstep(0.5, 22.0, planeDist));
     kNear = max(kNear, 10.0 * (1.0 - above));
-    float E = inversesqrt(nv * nv + 0.0005) * exp(-nv * kNear);
+    float E = inversesqrt(nv * nv + mix(0.0005, 0.002, smoothstep(1.0, 4.0, planeDist))) * exp(-nv * kNear);
     float I = uGainS * haze * hazePhase(c) * pow(max(vR, 4.0), -0.75) * E;
     // scan structure: the fan of discrete beams the scanner draws (+ a second, sliding family -> moire)
     float s1 = lines(vU * 41.0 + uTime * 0.21, 5.0);
