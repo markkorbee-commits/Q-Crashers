@@ -836,7 +836,12 @@ great circle at t0.)* Visible in almost every field and aerial shot from 30 s on
 sky in the top band of the official video's frames is a saturated pure blue, R ≈ 0 and G/B ≈ 0.15–0.4:
 sRGB **[0, 40, 103] at v20**, **[0, 10, 65] at v118**, **[0, 0, 41] at v509** and [5, 0, 10] at v754 (FACT,
 measured). The teal-navy values above carried too much red and green; `src/world/Environment.ts` SKY_KEYS
-follows the measured values. Where lasers or the rig light the smoke (Embers 1110–1190: the whole upper half
+follows the measured values. **Round 5:** measured through the current pipeline (Show camera exposure 0.5)
+the rendered sky was still ~3-4x too dark in blue with too much green after v100: the video's top band is
+[0, 3, 65] v118, [0, 0, 55] v215-338, [0, 0, 39] v509, [0, 0, 25] v607, [0, 0, 18] v778-925, and the SE
+horizon of the drone shots teal and darker ([9, 39, 70] v44.75, [0, 25, 47] v142.5, [0, 0, 27] v191.5).
+The dome therefore has its own keys (`DOME_KEYS`, "the sky as filmed"); SKY_KEYS stay the physical sky
+light for the fog colour, the hemisphere fill, the reflections and the cloud shading. Where lasers or the rig light the smoke (Embers 1110–1190: the whole upper half
 a lit blue haze, [0, 0, 93] at v1120.5), that light belongs to the haze and the laser ceiling, not to the sky.
 
 Clouds: broken mid-level deck (coverage 0.5–0.6, base 2.5–3.5 km) with gaps (the moon stays visible, FACT);

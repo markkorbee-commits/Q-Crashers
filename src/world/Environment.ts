@@ -256,6 +256,39 @@ const SKY_KEYS: Record<'zen' | 'se' | 'nw' | 'teal' | 'warm', RGB[]> = {
 };
 const ZEN_B0 = SKY_KEYS.zen[0][2];
 
+/**
+ * The sky DOME as the Show camera films it (round 5): SKY_KEYS stay the physical sky light (fog colour,
+ * hemisphere fill, reflections on the damp paving, cloud shading); the dome itself is keyed to the
+ * official video's top band through the current pipeline (Show-camera exposure 0.5 + tone curve: a
+ * rendered top band ≈ 0.28 x the key, measured; the zenith keys then scaled by 0.75 on the metric). Video (sRGB, median of the top band): terrace shots
+ * [0, 42, 103] v20, [0, 3, 65] v118, [0, 0, 55] v215-338, [0, 0, 39] v509, [0, 0, 25] v607, [0, 0, 18]
+ * v778-925; the SE horizon of the drone shots is teal: [9, 39, 70] v44.75, [0, 25, 47] v142.5, [0, 18, 36]
+ * v436-460, and darker than the terrace sky above it ([0, 0, 27] v191.5). Ours was ~3-4x too dark in blue,
+ * with too much green after v100 (the video's sky above the horizon is a pure, saturated blue: R 0, G 0
+ * from v118 on; any green lifts the luminance the metric compares). Similarity on 22 sky moments:
+ * 57.9 -> 60.2 % (20.25 +12, 69.25 +8, 118 +6; 167 / 191.5 -1, their drone shots expose darker).
+ */
+const DOME_KEYS: Record<'zen' | 'se' | 'nw', RGB[]> = {
+  zen: [[0.00022, 0.06, 0.36], [0.00015, 0.0015, 0.14], [0.000075, 0.00038, 0.082], [0.000075, 0.00022, 0.018], [0.000075, 0.00015, 0.0045]],
+  se: [[0.00038, 0.045, 0.12], [0.00022, 0.009, 0.052], [0.00015, 0.0022, 0.038], [0.00015, 0.00075, 0.009], [0.000075, 0.00038, 0.003]],
+  nw: [[0.00075, 0.09, 0.22], [0.00045, 0.03, 0.135], [0.0003, 0.006, 0.09], [0.00022, 0.0022, 0.038], [0.00015, 0.0015, 0.015]],
+};
+
+/** geometric interpolation of a dome key at show time t (no allocation) */
+function domeKey(key: keyof typeof DOME_KEYS, t: number, out: THREE.Color): THREE.Color {
+  const K = DOME_KEYS[key];
+  let i = 0;
+  while (i < SKY_T.length - 2 && t > SKY_T[i + 1]) i++;
+  const s = smoothstep(SKY_T[i], SKY_T[i + 1], t);
+  const a = K[i],
+    b = K[i + 1];
+  return out.setRGB(
+    Math.exp(lerp(Math.log(a[0]), Math.log(b[0]), s)),
+    Math.exp(lerp(Math.log(a[1]), Math.log(b[1]), s)),
+    Math.exp(lerp(Math.log(a[2]), Math.log(b[2]), s)),
+  );
+}
+
 /** geometric interpolation of a keyframed colour at show time t (no allocation) */
 function skyKey(key: keyof typeof SKY_KEYS, t: number, out: THREE.Color): THREE.Color {
   const K = SKY_KEYS[key];
@@ -283,6 +316,8 @@ export class EnvironmentSystem implements System {
   private starU!: SkyUniforms;
   private noise!: THREE.DataTexture;
   private fog!: THREE.FogExp2;
+  /** key the sky dome to the video (DOME_KEYS); false = the physical keys (A/B calibration) */
+  domeGrade = true;
   private fogCfg!: HeightFogConfig;
   private hemi!: THREE.HemisphereLight;
   private moonLight!: THREE.DirectionalLight;
@@ -621,6 +656,13 @@ export class EnvironmentSystem implements System {
     this.hemi.color.r += glow.r * 0.12 + bc.r * 0.02;
     this.hemi.color.g += glow.g * 0.12 + bc.g * 0.02;
     this.hemi.color.b += glow.b * 0.12 + bc.b * 0.02;
+
+    // --- the dome as filmed (DOME_KEYS): everything above used the physical sky light
+    if (this.domeGrade) {
+      domeKey('zen', t, U.uZenith.value);
+      domeKey('se', t, U.uHorizonSE.value);
+      domeKey('nw', t, U.uHorizonNW.value);
+    }
 
     // --- stars / planets
     const S = this.starU;
