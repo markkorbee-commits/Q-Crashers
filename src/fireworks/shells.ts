@@ -82,6 +82,8 @@ export const SHELLS: Record<string, ShellSpec> = {
   crossette: {
     stars: 14, minStars: 8, dist: DIST.SPHERE, drag: 1.4, burn: [1.9, 2.3], trail: 0.3, glitter: 0.3, head: 0.3, tailW: 0.4,
     flags: F.CROSSETTE | F.FLICKER, grav: -9.81, trailGain: 0.3, droop: 1, intensity: 20, color: 'gold', radiusK: 1, jitter: 0.25, split: 0.75, liftGain: 1, flash: 0.9,
+    // no glow ball at the break: the v553.5 / v557.0 crossette lines open as spiky star bursts
+    flashSize: 0.45,
   },
   ring: {
     stars: 60, minStars: 24, dist: DIST.RING, drag: 1.8, burn: [1.5, 2.0], trail: 0.14, glitter: 0, head: 0.32, tailW: 0.5,
