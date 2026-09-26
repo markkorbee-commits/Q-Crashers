@@ -168,7 +168,7 @@ export function flashingToggle(ui: UI, compact = false): HTMLElement {
 }
 
 /** onboarding chip icons per start choice */
-const CHIP_ICON: Record<string, string> = { front: 'crowd', crowd: 'person', middle: 'pin', foh: 'platform', photo: 'terrace', showcam: 'film' };
+const CHIP_ICON: Record<string, string> = { dj: 'music', front: 'crowd', crowd: 'person', middle: 'pin', foh: 'platform', photo: 'terrace', showcam: 'film' };
 
 /** "Explore the grounds. Choose your position. Experience the Endshow." */
 export function openOnboarding(ui: UI): Promise<'start' | 'explore'> {
@@ -240,6 +240,7 @@ export function openOnboarding(ui: UI): Promise<'start' | 'explore'> {
       if (!s) return;
       if (ui.camMode() !== 'first') cameraRig(app)?.setMode?.('first');
       pl?.teleport?.(s);
+      ui.arrivalToast(id);
     };
     // a remembered 'Show camera' choice starts in the show camera again
     if (pl?.rememberedStart === 'showcam' && ui.camMode() === 'first') cameraRig(app)?.setMode?.('showcam');

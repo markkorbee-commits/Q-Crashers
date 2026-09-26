@@ -238,23 +238,25 @@ export class VaultBuilder {
     const V = VAULT;
     const n = this.n;
     // front wall (faces into the vault): the ring outline at the screen back minus the portal opening
+    // (the outline is closed 0.3 m under the floor and the hole reaches 0.15 m under it: earcut needs
+    // the hole strictly inside the outline)
     const ring = vaultOutline(1, n);
-    const shape = new THREE.Shape(ring.map(([x, y]) => new THREE.Vector2(x, y)));
+    const shape = new THREE.Shape([...ring.map(([x, y]) => new THREE.Vector2(x, y)), new THREE.Vector2(ring[ring.length - 1][0], V.floorY - 0.3), new THREE.Vector2(ring[0][0], V.floorY - 0.3)]);
     const w = L.portalW / 2;
     const spring = L.portalApex - L.portalW * Math.sin(Math.PI / 3);
     const hole = new THREE.Path();
-    hole.moveTo(-w, V.floorY);
-    hole.lineTo(-w, spring);
+    hole.moveTo(-w, V.floorY - 0.15);
+    if (spring > V.floorY - 0.1) hole.lineTo(-w, spring);
     const m = 10;
     for (let i = 1; i <= m; i++) {
       const a = Math.PI - (Math.PI / 3) * (i / m);
       hole.lineTo(w + L.portalW * Math.cos(a), spring + L.portalW * Math.sin(a));
     }
-    for (let i = m - 1; i >= 0; i--) {
+    for (let i = m - 1; i >= (spring > V.floorY - 0.1 ? 0 : 1); i--) {
       const a = Math.PI - (Math.PI / 3) * (i / m);
       hole.lineTo(-(w + L.portalW * Math.cos(a)), spring + L.portalW * Math.sin(a));
     }
-    hole.lineTo(w, V.floorY);
+    hole.lineTo(w, V.floorY - 0.15);
     shape.holes.push(hole);
     const fg = new THREE.ShapeGeometry(shape, 6);
     // ShapeGeometry faces +Z: turned about Y to face -Z (into the vault; the outline is symmetric)

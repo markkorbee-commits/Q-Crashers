@@ -281,9 +281,10 @@ export function registerStageWalk(app: App): void {
     app.addSpot({ id, label, position, yaw: yawTowards(position, look), pitch });
   };
   // behind the decks: eyes ~1.75 m over the booth floor (0.1 m DJ riser), looking out through the arch
-  add('dj', 'DJ booth', 0, VAULT.floorY + BOOTH.matH, BOOTH.djZ, field, -0.05);
+  // over the gear (the lower third of the frame) to the podium, the pit and the field
+  add('dj', 'DJ booth', 0, VAULT.floorY + BOOTH.matH, BOOTH.djZ, field, -0.17);
   // on the dancers' podium, front edge left of the lead's pedestal
-  add('dancers', "Dancers' podium", -2.7, PODIUM.top, PODIUM.frontZ - 0.35, new THREE.Vector3(-1.5, 3, 60), -0.04);
+  add('dancers', "Dancers' podium", -2.7, PODIUM.top, PODIUM.frontZ - 0.35, new THREE.Vector3(-1.5, 3, 60), -0.06);
   // the upper castle platform / gallery (up the castle stairs): over the troupe and the field
   add('castle', 'Castle gallery', -14.2, L.platformY, L.galleryFrontZ - 0.55, new THREE.Vector3(-2, 2, 24), -0.16);
 }

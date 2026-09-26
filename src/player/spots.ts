@@ -58,8 +58,9 @@ export interface StartChoice {
   blurb: string;
 }
 
-/** Start positions offered on arrival, closest to the stage first. */
+/** Start positions offered on arrival, closest to the stage first ('dj' is registered by the stage: world/stageWalk.ts). */
 export const START_CHOICES: readonly StartChoice[] = [
+  { id: 'dj', title: 'DJ booth', short: 'DJ booth', blurb: 'Behind the decks in the gold vault, looking out over the dancers and the field. The view no visitor ever gets.' },
   { id: 'front', title: 'Front row', short: 'Front row', blurb: 'On the barrier. The dragon towers over you, the flames hit your face.' },
   { id: 'crowd', title: 'In the crowd', short: 'In the crowd', blurb: 'Packed in the pit with the Tribe, 30 m from the stage.' },
   { id: 'middle', title: 'Middle of the field', short: 'Middle', blurb: 'The whole set, both wings and the firework sky. The classic view.' },

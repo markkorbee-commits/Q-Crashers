@@ -170,6 +170,8 @@ export class PlayerController implements System {
   teleports = 0;
   /** flat raised walkable areas of the stage walk map, highest first (the camera rig reads them) */
   readonly platforms: Platform[] = [];
+  /** every flat top of the walk map, highest first (`platforms` is the per-frame subset in reach) */
+  private readonly allPlatforms: Platform[] = [];
   /** walkable fallback bounds (the world registers the real perimeter as colliders) */
   readonly bounds = { minX: -280, maxX: 280, minZ: -40, maxZ: 460 };
   /** optional hook for footstep sounds (called on every heel strike) */
@@ -201,9 +203,11 @@ export class PlayerController implements System {
     this.app = app;
     // the walkable stage (pure data: deck, stairs, podium, vault, castle platform) + its flat tops for the camera
     this.walk = stageWalk();
+    this.allPlatforms.length = 0;
+    for (const s of this.walk.surfaces) if (s.axis === 0) this.allPlatforms.push({ minX: s.minX, maxX: s.maxX, minZ: s.minZ, maxZ: s.maxZ, y: s.y0 });
+    this.allPlatforms.sort((a, b) => b.y - a.y);
     this.platforms.length = 0;
-    for (const s of this.walk.surfaces) if (s.axis === 0) this.platforms.push({ minX: s.minX, maxX: s.maxX, minZ: s.minZ, maxZ: s.maxZ, y: s.y0 });
-    this.platforms.sort((a, b) => b.y - a.y);
+    this.platforms.push(...this.allPlatforms);
     // third-person camera: never through the vault roof (runs after the camera rig placed the camera)
     app.onFrame(() => this.clampCameraUnderRoof());
     for (const s of DEFAULT_SPOTS) if (!app.spots.some((x) => x.id === s.id)) app.addSpot(s);
@@ -401,6 +405,7 @@ export class PlayerController implements System {
 
     this.collide(p);
     this.updateHeight(p, dt);
+    this.filterPlatforms(p.y);
     this.updateEyes(ctx, motor, crowd01);
     this.updateInteraction(p);
   }
@@ -439,6 +444,19 @@ export class PlayerController implements System {
       cam.y = Math.max(c, this.app.playerPos.y + 0.6);
       this.app.camera.updateMatrixWorld();
     }
+  }
+
+  /**
+   * The camera rig reads `platforms` as the floor under a third-person camera while the player stands on
+   * the stage (highest containing top wins): only the tops within reach of the feet, so a camera
+   * swinging over the castle platform (5.5) while you stand on the deck (1.9) does not jump up. On the
+   * ground every top stays in (the rig blocks its arm with them). No allocation.
+   */
+  private filterPlatforms(feet: number): void {
+    const all = this.allPlatforms;
+    const out = this.platforms;
+    out.length = 0;
+    for (const pl of all) if (!this.onStage || (pl.y > feet - 1.2 && pl.y < feet + 1.0)) out.push(pl);
   }
 
   /** terrain height (m) at x,z; 0 when the terrain system has no height field */
