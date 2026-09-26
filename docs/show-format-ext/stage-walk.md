@@ -55,9 +55,11 @@ front panel, the deep portal glow in `look.portal`). LED strips on the ring face
 (first ring in the content colour, the deeper rings at the outline level). The rig's 7 arch-crown
 downlights sit in black cans in the portal throat (`archSpotPositions()` = the rig's `archSpots`).
 
-Cost: +2 draw calls on desktop presets (vault interior, booth screens), ≈ 5 k triangles for the
-interior + booth and ≈ 6 k for the scale roof. Mobile: the interior joins the stage metal mesh (no
-practicals) and the screens are drawn only within 35 m, so +0 calls from the field.
+Cost (measured, HIGH, at the DJ spot: 115 calls / 1.36 M triangles in total, stage CPU 0.34 ms):
++2 draw calls on desktop presets (vault interior, booth screens), ≈ 11 k triangles for the interior,
+the booth and its screens, a few thousand for the scale roof (in the existing paint mesh). Mobile:
+the interior joins the stage metal mesh (no practicals) and the screens are drawn only within 35 m,
+so +0 calls from the field.
 
 ## Walking the stage (`src/world/stageWalk.ts`, `src/player/PlayerController.ts`)
 
