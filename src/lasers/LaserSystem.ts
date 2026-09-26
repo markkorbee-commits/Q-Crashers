@@ -1664,7 +1664,9 @@ export class LaserSystem implements System {
     if (this.tribe || gate < 0.01 || w < 0.01) return;
     const k = 2.0 * gate;
     // (the fog kind carries the crest colour in the wave-phase slots)
-    this.gfx.pushSurface(0, FOG_TOP, -1, 185, 0, 0, 1, 1.25, 0, 1, 0, SURF_FOG, this.seaR * k, this.seaG * k, this.seaB * k, 0, this.sea2R * k, this.sea2G * k, this.sea2B * k, 0, FOG_ZONE_X, 1, 0);
+    // (range 160: the bank covers the paved field and the hard-standing, it fades out before the road and
+    // the decking — it does not float over the photo terrace)
+    this.gfx.pushSurface(0, FOG_TOP, -1, 160, 0, 0, 1, 1.25, 0, 1, 0, SURF_FOG, this.seaR * k, this.seaG * k, this.seaB * k, 0, this.sea2R * k, this.sea2G * k, this.sea2B * k, 0, FOG_ZONE_X, 1, 0);
   }
 
   /** ground height (terrain system; flat 0 fallback) */
