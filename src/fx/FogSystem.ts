@@ -49,6 +49,12 @@ export class FogSystem extends CueFxSystem {
   private readonly tintSum = new THREE.Color();
   private readonly tint = new THREE.Color(1, 1, 1);
   private crowdSys: { mode?: unknown } | null | undefined = undefined;
+  /**
+   * calibration hooks (in-page experiments; burst lights are baked when a cue is expanded, so clear the
+   * cue cache after changing perTarget): tintLean = how far the site smoke's albedo leans to the site
+   * glow colour per unit of smoke; perTarget = glowing-burst lights per target and cluster
+   */
+  readonly tune = { tintLean: 0.3, perTarget: true };
 
   protected override onInit(app: App): void {
     if (app.params.has('fxproxy')) installFxProxy(app);
@@ -176,15 +182,22 @@ export class FogSystem extends CueFxSystem {
       });
     }
     if (self && pts.length) {
-      // the glowing cloud lights the haze and the floor around it: one line light per group of targets
-      // that lie together (round 6: roof + wings or deck front + side sections are separate clouds, not
-      // one light stretched across the empty space between them)
+      // the glowing cloud lights the haze and the floor around it: one line light per target and per
+      // group of its points that lie together (round 7: the targets touch each other, so a distance
+      // rule alone merged the roof row and both wings of v76 into one 176 m box, and the deck front +
+      // both side sections of v873.7 into one 182 m line; the two side sections are separate clouds)
       const dur = Math.max(0.5, Math.min(cue.dur, 3) + 0.8);
-      // (the groups share the one cloud's light: the total stays that of the single light it replaces)
-      const groups = clusters(pts, 30);
+      const names = this.app.anchors.names();
+      const perTarget = this.tune.perTarget && cue.targets.length > 1 && cue.targets.every((tg) => names.includes(tg));
+      const groups = perTarget ? cue.targets.flatMap((tg) => clusters(this.app.anchors.resolve([tg], 'wing_tips'), 30)) : clusters(pts, 30);
+      // A line light is as bright along all of its length, so a group keeps total * w / sqrt(sum w²):
+      // one group = the single light it replaces, far-apart groups keep most of their own brightness,
+      // and where neighbouring groups overlap their sum stays near the one cloud's light (round-7
+      // measurements: sharing the total linearly dimmed v875-876, not sharing at all over-lit v1552)
       const total = glow * 0.7 * sq * Math.min(2, Math.sqrt(pts.length));
-      let wSum = 0;
-      for (const grp of groups) wSum += Math.min(2, Math.sqrt(grp.length));
+      let w2 = 0;
+      for (const grp of groups) w2 += Math.min(4, grp.length);
+      const wSum = Math.sqrt(w2);
       for (const grp of groups) {
         const mn = new THREE.Vector3(Infinity, Infinity, Infinity);
         const mx = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
@@ -193,7 +206,7 @@ export class FogSystem extends CueFxSystem {
           mx.max(q);
         }
         mn.y = mx.y = (mn.y + mx.y) * 0.5 + 4 * sq;
-        out.lights.push({ kind: 1, t0: cue.t, t1: cue.t + dur, decay: dur * 0.6, strobe: 0, color: tint.clone(), peak: (total * Math.min(2, Math.sqrt(grp.length))) / wSum, pos: mn.clone().add(mx).multiplyScalar(0.5), a: mn.clone(), b: mx.clone(), radius: 8 + 6 * sq });
+        out.lights.push({ kind: 1, t0: cue.t, t1: cue.t + dur, decay: dur * 0.6, strobe: 0, color: tint.clone(), peak: (total * Math.min(2, Math.sqrt(grp.length))) / wSum, pos: mn.clone().add(mx).multiplyScalar(0.5), a: mn.clone(), b: mx.clone(), radius: 8 + 6 * sq, haze: 1 });
       }
     }
   }
@@ -424,13 +437,14 @@ export class FogSystem extends CueFxSystem {
       const dDeck = Math.sqrt(ex * ex + ey * ey + ez * ez);
       const cu = 1 - Math.min(1, Math.max(0, (dDeck - 6) / 22));
       this.haze.setCloseUp(cu * cu * (3 - 2 * cu));
-      // the smoke filling the site takes the hue of the light it holds (the pink whiteout is pink
-      // smoke, not white smoke in a pink light): the tint leans to the site glow with its smoke
+      // the smoke filling the site takes some of the hue of the light it holds: the tint leans to the
+      // site glow with its smoke (round 7: 0.6 -> 0.3 per unit of smoke; the v76 whiteout reads
+      // pink-WHITE, 241/180/174, and the white gerb light on it must not turn deep pink)
       const tint = this.smokeTint(t);
       const g = env.glowColor;
       const gm = Math.max(g.r, g.g, g.b);
       if (siteSmoke > 0 && gm > 1e-3) {
-        const k = 0.6 * siteSmoke;
+        const k = this.tune.tintLean * siteSmoke;
         tint.setRGB(tint.r + (g.r / gm - tint.r) * k, tint.g + (g.g / gm - tint.g) * k, tint.b + (g.b / gm - tint.b) * k);
       }
       this.haze.setTint(tint);

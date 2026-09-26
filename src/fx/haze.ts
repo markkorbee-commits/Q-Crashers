@@ -33,7 +33,8 @@ uniform vec3 uZoneSize[3];
 uniform vec3 uZoneAspect;
 uniform vec3 uZoneOcclusion;
 uniform float uStageBoost;
-uniform vec4 uHazePyro; // gain, knee stage, knee field, knee sky
+uniform vec4 uHazePyro; // source gain, knee stage, knee field, knee sky
+uniform vec3 uHazePyroK; // extra source gain per unit of site smoke, glowing-cloud gain, fog.level glow gain
 uniform vec3 uHazeTint; // colour of the smoke hanging in the air (albedo, from recent smoke cues)
 uniform vec2 uHazeSite; // site glow (atmos.glow) gain, knee lift per unit of glow luminance
 uniform float uHazeKeep; // share of the sprites the preset draws (ranked)
@@ -44,6 +45,23 @@ varying float vAlpha;
 varying vec3 vNoise;
 varying float vOcc;
 varying float vWorldY;
+
+// the pyro light field (fxLight) split by what each light is (uFxLB.w, FxLights LightSpec.haze): a
+// source that lights the air around it (flames, gerbs, shells: w = 0) or a glowing smoke cloud (a lit
+// fog burst: w = 1)
+void hazeFx(vec3 p, float reach, out vec3 src, out vec3 cloud) {
+  src = vec3(0.0);
+  cloud = vec3(0.0);
+  for (int i = 0; i < FX_MAX_LIGHTS; i++) {
+    if (i >= uFxLN) break;
+    float r = uFxLA[i].w * reach;
+    float d2 = segDist2(p, uFxLA[i].xyz, uFxLB[i].xyz);
+    vec3 L = uFxLC[i].rgb * (r * r / (d2 + r * r));
+    float h = uFxLB[i].w;
+    src += L * (1.0 - h);
+    cloud += L * h;
+  }
+}
 
 void main() {
   if (aPar.y >= uHazeKeep) CULL();
@@ -102,10 +120,19 @@ void main() {
   if (Lm > knee) light *= (knee + (Lm - knee) * 0.25) / Lm;
   // the pyro light field lights the haze where it burns (per corner: a flame wall at one end of a
   // 26 m sprite lights that end), with a much higher knee than the rig: the smoke around a fire
-  // glows, the far haze stays dark
+  // glows, the far haze stays dark.
+  // A glowing smoke cloud (lit fog burst) and the fog.level smoke glow ARE lit smoke: they fill the
+  // haze in their colour. A source (a silver gerb wall, a flame row) only lights the thin show haze
+  // with a trace (1438.5 / 1446: a dark, smoky frame with bright white gerbs — the gerbs' own smoke
+  // puffs carry their glow, not a grey-white veil over the whole set); once atmos.glow fills the site
+  // with smoke the same source lights that thick smoke fully (the pink-white whiteout of v76).
   vec3 wc = c + vec3(dot(viewMatrix[0].xy, off), dot(viewMatrix[1].xy, off), dot(viewMatrix[2].xy, off));
-  vec3 pyro = (fxLight(wc, zone == 2 ? 0.8 : 1.2) + uFxGlow) * uHazePyro.x * (zone == 2 ? 0.12 : 1.0);
-  pyro = kneeC(pyro, zone == 0 ? uHazePyro.y : (zone == 1 ? uHazePyro.z : uHazePyro.w), 0.3);
+  vec3 fxSrc, fxCloud;
+  hazeFx(wc, zone == 2 ? 0.8 : 1.2, fxSrc, fxCloud);
+  float gSrc = uHazePyro.x + uHazePyroK.x * uSiteSmoke;
+  float zk = zone == 2 ? 0.12 : 1.0;
+  float pk = zone == 0 ? uHazePyro.y : (zone == 1 ? uHazePyro.z : uHazePyro.w);
+  vec3 pyro = kneeC((fxCloud * uHazePyroK.y + uFxGlow * uHazePyroK.z) * zk, pk, 0.3) + kneeC(fxSrc * gSrc * zk, pk, 0.3);
   vLit = (light + pyro) * uHazeTint * fogT(depth * 0.7);
   // site smoke (atmos.glow smoke): the air is thick with it — it hides the set behind it too
   vOcc = mix(zone == 0 ? uZoneOcclusion.x : (zone == 1 ? uZoneOcclusion.y : uZoneOcclusion.z), 0.8, uSiteSmoke * 0.85);
@@ -197,7 +224,10 @@ export class HazeField {
       // how much each zone dims what lies behind it (the stage haze must not grey the set out)
       uZoneOcclusion: { value: new THREE.Vector3(0.35, 0.15, 0.55) },
       uStageBoost: { value: 1 },
-      uHazePyro: { value: new THREE.Vector4(7, 14, 7, 4) },
+      // pyro light on the haze: source gain (a trace; round 6 had 7 for every light), knees per zone
+      uHazePyro: { value: new THREE.Vector4(0.5, 14, 7, 4) },
+      // + source gain per unit of site smoke, glowing-cloud gain (lit fog bursts), fog.level glow gain
+      uHazePyroK: { value: new THREE.Vector3(8, 7, 7) },
       uHazeTint: { value: new THREE.Color(1, 1, 1) },
       // site glow (atmos.glow) on the haze: gain, knee lift per unit of glow luminance
       uHazeSite: { value: new THREE.Vector2(1.6, 3) },
