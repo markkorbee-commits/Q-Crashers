@@ -63,7 +63,7 @@ check wants ≤ 0.1).
 
 `$ENDSHOW_DATA/work/r7_show/audit.py` lists every group of non-snapped visual state cues (off the half-beat grid in
 steady tracks, off the measured onsets in free tempo) whose strongest per-frame change (camera cuts excluded) lies
-0.06–0.24 s after the cue. 30 groups came up; most are ramps that our cue fades already reproduce (1010.88, 1014.76,
+0.06–0.24 s after the cue (or clearly before it). 29 groups came up; most are ramps that our cue fades already reproduce (1010.88, 1014.76,
 1043.88, 75.94) or section starts (114.48, audio-locked). Moved only where the frames prove it: 586.964 → 587.044,
 1437.617 → 1437.68, 1508.36 flood attack 0.1 → 0.25 (the air lights up over v1508.36–1508.6).
 
