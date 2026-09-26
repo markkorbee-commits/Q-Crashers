@@ -507,8 +507,14 @@ export class CrowdSystem implements System {
       const p = s.position;
       if (p.y >= 8) continue;
       const view = CLEAR_VIEW_IDS.has(s.id) || p.z < 3; // start choices, showcase views, the deck spots
-      if (view) out.push({ x: p.x, z: p.z, yaw: s.yaw, ...CLEAR_VIEW });
-      else out.push({ x: p.x, z: p.z, ring: CLEAR_RING });
+      if (!view) {
+        out.push({ x: p.x, z: p.z, ring: CLEAR_RING });
+        continue;
+      }
+      // raised viewpoints (stage deck, photo terrace) look over the heads: their cone stays clear,
+      // but the 6–9 m band is not thinned (it would open holes in the packed barrier rows)
+      const raised = p.y - this.heightAt(p.x, p.z) >= 1.5;
+      out.push({ x: p.x, z: p.z, yaw: s.yaw, ...CLEAR_VIEW, keep: raised ? 1 : CLEAR_VIEW.keep });
     }
     return out;
   }

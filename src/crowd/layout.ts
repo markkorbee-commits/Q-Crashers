@@ -174,7 +174,7 @@ export function clearFactor(x: number, z: number, zones: readonly ClearZone[] | 
 
 function zonesKey(zones: readonly ClearZone[] | undefined): string {
   if (!zones) return '';
-  return zones.map((c) => `${c.x.toFixed(1)},${c.z.toFixed(1)},${c.ring},${c.yaw?.toFixed(2) ?? '-'}`).join('|');
+  return zones.map((c) => `${c.x.toFixed(1)},${c.z.toFixed(1)},${c.ring},${c.yaw?.toFixed(2) ?? '-'},${c.cone ?? ''},${c.r1 ?? ''},${c.r2 ?? ''},${c.keep ?? ''}`).join('|');
 }
 
 export interface FlagDef {

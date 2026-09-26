@@ -224,10 +224,13 @@ const MC_PATH = new Path([
   { t: 465, x: -4, z: -3.5 },
   { t: 478, x: 8, z: -3.5 },
   { t: 489, x: 12, z: -3.8 },
-  // back towards the booth for the close-ups v496.16 / v497.64 (cameras at x 5.6 / 0.4 aimed at
-  // x ~3), then he dances on the spot in the cyan backlight (v498.36–502.04) until the drop's cut
-  { t: 495.6, x: 3.8, z: -6.1 },
-  { t: 502.2, x: 2.6, z: -6.8 },
+  // the close-ups v496.12 / v497.60 (cameras at (5.6, -3.2) / (0.4, -3.5) aimed at the portal):
+  // he stands on their axes in front of the porch screen (Z −6), then dances on the spot in the
+  // cyan backlight (v498.36–502.04) until the cut to the terrace at the drop
+  { t: 495.6, x: 3.8, z: -5.2 },
+  { t: 496.6, x: 3.6, z: -5.3 },
+  { t: 497.7, x: 2.2, z: -5.4 },
+  { t: 502.2, x: 2.0, z: -5.7 },
 ]);
 const MC_T0 = 332;
 const TROUPE_T0 = 642;
