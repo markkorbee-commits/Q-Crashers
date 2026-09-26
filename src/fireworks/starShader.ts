@@ -17,7 +17,10 @@ import { GLSL_COMMON } from '../fx/core/glsl';
  */
 export const FW_SHED = 16384;
 export const FW_SWIM = 32768;
-/** curling stars: the velocity turns at HZ rad/s in the fan plane while drag slows it (hooks, rings) */
+/**
+ * curling stars: the velocity turns at HZ rad/s in the fan plane while drag slows it (hooks, rings);
+ * Y1 > 0 = the turn stops after Y1 s (an arc of HZ x Y1 rad: open lobes instead of closed rings)
+ */
 export const FW_CURL = 65536;
 
 export const STAR_VERT = /* glsl */ `
@@ -42,7 +45,7 @@ struct Star {
   float ts; vec3 sp; vec3 sv;
   vec3 n1; vec3 n2; vec3 d; float serp; float wph; float wf;
   float swim; vec3 sw; vec3 sph;
-  float curl; vec3 ce1; vec3 ce2; float cv;
+  float curl; vec3 ce1; vec3 ce2; float cv; float ca;
 };
 
 // closed form of a drag-slowed velocity turning at a constant rate w: v(t) = v0 e^((-k + i w) t)
@@ -57,7 +60,14 @@ vec3 starPos(Star s, float t) {
   vec3 p;
   if (s.ts > 0.0 && t > s.ts) p = ballistic(s.sp, s.sv, s.k, s.acc, t - s.ts);
   else if (s.curl != 0.0) {
-    vec2 c = curlPos(s.k, s.curl, t) * s.cv;
+    // the turn stops after s.ca seconds: from there the star flies on straight (drag-slowed)
+    float tc = min(t, s.ca);
+    vec2 c = curlPos(s.k, s.curl, tc);
+    if (t > tc) {
+      float a = s.curl * tc;
+      c += vec2(cos(a), sin(a)) * (exp(-s.k * tc) * (1.0 - exp(-s.k * (t - tc))) / s.k);
+    }
+    c *= s.cv;
     p = ballistic(s.p0, vec3(0.0), s.k, s.acc, t) + s.ce1 * c.x + s.ce2 * c.y;
   } else p = ballistic(s.p0, s.v0, s.k, s.acc, t);
   if (s.serp > 0.0) {
@@ -76,7 +86,8 @@ vec3 starVel(Star s, float t) {
   if (s.ts > 0.0 && t > s.ts) return ballisticVel(s.sv, s.k, s.acc, t - s.ts);
   if (s.curl != 0.0) {
     float E = exp(-s.k * t) * s.cv;
-    return ballisticVel(vec3(0.0), s.k, s.acc, t) + (s.ce1 * cos(s.curl * t) + s.ce2 * sin(s.curl * t)) * E;
+    float a = s.curl * min(t, s.ca);
+    return ballisticVel(vec3(0.0), s.k, s.acc, t) + (s.ce1 * cos(a) + s.ce2 * sin(a)) * E;
   }
   return ballisticVel(s.v0, s.k, s.acc, t);
 }
@@ -142,7 +153,7 @@ void main() {
   s.n1 = vec3(1.0, 0.0, 0.0); s.n2 = vec3(0.0, 0.0, 1.0); s.d = vec3(0.0, 1.0, 0.0);
   s.sp = s.p0; s.sv = vec3(0.0);
   s.sw = vec3(0.0); s.sph = vec3(0.0);
-  s.curl = 0.0; s.ce1 = vec3(0.0, 1.0, 0.0); s.ce2 = vec3(1.0, 0.0, 0.0); s.cv = 0.0;
+  s.curl = 0.0; s.ce1 = vec3(0.0, 1.0, 0.0); s.ce2 = vec3(1.0, 0.0, 0.0); s.cv = 0.0; s.ca = 1e9;
   float spd = mix(r2.x, r2.y, rnd(key, 2u));
   vec3 axis = r7.xyz;
   vec3 dir;
@@ -182,6 +193,7 @@ void main() {
     s.ce1 = dir;
     s.ce2 = normalize(cross(N, dir));
     s.cv = spd;
+    if (r10.y > 0.0) s.ca = r10.y;
   }
   if ((flags & (F_SERPENT | FW_SWIM)) != 0) {
     s.n1 = orthoA(dir);

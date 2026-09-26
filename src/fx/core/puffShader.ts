@@ -134,6 +134,9 @@ void main() {
       if (cut > 0.0) {
         burn = 1.0 - smoothstep(0.0, 0.35, cut);
         burn *= burn;
+        // the soot of the plume thins out as well (v1509.8-1510.0: the dark sky is back within half
+        // a second of the cut; what lingers is the row's smoke bank, not a wall of fire-sized soot)
+        soot *= 0.25 + 0.75 * (1.0 - smoothstep(0.1, 0.6, cut));
       }
     }
     vEmis = r3.rgb * r3.w * em * fog * nearF * thinGain * burn;
@@ -156,7 +159,11 @@ void main() {
     float alpha = r3.w * fadeIn * fadeOut * em * nearF * thinGain;
     vec3 light = envLight(P) * r11.x;
     vec3 self = vec3(0.0);
-    if ((flags & F_SELFLIT) != 0) self = r4.rgb * exp(-tau / max(r9.x, 0.01));
+    if ((flags & F_SELFLIT) != 0) {
+      self = r4.rgb * exp(-tau / max(r9.x, 0.01));
+      // the source that lit it has gone out (r8.z = its end, show time): no light left to scatter
+      if (r8.z > 0.0) self *= 1.0 - smoothstep(0.0, 0.3, uTime - r8.z);
+    }
     vLit = r3.rgb * r10.x * (light + self) * fog;
     vEmis = kind == 2 ? r4.rgb * alpha * (1.0 - f) * fog : vec3(0.0);
     vPar = vec4(alpha, 0.0, 0.0, float(kind));

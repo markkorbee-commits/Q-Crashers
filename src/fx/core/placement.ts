@@ -182,6 +182,32 @@ export function tiltedUp(x: number, deg: number, out: THREE.Vector3, lean = 0): 
 }
 
 /**
+ * Stretches of a row of units: the units (only those with steps[i] >= 0 when `steps` is given), in
+ * order along the unrolled U (see uCoord), cut into pieces of at most `maxLen` m; a gap of more than
+ * `maxGap` m starts a new piece. Returns the unit indices of every stretch. The row light, the row
+ * smoke and the LightEnv flashes of a U-shaped row follow these stretches, so nothing of the row is
+ * placed in the empty field inside the U. Build-time only (allocates).
+ */
+export function stretches(pts: THREE.Vector3[], steps?: number[], maxLen = 40, maxGap = 24): number[][] {
+  const idx: number[] = [];
+  for (let i = 0; i < pts.length; i++) if (!steps || steps[i] >= 0) idx.push(i);
+  if (!idx.length) return [];
+  idx.sort((a, b) => uCoord(pts[a]) - uCoord(pts[b]) || pts[a].z - pts[b].z);
+  const out: number[][] = [];
+  let cur: number[] = [idx[0]];
+  for (let i = 1; i < idx.length; i++) {
+    const p = pts[idx[i]];
+    if (p.distanceTo(pts[cur[0]]) > maxLen || p.distanceTo(pts[idx[i - 1]]) > maxGap) {
+      out.push(cur);
+      cur = [];
+    }
+    cur.push(idx[i]);
+  }
+  out.push(cur);
+  return out;
+}
+
+/**
  * Groups of points that lie together (single linkage: a point joins a group when it is within
  * `gap` m of any member), in the order of their first member. Lights over far-apart targets (a burst
  * on both arm ends, X ±94) are pushed per group instead of one segment across the empty field.

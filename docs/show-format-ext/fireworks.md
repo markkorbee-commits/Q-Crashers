@@ -34,6 +34,18 @@ Engine: `src/fireworks/FireworkSystem.ts`, `src/fireworks/shells.ts`, `src/firew
   the white serpent rows stand as wriggling lines from the ground to their pearls). `smoke: false`
   turns it off.
 
+* **Round 6.**
+  * The launch cloud of a comet / cake / mine is lit in the stars' colour only until the last shot
+    has left (+0.4 s), and a shell's smoke only while its stars burn: smoke is never lit by fireworks
+    that are already out (`Emitter.litUntil`, see pyro.md).
+  * The LightEnv flash of a comet or cake row is shared out over the row's stretches (like the row
+    lights) instead of one flash at the centroid of the row, which for a U row sat in the empty
+    field; the LightEnv then sees the true spread of the sources (see pyro.md, round 6).
+  * Fans of more than 2 comets per point (`per` 3–12) stand in a denser launch cloud (up to 5 puffs
+    per point) and light their smoke more (row light × sqrt(per / 2)); `per` ≤ 2 is unchanged. With
+    `per: 6, glitter: 0.6, tailGain: 2.5` the pink V-fans of v550–559 read as dense fans in a pink
+    lit cloud (measured on 552.25–558.75: +0.7 points on top of the cue change alone, 558.25 +1.4).
+
 ## New params
 
 ### comet, cake and mine: launch positions
@@ -54,6 +66,7 @@ Engine: `src/fireworks/FireworkSystem.ts`, `src/fireworks/shells.ts`, `src/firew
 | `tilt` | deg: leans the whole fan / stream of each point outward (negative: inward). One cue with `per` + `stagger` + `tilt` is a leaning stream. |
 | `cross` | m: X-fan. Every point becomes two launch points `cross` m apart; each fires its fan tilted towards the other by `crossAngle` (deg, default 22), so the fans cross. |
 | `curl` | deg/s: the flight turns while it slows (+ = over the top towards the outside of the set, − = towards the centre). Hooks and rings. |
+| `arc` | deg (round 6, with `curl`): the turn stops after this many degrees and the stars burn out there, so a stream draws an open lobe instead of a closed ring. The heart of v88.3–92.5: `curl: -190, arc: 270` (lobes of ~270° meeting at the bottom). Shell / `pops` ends break where the arc ends. |
 | `end` | adds `pops` (alias `crackle_comet`): the head dies in a small cloud of crackle micro-flashes, no shell. Shell ends may also be `spider`, `glitter`, `swimmer`. |
 | `endSize` | m: break radius of a shell end / the pops cloud. |
 

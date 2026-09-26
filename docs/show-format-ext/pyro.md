@@ -97,6 +97,40 @@ listed under "Engine behaviour". Unknown params are still ignored.
 * **`reduceFlashing`.** When the UI sets `app.reduceFlashing`, pyro, firework and fog flashes on the
   LightEnv drop to 40 % and the light field to 60 %.
 
+## Engine behaviour, round 6 (no cue changes needed)
+
+* **Self-lit smoke goes dark when its source goes out.** Smoke that glows in the colour of the
+  effect that makes it (Bengal clouds, flare-drone trails, the smoke column of a gerb, the row smoke
+  and burning cloud of flame / fountain rows, fireball caps, dragon-breath smoke) keeps that
+  self-light only while the source burns; it fades within ~0.3 s after (`Emitter.litUntil`, the HZ
+  slot of a puff record). Afterwards the show's light (rig, flashes, pyro light field) lights it.
+  The red Bengal clouds of 333.849 are dark by v337.96 instead of two red glow blobs over the castle.
+* **LightEnv flashes follow the units.** A row (flames, fountains, billowing walls) pushes its flash
+  per stretch of the row (≤ 40 m along the U), scattered units (bursts, fireballs, Bengal flares)
+  per group of units (> 30 m apart = separate groups), each at its own centre and with its share of
+  the peak. The flash pots on both arm ends (v484.75) no longer push one flash at the middle of the
+  field; the LightEnv now sees the spread of the sources, which softens the far flash light on the
+  floor and the smoke. The far flash term on smoke (`envLight()` in `src/fx/core/glsl.ts`) is 0.2
+  (was 0.3): smoke next to a source is lit by the pyro light field.
+* **Billowing walls, `width`.** A billowing wall (`billow`) reads `width` as its bulk
+  (B = sqrt(`width`), 0.7–1.8): the balls grow to B × their size and rise to (0.78 + 0.35 (B − 1)) × H,
+  roll out towards the audience, burn brighter (× 1 + 0.6 (B − 1)) and less opaque (they sum up into
+  one blinding mass) with less soot, and the white-hot roots hide in the mass. At `width: 3` the
+  28 m wall of v1508.4 is one rolling fire cloud over the whole front instead of a row of jets.
+  When the valves close, the plume's soot thins to a quarter within 0.6 s as well (v1509.8–1510.0:
+  the dark sky is back within half a second; the row's smoke bank is what lingers).
+* **Dense fireball rows** (more than 6 balls, the mass eruption) burn out 28 % faster: the v1508.4
+  eruption is gone as one by ~v1509.9.
+* **Silver gerbs of the shorter walls.** White / silver gerb rows of 16–22 m (the v1437–1456 walls)
+  throw 40 % of the light of a gold row of their height and leave thinner, darker row smoke (self-light
+  × 0.36, opacity 0.10): the air and the set around them keep the colour of the stage light (pink at
+  v1439.5, v1446) instead of turning white. The effect ramps out between 22 and 30 m: the 30–34 m
+  finale walls keep their full light. The burning cloud of a long burn (≥ 4 s) ramps in with the
+  height between 18 and 30 m (full for the 30–34 m finale walls, hardly any for a 20 m wall).
+* **Burning wings.** The light of a `firewall` on the wings is cut into stretches of ≤ 14 m with a
+  reach of 0.45 H + 2.5 m (was one light over the whole wing, 0.45 H + 6 m), so the glow follows the
+  wing shape.
+
 ## pyro — new params
 
 | fx | param | meaning |
