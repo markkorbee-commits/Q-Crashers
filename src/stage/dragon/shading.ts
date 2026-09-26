@@ -74,6 +74,8 @@ export interface CrownUniforms {
    * dots ride in the static strip / bulb draws (instances flagged `iJaw`) and follow the jaw here
    */
   uJawMat: THREE.IUniform<THREE.Matrix4>;
+  /** per-side emitter level: x audience-left (x < 0), y right (stage.state `side`) */
+  uSide: THREE.IUniform<THREE.Vector2>;
 }
 
 export function createUniforms(): CrownUniforms {
@@ -119,6 +121,7 @@ export function createUniforms(): CrownUniforms {
     uDragonWash: { value: 1 },
     uDay: { value: 0 },
     uJawMat: { value: new THREE.Matrix4() },
+    uSide: { value: new THREE.Vector2(1, 1) },
   };
 }
 
@@ -136,6 +139,9 @@ uniform vec3 uLedW;
 uniform vec3 uLedW2;
 uniform float uDragonG;
 uniform float uWingG;
+uniform vec2 uSide;
+// per-side isolation of the emitters (soft over the dragon's head)
+float crownSide(float x) { return mix(uSide.x, uSide.y, smoothstep(-6.0, 6.0, x)); }
 float crownHash(float n) { return fract(sin(n * 12.9898) * 43758.5453); }
 // overall LED output of the crown (strips, pixel dots, membrane lanes, rosette spokes), calibrated
 // against the official video (round 4): at 1.0 the lines clipped to white-pink under the tone curve
@@ -372,7 +378,7 @@ iblIrradiance *= uEnvTint * max(crownWashReg(), 0.03);`,
   vec3 lc = crownLed(vMemb.y, alt, side, abs(vMemb.z) + lane * 2.7027027);
   // pixel canvas fades out towards the wrist
   float grow = smoothstep(1.5, 5.0, vMemb.y);
-  float em = emberMask(vCrownPos.x);
+  float em = emberMask(vCrownPos.x) * crownSide(vCrownPos.x);
   totalEmissiveRadiance += lc * line * feather * grow * uWings * 2.4 * em;
   // the printed skin is flooded by its own warm uplights from below (follows the wing glow level):
   // saturated print, brightest at the lower edge, falling off towards the scalloped top. Kept below
@@ -469,7 +475,7 @@ void main() {
   // is pushed above the lit haze around the crown, so the wing ribs read as lines of light
   vec3 steady = crownSteady(vInfo.x) * uLedI * 0.7;
   c = max(c, steady * vFar) * (1.0 + 1.2 * vFar);
-  gl_FragColor = vec4(c * core * dots * vFade * 3.2 * crownDim(vInfo.x) * emberMask(vWX), 1.0);
+  gl_FragColor = vec4(c * core * dots * vFade * 3.2 * crownDim(vInfo.x) * emberMask(vWX) * crownSide(vWX), 1.0);
 }`,
   });
 }
@@ -645,7 +651,9 @@ void main() {
     c = mix(vec3(1.0, 0.8, 0.84) * (0.25 + 0.75 * uLedI), led, 0.2) * (0.2 * uEmit + 0.9 * uMouth) * 1.2;
   } else if (t == 4) c = (vec3(1.0, 0.96, 0.92) * (0.35 * uEmit + 1.2 * min(1.0, dot(uEyes, vec3(0.3, 0.5, 0.2)) * 1.5)) + uEyes * 0.3);
   else c = vec3(1.0, 0.7, 0.4) * (0.3 * uEmit + uLedI) * uDragonG;
-  gl_FragColor = vec4(c * m * vFade * 2.4 * emberMask(vWX), 1.0);
+  // eyes / mouth / rider keep their own controls; the LED dots follow the per-side level
+  float sd = (t == 2 || t == 3 || t == 4) ? 1.0 : crownSide(vWX);
+  gl_FragColor = vec4(c * m * vFade * 2.4 * emberMask(vWX) * sd, 1.0);
 }`,
   });
 }
@@ -887,7 +895,7 @@ void main() {
   vec3 led = crownLed(r * 2.0 + vSeed * 0.1, 3.0, sign(vSeed), 0.3);
   float lv = max(uLedI, 0.2);
   vec3 c = uRosette * (star * 1.5 + glow + rays * (0.5 + 0.6 * lv)) * (0.3 + 0.8 * uWings) + led * (rays * 0.4 + rim * 0.3);
-  gl_FragColor = vec4(c * 1.2 * emberMask(vSeed), 1.0);
+  gl_FragColor = vec4(c * 1.2 * emberMask(vSeed) * crownSide(vSeed), 1.0);
 }`,
   });
 }

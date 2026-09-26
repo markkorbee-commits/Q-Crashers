@@ -485,6 +485,7 @@ export class MainStageSystem implements System {
       tintTowards(u.uFloodB.value, _glow, k);
     }
     u.uSkyK.value = CALIB.sky;
+    u.uSide.value.set(look.sideL, look.sideR);
     addScaled(u.uFront.value.copy(look.wash).multiplyScalar(wi * CALIB.front), look.pulseColor, 1.2);
     u.uFront.value.r += look.strobe * 2.5;
     u.uFront.value.g += look.strobe * 2.5;
@@ -521,6 +522,7 @@ export class MainStageSystem implements System {
     (l.uLed2S.value as THREE.Color).copy(look.sidesLed2).multiplyScalar(ledGain);
     (l.uAccentS.value as THREE.Color).copy(look.sidesAccent).multiplyScalar(ledGain * CALIB.pilaster);
     (l.uRegion.value as THREE.Vector4).set(look.castleGain, look.sidesGain, look.battenGain, CALIB.outline);
+    (l.uSide.value as THREE.Vector2).set(look.sideL, look.sideR);
     (l.uWin.value as THREE.Color).copy(look.windowColor).multiplyScalar(CALIB.window * look.windows);
     l.uWinLvl.value = look.windows;
     l.uWinMode.value = look.windowMode;

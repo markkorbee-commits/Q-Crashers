@@ -40,6 +40,8 @@ export interface StageUniforms {
    * so the set takes a reduced share; 1 in the dev `?daylight` view.
    */
   uSkyK: THREE.IUniform<number>;
+  /** per-side level of the floods / FOH wash / decor glow: x audience-left (x < 0), y right (state `side`) */
+  uSide: THREE.IUniform<THREE.Vector2>;
 }
 
 export function createStageUniforms(): StageUniforms {
@@ -57,6 +59,7 @@ export function createStageUniforms(): StageUniforms {
     uFloodTintS: { value: new THREE.Color(1, 1, 1) },
     uDay: { value: 0 },
     uSkyK: { value: 1 },
+    uSide: { value: new THREE.Vector2(1, 1) },
   };
 }
 
@@ -82,7 +85,10 @@ uniform vec3 uFloodTintC;
 uniform vec3 uFloodTintS;
 uniform float uDay;
 uniform float uSkyK;
+uniform vec2 uSide;
 varying vec3 vStageWP;
+// per-side isolation (soft over the centre line so the portal / dragon never shows a hard seam)
+float stageSide(vec3 wp) { return mix(uSide.x, uSide.y, smoothstep(-6.0, 6.0, wp.x)); }
 float stageSideW(vec3 wp) { return smoothstep(37.3, 38.3, abs(wp.x)); }
 float stageRegion(vec3 wp) { return mix(uRegionF.x, uRegionF.y, stageSideW(wp)); }
 // cheap contact occlusion where vertical faces meet the deck (1.9) / upper platform (5.5) / ground
@@ -123,6 +129,7 @@ vec3 stageFlood(vec3 wp, vec3 n) {
   // 'wings' / 'dragon' leave it a dark silhouette as in the footage)
   acc *= rg <= 1.0 ? 0.03 + 0.97 * rg : pow(rg, 1.5);
   acc += uFront * max(dot(n, vec3(0.0, 0.2425, 0.9701)), 0.0) * min(0.08 + 0.92 * rg, 1.3);
+  acc *= stageSide(wp);
   acc += uBack * max(dot(n, vec3(0.0, 0.9285, -0.3714)), 0.0);
   vec3 fd = uFlashPos - wp;
   float fl = length(fd);
@@ -197,7 +204,7 @@ ${
   o.glowGroups
     ? `{
   float gw = vGroup < 0.5 ? uGlow.w : (vGroup < 1.5 ? uGlow.x : (vGroup < 2.5 ? uGlow.y : uGlow.z));
-  totalEmissiveRadiance *= gw * stageRegion(vStageWP);
+  totalEmissiveRadiance *= gw * stageRegion(vStageWP) * stageSide(vStageWP);
 }`
     : ''
 }`,

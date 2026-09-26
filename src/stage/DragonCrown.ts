@@ -364,6 +364,7 @@ export class DragonCrown {
     U.uDragonG.value = look.dragonGain;
     U.uWingG.value = look.wingGain;
     U.uWingWash.value = look.wingWash;
+    U.uSide.value.set(look.sideL, look.sideR);
     U.uDragonWash.value = look.dragonWash;
     U.uBeat.value = ctx.beat.beat;
     U.uLedI.value = Math.max(0, look.ledIntensity);

@@ -83,6 +83,8 @@ export function createLedMaterial(): THREE.ShaderMaterial {
         uRegion: { value: new THREE.Vector4(1, 1, 1, 0.35) },
         /** 0..1 window level (share of the windows lit) */
         uWinLvl: { value: 1 },
+        /** per-side level: x audience-left (x < 0), y right (stage.state `side`) */
+        uSide: { value: new THREE.Vector2(1, 1) },
       },
     ]),
     vertexShader: LED_VERT,
@@ -171,6 +173,7 @@ const LED_FRAG = /* glsl */ `
       uniform float uContent;
       uniform vec3 uContentCol;
       uniform vec3 uContentColS;
+      uniform vec2 uSide;
       // 0 castle core .. 1 side sections (set in main before the panel content is evaluated)
       float gSideW = 0.0;
       uniform float uContentMix;
@@ -442,7 +445,7 @@ const LED_FRAG = /* glsl */ `
           col = panelContent(p, size) * (0.35 + 0.65 * grid) * pulse * uContentGain;
         }
         col += vec3(uStrobe) * 3.0 * step(kind, 0.5) * uRegion.z;
-        col *= regG;
+        col *= regG * mix(uSide.x, uSide.y, smoothstep(-6.0, 6.0, vWP.x));
         #ifdef LED_OVERLAY
         col *= vOverlay;
         if (max(col.r, max(col.g, col.b)) < 1e-4) discard;

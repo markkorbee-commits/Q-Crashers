@@ -45,6 +45,9 @@ interface StateVals {
   crownColW: number;
   wingCol: THREE.Color;
   wingColW: number;
+  /** per-side emitter levels (state param `side`): audience-left (x < 0) / right */
+  sideL: number;
+  sideR: number;
   /** persistent festoon level (all groups) + colour / pattern / rate */
   garlands: number;
   garlandCol: THREE.Color;
@@ -79,6 +82,8 @@ const newVals = (): StateVals => ({
   crownColW: 0,
   wingCol: new THREE.Color(),
   wingColW: 0,
+  sideL: 1,
+  sideR: 1,
   garlands: 0,
   garlandCol: new THREE.Color(),
   garlandPat: 0,
@@ -350,6 +355,8 @@ export class LookResolver {
     base.sidesColW = 0;
     base.crownColW = 0;
     base.wingColW = 0;
+    base.sideL = 1;
+    base.sideR = 1;
     base.garlands = 0;
     base.garlandCol.copy(GARLAND_WARM);
     base.garlandPat = 0;
@@ -400,6 +407,8 @@ export class LookResolver {
     out.wingGain = cur.wingLed;
     out.wingWash = cur.wingWash;
     out.dragonWash = cur.dragonWash;
+    out.sideL = cur.sideL;
+    out.sideR = cur.sideR;
     out.garland.set(cur.garlands, cur.garlands, cur.garlands);
     out.garlandColor.copy(cur.garlandCol);
     out.garlandPattern = cur.garlandPat;
@@ -762,6 +771,9 @@ export class LookResolver {
         v.rosettes.setRGB(0, 0, 0);
         break;
     }
+    // per-side isolation: only the audience-left (x < 0) or right half of the set's emitters
+    v.sideL = p.side === 'right' ? 0 : 1;
+    v.sideR = p.side === 'left' ? 0 : 1;
     // warm festoon bulb strings (persistent level; stage.garlands cues add flashes / strobes on top)
     v.garlands = clamp2(p.garlands, 0);
     if (p.garlandColor !== undefined) resolveColor(p.garlandColor, pal, v.garlandCol, 'accent');
@@ -831,6 +843,8 @@ function copyVals(dst: StateVals, src: StateVals): void {
   dst.crownColW = src.crownColW;
   dst.wingCol.copy(src.wingCol);
   dst.wingColW = src.wingColW;
+  dst.sideL = src.sideL;
+  dst.sideR = src.sideR;
   dst.garlands = src.garlands;
   dst.garlandCol.copy(src.garlandCol);
   dst.garlandPat = src.garlandPat;
@@ -854,6 +868,8 @@ function copyIsolation(dst: StateVals, src: StateVals): void {
   dst.crownColW = src.crownColW;
   dst.wingCol.copy(src.wingCol);
   dst.wingColW = src.wingColW;
+  dst.sideL = src.sideL;
+  dst.sideR = src.sideR;
 }
 
 /** resolve an optional colour override into `out`; returns its weight (1 when given, else 0) */
@@ -897,6 +913,8 @@ function lerpVals(a: StateVals, b: StateVals, k: number, out: StateVals): void {
   out.sidesColW = lerpOverride(a.sidesCol, a.sidesColW, b.sidesCol, b.sidesColW, k, out.sidesCol);
   out.crownColW = lerpOverride(a.crownCol, a.crownColW, b.crownCol, b.crownColW, k, out.crownCol);
   out.wingColW = lerpOverride(a.wingCol, a.wingColW, b.wingCol, b.wingColW, k, out.wingCol);
+  out.sideL = lerpN(a.sideL, b.sideL, k);
+  out.sideR = lerpN(a.sideR, b.sideR, k);
   out.garlands = lerpN(a.garlands, b.garlands, k);
   out.garlandCol.lerpColors(a.garlandCol, b.garlandCol, k);
   out.garlandPat = k < 0.5 ? a.garlandPat : b.garlandPat;
