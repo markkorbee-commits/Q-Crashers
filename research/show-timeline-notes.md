@@ -21,6 +21,31 @@ haze/wash/sky, thins the beams, widens and re-phases the fireworks, re-aims 13 c
 build, adds viewing hints to the moments, and turns three of those lessons into validator checks (storyboard
 liveness, blackouts, camera sight lines). The key-cue column of §5 is regenerated from the file.
 
+**Round 2 integration (2026-09-26).** The engine modules gained video-derived features (`docs/show-format-ext/*.md`)
+and each fixer listed the cue updates it had verified side by side with the official video; the file now opts in
+(~300 edits, 2983 cue definitions). *Stage*: the castle is dark by default, so lit-castle moments ask for
+`castle` (131.4, 330.4/339.0 blue facade, 508.3, 1104/1110), dark castle under the glowing dragon (934–1006) and in
+the violet/blue scenes; `mask` isolates crown / wings / dragon (120.7, 131.0, 534.3, 1098, 1314–1323, 1383, 1437.6);
+the 587–590 stutter is a `stage.gate` (16ths, then off on the beat) instead of repeated master cues; the lamp strings
+are `stage.garlands` (35 moments + the L.P.A. warm-white wing strings), which replace the warm `screens.content`
+stand-ins and the wing-edge `still` looks (one bulb system only: `lights.festoon` is used just for the flickering
+tower torches 666–682). *Lasers*: `corners` fans (202/207), `rings` sunburst/tunnel/wing-tip circles (377, 1064,
+1182), white ground `dashes` (400), compact `reach` fans, the red field `x` (520.7), violet/blue `zigzag` lattices
+(798, 803.7, 838), the piano bounce `path`s (889–934), parallel golden chevrons, the right-lantern starbursts, the
+lens hit (1492.8), no beams under the 243.4 drop. *Fireworks*: the 80 appendix updates (flare drones 43–64 and 313,
+the heart and the peacock fan as cakes, pearls, spider/strobe obelisk tops, swimmers, far-left glitter comets,
+side-rampart X fans and domes, the glitter volcano 1087, FPV shells 1294.7). *Lights*: `flood` lit air (pink
+whiteout 75.9, red 324, teal 594, gold 600, blue storm 1011, flame wall / red smoke 1508–1537, 1565), the booth spot,
+blue floor pools under the drone (176), backlight row (409), arch-crown downlights, one crystal per piano hit
+(887–907), the parallel `curtain` (1170), glitter gobo spots (1392). *Core*: `atmos.glow` on the same moments, real
+zooms (`fov`→`fovTo`: 797.9 crash zoom, 1001.8, 1098.4, 1460.5, 1551.3) and stutter edits (`alt` + `altEvery`
+0.12 s at 1222.6–1225 and 1267.8/1272.4). New one-off hits stay on the half-beat grid (`check-sync.py`: steady
+tracks 100 % within 20 ms). Pyro cues are left for the pyro fixer's own pass (`pyro-cue-updates.py`); note that the
+fireworks list already replaced the static flare bursts of 43–62 s and 313 s by `fireworks.flare` drones, so that
+script's flare-drone conversion there reports MISSING by design. `validate-show` now also reads the module docs'
+own idioms ("New fx" headings, "lights fx: …" lists, "`param`: add …" / "adds" enumerations) and the lasers' own
+target tokens, so the documented extensions validate.
+
 Classification (as in `design-bible.md` / `uncertainties.md`):
 **FACT** = seen in a storyboard frame / official photo, or measured in the audio; **INFERENCE** = strong
 deduction (interpolated between frames, read through smoke, grid-derived); **ASSUMPTION** = designed fill-in
