@@ -49,7 +49,8 @@ video (≈50 moments) then corrected what cues can fix: the Winter peacock fan h
 out; the L.P.A. strings bloom in lit white fog (567.4, field flood); the teal flood at 594.3 is lower (the set kept
 rendering flat cyan); the Embers terrace shot at 1222.5 is beam-less until the blinder row; the 1267.8 stutter edit
 intercuts the dark close frontal with the terrace telephoto of the strobing strings (25 fps cut metric), the set
-stays dark until 1271.2, and 1272.4 is one shot (its flicker is the strings strobing the fog); the violet emergence
+stays dark until 1271.2, and 1272.4 is one frontal shot past pillar L1 on the left edge (its flicker is the strings
+strobing the fog; the old pose from x −44 showed the set obliquely with the pillar on the right); the violet emergence
 at 1460.5 frames the whole crown with red rosettes. `validate-show` now also reads the module docs'
 own idioms ("New fx" headings, "lights fx: …" lists, "`param`: add …" / "adds" enumerations) and the lasers' own
 target tokens, so the documented extensions validate.

@@ -2731,7 +2731,7 @@
     {"t":1267.866,"dur":7.312,"sys":"strobe","fx":"burst","p":{"rate":5.333,"color":"#FFE6C0","intensity":0.8},"note":"v1267.9-1275.3 lamp strings + white haze light flash on every half beat (stutter edit in the video)"},
     {"t":1269.178,"dur":3.188,"sys":"lasers","fx":"look","target":["deck_front","roof"],"p":{"preset":"grid","color":"#1A2AFF","color2":"#4060FF","count":14,"spread":110,"tilt":3,"height":2.5,"speed":0.5,"intensity":1},"note":"v1269.2-1272.3 blue laser web over the field"},
     {"t":1271.241,"dur":2.625,"sys":"stage","fx":"state","p":{"mode":"frozen","eyes":"#40E0B0","eyesIntensity":0.7,"mouth":0.35,"wings":0.8,"windows":0.5,"windowColor":"#1A2AFF","rosettes":"#42EEFD","spin":0.8,"fade":0.1,"master":0.6},"note":"v1271.2 the blue LED set shows under the lasers"},
-    {"t":1272.4,"dur":2.884,"sys":"camera","fx":"shot","p":{"pos":[-44,5,40],"look":[2,12,0],"fov":46,"ease":"inout"},"note":"v1272.0-1275.3 one shot past a pillar on the left edge (the lamp strings strobe the fog on every beat)"},
+    {"t":1272.4,"dur":2.884,"sys":"camera","fx":"shot","p":{"pos":[-17,4,52],"look":[0,12,0],"fov":46,"ease":"inout"},"note":"v1272.0-1275.3 one shot past a pillar on the left edge (the lamp strings strobe the fog on every beat)"},
     {"t":1273.866,"dur":13.5,"sys":"crowd","fx":"mood","p":{"state":"handsup","intensity":0.8}},
     {"t":1273.866,"dur":13.5,"sys":"fog","fx":"level","p":{"haze":0.74,"fade":2}},
     {"t":1273.866,"dur":1.312,"sys":"lasers","fx":"off"},
