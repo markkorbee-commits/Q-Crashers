@@ -49,15 +49,16 @@ export function miniMapSvg(app: App, spots: NamedSpot[], clusters: SpotCluster[]
     return `<g transform="translate(${b.x} ${b.z}) rotate(${deg})"><rect x="${-b.width / 2}" y="-3" width="${b.width}" height="6" rx="1.2" fill="#2a0d0b" stroke="#ff2a12" stroke-width=".8"/><rect x="${-b.width / 2 + 1}" y="1.6" width="${b.width - 2}" height="1.2" fill="#ff2a12"/></g>`;
   }).join('');
   // markers: a numbered dot per spot, a pill ("3·9") where spots overlap; big = touch sizes
-  const r = big ? 8.6 : 6.5;
-  const fs = big ? 9 : 7.4;
-  const hit = big ? 15 : 9;
+  const r = big ? 8.8 : 7.6;
+  const fs = big ? 9.4 : 8.6;
+  const hit = big ? 15 : 10;
   const spotEls = clusters
     .map((c, ci) => {
       const x = c.x.toFixed(1),
         y = c.z.toFixed(1);
-      const text = c.idx.map((i) => i + 1).join('·');
-      const w = c.idx.length > 1 ? text.length * fs * 0.6 + r * 1.3 : r * 2;
+      // overlapping spots: '3 • 10' (a bullet with thin spaces reads as two numbers, not a range)
+      const text = c.idx.map((i) => i + 1).join('\u2009\u2022\u2009');
+      const w = c.idx.length > 1 ? text.length * fs * 0.52 + r * 1.3 : r * 2;
       const shape =
         c.idx.length > 1
           ? `<rect class="dot" x="${(c.x - w / 2).toFixed(1)}" y="${(c.z - r).toFixed(1)}" width="${w.toFixed(1)}" height="${(r * 2).toFixed(1)}" rx="${r}" fill="rgba(225,6,0,.6)" stroke="#fff" stroke-width="1.2"/>`

@@ -909,6 +909,42 @@ input[type='range']::-moz-range-thumb {
   background: var(--line-2);
   margin: 0 4px;
 }
+/* text labels next to the toolbar icons where there is room (smaller screens: tooltips + coach) */
+.toolbar .tb-l {
+  display: none;
+}
+@media (min-width: 1360px) and (hover: hover) {
+  #ui:not(.touch) .toolbar .icon-btn {
+    width: auto;
+    gap: 7px;
+    padding: 0 11px 0 9px;
+  }
+  #ui:not(.touch) .toolbar .tb-l {
+    display: inline;
+    font: 600 10.5px/1 var(--font-ui);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    color: var(--paper-2);
+  }
+  #ui:not(.touch) .toolbar .icon-btn:hover .tb-l,
+  #ui:not(.touch) .toolbar .icon-btn.on .tb-l,
+  #ui:not(.touch) .toolbar .icon-btn[aria-expanded='true'] .tb-l {
+    color: #fff;
+  }
+  /* the label already says it: no tooltip, no coach mark */
+  #ui:not(.touch) .toolbar [data-tip]:hover::after,
+  #ui:not(.touch) .toolbar [data-tip]:focus-visible::after,
+  #ui.coach:not(.touch) .toolbar [data-label]::after {
+    display: none;
+  }
+}
+/* a toolbar button whose panel is open (keyboard shortcuts pass the button as the trigger) */
+.toolbar .icon-btn[aria-expanded='true'] {
+  color: #fff;
+  background: rgba(225, 6, 0, 0.18);
+  border-color: rgba(225, 6, 0, 0.45);
+}
 .src-chip {
   appearance: none;
   display: inline-flex;
@@ -1500,7 +1536,8 @@ input[type='range']::-moz-range-thumb {
   top: calc(66px + var(--sa-t));
   right: calc(12px + var(--sa-r));
   width: min(380px, calc(100% - 24px));
-  max-height: calc(100% - 180px - var(--sa-t) - var(--sa-b));
+  /* clear of the show bar (Hud publishes its height as --sb-space) */
+  max-height: calc(100% - 66px - var(--sb-space, 150px) - 12px - var(--sa-t));
   overflow: auto;
   padding: 18px 18px 16px;
   z-index: 25;
@@ -1514,11 +1551,28 @@ input[type='range']::-moz-range-thumb {
 }
 .panel.at-bottom {
   top: auto;
-  bottom: calc(126px + var(--sa-b));
+  bottom: calc(var(--sb-space, 136px) + 10px);
   right: 50%;
   transform: translateX(50%);
-  max-height: calc(100% - 160px - var(--sa-t) - var(--sa-b));
+  /* above the show bar, below the toolbar (62 px + gap) */
+  max-height: calc(100% - var(--sb-space, 136px) - 10px - 74px - var(--sa-t));
   animation: none;
+}
+/* scrollable panels / cards fade out at an edge while more content is there */
+.panel.more-below,
+.card.more-below {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 44px), rgba(0, 0, 0, 0.12));
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 44px), rgba(0, 0, 0, 0.12));
+}
+.panel.more-above.more-below,
+.card.more-above.more-below {
+  -webkit-mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.25), #000 36px, #000 calc(100% - 44px), rgba(0, 0, 0, 0.12));
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.25), #000 36px, #000 calc(100% - 44px), rgba(0, 0, 0, 0.12));
+}
+.panel.more-above:not(.more-below),
+.card.more-above:not(.more-below) {
+  -webkit-mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.25), #000 36px);
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.25), #000 36px);
 }
 .panel.xwide {
   width: min(780px, calc(100% - 24px));
@@ -2107,6 +2161,39 @@ ul.fx li::before {
   box-shadow: 0 0 8px var(--red-hot);
   vertical-align: 1px;
 }
+.pip .bar .grip {
+  display: inline-flex;
+  margin-left: -6px;
+  color: var(--dim);
+}
+.pip .bar .grip .ico {
+  width: 14px;
+  height: 14px;
+}
+.pip.compact .bar {
+  height: 30px;
+  padding-left: 10px;
+}
+.pip.hinting .bar {
+  background: rgba(225, 6, 0, 0.22);
+}
+.pip.hinting .bar .t {
+  color: #fff;
+  letter-spacing: 0.1em;
+}
+.pip.hinting .bar .grip {
+  color: #fff;
+  animation: pip-grip 1.1s ease-in-out infinite;
+}
+@keyframes pip-grip {
+  50% {
+    transform: translateX(3px);
+  }
+}
+#ui.pip-tl .brand {
+  opacity: 0;
+  visibility: hidden;
+}
 .pip .bar .icon-btn {
   width: 30px;
   height: 30px;
@@ -2143,12 +2230,9 @@ ul.fx li::before {
 #ui.cinema .pip::after {
   display: none;
 }
-@media (max-width: 640px) {
-  .pip,
-  .pip.large {
-    width: 256px;
-    bottom: calc(142px + var(--sa-b));
-  }
+.pip.compact .bar .icon-btn {
+  width: 28px;
+  height: 28px;
 }
 
 /* drop overlay */
@@ -3268,4 +3352,564 @@ ul.fx.links a {
   margin-left: -1.5px;
   bottom: 14px;
   transform: none;
+}
+
+/* =====================================================================================
+   ROUND-2 UX FIXES: crowd choice, comfort switches, grouped legend, end card, touch skips
+   ===================================================================================== */
+
+/* ---------- onboarding: who is on the grounds (the Tribe / as filmed) ---------- */
+.crowd-seg {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.cs-opt {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 58px;
+  padding: 9px 14px 9px 10px;
+  border-radius: 14px;
+  border: 1px solid var(--line-2);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--paper-2);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.cs-opt:hover {
+  border-color: rgba(243, 237, 228, 0.3);
+  color: var(--paper);
+}
+.cs-opt .cs-i {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--red-hot);
+}
+.cs-opt .cs-i .ico {
+  width: 20px;
+  height: 20px;
+}
+.cs-opt b {
+  display: block;
+  font: 600 13.5px/1.2 var(--font-ui);
+  letter-spacing: 0.02em;
+  color: var(--paper);
+}
+.cs-opt small {
+  display: block;
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.cs-opt.on {
+  border-color: rgba(255, 90, 60, 0.8);
+  background: rgba(225, 6, 0, 0.2);
+}
+.cs-opt.on .cs-i {
+  background: var(--red);
+  color: #fff;
+}
+.cs-opt.on small {
+  color: var(--paper-2);
+}
+.cs-opt:focus-visible,
+.chip:focus-visible {
+  outline: 2px solid var(--red-hot);
+  outline-offset: 2px;
+}
+.chip-blurb {
+  margin: 8px 2px 0 !important;
+  min-height: 1.4em;
+  font-size: 12px;
+  color: var(--muted) !important;
+}
+
+/* ---------- safety & comfort: two switches ---------- */
+.safety {
+  cursor: default;
+  flex-wrap: wrap;
+}
+.safety .sw-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: none;
+}
+.safety .sw {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  cursor: pointer;
+}
+.safety .sw-l {
+  font: 600 11px/1 var(--font-ui);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--paper-2);
+  white-space: nowrap;
+}
+@media (max-width: 560px) {
+  .safety .sw-group {
+    flex-direction: row;
+    flex-wrap: wrap;
+    width: 100%;
+    gap: 8px 18px;
+    padding-left: 32px;
+  }
+}
+
+/* ---------- legend: grouped sections, compact onboarding subset ---------- */
+.legend .legend-h {
+  grid-column: 1 / -1;
+  font: 600 10px/1 var(--font-ui);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--red-hot);
+  margin-top: 8px;
+}
+.legend .legend-h:first-child {
+  margin-top: 0;
+}
+.legend .keys .to {
+  align-self: center;
+  color: var(--dim);
+  font-size: 11px;
+}
+.legend kbd {
+  min-width: 22px;
+}
+.onboarding .legend > div:not(.legend-h) {
+  font-size: 12px;
+}
+
+/* ---------- end card: setlist over the final frame ---------- */
+.scrim.ended-scrim {
+  background: radial-gradient(ellipse at 50% 60%, rgba(4, 3, 5, 0.15), rgba(4, 3, 5, 0.6));
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  animation: fade-in 1.6s var(--ease);
+}
+.card.ended {
+  text-align: center;
+  width: min(520px, 100%);
+  animation: ended-in 1.6s var(--ease);
+}
+@keyframes ended-in {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+}
+.ended .ended-mark {
+  display: flex;
+  justify-content: center;
+}
+.ended .list-h {
+  margin-top: 18px;
+}
+.setlist {
+  list-style: none;
+  margin: 6px auto 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  max-width: 440px;
+  counter-reset: sl;
+}
+.setlist li {
+  display: grid;
+  grid-template-columns: 22px 46px 1fr;
+  gap: 8px;
+  align-items: baseline;
+  padding: 5px 8px;
+  border-radius: 8px;
+  counter-increment: sl;
+  font-size: 12.5px;
+}
+.setlist li::before {
+  content: counter(sl);
+  font: 600 10.5px/1 var(--font-ui);
+  color: var(--red-hot);
+  text-align: right;
+}
+.setlist li:nth-child(odd) {
+  background: rgba(255, 255, 255, 0.03);
+}
+.setlist .sl-t {
+  font: 500 11px/1 var(--font-mono);
+  color: var(--dim);
+}
+.setlist .sl-a b {
+  font-weight: 600;
+  color: var(--paper);
+  margin-right: 6px;
+}
+.setlist .sl-a span {
+  color: var(--muted);
+}
+
+/* ---------- touch: double-tap ±10 s ripple ---------- */
+.skip-ripple {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 34%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: #fff;
+  font: 600 13px/1 var(--font-ui);
+  letter-spacing: 0.08em;
+  pointer-events: none;
+  opacity: 0;
+  z-index: 4;
+}
+.skip-ripple.left {
+  left: 0;
+  border-radius: 0 50% 50% 0 / 0 50% 50% 0;
+  background: radial-gradient(ellipse at 20% 50%, rgba(255, 255, 255, 0.16), transparent 70%);
+}
+.skip-ripple.right {
+  right: 0;
+  border-radius: 50% 0 0 50% / 50% 0 0 50%;
+  background: radial-gradient(ellipse at 80% 50%, rgba(255, 255, 255, 0.16), transparent 70%);
+}
+.skip-ripple .ico {
+  width: 30px;
+  height: 30px;
+}
+.skip-ripple.go {
+  animation: skip-ripple 0.7s var(--ease);
+}
+@keyframes skip-ripple {
+  0% {
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* ---------- toasts never cover a card's heading: they move to the bottom behind modals ---------- */
+#ui.modal-open .toasts {
+  top: auto;
+  bottom: calc(14px + var(--sa-b));
+  flex-direction: column-reverse;
+}
+
+/* ---------- coach marks: thumb buttons step back, desktop show bar needs none ---------- */
+#ui.coach ~ .tc .tc-cluster {
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.3s, visibility 0.3s;
+}
+#ui.coach:not(.touch) .showbar [data-label]::after {
+  display: none;
+}
+
+/* ---------- landscape phones: compact onboarding (three essentials in the legend) ---------- */
+@media (max-height: 500px) {
+  .onboarding .legend .extra {
+    display: none;
+  }
+  .onboarding .legend.touch {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px 14px;
+    padding-top: 10px;
+  }
+  .onboarding .crowd-seg .cs-opt {
+    min-height: 48px;
+    padding: 6px 10px 6px 8px;
+  }
+  .onboarding .cs-opt .cs-i {
+    width: 32px;
+    height: 32px;
+  }
+  .onboarding .cs-opt small {
+    font-size: 10.5px;
+  }
+  .onboarding .actions {
+    margin-top: 12px;
+  }
+  .onboarding .chip-blurb {
+    display: none;
+  }
+}
+@media (max-width: 480px) {
+  .crowd-seg {
+    grid-template-columns: 1fr;
+  }
+  .onboarding .legend .extra {
+    display: none;
+  }
+}
+
+/* ---------- camera sheet: 3 x 2 grid on landscape phones (all six views without scrolling) ---------- */
+@media (max-height: 500px) and (pointer: coarse) {
+  .panel.camsheet .list {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+  }
+  .panel.camsheet .row-btn {
+    grid-template-columns: auto 1fr;
+    padding: 8px 10px;
+    min-height: 58px;
+  }
+  .panel.camsheet .row-btn .meta {
+    display: none;
+  }
+  .panel.camsheet .row-btn small {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .panel.camsheet header {
+    margin-bottom: 8px;
+  }
+}
+
+/* ---------- Moments: transport row (touch), pre-roll and 'watch from' ---------- */
+.mom-transport {
+  display: flex;
+  gap: 6px;
+  margin: -2px 0 10px;
+}
+.mom-transport .btn {
+  flex: 1;
+  min-height: 40px;
+  padding: 0 10px;
+  font-size: 11px;
+  gap: 6px;
+}
+.mom-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: stretch;
+}
+.mom-row .watch {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line-2);
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--paper-2);
+  font: 600 10.5px/1.15 var(--font-ui);
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  max-width: 132px;
+  text-align: left;
+}
+.mom-row .watch:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: #fff;
+}
+.mom-row .watch .ico {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  color: var(--red-hot);
+}
+
+/* ---------- positions: blurbs instead of coordinates ---------- */
+.panel.positions .row-btn small {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------- touch photo mode: one compact strip (chips + the active slider) ---------- */
+.photo-panel.touch {
+  padding: 8px 10px 8px;
+}
+.photo-panel.touch .ph-head {
+  gap: 6px;
+}
+.photo-panel.touch .ph-head .kicker {
+  flex: none;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+}
+.photo-panel.touch .ph-head .ph-chips {
+  flex: 1;
+  min-width: 0;
+  margin-top: 0;
+}
+.photo-panel.touch .ph-help {
+  display: none;
+}
+.photo-panel.touch .ctl.active {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  margin-top: 6px;
+}
+.photo-panel.touch .ctl label {
+  margin: 0;
+  gap: 8px;
+  min-width: 118px;
+}
+.photo-panel.touch .ph-actions {
+  display: none;
+}
+.photo-panel.touch.folded .ph-head .ph-chips {
+  display: none !important;
+}
+/* photo size selector (desktop photo panel) */
+.ph-res-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 12px;
+}
+.ph-res-row .ctl-l {
+  font-size: 11.5px;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.ph-res-row .seg {
+  margin-left: 0;
+}
+.ph-res-row .seg button {
+  height: 28px;
+  padding: 0 11px;
+}
+/* perception: heat & body section, air line in the status widget */
+.heat-panel {
+  margin-top: 12px;
+}
+.heat-panel .seg-pick button {
+  font: 600 11px/1.15 var(--font-ui);
+  padding: 4px 6px;
+}
+.status .air-line {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font: 500 10.5px/1.35 var(--font-ui);
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+/* photo mode: time transport */
+.ph-time {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.ph-time .icon-btn {
+  width: 34px;
+  height: 34px;
+}
+.ph-time .ph-t {
+  margin-left: auto;
+  font: 500 12px/1 var(--font-mono);
+  color: var(--paper);
+}
+.photo-panel.touch .ph-time {
+  display: none;
+}
+.photo-panel.touch.show-time .ph-time {
+  display: flex;
+}
+/* narrow panels (Graphics): the two comfort switches sit under the warning text */
+.panel .safety .st {
+  flex-basis: calc(100% - 44px);
+}
+.panel .safety .sw-group {
+  width: 100%;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  padding-left: 32px;
+}
+.mom-row .watch {
+  white-space: nowrap;
+  min-width: 118px;
+  max-width: 150px;
+}
+.mom-row .watch span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* onboarding: all six start chips on one row, and the welcome line on one line on short screens */
+.card.wide.onboarding {
+  width: min(820px, 100%);
+}
+@media (max-height: 820px) {
+  .onboarding .lead {
+    margin: 8px 0 12px;
+  }
+  .onboarding .lead br {
+    display: none;
+  }
+}
+/* touch photo mode: toasts at the bottom (the strip and its slider stay visible), chips hint at more */
+#ui.touch.photo .toasts {
+  top: auto;
+  bottom: calc(14px + var(--sa-b));
+  flex-direction: column-reverse;
+}
+.photo-panel.touch .ph-chips {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  padding-right: 22px;
+}
+/* Moments sheet: the transport row stays reachable while the list scrolls to the current moment */
+.mom-transport {
+  position: sticky;
+  top: -18px;
+  z-index: 2;
+  padding: 8px 0;
+  margin: -8px 0 6px;
+  background: #0b0b0e;
+}
+.onboarding .chips {
+  gap: 6px;
+}
+.onboarding .chip {
+  padding: 0 12px 0 10px;
+  gap: 7px;
+}
+.onboarding .legend {
+  margin-top: 12px;
+}
+/* desktop: with a right-hand panel open, toasts move into the free area left of it (not over its header) */
+@media (min-width: 900px) {
+  #ui.panel-open:has(> .panel:not(.at-bottom)) .toasts {
+    left: 16px;
+    transform: none;
+    align-items: flex-start;
+    width: max(260px, min(440px, calc(100% - 640px)));
+  }
+  #ui.has-status.panel-open:has(> .panel:not(.at-bottom)) .toasts {
+    left: 276px;
+    width: max(240px, min(420px, calc(100% - 880px)));
+  }
 }

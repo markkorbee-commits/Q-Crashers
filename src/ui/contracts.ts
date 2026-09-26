@@ -22,6 +22,15 @@ export interface RiskLike {
   hydration?: number;
   heartRate?: number;
   warnings?: unknown[];
+  /** apparent temperature (humidity, crowd, flames) */
+  feelsLikeC?: number;
+}
+
+export interface HeatScenarioLike {
+  id: string;
+  label: string;
+  short: string;
+  note?: string;
 }
 
 export interface PerceptionLike extends System {
@@ -42,6 +51,13 @@ export interface PerceptionLike extends System {
   setXtc?(on: boolean): void;
   setCompare?(on: boolean): void;
   setSplit?(x: number): void;
+  /** "Air 22.5 °C · 81 % humidity" */
+  air?: string;
+  /** "Dancing" / "Walking" / "Standing" / "Resting" / "Cooling down" / "First aid" */
+  activityLabel?: string;
+  heat?: HeatScenarioLike;
+  setActivity?(mode: 'auto' | 'dance' | 'rest'): void;
+  setHeatScenario?(id: 'endshow' | 'heatwave'): void;
 }
 
 export interface CameraLike extends System {
@@ -62,6 +78,38 @@ export interface PlayerLike extends System {
   teleport?(spot: NamedSpot): void;
   yaw?: number;
   pitch?: number;
+  reduceMotion?: boolean;
+  setReduceMotion?(on: boolean): void;
+  rememberStart?(id: string): void;
+  rememberedStart?: string | null;
+}
+
+/** Tribe (populated) or the empty grounds as filmed; size capped by the quality preset */
+export interface CrowdLike {
+  populated: boolean;
+  count: number;
+  targetCount: number;
+  maxCount: number;
+  setPopulated(on: boolean): void;
+  setCount(n: number): void;
+  /** optional: head-count cap of any preset (falls back to the UI mirror below) */
+  maxCountFor?(level: string): number;
+}
+
+/**
+ * Mirror of the crowd's per-preset head-count caps (src/crowd/CrowdSystem.ts LOD.head) for the
+ * presets that are not active. The active preset always shows the live CrowdSystem.maxCount.
+ */
+const HEADCOUNT_FALLBACK: Record<string, number> = { ultra: 65000, high: 45000, medium: 26000, mobile: 11000 };
+
+export const crowdSys = (app: App) => app.get('crowd') as unknown as CrowdLike | undefined;
+
+/** people the crowd can show at a quality preset (live value for the active preset) */
+export function crowdCap(app: App, level: string): number {
+  const c = crowdSys(app);
+  if (c?.maxCountFor) return c.maxCountFor(level);
+  if (c && level === app.quality.level) return c.maxCount;
+  return HEADCOUNT_FALLBACK[level] ?? 0;
 }
 
 /** the first-aid post of the RED stage (official 2026 floorplan, design bible §6.5) */

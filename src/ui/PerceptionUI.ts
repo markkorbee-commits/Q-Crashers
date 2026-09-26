@@ -112,6 +112,10 @@ export class PerceptionUI {
   private restBtn: HTMLButtonElement;
   private aidBtn: HTMLButtonElement;
   private cmpTag: HTMLElement;
+  /** air / feels-like / activity line of the status widget */
+  private airEl: HTMLElement;
+  /** activity the viewer picked in the panel (the model reports what the body actually does) */
+  private activity: 'auto' | 'dance' | 'rest' = 'auto';
   private acc = 0;
   private warnIdx = 0;
   private warnAt = 0;
@@ -158,7 +162,8 @@ export class PerceptionUI {
     });
     this.actions = h('div', { class: 'st-actions' }, this.restBtn, this.aidBtn);
     this.cmpTag = h('div', { class: 'compare-tag', html: `${icon('split')}<span>Compare · drag the divider</span>` });
-    this.status = h('aside', { class: 'status glass strong hud-el', 'aria-live': 'polite', 'aria-label': 'Perception status' }, this.bacBox, this.xtcBox, this.warnBox, this.actions, this.cmpTag);
+    this.airEl = h('div', { class: 'air-line' });
+    this.status = h('aside', { class: 'status glass strong hud-el', 'aria-live': 'polite', 'aria-label': 'Perception status' }, this.bacBox, this.xtcBox, this.warnBox, this.actions, this.airEl, this.cmpTag);
     this.status.addEventListener('click', () => this.open());
     this.status.classList.add('ia');
     this.status.style.cursor = 'pointer';
@@ -261,6 +266,7 @@ export class PerceptionUI {
     const p = this.p;
     const next = on ?? !p?.resting;
     if (!tryCall(p, 'setResting', next)) return;
+    this.activity = next ? 'rest' : 'auto';
     this.ui.toast(next ? 'Resting — you stop dancing and cool down. Sip water, find shade.' : 'Back on your feet', 2600, next ? 'pause' : 'play');
     this.acc = 1; // refresh the widget now
   }
@@ -334,13 +340,62 @@ export class PerceptionUI {
     });
     const heat = h('p', { class: 'note', html: `${icon('sun')}<span></span>` });
     (heat.lastElementChild as HTMLElement).textContent = 'Heat (26–27 June 2026 was a red heat warning): for everyone — take breaks in the shade, cool down and drink water regularly.';
+    const body2 = this.heatSection();
+    const comfort = h('p', { class: 'note', html: `${icon('motion')}<span>Motion and flashing: the simulated effects sway the view and brighten flashes. Reduce motion and Reduce flashing (Graphics panel, Help) keep them calm.</span>` });
     const alcoholActive = mode === 'alcohol' || (p?.bac ?? 0) > 0.005;
     // with alcohol active its details (the current state) come first
-    if (alcoholActive) body.append(detail, grid, heat, reset);
-    else body.append(grid, detail, heat, reset);
+    if (alcoholActive) body.append(detail, grid, body2 ?? heat, comfort, reset);
+    else body.append(grid, detail, body2 ?? heat, comfort, reset);
     if (alcoholActive) this.alcoholDetail(detail);
     else if (this.compareOn) this.compareDetail(detail);
     ui.layers.open('perception', el, { kind: 'panel', trigger: trigger ?? ui.hud.btn.perception, onClose: () => (this.panelBac = null) });
+  }
+
+  /**
+   * Heat & body: the air of the Endshow night (22.5 °C, 81 %) or the code-red Friday afternoon the
+   * festival would have run, and what the body is doing (automatic from walking / crowd, or dance /
+   * rest). Null when the perception system has no heat model.
+   */
+  private heatSection(): HTMLElement | null {
+    const p = this.p;
+    if (!p?.setHeatScenario || !p.heat) return null;
+    const segOf = (label: string, opts: [string, string][], cur: string, on: (id: string) => void) => {
+      const seg = h('div', { class: 'seg-pick', role: 'radiogroup', 'aria-label': label });
+      for (const [id, text] of opts) {
+        const b = h('button', { type: 'button', role: 'radio', class: id === cur ? 'on' : '', 'aria-checked': String(id === cur) }, text);
+        b.addEventListener('click', () => {
+          on(id);
+          seg.querySelectorAll('button').forEach((x) => {
+            x.classList.toggle('on', x === b);
+            x.setAttribute('aria-checked', String(x === b));
+          });
+        });
+        seg.appendChild(b);
+      }
+      return seg;
+    };
+    const note = h('p', { class: 'small muted', style: 'margin:8px 0 0' }, p.heat.note ?? '');
+    const scen = segOf('Weather', [['endshow', 'Endshow night · 22.5 °C'], ['heatwave', 'Friday afternoon · 36.8 °C']], p.heat.id, (id) => {
+      p.setHeatScenario?.(id as 'endshow' | 'heatwave');
+      note.textContent = this.p?.heat?.note ?? '';
+      this.ui.toast(this.p?.air ?? 'Weather changed', 2400, 'sun');
+      this.acc = 1;
+    });
+    const act = segOf('Activity', [['auto', 'Automatic'], ['dance', 'Dance'], ['rest', 'Rest in the shade']], this.p?.resting ? 'rest' : this.activity, (id) => {
+      this.activity = id as 'auto' | 'dance' | 'rest';
+      p.setActivity?.(this.activity);
+      this.acc = 1;
+    });
+    return h(
+      'div',
+      { class: 'sub-panel heat-panel' },
+      h('div', { class: 'list-h', style: 'margin-top:0' }, 'Heat & body'),
+      h('p', { class: 'note', style: 'margin-top:0', html: `${icon('sun')}<span>For everyone, sober or not: take breaks in the shade, cool down and drink water regularly. 26 June 2026 was the first red heat warning in the Netherlands.</span>` }),
+      scen,
+      note,
+      h('div', { class: 'list-h' }, 'What you are doing'),
+      act,
+    );
   }
 
   private alcoholDetail(host: HTMLElement) {
@@ -575,17 +630,21 @@ export class PerceptionUI {
       const PH: Record<string, string> = { onset: 'onset', plateau: 'peak', comedown: 'comedown', after: 'after', off: 'recovering' };
       setText(this.xtcKicker, `XTC · risk monitor · ${PH[phase] ?? phase}`);
       const hyd = risk?.hydration;
-      const over = typeof hyd === 'number' && hyd > 1.02;
+      // over-hydration (MDMA water retention, hyponatraemia risk) is its own 0..1 state now
+      const overK = (risk as { overhydration?: number } | undefined)?.overhydration;
+      const over = typeof overK === 'number' ? overK > 0.08 : typeof hyd === 'number' && hyd > 1.02;
       const hydPct = typeof hyd === 'number' ? Math.round(Math.min(1, hyd) * 100) : null;
+      // the peak masks thirst signals: say it when the body is already short of water
+      const thirsty = !over && phase === 'plateau' && typeof hyd === 'number' && hyd < 0.9;
       setText(this.vT, typeof temp === 'number' ? temp.toFixed(1) : '—');
       setText(this.vH, hydPct === null ? '—' : over ? '100+' : String(hydPct));
-      setText(this.vHLabel, over ? 'Too much' : 'Water');
+      setText(this.vHLabel, over ? 'Too much' : thirsty ? 'Drink' : 'Water');
       setText(this.vR, typeof hr === 'number' ? `${Math.round(hr)}` : '—');
       toggleClass(this.vitalT, 'hot', typeof temp === 'number' && temp >= 38.5);
       toggleClass(this.vitalT, 'warn', typeof temp === 'number' && temp >= 37.8 && temp < 38.5);
       toggleClass(this.vitalH, 'hot', hydPct !== null && !over && hydPct < 55);
-      toggleClass(this.vitalH, 'warn', over || (hydPct !== null && hydPct >= 55 && hydPct < 75));
-      this.vitalH.title = over ? 'Over-hydrated: with MDMA the body retains water (hyponatraemia risk)' : 'Water';
+      toggleClass(this.vitalH, 'warn', over || thirsty || (hydPct !== null && hydPct >= 55 && hydPct < 75));
+      this.vitalH.title = over ? 'Over-hydrated: with MDMA the body retains water (hyponatraemia risk) — sip, do not gulp' : thirsty ? 'Dehydrating: MDMA hides thirst — sip about a glass of water per hour' : 'Water';
       toggleClass(this.vitalR, 'hot', typeof hr === 'number' && hr >= 140);
       toggleClass(this.vitalR, 'warn', typeof hr === 'number' && hr >= 110 && hr < 140);
     } else if (this.xtcBox.dataset.on === '1') this.clearVitals();
@@ -622,6 +681,11 @@ export class PerceptionUI {
     this.actions.style.display = restVisible || danger || bac >= 2.0 || heatRisk ? '' : 'none';
 
     this.cmpTag.style.display = cmp ? '' : 'none';
+    // the air of the night and what the body is doing (both modes)
+    const feels = risk?.feelsLikeC;
+    const air = p?.air ? `${p.air}${typeof feels === 'number' ? ` · feels ${Math.round(feels)} °C` : ''}${p.activityLabel ? ` · ${p.activityLabel}` : ''}` : '';
+    setText(this.airEl, air);
+    this.airEl.style.display = air ? '' : 'none';
     // live values in the open panel
     const pb = this.panelBac;
     if (pb) {

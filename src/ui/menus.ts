@@ -1,6 +1,6 @@
-import { QUALITY_PRESETS } from '../core/Quality';
-import type { QualityLevel } from '../core/types';
-import { CAMERA_MODES, cameraRig, player } from './contracts';
+import type { NamedSpot, QualityLevel } from '../core/types';
+import { START_CHOICES } from '../player/spots';
+import { CAMERA_MODES, cameraRig, crowdCap, crowdSys, player } from './contracts';
 import { h, store } from './dom';
 import { fmtDistance, fmtTime } from './format';
 import { icon } from './icons';
@@ -34,10 +34,58 @@ function rowBtn(ico: string | HTMLElement, title: string, sub: string, meta: str
 // ------------------------------------------------------------------------------------------
 // Positions (T)
 // ------------------------------------------------------------------------------------------
+/** list order: the audience first (closest to the stage first), then the stage and special spots */
+const AUDIENCE = ['front', 'crowd', 'dragon_view', 'middle', 'foh', 'photo', 'aisle', 'side_left', 'side_right', 'back'];
+const SPECIAL = ['stage_left', 'stage_right', 'dj_booth', 'piano', 'crest_left', 'decking', 'entrance'];
+/** one-line description per spot (instead of coordinates) */
+const SPOT_BLURB: Record<string, string> = {
+  front: 'On the barrier, right under the dragon',
+  crowd: 'In the pit with the Tribe, 30 m out',
+  dragon_view: 'Looking up at the dragon crown',
+  middle: 'The whole set and the firework sky',
+  foh: 'Behind the desks on the axis, 95 m out',
+  photo: 'Raised: the official Endshow photo view',
+  aisle: 'On the axis between the lantern pillars',
+  side_left: 'On the grass bank, west side',
+  side_right: 'On the grass bank, east side',
+  back: 'The full width of the set, far back',
+  stage_left: 'On the deck, looking across the stage',
+  stage_right: 'On the deck, looking across the stage',
+  dj_booth: 'Where the DJs stand, facing the field',
+  piano: 'The piano riser of Domitor Draconis',
+  crest_left: 'Up on the west crest by the bars',
+  decking: 'On the decking by the lake',
+  entrance: 'Where you walk in (entrance E1)',
+};
+
+function spotGroups(all: readonly NamedSpot[]): { heading: string; spots: NamedSpot[] }[] {
+  const byId = new Map(all.map((s) => [s.id, s]));
+  const used = new Set<string>();
+  const take = (ids: string[]) =>
+    ids.flatMap((id) => {
+      const s = byId.get(id);
+      if (!s || used.has(id)) return [];
+      used.add(id);
+      return [s];
+    });
+  const audience = take(AUDIENCE);
+  const special = take(SPECIAL);
+  const bars = all.filter((s) => s.id.startsWith('bar_'));
+  bars.forEach((s) => used.add(s.id));
+  const rest = all.filter((s) => !used.has(s.id));
+  return [
+    { heading: 'In the audience', spots: audience },
+    { heading: 'On stage & around the grounds', spots: [...special, ...rest] },
+    { heading: 'Bars', spots: bars },
+  ].filter((g) => g.spots.length);
+}
+
 export function openPositions(ui: UI, trigger?: HTMLElement | null): void {
   const app = ui.app;
   const { el, body } = panelShell(ui, 'Positions', 'Choose your spot', true);
-  const spots = [...app.spots];
+  // numbers follow the list order (map markers use the same numbers)
+  const groups = spotGroups(app.spots);
+  const spots = groups.flatMap((g) => g.spots);
   // touch: bigger markers (≥ 30 px hit areas) and a name callout before teleporting
   const big = ui.touch;
   const clusters = clusterSpots(spots, big ? 17 : 14);
@@ -54,24 +102,25 @@ export function openPositions(ui: UI, trigger?: HTMLElement | null): void {
   const dist = (i: number) => Math.hypot(spots[i].position.x - app.playerPos.x, spots[i].position.z - app.playerPos.z);
   const list = h('div', { class: 'list' });
   const rows: HTMLButtonElement[] = [];
-  const view = spots.map((s, i) => ({ s, i })).filter((x) => !x.s.id.startsWith('bar_'));
-  const bars = spots.map((s, i) => ({ s, i })).filter((x) => x.s.id.startsWith('bar_'));
   const markerOf = (i: number) => svg.querySelector(`[data-cluster="${clusters.findIndex((c) => c.idx.includes(i))}"]`);
-  const addRows = (arr: { s: (typeof spots)[number]; i: number }[], heading: string) => {
-    if (!arr.length) return;
-    list.appendChild(h('div', { class: 'list-h', style: list.childElementCount ? '' : 'margin-top:0' }, heading));
-    for (const { s, i } of arr) {
+  const crowdOn = crowdSys(app)?.populated ?? true;
+  const blurbOf = (s: NamedSpot) => {
+    if (s.id.startsWith('bar_')) return crowdOn ? `Walk up to the counter and ${ui.touch ? 'tap' : 'press E'} to order` : 'Closed: the grounds were empty on 27 June';
+    return SPOT_BLURB[s.id] ?? START_CHOICES.find((c) => c.id === s.id)?.blurb ?? '';
+  };
+  let k = 0;
+  for (const g of groups) {
+    list.appendChild(h('div', { class: 'list-h', style: list.childElementCount ? '' : 'margin-top:0' }, g.heading));
+    for (const s of g.spots) {
+      const i = k++;
       const d = dist(i);
-      const coords = `x ${s.position.x.toFixed(0)} · z ${s.position.z.toFixed(0)}`;
-      const r = rowBtn(h('span', { class: 'n' }, String(i + 1)), s.label, coords, d < 3 ? 'here' : fmtDistance(d), () => go(i));
+      const r = rowBtn(h('span', { class: 'n' }, String(i + 1)), s.label, blurbOf(s), d < 3 ? 'here' : fmtDistance(d), () => go(i));
       r.addEventListener('pointerenter', () => markerOf(i)?.classList.add('hl'));
       r.addEventListener('pointerleave', () => markerOf(i)?.classList.remove('hl'));
       rows[i] = r;
       list.appendChild(r);
     }
-  };
-  addRows(view, 'Viewing spots');
-  addRows(bars, 'Bars');
+  }
   if (!spots.length) list.appendChild(h('p', { class: 'muted small' }, 'No positions registered yet.'));
 
   // callout over the map: the names behind a marker, each with a Go button
@@ -138,42 +187,109 @@ export function openPositions(ui: UI, trigger?: HTMLElement | null): void {
 // ------------------------------------------------------------------------------------------
 // Moments & tracks
 // ------------------------------------------------------------------------------------------
+/** a show moment (optional pre-roll in seconds and a spot id to watch it from) */
+interface MomentDef {
+  t: number;
+  label: string;
+  lead?: number;
+  spot?: string;
+}
+
 export function openMoments(ui: UI, trigger?: HTMLElement | null): void {
   const app = ui.app;
   const { el, body } = panelShell(ui, 'Jump to', 'Moments & tracks');
   el.classList.add('at-bottom');
   const t = app.clock?.time ?? 0;
-  const seek = (to: number) => {
-    app.clock.seek(to);
-    ui.toast(`Jumped to ${fmtTime(to)}`, 1600, 'flag');
+  /** jump a little before the moment (pre-roll) and play, so it is seen happening */
+  const seek = (to: number, label: string, lead = 0) => {
+    const at = Math.max(0, to - lead);
+    app.clock.seek(at);
+    if (!app.clock.playing) void ui.play();
+    ui.toast(`${label} · ${fmtTime(to)}`, 1800, 'flag');
     ui.layers.close();
   };
-  const moments = app.show.file.moments ?? [];
+  // touch: the slim show bar has no restart / ±10 s / mute: they live here
+  if (ui.root.classList.contains('touch')) {
+    const tbtn = (ico: string, label: string, fn: () => void) => {
+      const b = h('button', { class: 'btn small ghost', type: 'button', html: `${icon(ico)}<span>${label}</span>` });
+      b.addEventListener('click', fn);
+      return b;
+    };
+    const mute = tbtn(ui.isMuted ? 'mute' : 'volume', ui.isMuted ? 'Unmute' : 'Mute', () => {
+      ui.toggleMute();
+      mute.innerHTML = `${icon(ui.isMuted ? 'mute' : 'volume')}<span>${ui.isMuted ? 'Unmute' : 'Mute'}</span>`;
+    });
+    body.appendChild(
+      h(
+        'div',
+        { class: 'mom-transport' },
+        tbtn('restart', 'Restart', () => {
+          ui.layers.close();
+          ui.restart();
+        }),
+        tbtn('back10', '−10 s', () => ui.skip(-10)),
+        tbtn('fwd10', '+10 s', () => ui.skip(10)),
+        mute,
+      ),
+    );
+  }
+  const moments = (app.show.file.moments ?? []) as MomentDef[];
+  // 'watch from' buttons need a second column
+  if (moments.some((m) => m.spot)) el.classList.add('wide');
+  let curRow: HTMLElement | null = null;
   if (moments.length) {
-    body.appendChild(h('div', { class: 'list-h', style: 'margin-top:0' }, 'Moments'));
+    body.appendChild(h('div', { class: 'list-h', style: body.childElementCount ? '' : 'margin-top:0' }, 'Moments'));
     const list = h('div', { class: 'list' });
     let cur = -1;
     moments.forEach((m, i) => {
-      if (m.t <= t) cur = i;
+      if (m.t - (m.lead ?? 2.5) <= t + 0.5) cur = i;
     });
-    moments.forEach((m, i) => list.appendChild(rowBtn('sparkle', m.label, '', fmtTime(m.t), () => seek(m.t), i === cur)));
+    moments.forEach((m, i) => {
+      const lead = m.lead ?? 2.5;
+      const row = rowBtn('sparkle', m.label, '', fmtTime(m.t), () => seek(m.t, m.label, lead), i === cur);
+      const spot = m.spot ? app.spots.find((s) => s.id === m.spot) : undefined;
+      if (!spot) {
+        list.appendChild(row);
+        if (i === cur) curRow = row;
+        return;
+      }
+      // 'Watch from ...': the viewpoint the moment was authored for
+      const watch = h('button', { class: 'watch', type: 'button', title: `Watch from ${spot.label}`, 'aria-label': `Watch ${m.label} from ${spot.label}`, html: `${icon('eye')}<span>${shortSpot(spot.label, spot.id)}</span>` });
+      watch.addEventListener('click', () => {
+        ui.teleport(spot);
+        seek(m.t, m.label, lead);
+      });
+      const wrap = h('div', { class: 'mom-row' }, row, watch);
+      list.appendChild(wrap);
+      if (i === cur) curRow = wrap;
+    });
     body.appendChild(list);
   }
   const chapters = app.show.file.chapters ?? [];
-  body.appendChild(h('div', { class: 'list-h', style: moments.length ? '' : 'margin-top:0' }, 'Tracks'));
+  body.appendChild(h('div', { class: 'list-h' }, 'Tracks'));
   const list = h('div', { class: 'list' });
   const cur = app.show.chapterAt(t);
-  chapters.forEach((c) => list.appendChild(rowBtn('music', c.title, c.artist, fmtTime(c.t), () => seek(c.t), c === cur)));
+  chapters.forEach((c) => list.appendChild(rowBtn('music', c.title, c.artist, fmtTime(c.t), () => seek(c.t, `${c.artist} — ${c.title}`), c === cur)));
   body.appendChild(list);
   if (!moments.length) body.appendChild(h('p', { class: 'note', html: `${icon('info')}<span>Signature moments will appear here as the show timeline is authored.</span>` }));
   ui.layers.open('moments', el, { kind: 'panel', trigger: trigger ?? ui.hud.btn.moments });
+  // long list: start at the moment that is playing now
+  const row = curRow as HTMLElement | null;
+  if (row) requestAnimationFrame(() => row.scrollIntoView({ block: 'center' }));
+}
+
+/** short viewpoint name for the 'watch from' button: 'Middle of the field' -> 'Middle' */
+function shortSpot(label: string, id = ''): string {
+  const c = START_CHOICES.find((x) => x.id === id);
+  if (c) return c.short;
+  return label.replace(/\s*\(.*\)\s*$/, '').replace(/ \/ .*$/, '');
 }
 
 // ------------------------------------------------------------------------------------------
 // Graphics quality
 // ------------------------------------------------------------------------------------------
 const Q_DESC: Record<QualityLevel, string> = {
-  ultra: 'Shadows, full crowd, maximum effects',
+  ultra: 'Full crowd, maximum effects, 4x MSAA',
   high: 'Rich visuals for strong GPUs',
   medium: 'Balanced for laptops',
   mobile: 'Phones, tablets and older devices',
@@ -199,13 +315,13 @@ export function openQuality(ui: UI, trigger?: HTMLElement | null): void {
   };
   list.appendChild(rowBtn('sparkle', 'Auto', `Adapts to your device — now ${app.quality.level.toUpperCase()}`, auto ? 'active' : '', () => pick('auto'), auto));
   for (const lvl of ['ultra', 'high', 'medium', 'mobile'] as QualityLevel[]) {
-    const q = QUALITY_PRESETS[lvl];
-    const meta = `${Math.round(q.crowdCount / 1000)}k crowd`;
+    // the same head count the Crowd panel shows (live value for the active preset)
+    const meta = `${Math.round(crowdCap(app, lvl) / 1000)}k crowd`;
     list.appendChild(rowBtn('gauge', lvl[0].toUpperCase() + lvl.slice(1), Q_DESC[lvl], meta, () => pick(lvl), !auto && app.quality.level === lvl));
   }
   body.append(
     list,
-    h('p', { class: 'note', html: `${icon('info')}<span>GPU: ${escapeHtml(app.device.gpu)}. Auto lowers the internal resolution first, then the preset, based on measured frame times.</span>` }),
+    h('p', { class: 'note', html: `${icon('info')}<span>GPU: ${escapeHtml(app.device.gpu)}. Auto adapts the internal resolution to the measured frame times. A lighter preset is only applied while the show is paused, and is remembered for your next visit.</span>` }),
     h('div', { class: 'list-h' }, 'Safety'),
     flashingToggle(ui),
     h('div', { class: 'list-h' }, 'Controls'),
@@ -261,6 +377,7 @@ export function openCameraSheet(ui: UI, trigger?: HTMLElement | null): void {
     );
   }
   body.appendChild(list);
+  el.classList.add('camsheet');
   ui.layers.open('camera', el, { kind: 'panel', trigger });
 }
 
@@ -310,22 +427,13 @@ export function escapeHtml(s: string): string {
 // ------------------------------------------------------------------------------------------
 // Crowd (G): the Tribe as it should have been, or the empty grounds as filmed
 // ------------------------------------------------------------------------------------------
-interface CrowdLike {
-  populated: boolean;
-  count: number;
-  targetCount: number;
-  maxCount: number;
-  setPopulated(on: boolean): void;
-  setCount(n: number): void;
-}
-
 export function openCrowd(ui: UI, trigger?: HTMLElement | null): void {
   const app = ui.app;
-  const crowd = app.get('crowd') as unknown as CrowdLike | undefined;
+  const crowd = crowdSys(app);
   const { el, body } = panelShell(ui, 'Crowd', 'Who is on the Holy Grounds?');
   if (!crowd) {
     body.appendChild(h('p', { class: 'muted small' }, 'The crowd is not available.'));
-    ui.layers.open('crowd', el, { kind: 'panel', trigger: trigger ?? null });
+    ui.layers.open('crowd', el, { kind: 'panel', trigger: trigger ?? ui.hud.btn.crowd });
     return;
   }
   const list = h('div', { class: 'list' });
@@ -336,7 +444,7 @@ export function openCrowd(ui: UI, trigger?: HTMLElement | null): void {
     ui.layers.close();
   };
   list.appendChild(rowBtn('crowd', 'The Tribe', 'As it should have been: the Warriors on the Holy Grounds', `${Math.round(crowd.count / 1000)}k`, () => pick(true), crowd.populated));
-  list.appendChild(rowBtn('eye', 'As filmed', 'The empty grounds: only crew and performers, as in the 2026 Endshow video', '0', () => pick(false), !crowd.populated));
+  list.appendChild(rowBtn('empty', 'As filmed', 'The empty grounds: only crew and performers, as in the 2026 Endshow video', '0', () => pick(false), !crowd.populated));
   const max = crowd.maxCount;
   const slider = h('input', { id: 'crowd-size', type: 'range', min: '5000', max: String(max), step: '1000', value: String(Math.min(max, crowd.targetCount || max)), 'aria-label': 'Crowd size' }) as HTMLInputElement;
   const val = h('span', { class: 'meta' }, `${Math.round(Number(slider.value) / 1000)}k`);
@@ -353,8 +461,8 @@ export function openCrowd(ui: UI, trigger?: HTMLElement | null): void {
     list,
     h('div', { class: 'list-h' }, 'Crowd size'),
     h('div', { style: 'display:flex;gap:12px;align-items:center' }, slider, val),
-    h('p', { class: 'note', html: `${icon('info')}<span>Saturday 27 June 2026 would have held about 45,000 people at RED (reduced by the heat plan). Larger crowds need a stronger GPU; this device allows up to ${Math.round(max / 1000)}k.</span>` }),
+    h('p', { class: 'note', html: `${icon('info')}<span>Saturday 27 June 2026 would have held about 45,000 people at RED (reduced by the heat plan). The ${app.quality.level.toUpperCase()} graphics preset draws up to ${Math.round(max / 1000)}k people${max < 45000 ? ' — a higher preset in Graphics shows more' : ''}.</span>` }),
   );
   ui.hud.paintRange(slider);
-  ui.layers.open('crowd', el, { kind: 'panel', trigger: trigger ?? null });
+  ui.layers.open('crowd', el, { kind: 'panel', trigger: trigger ?? ui.hud.btn.crowd });
 }

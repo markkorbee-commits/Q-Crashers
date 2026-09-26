@@ -27,7 +27,7 @@ const spot = (id: string, label: string, x: number, y: number, z: number, look =
 export const DEFAULT_SPOTS: NamedSpot[] = [
   spot('entrance', 'Field entrance', 0, 0, 300),
   spot('back', 'Back of the field', 0, 0, 200),
-  spot('foh', 'FOH tower', 12, 0, 118),
+  spot('foh', 'FOH platform', 12, 0, 118),
   spot('middle', 'Middle of the field', 0, 0, 70),
   spot('crowd', 'In the crowd', 6, 0, 32),
   spot('front', 'Front row', 0, 0, 6, new THREE.Vector3(0, 20, -6), 0.6),
@@ -53,14 +53,17 @@ export interface StartChoice {
   /** spot id (app.spots), or 'showcam' for the directed show camera */
   id: string;
   title: string;
+  /** short chip label */
+  short: string;
   blurb: string;
 }
 
 /** Start positions offered on arrival, closest to the stage first. */
 export const START_CHOICES: readonly StartChoice[] = [
-  { id: 'front', title: 'Front row', blurb: 'On the barrier. The dragon towers over you, the flames hit your face.' },
-  { id: 'crowd', title: 'In the crowd', blurb: 'Packed in the pit with the Tribe, 30 m from the stage.' },
-  { id: 'middle', title: 'Middle of the field', blurb: 'The whole set, both wings and the firework sky. The classic view.' },
-  { id: 'foh', title: 'FOH tower', blurb: 'The official camera position: the full symmetry of the show.' },
-  { id: 'showcam', title: 'Show camera', blurb: 'Sit back: a director cuts the Endshow like the film.' },
+  { id: 'front', title: 'Front row', short: 'Front row', blurb: 'On the barrier. The dragon towers over you, the flames hit your face.' },
+  { id: 'crowd', title: 'In the crowd', short: 'In the crowd', blurb: 'Packed in the pit with the Tribe, 30 m from the stage.' },
+  { id: 'middle', title: 'Middle of the field', short: 'Middle', blurb: 'The whole set, both wings and the firework sky. The classic view.' },
+  { id: 'foh', title: 'FOH platform', short: 'FOH platform', blurb: 'Behind the mixing desks on the axis, 95 m out: the full symmetry of the show.' },
+  { id: 'photo', title: 'Photo terrace', short: 'Photo terrace', blurb: 'The official Endshow photo: raised on the terrace, straight down the lantern aisle.' },
+  { id: 'showcam', title: 'Show camera', short: 'Show camera', blurb: 'Sit back: a director cuts the Endshow like the film.' },
 ];

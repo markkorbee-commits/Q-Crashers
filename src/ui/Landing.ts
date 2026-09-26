@@ -58,9 +58,21 @@ export class Landing {
     this.embers.start();
   }
 
-  setProgress(label: string, p: number): void {
+  /**
+   * Progress: jump to the reached value, then glide towards `next` over the expected time. The glide
+   * is a compositor transition (transform), so the bar keeps moving while a system's synchronous
+   * generator blocks the main thread.
+   */
+  setProgress(label: string, p: number, next?: number, etaMs?: number): void {
     const v = Math.max(0, Math.min(1, p));
-    this.bar.style.transform = `scaleX(${v})`;
+    const bs = this.bar.style;
+    bs.transition = '';
+    bs.transform = `scaleX(${v})`;
+    if (next !== undefined && etaMs && next > v + 0.002) {
+      void this.bar.offsetWidth; // commit the start value before the long transition
+      bs.transition = `transform ${Math.max(300, Math.min(30000, etaMs * 1.15)).toFixed(0)}ms cubic-bezier(0.25, 0.6, 0.45, 1)`;
+      bs.transform = `scaleX(${Math.min(1, next).toFixed(4)})`;
+    }
     this.label.textContent = label;
     this.pct.textContent = `${Math.round(v * 100)}%`;
     this.el.querySelector('.loader')?.setAttribute('aria-valuenow', String(Math.round(v * 100)));

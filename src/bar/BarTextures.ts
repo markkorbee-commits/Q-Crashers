@@ -11,6 +11,11 @@ const BODY = "'Inter', 'Liberation Sans', 'DejaVu Sans', Arial, sans-serif";
 export async function fontsReady(): Promise<void> {
   const fonts = (document as Document & { fonts?: FontFaceSet }).fonts;
   if (!fonts) return;
+  // the font stylesheet loads without blocking the page (index.html): let it arrive first
+  const css = document.getElementById('webfonts') as HTMLLinkElement | null;
+  if (css && css.media !== 'all') {
+    await Promise.race([new Promise((r) => css.addEventListener('load', r, { once: true })), new Promise((r) => setTimeout(r, 1500))]).catch(() => undefined);
+  }
   const load = Promise.all([fonts.load("700 120px 'Oswald'"), fonts.load("600 40px 'Inter'"), fonts.load("400 40px 'Inter'")]).catch(() => undefined);
   await Promise.race([load, new Promise((r) => setTimeout(r, 1200))]);
 }
