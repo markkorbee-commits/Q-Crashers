@@ -341,9 +341,14 @@ void main() {
     // A ~0.5 m thick glowing layer: its path-length boost is small (1/max(|n.v|, 0.22)).
     // rolling swells (~10 x 5 m) and ripples (~3.5 x 2 m) pushed out from the stage; only the crests that
     // rise into the sheet catch its light -> bright waves over dark troughs (f116)
-    float w1 = texture(uNoise, q * vec3(0.1, 0.3, 0.2) + uDrift).r;
-    // (one octave: the swells alone carry the contrast, not a flat 0.5 that evens the sea out)
-    float w2 = uOct > 1.5 ? texture(uNoise, q * vec3(0.29, 0.5, 0.52) - uDrift * 2.0).r : w1;
+    // The noise tile's lowest octave is a 4-cell lattice repeating every 1/scale metres: on the flat fog
+    // top, axis-aligned samples showed it as a checkerboard. Sampled on rotated axes with a domain warp
+    // and at the swell scale (lattice cells ~12 x 6 m, ripples ~4 x 2 m), the waves read as rolling fog.
+    vec3 qr = vec3(q.x * 0.83 + q.z * 0.56, q.y, q.z * 0.83 - q.x * 0.56);
+    vec3 wp = vec3(n1 - 0.5, 0.0, n2 - 0.5) * 0.8;
+    float w1 = texture(uNoise, qr * vec3(0.02, 0.3, 0.04) + wp + uDrift).r;
+    // (one octave: the mid-scale haze noise stands in for the ripples, not a flat 0.5 that evens the sea out)
+    float w2 = uOct > 1.5 ? texture(uNoise, qr.zyx * vec3(0.11, 0.5, 0.06) - wp * 0.5 - uDrift * 2.0).r : n2;
     float fogTex = smoothstep(0.34, 0.76, w1 * 0.55 + w2 * 0.3 + n1 * 0.15);
     float crest = fogTex * fogTex;
     float streak = lines(vU * 29.0 + uTime * 0.07, 5.0);

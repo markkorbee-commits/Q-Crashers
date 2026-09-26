@@ -673,7 +673,9 @@ export class LaserSystem implements System {
     for (const c of fogs) {
       if (c.fx !== 'lowfog') continue;
       const d = typeof c.p.density === 'number' ? c.p.density : 0.6;
-      const a = clamp01((ctx.showTime - c.t) / 3) * clamp01((c.t + c.dur - ctx.showTime) / 3);
+      // the fog needs a few seconds to flow off the deck and build a layer (v1460.5: the sea shows from
+      // ~v1466, not with the cue): 6 s build-up, 3 s release before the cue ends
+      const a = clamp01((ctx.showTime - c.t) / 6) * clamp01((c.t + c.dur - ctx.showTime) / 3);
       low = Math.max(low, d * a);
     }
     this.lowHaze = low;
