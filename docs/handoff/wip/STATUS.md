@@ -7,7 +7,7 @@ How to use this on the Mac: [README.md](README.md).
 |---|---|---|---|
 | pillars | `worktree-wf_32e56de3-561-2` | merged in `2e077b0` (branch tip `dd556c0`) | nothing to do |
 | lightbalance | `worktree-wf_32e56de3-561-1` | merged in `4c75707` (branch tip `5168a48`) | nothing to do |
-| stage | `worktree-wf_227eec07-468-1` | NOT merged: 6 commit(s) up to `9e6a659` exported as patches, see below | `git am -3 docs/handoff/wip/stage/*.patch` |
+| stage | `worktree-wf_227eec07-468-1` | applied on the Mac (6 patches + uncommitted.diff) and merged 26 Sep 2026; patches removed | nothing to do |
 
 ## pillars: merged in 2e077b0
 
@@ -17,14 +17,8 @@ Check on the Mac: `git merge-base --is-ancestor dd556c0 HEAD && echo merged`
 
 Check on the Mac: `git merge-base --is-ancestor 5168a48 HEAD && echo merged`
 
-## stage: not merged, patch series in `docs/handoff/wip/stage/`
+## stage: merged on the Mac
 
-Base `a8daf27`, tip `9e6a659`:
-- `2d56f99` WIP stage r4: dark castle (sky share, flash from above, narrow FOH keys, nightK), LED calibration, sunburst rosettes
-- `63fee2e` WIP stage r4: mobile draw calls (crown mix material, set mix, barrier baked, jaw LEDs in the static strip/bulb draws)
-- `f608a33` WIP stage r4: dimmer floods/front wash, loading sub-steps
-- `83c962a` WIP stage r4: warm FOH keys
-- `9209919` WIP stage r4: per-zone panel colours, dark masked castle, crown flash glint only, grey rosette rims at night
-- `9e6a659` WIP stage r4: per-side isolation (state side), docs
-
-Note: + `uncommitted.diff` (work in progress)
+Applied with `git am -3` + the uncommitted diff on branch `r4-stage-wip`, measured on the Mac GPU (64 moments:
+52.1 % raw / 25.6 % calibrated -> 53.6 % / 27.9 %; colour 52.3 -> 54.4, light 63.8 -> 64.9, shape 42.0 -> 42.8; mobile
+budget-check PASS, 90-100 draw calls), merged with `git merge --no-ff`. The patch series was removed.
