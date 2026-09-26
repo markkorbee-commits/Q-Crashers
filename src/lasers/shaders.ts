@@ -342,12 +342,15 @@ void main() {
     // rolling swells (~10 x 5 m) and ripples (~3.5 x 2 m) pushed out from the stage; only the crests that
     // rise into the sheet catch its light -> bright waves over dark troughs (f116)
     float w1 = texture(uNoise, q * vec3(0.1, 0.3, 0.2) + uDrift).r;
-    float w2 = uOct > 1.5 ? texture(uNoise, q * vec3(0.29, 0.5, 0.52) - uDrift * 2.0).r : 0.5;
+    // (one octave: the swells alone carry the contrast, not a flat 0.5 that evens the sea out)
+    float w2 = uOct > 1.5 ? texture(uNoise, q * vec3(0.29, 0.5, 0.52) - uDrift * 2.0).r : w1;
     float fogTex = smoothstep(0.34, 0.76, w1 * 0.55 + w2 * 0.3 + n1 * 0.15);
     float crest = fogTex * fogTex;
     float streak = lines(vU * 29.0 + uTime * 0.07, 5.0);
     float edgeU = smoothstep(0.0, 0.12, min(vU, 1.0 - vU));
-    float I = uGainS * uLowHaze * (0.025 + 0.8 * crest + 3.4 * crest * crest) * (0.55 + 1.3 * streak) * (0.55 + 0.45 * hazePhase(c))
+    // most of the sea is dark trough; the light sits on the crests that rise into the sheet (video
+    // Embers v1139-1160: bright rolling waves and dark gaps, never an evenly lit floor)
+    float I = uGainS * uLowHaze * (0.008 + 0.3 * crest + 4.0 * crest * crest) * (0.55 + 1.3 * streak) * (0.55 + 0.45 * hazePhase(c))
       * pow(max(vR, 6.0), -0.55) / max(nv, 0.25) * exp(-vLift / 1.3) * edgeU;
     // deep scan colour in the troughs, the second colour on the lit crests
     col = mix(vColor, vColor2, smoothstep(0.12, 0.6, crest)) * I;

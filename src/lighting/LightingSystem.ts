@@ -76,8 +76,12 @@ const FLOOD_K_SIDES = 0.05;
 const FLOOD_K_FIELD = 0.02;
 /** backlight / booth haze glow */
 const LOCAL_GLOW_K = 0.06;
-/** field flood: HDR of the lit-ground pool per unit flood level */
-const FLOOD_GROUND = 0.55;
+/**
+ * field flood: HDR of the lit-ground pool per unit flood level. Round 4 (similarity against the video):
+ * a flood is lit AIR — the paving under it only catches a soft pool in front of the deck, the far
+ * field stays dark (was 0.55 with a second pool over the back of the field)
+ */
+const FLOOD_GROUND = 0.3;
 /** flood slices per quality level (depth-sliced haze integral) */
 const FLOOD_SLICES: Record<string, number> = { ultra: 10, high: 9, medium: 7, mobile: 4 };
 /** dense-haze scatter ("storm haze"): env.haze range over which the lit haze turns into a glowing cloud */
@@ -682,8 +686,8 @@ export class LightingSystem implements System {
       // the flooded air lights the paved field: a broad soft pool, brightest in front of the stage
       const fc = this.floodField;
       const kf = FLOOD_GROUND * (rf ? 0.6 : 1);
-      this.pools.push(0, 0.07, 30, 62, 1, 0, 40, 0.3, fc.r * kf, fc.g * kf, fc.b * kf, 0);
-      this.pools.push(0, 0.07, 105, 52, 1, 0, 50, 1.7, fc.r * kf * 0.45, fc.g * kf * 0.45, fc.b * kf * 0.45, 0);
+      this.pools.push(0, 0.07, 26, 56, 1, 0, 36, 0.3, fc.r * kf, fc.g * kf, fc.b * kf, 0);
+      this.pools.push(0, 0.07, 100, 52, 1, 0, 50, 1.7, fc.r * kf * 0.2, fc.g * kf * 0.2, fc.b * kf * 0.2, 0);
     }
     this.nSprites = this.sprites.count;
     this.beams.end();

@@ -1655,8 +1655,9 @@ export class LaserSystem implements System {
    */
   private pushSea(): void {
     const w = this.seaR + this.seaG + this.seaB;
-    // only a dense low fog forms a readable sea (Embers 0.9); a thin drift (0.2–0.4) stays dark
-    const x = Math.min(1, Math.max(0, (this.lowHaze - 0.3) / 0.4));
+    // only a dense low fog forms a readable sea (Embers 0.9); a drift (0.2–0.5) stays dark and a
+    // medium bank (0.6–0.7: v1389, v1463) shows the sea only where the fog is thickest
+    const x = Math.min(1, Math.max(0, (this.lowHaze - 0.45) / 0.4));
     const gate = x * x * (3 - 2 * x);
     if (this.tribe || gate < 0.01 || w < 0.01) return;
     const k = 2.0 * gate;

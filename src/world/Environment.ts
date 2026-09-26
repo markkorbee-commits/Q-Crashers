@@ -592,11 +592,14 @@ export class EnvironmentSystem implements System {
     this.fog.density = this.fogBase * (0.75 + 0.45 * clamp(env.haze, 0, 1.5)) * (1 + 7 * env.smoke);
     (this.app.scene.background as THREE.Color).copy(this.fog.color);
 
-    // --- lights (sky ambient follows the sky; the moon keeps a floor of cool-warm fill)
-    const hl = 0.3 + 0.7 * Math.pow(L, 0.7);
+    // --- lights (sky ambient follows the sky; the moon keeps a floor of cool-warm fill). Round 4: the
+    //     video's grounds read near-black once the blue hour is over (the camera exposes for the LEDs);
+    //     the sky fill fades with the sky to a moonlit minimum that still lets a walker read the
+    //     paving and the silhouettes at eye level
+    const hl = 0.22 + 0.78 * Math.pow(L, 0.8);
     this.hemi.color.setRGB(0.16 * hl, 0.3 * hl, 0.64 * hl);
     this.hemi.groundColor.setRGB(0.04 * hl, 0.032 * hl, 0.024 * hl);
-    this.hemi.intensity = 0.34;
+    this.hemi.intensity = 0.26;
     this.moonLight.position.copy(U.uMoonDir.value).multiplyScalar(500);
     this.moonLight.intensity = 0.14 * smoothstep(0, 1, 1 - cover * 0.6);
     this.twilightLight.position.copy(this.sunDir).setY(0.18).normalize().multiplyScalar(500);
@@ -609,10 +612,11 @@ export class EnvironmentSystem implements System {
       this.hemi.color.b += env.flashColor.b * 0.002 * fk;
     }
     if (li > 0) this.hemi.color.addScalar(li * 0.05);
-    // site glow on everything lit by the sky dome (set, props without the world-light patch)
-    this.hemi.color.r += glow.r * 0.3 + bc.r * 0.05;
-    this.hemi.color.g += glow.g * 0.3 + bc.g * 0.05;
-    this.hemi.color.b += glow.b * 0.3 + bc.b * 0.05;
+    // site glow on everything lit by the sky dome (set, props without the world-light patch): a trace —
+    // the glow is the colour of the smoke in the air, the set and the grounds under it stay dark
+    this.hemi.color.r += glow.r * 0.12 + bc.r * 0.02;
+    this.hemi.color.g += glow.g * 0.12 + bc.g * 0.02;
+    this.hemi.color.b += glow.b * 0.12 + bc.b * 0.02;
 
     // --- stars / planets
     const S = this.starU;

@@ -64,9 +64,16 @@ vec3 wlSky( vec3 r ) {
 const LAMP_GAIN = 70;
 const SPILL_GAIN = 90;
 const STAGE_GAIN = 5200;
-/** fireworks / pyro flashes on the grounds: aerial shells burst 60–150 m up, so the field gets a
- *  modest share (photo P: silhouetted pillars and a dim red floor under a full crackle canopy) */
-const FLASH_GAIN = 3000;
+/** the set's spill with the rig dark (worklights, LED art reflected by the deck): a trace only */
+const STAGE_IDLE = 0.03;
+/**
+ * fireworks / pyro flashes on the grounds: aerial shells burst 60–150 m up, so the field gets a
+ * modest share (photo P: silhouetted pillars and a dim red floor under a full crackle canopy).
+ * Round 4 (similarity metric against the official video: our floor was 2–5x the video's in 54/64
+ * moments): the light of the show lives in the smoke and the air; the ground under it reads near-black
+ * except close to the sources. The spatial part of the pyro light on the floor is the fx FieldLight layer.
+ */
+const FLASH_GAIN = 1800;
 /**
  * Pyro light is burning metal (≈ 2000–2500 K) and the camera is balanced for the LEDs: on the video a
  * gold gerb wall lights the ground deep ORANGE (measured on the field at v600.25: linear G/R ≈ 0.25,
@@ -84,12 +91,22 @@ const WORLD_FLASH_K = 7;
  * almost direct-only (the bounce grows with F / (F + 2)).
  */
 const BOUNCE_GAIN = 1.6;
-/** half-strength radius (m) of the bounce around the flash centre (+ the spread of the sources) */
-const BOUNCE_R = 110;
+/**
+ * share of that bounce that reaches the world materials (the grounds, pillars, trees): the lit cloud
+ * itself (sky dome, fog colour, haze) keeps the full bounce, the ground under it a fraction, over a
+ * tighter radius (video 1438.5 / 607 / 264.75: bright gerbs and glowing smoke over a dark field)
+ */
+const WORLD_BOUNCE_K = 0.3;
+/** half-strength radius (m) of the bounce on the world materials around the flash centre (+ 0.6 x the spread of the sources) */
+const WORLD_BOUNCE_R = 70;
 /** multiple scattering in a coloured smoke cloud saturates its light further (gold → orange, pink → red) */
 const BOUNCE_WARM = 3;
-/** atmos.glow irradiance per unit of env.glowColor */
-const GLOW_GAIN = 6;
+/**
+ * atmos.glow irradiance per unit of env.glowColor on the world materials. The glow is the colour of the
+ * SMOKE (haze, sky, fog carry it); the lawn and the paving under it only pick up a trace (was 6: the
+ * banks glowed green / red with every smoke scene, the video's grounds stay dark)
+ */
+const GLOW_GAIN = 1.2;
 
 const tmp = new THREE.Color();
 
@@ -166,7 +183,7 @@ export function updateWorldLights(env: LightEnv, time: number, flashScale = 1): 
     u.uWSpillCol.value[i].set(tmp.r * sp, tmp.g * sp, tmp.b * sp);
   }
   // stage: overall output + share aimed at the audience
-  const st = (Math.max(0, env.stageIntensity) * 0.6 + Math.max(0, env.audienceWash) * 0.8 + 0.08) * STAGE_GAIN;
+  const st = (Math.max(0, env.stageIntensity) * 0.6 + Math.max(0, env.audienceWash) * 0.8 + STAGE_IDLE) * STAGE_GAIN;
   u.uWStageCol.value.set(env.stageColor.r * st, env.stageColor.g * st, env.stageColor.b * st);
   // strobe adds white light from the stage
   const sb = Math.max(0, env.strobe) * STAGE_GAIN * 0.9;
@@ -177,11 +194,12 @@ export function updateWorldLights(env: LightEnv, time: number, flashScale = 1): 
   const k = flashCompression(env.flashIntensity, WORLD_FLASH_K) * flashScale;
   setFlash(env.flashStage, k, u.uWFlash.value, u.uWFlashCol.value);
   setFlash(env.flashField, k, u.uWFlash2.value, u.uWFlashCol2.value);
-  // bounce off the lit smoke around the flash centre (falls to a quarter at BOUNCE_R + spread)
+  // bounce off the lit smoke around the flash centre (falls to a quarter at WORLD_BOUNCE_R + 0.6 spread)
   flashBounce(env, bounceC);
-  u.uWAmbCol.value.set(bounceC.r * flashScale, bounceC.g * flashScale, bounceC.b * flashScale);
+  const bk = flashScale * WORLD_BOUNCE_K;
+  u.uWAmbCol.value.set(bounceC.r * bk, bounceC.g * bk, bounceC.b * bk);
   const sp = env.flashSpread;
-  const r = BOUNCE_R + sp;
+  const r = WORLD_BOUNCE_R + 0.6 * sp;
   u.uWAmbPos.value.set(env.flashPos.x, Math.max(8, env.flashPos.y), env.flashPos.z, 1 / (r * r));
   const g = env.glowColor;
   u.uWGlowCol.value.set(g.r * GLOW_GAIN, g.g * GLOW_GAIN, g.b * GLOW_GAIN);
@@ -238,30 +256,40 @@ const APPLY = /* glsl */ `
   {
     PhysicalMaterial wm = material;
     wm.roughness = max( material.roughness, 0.42 );
+    vec3 upV = ( viewMatrix * vec4( 0.0, 1.0, 0.0, 0.0 ) ).xyz;
+    // how much the surface faces up (the ground, deck tops, plinths): the show light that reaches a
+    // floor is the light that comes down steeply — grazing light from far sources barely lights it
+    float wlUp = clamp( dot( geometryNormal, upV ), 0.0, 1.0 );
     vec3 lp = ( viewMatrix * vec4( uWStage.xyz, 1.0 ) ).xyz;
     vec3 L = lp - geometryPosition;
     float d2 = dot( L, L );
     wl.direction = L * inversesqrt( d2 );
-    // the stage wash is aimed at the front of the field: it falls off faster than a point source
-    // (≈ 0.4 at 30 m, 0.1 at 90 m on top of 1/d²), so the floor stays dim red, not a lit tile hall
-    wl.color = uWStageCol / ( d2 + uWStage.w ) * ( 1400.0 / ( 1400.0 + d2 ) );
+    // the rig is aimed at the air and the front rows: on the ground its light is a pool at the deck
+    // lip (window ≈ 0.45 at 25 m, 0.12 at 60 m, 0.05 at 100 m on top of 1/d²); walls and pillars
+    // facing the stage keep the wider throw (≈ 0.4 at 30 m, 0.1 at 90 m). The video: the light lives
+    // in the haze and on the set, the grounds read near-black
+    wl.color = uWStageCol / ( d2 + uWStage.w ) * mix( 1400.0 / ( 1400.0 + d2 ), 500.0 / ( 500.0 + d2 ), wlUp );
     RE_Direct( wl, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, wm, reflectedLight );
+    // flash buckets = soft area lights at the centroid of their sources. A bucket of sources spread
+    // wide (the two arm ends 190 m apart, a gerb row along the deck) is not one lamp hanging over the
+    // middle of the field: an up-facing surface receives it from the sources themselves, at grazing
+    // angles — its cosine drops by sqrt( d² / ( d² + spread² ) ) (spread² = 1.25 (w − 400))
     lp = ( viewMatrix * vec4( uWFlash.xyz, 1.0 ) ).xyz;
     L = lp - geometryPosition;
     d2 = dot( L, L );
     wl.direction = L * inversesqrt( d2 );
-    wl.color = uWFlashCol / ( d2 + uWFlash.w );
+    wl.color = uWFlashCol / ( d2 + uWFlash.w ) * mix( 1.0, sqrt( d2 / ( d2 + 1.25 * ( uWFlash.w - 400.0 ) ) ), wlUp );
     RE_Direct( wl, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, wm, reflectedLight );
     if ( dot( uWFlashCol2, vec3( 1.0 ) ) > 0.0 ) {
       lp = ( viewMatrix * vec4( uWFlash2.xyz, 1.0 ) ).xyz;
       L = lp - geometryPosition;
       d2 = dot( L, L );
       wl.direction = L * inversesqrt( d2 );
-      wl.color = uWFlashCol2 / ( d2 + uWFlash2.w );
+      wl.color = uWFlashCol2 / ( d2 + uWFlash2.w ) * mix( 1.0, sqrt( d2 / ( d2 + 1.25 * ( uWFlash2.w - 400.0 ) ) ), wlUp );
       RE_Direct( wl, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, wm, reflectedLight );
     }
-    // lit smoke / haze overhead and the site glow: soft sky-weighted fill (no direction, no specular)
-    vec3 upV = ( viewMatrix * vec4( 0.0, 1.0, 0.0, 0.0 ) ).xyz;
+    // lit smoke / haze overhead and the site glow: soft sky-weighted fill (no direction, no specular).
+    // Both belong to the smoke in the air (drawn by the haze): the grounds only get a trace of them
     float wlHemi = 0.55 + 0.45 * dot( geometryNormal, upV );
     vec3 ac = ( viewMatrix * vec4( uWAmbPos.xyz, 1.0 ) ).xyz - geometryPosition;
     vec3 gc = ( viewMatrix * vec4( 0.0, 10.0, 50.0, 1.0 ) ).xyz - geometryPosition;
