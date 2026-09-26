@@ -162,6 +162,13 @@ export class Emitter {
   drawn = 0;
   /** multiplier of the golden-ratio permutation of the particle indices when thinned (see FxLayer) */
   perm = 0;
+  /**
+   * Show times between which the emitter's particles die out (FxLayer budget: a fountain past its
+   * emission window, a burst past its first deaths, holds less and less of its layer). Set by the
+   * layer when the emitter gets its row.
+   */
+  tail0 = 0;
+  tail1 = 0;
   readonly uid = seedCounter++;
 
   constructor(dist: number, flags = 0) {

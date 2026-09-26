@@ -194,7 +194,7 @@ export abstract class CueFxSystem implements System {
     const kl = (this.lightSum > capL ? (capL * (1 + Math.log(this.lightSum / capL))) / this.lightSum : 1) * (calm < 1 ? 0.6 : 1);
     const lights = this.shared.lights;
     for (let k = 0; k < this.lightN; k++) lights.add(this.lightBuf[k], this.lightI[k] * kl);
-    for (let i = 0; i < layers.length; i++) layers[i].commit(dt);
+    for (let i = 0; i < layers.length; i++) layers[i].commit(dt, t);
     // the frame that already built alive cues synchronously (a seek) does no background work
     if (expanded === 0) this.prefetch(t);
     this.afterUpdate(ctx);

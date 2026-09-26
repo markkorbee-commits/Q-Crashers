@@ -125,12 +125,23 @@ void main() {
     // flame fireball: temperature falls with age; soot takes over near the end
     float temp = pow(1.0 - f, 1.1) * (0.66 + 0.26 * rnd(key, 9u));
     float soot = r10.x * smoothstep(r10.y, 0.92, f) * (1.0 - smoothstep(0.9, 1.0, f));
-    vEmis = r3.rgb * r3.w * em * fog * nearF * thinGain;
+    // valve closed (a continuous projector past its emission window): the plume is fed no more and
+    // burns out within ~0.4 s (v1509.6-1510.0: the 28 m wall is gone well within half a second of
+    // the cut); only the soot the older puffs already carry stays behind as smoke
+    float burn = 1.0;
+    if (cont && (flags & F_RAMP) != 0) {
+      float cut = uTime - (r0.w + r5.z);
+      if (cut > 0.0) {
+        burn = 1.0 - smoothstep(0.0, 0.45, cut);
+        burn *= burn;
+      }
+    }
+    vEmis = r3.rgb * r3.w * em * fog * nearF * thinGain * burn;
     vLit = (r4.rgb * envLight(P) * 1.4 + r3.rgb * r3.w * 0.004) * fog;
     vPar = vec4(smoothstep(0.0, 0.03, f) * em * nearF, temp, soot, 0.0);
     // flame body opacity (Z1): dense rows / billowing walls occlude what lies behind (and each
     // other) instead of summing into a clipped white band
-    vOpac = r11.y;
+    vOpac = r11.y * burn;
   } else if (kind == 3 || kind == 4 || kind == 6) {
     float decay = max(r9.x, 0.01);
     float g = kind == 3 ? exp(-tau / decay)

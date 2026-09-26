@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { layerBudget, keepCap } from './budget';
-import { Emitter, R, REC_FLOATS, REC_TEXELS } from './Emitter';
+import { Emitter, F, R, REC_FLOATS, REC_TEXELS } from './Emitter';
 
 const SLOT_TEX_W = 256;
 /** slot texture capacity relative to the preset's budget (a later preset switch reuses the layer) */
@@ -105,6 +105,33 @@ function maxPartialQuotient(a: number, n: number): number {
     y = r;
   }
   return m;
+}
+
+/** show times between which an emitter's particles die out (see Emitter.tail0) */
+function setTail(e: Emitter): void {
+  const f = e.f;
+  const flags = f[R.FLAGS];
+  const t0 = f[R.T0];
+  if ((flags & (F.POPS | F.CROSSETTE | F.PEARL)) !== 0) {
+    // their visible part comes after the parent star's death: full weight until the emitter ends
+    e.tail0 = e.tail1 = Infinity;
+  } else if ((flags & F.CONTINUOUS) !== 0) {
+    // every index re-spawns until the end of the emission window, the last ones live up to LIFE1
+    e.tail0 = t0 + f[R.EMITDUR];
+    e.tail1 = e.tail0 + f[R.LIFE1];
+  } else {
+    // one-shot: the first die at LIFE0, the last (staggered) at stagger * count + LIFE1
+    e.tail0 = t0 + f[R.LIFE0];
+    e.tail1 = t0 + f[R.STAGGER] * e.count + f[R.LIFE1];
+  }
+}
+
+/** share of an emitter's particles still alive at show time t (1 until they start dying) */
+function tailShare(e: Emitter, t: number): number {
+  if (t <= e.tail0) return 1;
+  const span = e.tail1 - e.tail0;
+  if (!(span > 0.05)) return t < e.tail1 ? 1 : 0.05;
+  return Math.max(0.05, Math.min(1, (e.tail1 - t) / span));
 }
 
 /**
@@ -251,9 +278,10 @@ export class FxLayer {
 
   /**
    * assign rows + slots and upload what changed. `dt` = show time step of this frame (0 while
-   * paused): the budget pressure relaxes in show time, so a paused frame never changes.
+   * paused): the budget pressure relaxes in show time, so a paused frame never changes. `t` = show
+   * time: emitters whose particles are dying out hold less of the budget (see tailShare).
    */
-  commit(dt = 1 / 60): void {
+  commit(dt = 1 / 60, t = 0): void {
     const frame = ++this.frame;
     const list = this.list;
     const n = this.listLen;
@@ -289,6 +317,7 @@ export class FxLayer {
       }
       e.row = row;
       e.keep = 0;
+      setTail(e);
       owners[row] = e;
       this.emitData.set(e.f, row * REC_FLOATS);
       newRows++;
@@ -308,6 +337,9 @@ export class FxLayer {
     // after a jump of the show clock the picture is new anyway: every share is decided again, so the
     // frame after a seek is the same whatever was on screen before it
     if (this.jumped) for (let i = 0; i < n; i++) list[i].keep = 0;
+    // (particle demand is weighted by the share of an emitter's particles still alive: a fountain
+    // wall that stopped a second ago must not keep the next, bigger wave thinned for its whole life;
+    // the weight only ever falls, so the budget of a decision stays valid)
     let full = 0;
     let fixedP = 0;
     let fixedS = 0;
@@ -315,9 +347,10 @@ export class FxLayer {
     for (let i = 0; i < n; i++) {
       const e = list[i];
       if (e.row < 0) continue;
-      full += e.count;
+      const w = tailShare(e, t);
+      full += e.count * w;
       if (e.keep > 0) {
-        fixedP += e.drawn;
+        fixedP += e.drawn * w;
         fixedS += Math.ceil(e.drawn / S);
       } else if (e.keep === 0) fresh++;
     }
@@ -352,7 +385,7 @@ export class FxLayer {
           const e = list[i];
           if (e.row < 0 || e.keep !== 0) continue;
           const d = this.drawnAt(e, Math.min(k, keepCap(e.f[R.FLAGS])));
-          needP += d;
+          needP += d * tailShare(e, t);
           needS += Math.ceil(d / S);
         }
         if ((fixedP + needP <= B && fixedS + needS <= SC) || li === KEEP_LEVELS.length - 1) break;
@@ -366,14 +399,15 @@ export class FxLayer {
         if (e.row < 0 || e.keep !== 0) continue;
         this.setShare(e, k);
         const s = Math.ceil(e.drawn / S);
-        if (fixedS + s > SC || fixedP + e.drawn > hardP) {
+        const p = e.drawn * tailShare(e, t);
+        if (fixedS + s > SC || fixedP + p > hardP) {
           // no room even at the lowest share: this one stays out for its whole life (it never pops
           // in later when an older emitter dies, and nothing on screen is re-thinned for it)
           e.keep = -1;
           e.drawn = 0;
           continue;
         }
-        fixedP += e.drawn;
+        fixedP += p;
         fixedS += s;
       }
     } else this.keepNow = KEEP_LEVELS[this.pressure];

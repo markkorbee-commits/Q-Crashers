@@ -100,8 +100,9 @@ void main() {
   vec3 wc = c + vec3(dot(viewMatrix[0].xy, off), dot(viewMatrix[1].xy, off), dot(viewMatrix[2].xy, off));
   vec3 pyro = (fxLight(wc, zone == 2 ? 0.8 : 1.2) + uFxGlow) * uHazePyro.x * (zone == 2 ? 0.12 : 1.0);
   pyro = kneeC(pyro, zone == 0 ? uHazePyro.y : (zone == 1 ? uHazePyro.z : uHazePyro.w), 0.3);
-  vLit =(light + pyro) * uHazeTint * fogT(depth * 0.7);
-  vOcc = zone == 0 ? uZoneOcclusion.x : (zone == 1 ? uZoneOcclusion.y : uZoneOcclusion.z);
+  vLit = (light + pyro) * uHazeTint * fogT(depth * 0.7);
+  // site smoke (atmos.glow smoke): the air is thick with it — it hides the set behind it too
+  vOcc = mix(zone == 0 ? uZoneOcclusion.x : (zone == 1 ? uZoneOcclusion.y : uZoneOcclusion.z), 0.8, uSiteSmoke * 0.85);
   vUv = position.xy;
   vNoise = vec3(fract(aPar.w * 13.1) + t * 0.004, fract(aPar.w * 7.3) - t * 0.003, 0.55 + 0.4 * fract(aPar.w * 3.7));
 }
@@ -192,7 +193,8 @@ export class HazeField {
       uStageBoost: { value: 1 },
       uHazePyro: { value: new THREE.Vector4(7, 14, 7, 4) },
       uHazeTint: { value: new THREE.Color(1, 1, 1) },
-      uHazeSite: { value: new THREE.Vector2(1, 3) },
+      // site glow (atmos.glow) on the haze: gain, knee lift per unit of glow luminance
+      uHazeSite: { value: new THREE.Vector2(1.6, 3) },
       uHazeKeep: { value: 1.01 },
     };
     const mat = new THREE.ShaderMaterial({

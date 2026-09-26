@@ -27,19 +27,29 @@ listed under "Engine behaviour". Unknown params are still ignored.
   saturated spark colour that the camera recorded as that pale tint. Coloured sparks keep their
   hue as they cool; only gold and charcoal sparks cool to deep orange. The white-hot core is
   smaller for metal-salt colours. Tall wall gerbs (H > 14) burn out near the top of their column.
-* **Particle budget (round 3).** An emitter's share of its layer is decided on the first frame it is
-  drawn and then fixed for its life, so a layer over budget never reshuffles or flickers the
-  particles already on screen. Newborn emitters get a quantised share (1 / 0.75 / 0.5 / 0.35 /
-  0.25) from the layer's pressure (fast attack, ~1.5 s release) and a lower one only when they
-  would not fit. Small emitters (≤ 2 slots: a pillar-top fan, a flare) stay complete. A thinned
-  emitter draws a golden-ratio subset of its particles; directions, phases and timing always come
-  from the recorded count, so a thinned sphere is still a sphere and a thinned fountain still emits
-  evenly. After a seek every share is decided again (the paused picture does not depend on what
-  was on screen before). Budgets per preset live in `src/fx/core/budget.ts`: fw-stars ×1.3 and
-  fw-smoke ×1.5 on desktop; mobile caps fw-stars at 15k and pyro sparks at 12k particles, and spark
-  ribbons use 2 trail segments. Crackle pops keep ~60 % (medium) / ~40 % (mobile) of their pops per
-  star. The layer stats show `<layer>.keep` (share given to newborns now) and `<layer>.changes`
-  (emergency re-thinning of emitters on screen; normally absent).
+* **Particle budget (round 3).** Budgets count the particles actually drawn. An emitter's share
+  of its layer is decided on the first frame it is drawn and then fixed for its life, so a layer
+  over budget never reshuffles or flickers the particles already on screen. Newborn emitters get a
+  quantised share (1 / 0.75 / 0.5 / 0.35 / 0.25) from the layer's pressure (fast attack, 1.5 s
+  release in show time, so a paused frame never changes) and a lower one only when they would not
+  fit. Small emitters (≤ 2 slots: a pillar-top fan, a flare, a shell's smoke) stay complete. The
+  instances a layer issues (slots × slot size) may reach twice the budget, so hundreds of tiny
+  emitters (shell smokes of 1–5 puffs, comet tails) are all drawn; ribbon layers use slots of 16.
+  A newborn that does not fit even at the lowest share (1.25 × the budget, or the slot cap) is left
+  out for its whole life instead of popping in later. A thinned emitter draws a golden-ratio subset
+  of its particles; directions, phases and timing always come from the recorded count, so a thinned
+  sphere is still a sphere and a thinned fountain still emits evenly. After a seek every share is
+  decided again (the paused picture does not depend on what was on screen before). Budgets per
+  preset live in `src/fx/core/budget.ts`: fw-stars ×1.3 and fw-smoke ×1.5 on desktop; mobile caps
+  fw-stars at 15k and pyro sparks at 12k particles, and spark ribbons use 2 trail segments. Crackle
+  pops keep ~60 % (medium) / ~40 % (mobile) of their pops per star. The layer stats show
+  `<layer>.keep` (share given to newborns now) and `<layer>.hidden` (emitters left out; normally
+  absent).
+* **Flames burn out when the valve closes (round 3).** A continuous flame unit (`flame`,
+  `firewall`, billowing walls, `dragon_breath`, fireball lift jets) stops glowing within ~0.4 s of
+  the end of its emission window: the plume is fed no more (v1509.6–1510.0: the 28 m wall is gone
+  well within half a second). The soot the older puffs carry stays behind as smoke. One-shot
+  fireballs are not affected.
 * **Site glow on smoke and haze (round 3).** `atmos.glow` (`app.env.glowColor`, `app.env.smoke`)
   lights every haze sprite in its colour in all three zones (the brightness knee rises with the
   glow's luminance, so the glow is not squashed like the rig scatter) and all smoke, CO2 and low fog.

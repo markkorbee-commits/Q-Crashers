@@ -214,10 +214,12 @@ export class FogSystem extends CueFxSystem {
     const cx = (minX + maxX) / 2;
     const dur = Math.max(1, cue.dur);
     const life = 13;
-    // saturated smoke (the red finale bank) keeps its colour; white / pale fog stays neutral
+    // saturated smoke (the red finale bank) keeps its colour; white / pale fog stays neutral. The
+    // colours are linear: even 10 % of white turns a deep red bank salmon on screen, so a saturated
+    // colour only gets a trace of it
     const raw = fxColor(p.color, this.palette, this.c1, 'white');
     const rawSat = 1 - Math.min(raw.r, raw.g, raw.b) / Math.max(raw.r, raw.g, raw.b, 1e-4);
-    const tint = raw.lerp(WHITE, rawSat > 0.6 ? 0.12 : 0.3).clone();
+    const tint = raw.lerp(WHITE, rawSat > 0.6 ? 0.025 : 0.3).clone();
     const regions: [THREE.Vector3, THREE.Vector3, number, number][] = [];
     const deckY = Math.max(0, y - 0.3);
     if (area !== 'field') regions.push([new THREE.Vector3(cx, deckY + 0.5, z - 9), new THREE.Vector3(w, 0.7, 20), 0.35, deckY]);
@@ -365,7 +367,8 @@ export class FogSystem extends CueFxSystem {
     this.tint.setRGB(1, 1, 1);
     if (W > 1e-4) {
       sum.multiplyScalar(1 / W);
-      this.tint.lerp(sum, Math.min(0.85, W / (W + 0.35)));
+      // (linear colours: the haze of a thick red smoke bank must not stay salmon)
+      this.tint.lerp(sum, Math.min(0.96, W / (W + 0.3)));
     }
     return this.tint;
   }
@@ -395,10 +398,11 @@ export class FogSystem extends CueFxSystem {
       const tribe = this.crowdMode() === 'tribe';
       // atmos.glow `smoke`: the site fills with smoke (pink whiteout v76, red smoke v1510-1537)
       const siteSmoke = Math.min(1, Math.max(0, Number.isFinite(env.smoke) ? env.smoke : 0));
+      // (denser in proportion, plus a bank of its own that fills the air even where no haze hung)
       const sk = 1 + 2 * siteSmoke;
-      const stage = (0.062 * level + 0.1 * this.stageSmoke) * sk;
-      const field = (0.022 * level + 0.02 * this.stageSmoke) * (tribe ? 0.55 : 1) * sk;
-      const skyD = 0.02 * level + 0.2 * this.skySmoke;
+      const stage = (0.062 * level + 0.1 * this.stageSmoke) * sk + 0.22 * siteSmoke;
+      const field = ((0.022 * level + 0.02 * this.stageSmoke) * sk + 0.09 * siteSmoke) * (tribe ? 0.55 : 1);
+      const skyD = 0.02 * level + 0.2 * this.skySmoke + 0.12 * siteSmoke;
       this.haze.setDensity(stage, field, skyD);
       this.haze.setTint(this.smokeTint(t));
     }
