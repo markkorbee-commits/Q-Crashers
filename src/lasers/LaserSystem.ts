@@ -12,7 +12,7 @@ import { type Emitter, type EmitterGroup, LaserRig } from './LaserRig';
  * LaserSystem ('lasers') — show lasers of the 2026 RED Endshow.
  *
  * Cue contract (docs/show-format.md + docs/show-format-ext/lasers.md):
- *   look  preset fan|sheet|tunnel|sweep|crossfire|sky|wave|cone|grid|burst (+ extensions: chevron, zigzag,
+ *   look  preset fan|sheet|tunnel|sweep|crossfire|sky|wave|cone|grid|burst (+ extensions: chevron, zigzag, trees,
  *         x, rings, dashes); color, color2, count, speed (cycles/bar), spread (deg), tilt (deg),
  *         origin stage|field|all, height (m), intensity, kick;
  *         extensions (optional): fade (s crossfade from the look it replaces), aim [x,y,z] (world point the
@@ -46,7 +46,7 @@ import { type Emitter, type EmitterGroup, LaserRig } from './LaserRig';
 
 type Preset =
   | 'fan' | 'sheet' | 'tunnel' | 'sweep' | 'crossfire' | 'sky' | 'wave' | 'cone' | 'grid' | 'burst' | 'chevron'
-  | 'zigzag' | 'x' | 'rings' | 'dashes';
+  | 'zigzag' | 'x' | 'rings' | 'dashes' | 'trees';
 
 const G: Record<EmitterGroup, number> = { deck: 1, tower: 2, high: 4, corner: 8, pillar: 16, base: 32, turret: 64, dragon: 128, piano: 256 };
 const STAGE_MASK = G.deck | G.tower | G.high | G.corner | G.dragon;
@@ -172,6 +172,9 @@ const PRESETS: Record<Preset, PresetDef> = {
   },
   // ground projection: dashed white streaks scanned on the empty field (v400.0–400.8)
   dashes: { count: 4, spread: 90, tilt: 0, speed: 0.5, stage: G.deck, field: G.base, pick: deckSix },
+  // standing Λ "trees" along the deck front (v803.8–804.9): a scanned tent per unit, apex `height` m up,
+  // legs down to the deck
+  trees: { count: 9, spread: 46, tilt: 0, speed: 0.25, stage: G.deck, field: G.base, pick: deckSix },
 };
 
 /** cue target tokens → projector groups (+ optional side restriction) */
@@ -959,6 +962,9 @@ export class LaserSystem implements System {
         case 'dashes':
           this.genDashes(s, e, I);
           break;
+        case 'trees':
+          this.genTrees(s, e, I);
+          break;
       }
     }
     this.reachNow = 0;
@@ -1426,6 +1432,38 @@ export class LaserSystem implements System {
       this.beam(e, this.lerpColor(s, u), pb, 0.35, maxLen);
     }
     this.reachNow = r0;
+  }
+
+  /**
+   * Λ "trees" (v803.8–804.9: five standing tents of blue scan lines along the deck): every unit draws
+   * `count` beams from an apex `height` m up (world Y, default 10) straight above it, down to its own
+   * level, fanned laterally over `spread` (default 46°), dashed like a scanned figure. The apex is where
+   * the scan converges (it glows); the legs end on the deck. `speed` makes the trees breathe, neighbours
+   * in counter-phase. The zig-zag's negative tilt only makes Λ fans that land on the field, not trees.
+   */
+  private genTrees(s: LookSlot, e: Emitter, I: number): void {
+    const n = s.nEff;
+    const top = s.heightGiven ? s.height : 10;
+    const h = top - e.pos.y;
+    if (h < 0.5) return;
+    const ph = TAU * s.speed * s.bars;
+    const alt = e.order % 2 ? 1 : -1;
+    const spreadT = Math.min(170 * DEG, s.spread * (0.86 + 0.14 * Math.sin(ph + alt * 1.3)));
+    // (a scanned tent is a dense figure: the film's trees read nearly white-hot at their core)
+    const pb = I * this.perBeam(n) * 1.4;
+    const ax = e.pos.x;
+    const az = e.pos.z;
+    for (let i = 0; i < n; i++) {
+      const u = n > 1 ? i / (n - 1) : 0.5;
+      const a = (u - 0.5) * spreadT;
+      const sa = Math.sin(a);
+      const ca = Math.cos(a);
+      this.setDir(sa * e.lat.x, -ca, sa * e.lat.z);
+      this.beamFrom(e, ax, top, az, this.lerpColor(s, u), pb, h / Math.max(0.05, ca), 0.35, false);
+    }
+    if (!this.recording) this.gfx.pushSprite(ax, top, az, 0.7, s.color.r * pb * 0.5, s.color.g * pb * 0.5, s.color.b * pb * 0.5, 1);
+    // the unit on the deck is the projector: its aperture glows faintly
+    this.glow(e, s.color, I * 0.2);
   }
 
   /**

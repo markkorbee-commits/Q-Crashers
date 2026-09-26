@@ -305,11 +305,20 @@ const CAPITAL_TOP = 9.6;
 const FOH = v3(0, 0.5, 90);
 /**
  * DJ portal (src/stage/layout.ts): equilateral pointed arch 5.4 m wide, apex Y 7.2, in the porch screen
- * wall whose front face is at Z −6 (0.9 m thick); deck Y 1.9. Backlight row on the porch front at
- * head height behind the performers, clear of the portal frame (±3.3) and the stair arches.
+ * wall whose front face is at Z −6 (0.9 m thick), 3 m deep; deck Y 1.9.
+ * Backlight row (round 6, v409.0–412.1): the white lamps behind the MC hang INSIDE the portal, a
+ * shallow arc across the vault near its back wall (Z −8.4), under the crown — seen through the arch
+ * opening behind the performer, not on the porch front beside it (the old row at X ±4.1…10.7 was
+ * outside every close-up of the MC). |X| and Y per lamp pair (mirrored): 8 lamps.
  */
-const PORTAL = { w: 5.4, apex: 7.2, frontZ: -6, wallT: 0.9, deckY: 1.9, backlightY: 4.3 };
-const BACKLIGHT_X = [4.1, 6.3, 8.5, 10.7];
+const PORTAL = { w: 5.4, apex: 7.2, frontZ: -6, wallT: 0.9, deckY: 1.9, depth: 3 };
+const BACKLIGHT_ARC: [number, number][] = [
+  [0.3, 6.05],
+  [0.88, 5.9],
+  [1.42, 5.55],
+  [1.9, 4.95],
+];
+export const BACKLIGHT_Z = PORTAL.frontZ - PORTAL.depth + 0.6;
 const ARCH_SPOTS = 7;
 
 /** downlight positions in the arch soffit: evenly spaced along the upper arch, 0.25 m inside the opening */
@@ -561,8 +570,8 @@ export function buildRig(anchors: Anchors, density: number, own?: Map<string, TH
   for (let k = 0; k < 24; k++) blinder(T_DECK, v3(-35.5 + (71 * (k + 0.5)) / 24, 2.6, -0.3), Z);
   // obelisks: one blinder each under the capital, facing +Z (with the delay arrays)
   for (const p of pillars) blinder(T_PLINTH, v3(p.top.x, p.capitalY - 1.4, p.top.z + 1.45), Z);
-  // backlight row on the porch front, behind the performers, facing the audience (explicit: `deck_back`)
-  for (const x of BACKLIGHT_X) for (const s of [-1, 1]) blinder(T_BACK, v3(s * x, PORTAL.backlightY, PORTAL.frontZ + 0.3), Z);
+  // backlight arc inside the portal, behind the performers, facing the audience (explicit: `deck_back`)
+  for (const [x, y] of BACKLIGHT_ARC) for (const s of [-1, 1]) blinder(T_BACK, v3(s * x, y, BACKLIGHT_Z), Z);
   // the DJ booth spot at the foot of the portal (explicit: `dj_booth` / `booth`): 1.35 m above the walkable
   // floor there — the raised vault floor (deck + 0.8), so (0, 4.05, −6.35), not buried in it
   const boothZ = PORTAL.frontZ - 0.35;

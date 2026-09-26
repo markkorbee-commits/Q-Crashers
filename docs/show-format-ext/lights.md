@@ -48,7 +48,7 @@ Validator-legal anchor names now work as lighting positions:
 | target | look / hit / chase (moving heads) | blinder / strobe (emitters) |
 |---|---|---|
 | `dj_booth` | the 7 **arch-crown downlights** in the DJ portal soffit | the **booth spot**: a single spot at the foot of the portal, aimed at the audience (lens flare) |
-| `deck_back` | none | the **backlight row**: 8 round lamps on the porch front behind the performers, facing the audience. They light the haze and the crowd, never the set (the castle stays dark under a low stage master) |
+| `deck_back` | none | the **backlight arc**: 8 round lamps inside the DJ portal (a shallow arc under the crown, near the vault's back wall), behind the performers, facing the audience. They light the haze into a milky veil (see Round 6) and the crowd, never the set (the castle stays dark under a low stage master) |
 | `side_front`, `side_rampart` | side-section wall heads | side-section / corner blinders |
 | `corner_fireballs` | corner-tower heads | corner-tower blinders |
 | `arm_posts`, `arm_ends` | rampart / arm-end heads | rampart strobes |
@@ -101,6 +101,36 @@ level scales its lamp and its shaft together.
 * Photosensitivity (`app.reduceFlashing`): strobe bursts are capped at 3 Hz and kick strobes fire on
   every second kick with a softer decay. Strobes are at 40 %, blinders at 50 % with a 0.25 s rise,
   floods at 60 % with an attack of at least 0.3 s, and light-bus flashes at 40 %.
+
+## Round 6: backlight veil, deck air, arch cans (no cue change needed)
+Measured with `scripts/similarity.mjs` on the Mac GPU (64 moments: 61.0 / 39.4 % → 62.2 / 41.3 % raw / calibrated;
+colour 59.8 → 61.7, light 76.2 → 77.0, shape 50.1 → 50.6).
+* **Backlight arc** (`blinder` target `deck_back`, v409.0–412.1): the 8 lamps hang inside the DJ portal on a
+  shallow arc (|X| 0.3–1.9 m, Y 4.95–6.05, Z −8.4), where the film shows them behind the MC — the old row on
+  the porch front (X ±4.1…10.7) was outside every close-up. They draw as big hot discs (not festoon dots)
+  and light the haze as forward scatter: a tight glow at the lamps plus a wide veil over the deck, cool
+  blue-white for a white lamp, strongest for a camera in front of the portal looking into it (the DJ at the
+  booth, beside the lamps, sees a trace). 411.5 s 7 → 59 %, 409.5 s 11 → 55 %.
+* **Lamps aimed at the lens light the air in front of it**: the flood volume has two near pre-slices
+  (1.2–3.2–4 m) in which only the local lamp glows (backlight, booth spot, deck air) are integrated, drawn only
+  while one of them is lit. Every other flood keeps the clear air at the lens.
+* **Deck air** (deck close-ups, v656–711): while `fog.lowfog` lies on the deck (`area` `deck` / `all`), a
+  camera on / at the deck that looks at the set stands in that smoke, lit by the wash in the fog's colour
+  (the red smoky deck of the fire ritual). Level ∝ the lowfog density (in over 2.5 s, 8 s linger). A camera
+  in the portal looking out over the field (v658–666) does not get it. 705 s 30 → 47 %, 673.5 s 39 → 50 %.
+* **Arch cans** (`look` target `dj_booth`): their haze cones are drawn at 12 % (the film shows the ring of
+  lamps in the crown and their light on the performers, never cream cones filling the portal); the lamp
+  discs are brighter, and the cans light the smoke in the portal mouth a little in their colour.
+  `app.env.archSpotColor` (normalised) / `app.env.archSpotIntensity` (mean level 0–1.5, 0 = off) expose them
+  for the performers in the arch.
+* **Glowing fog bursts** (`fog.burst` with `glow`): one light per group of targets that lie together
+  (30 m), sharing the old single light's total, instead of one line light stretched across the empty space
+  between e.g. the roof and the wings.
+* Measured and NOT changed: SceneGlare G1/G2/G3 (src 0.15, psf 0.035, e0 14) +0.03 / +0.06 on the 64 (313.75
+  −6); the site-smoke height fog (`atmos.glow smoke`) at 2/7 of its density: 76.25 +10.8, 1528 +3.3 but
+  1511.75 −1.5, 1536.25 −1.9; flood volume / ground pool / flash cuts: all lower. Calibration hooks stay in
+  the code (`lights.floodGlowK`, `floodSetK`, `floodFlashK`, `scatterK`, `deckHazeK`, `backGlowK`,
+  `environment.smokeTune`).
 
 ## Round 5: atmosphere (no cue change needed)
 Measured with `scripts/similarity.mjs` on the Mac GPU (Show camera exposure 0.5):

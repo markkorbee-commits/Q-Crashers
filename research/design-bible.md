@@ -330,6 +330,10 @@ on the same site.
   wide from Z −4.2 to −1.35, U-shaped around the lead's pedestal (notch |X| < 1.5 from Z −2.9 to the front), with
   cheeks beside the steps back to the porch screen and 0.35 m half-height aprons (Y 2.05) along the outer
   flanks (Z −5.6 … −3.1). The arch-crown downlights focus on this walkable floor (the podium, Y 2.2).
+  **Backlight arc** (round 6, v409.0–412.1: the white lamps behind the MC seen through the arch opening): 8 round
+  lamps on a shallow arc inside the portal vault at Z −8.4, |X| 0.3 / 0.88 / 1.42 / 1.9 at Y 6.05 / 5.9 / 5.55 /
+  4.95, facing the audience (ASSUMPTION from the video framing; the old row on the porch front at X ±4.1…10.7
+  never appeared behind the MC).
 - Decorative stone staircases (oversized steps) left and right of the portal from the deck (Y 1.9) to the
   upper castle platform (Y 5.5) at X ±6…±12 (FACT look, dimensions ASSUMPTION); the castle stairs' foot sits
   inside the stair arch at |X| 7.1 (walkable, round 4).

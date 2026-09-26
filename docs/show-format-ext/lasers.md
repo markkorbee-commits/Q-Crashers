@@ -6,7 +6,7 @@ Unknown values are ignored, never thrown on.
 
 ## Validator (scripts/validate-show.mjs, owned by core)
 
-* `EXT_ENUM['lasers.look.preset']`: `chevron`, `zigzag`, `x`, `rings`, `dashes`
+* `EXT_ENUM['lasers.look.preset']`: `chevron`, `zigzag`, `x`, `rings`, `dashes`, `trees` (round 6)
 * Non-enum params to list as known extensions: look `reach`, `rows`, `rings`, `lobes`, `lobeAmp`,
   `squash`, `parallel`, `path`, `distance`, `segments`, `aim`, `fade`; hit `lens`, `reach`.
 
@@ -38,6 +38,15 @@ A negative `tilt` makes Λ down-fans that land on the floor in front of the deck
 40 m out, −6 about 20 m out. v803.8 is roughly `tilt: -3, spread: 16, count: 6`.
 `speed` makes the fans breathe, with neighbouring units in counter-phase. The beams are dashed
 (scanned look).
+
+### `trees`: standing Λ tents along the deck (v803.9–804.4, round 6)
+Every unit draws a scanned tent: `count` beams (default 9) from an apex `height` m up (world Y, default
+10) straight above it, down to its own level on the deck, fanned sideways over `spread` (default 46°),
+dashed like the other scanned figures; the apex glows. `speed` makes the tents breathe, neighbouring
+units in counter-phase. The natural set is the 6 deck units at |x| = 3, 15, 27 (no target); target
+`deck_front` uses all 12 (a denser row). The zig-zag's negative `tilt` only makes Λ fans that land on the
+field, never standing trees. v803.9–804.4 is roughly
+`{fx:'look', p:{preset:'trees', color:'#2438FF', count:9, spread:46, height:10, speed:1, fade:0.05}}`.
 
 ### `x`: compact X on the field (red X, v520.4–529.9)
 The outermost selected unit on each side fires `count` beams (default 1; `spread` default 2.5° is the
