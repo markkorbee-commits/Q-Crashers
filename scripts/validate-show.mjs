@@ -463,7 +463,9 @@ function checkParams(c, where) {
     }
     if (p.altEvery !== undefined && (!isNum(p.altEvery) || p.altEvery < 1 / 30 || p.altEvery > 10)) err(`${where}: altEvery must be 0.033..10 s`);
     if (p.ease !== undefined && !CAMERA_EASE.has(p.ease)) err(`${where}: ease "${p.ease}"`);
-    if (v3(p.pos) && (p.pos[1] < 0.3 || Math.abs(p.pos[0]) > 700 || p.pos[1] > 400 || Math.abs(p.pos[2]) > 900)) warn(`${where}: camera pos ${p.pos} looks off-site`);
+    if (p.subject !== undefined && !['mc'].includes(p.subject)) err(`${where}: camera subject "${p.subject}" (known: mc)`);
+    // subject shots: pos / look are offsets from the performer's feet
+    if (p.subject === undefined && v3(p.pos) && (p.pos[1] < 0.3 || Math.abs(p.pos[0]) > 700 || p.pos[1] > 400 || Math.abs(p.pos[2]) > 900)) warn(`${where}: camera pos ${p.pos} looks off-site`);
   }
 }
 /** every `name` mentioned in a `## sys` table row counts as documented for that fx */
@@ -794,7 +796,7 @@ if (args.includes('--storyboard')) for (const g of storyGaps) console.log(`  · 
     return out;
   };
   /** shots whose subject IS the structure (the pianist on the riser, the K close-up of lantern L1, f113): note tag #subject */
-  const CAM_EXCEPT = (c) => typeof c.note === 'string' && c.note.includes('#subject');
+  const CAM_EXCEPT = (c) => (typeof c.note === 'string' && c.note.includes('#subject')) || c.p?.subject !== undefined;
   for (const [i, c] of cues.entries()) {
     if (c.sys !== 'camera' || c.fx !== 'shot' || !Array.isArray(c.p?.pos) || !Array.isArray(c.p?.look)) continue;
     if (CAM_EXCEPT(c)) continue;

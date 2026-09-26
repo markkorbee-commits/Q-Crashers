@@ -8,12 +8,13 @@ opt into. Every one is optional: a cue that does not use them renders exactly as
 
 | fx | params |
 |---|---|
-| `shot` | `fov` now 5–110 (was 10–110): the official telephotos are ≈ 6°; `fovTo` (deg, 5–110): a real zoom from `fov` to `fovTo` over `dur`, with the same `ease` as the move, at an even pace in focal length (log tan), so `to`/`lookTo` dolly emulations of zooms can go; `alt` { `pos`, `look`, `fov`, `roll` } + `altEvery` (s, 0.033–10, default 0.1): stutter edit, the odd `altEvery` slots show the `alt` camera (held on the main camera with reduced motion); `roll` (rad) |
+| `shot` | `fov` now 5–110 (was 10–110): the official telephotos are ≈ 6°; `fovTo` (deg, 5–110): a real zoom from `fov` to `fovTo` over `dur`, with the same `ease` as the move, at an even pace in focal length (log tan), so `to`/`lookTo` dolly emulations of zooms can go; `alt` { `pos`, `look`, `fov`, `roll` } + `altEvery` (s, 0.033–10, default 0.1): stutter edit, the odd `altEvery` slots show the `alt` camera (held on the main camera with reduced motion); `roll` (rad); `subject` (`mc`): `pos`, `look`, `to`, `lookTo` and `alt` become OFFSETS (m) from the performer's feet at each moment, so the camera follows him like the film's handheld deck operator (no PA nudge; the sight-line check is skipped) |
 
 Examples
 
 * Telephoto zoom-out (v1098.4–1110.4):
   `{ "sys": "camera", "fx": "shot", "t": 1098.37, "dur": 12, "p": { "pos": [0, 6.7, 170], "look": [0, 15, -10], "fov": 6, "fovTo": 30, "ease": "inout" } }`
+* MC close-up from low front-right, following him (v408.4): `"subject": "mc", "pos": [0.4, 0.55, 3.0], "look": [-0.1, 1.9, -6], "fov": 48`.
 * Crash zoom (v798.0): `"fov": 40, "fovTo": 12, "ease": "in"` on a 0.6 s shot.
 * Stutter edit (v1222.6–1225, two angles every 2–4 frames):
   `"alt": { "pos": [-44, 52, 78], "look": [-3, 18, -12], "fov": 40 }, "altEvery": 0.1`.

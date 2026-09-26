@@ -209,6 +209,11 @@ export class CrowdSystem implements System {
     return sampleDensity(this.layout.density, x, z);
   }
 
+  /** a performer's feet at show time t (show-camera shots that follow a subject); false when off stage */
+  subjectAt(who: string, t: number, out: { x: number; y: number; z: number }): boolean {
+    return this.perf ? this.perf.subjectAt(who, t, out) : false;
+  }
+
   /** Tribe mode (true) or the empty grounds as filmed in 2026 (false). */
   setPopulated(on: boolean): void {
     this.populated = on;

@@ -210,19 +210,30 @@ class Path {
  * UPSTAGE of the pyro line (flame heads at z −0.4, gerbs −0.85, comets −1.1: ≥ 3 m safety distance,
  * as a pyro operator would demand) and steps back next to the booth for the anthem drops.
  */
+// 347-460: the deck close-ups keep him near the centre (backgrounds in the film: red castle 348, dragon
+// mouth behind-right 360-363, the arch 373, in front of the head 397, emblem 406, arch lights 409, vault
+// ring 452), so the walk stays within x ±7 there
 const MC_PATH = new Path([
   { t: 332, x: 0, z: -7.2 },
   { t: 338, x: 0, z: -3.6 },
-  { t: 350, x: -9, z: -3.5 },
-  { t: 362, x: -12.5, z: -3.8 },
-  { t: 376, x: 3, z: -3.4 },
-  { t: 389, x: 13.5, z: -3.7 },
-  { t: 402, x: 6, z: -3.4 },
-  { t: 409, x: 2.5, z: -4.4 },
+  { t: 347, x: -1.5, z: -3.8 },
+  { t: 351, x: -3, z: -4.0 },
+  { t: 357, x: -5.5, z: -3.8 },
+  { t: 363, x: -6.5, z: -3.6 },
+  { t: 366, x: -5.5, z: -3.5 },
+  { t: 373, x: -0.5, z: -4.4 },
+  { t: 380, x: 3, z: -3.6 },
+  { t: 389, x: 5.5, z: -3.7 },
+  { t: 397, x: -1.2, z: -3.6 },
+  { t: 402, x: 2, z: -3.8 },
+  { t: 406, x: 3.5, z: -4.0 },
+  { t: 409, x: 0.8, z: -4.3 },
   { t: 414, x: 1.2, z: -5.0 },
   { t: 430, x: -1.4, z: -5.0 },
   { t: 441, x: -3.5, z: -4.4 },
-  { t: 452, x: -13.5, z: -3.8 },
+  { t: 446, x: -5.5, z: -4.0 },
+  { t: 452, x: -2, z: -4.2 },
+  { t: 458, x: -4, z: -3.8 },
   { t: 465, x: -4, z: -3.5 },
   { t: 478, x: 8, z: -3.5 },
   { t: 489, x: 12, z: -3.8 },
@@ -284,6 +295,7 @@ export class Performers {
   private pose = newPose();
   private fr: PerfFrame = { visible: false, x: 0, y: 0, z: 0, yaw: 0, glow: 0 };
   private pp = { x: 0, z: 0, dist: 0, speed: 0, dx: 0, dz: 0 };
+  private spp = { x: 0, z: 0, dist: 0, speed: 0, dx: 0, dz: 0 };
   private heightAt: (x: number, z: number) => number;
 
   constructor(heightAt: (x: number, z: number) => number) {
@@ -358,6 +370,20 @@ export class Performers {
     this.iLook = new Float32Array(this.count * 4);
     this.iP = Array.from({ length: 7 }, () => new Float32Array(this.count * 4));
     for (let i = 0; i < this.count; i++) packLook(this.perfs[i].look, this.iLook, i * 4);
+  }
+
+  /**
+   * Where a filmed subject stands at show time t (feet on the stage floor), for show-camera shots that
+   * follow a performer (`camera.shot` p.subject). Pure; false when the subject is not on stage.
+   */
+  subjectAt(who: string, t: number, out: { x: number; y: number; z: number }): boolean {
+    if (who !== 'mc' || !inWin(t, this.timing.mc)) return false;
+    const pp = this.spp;
+    MC_PATH.at(t - this.timing.mc.t0 + MC_T0, pp);
+    out.x = pp.x;
+    out.z = pp.z;
+    out.y = stageFloorSmooth(pp.x, pp.z);
+    return true;
   }
 
   /** evaluate every performer at show time t (pure). populated = Tribe mode. */

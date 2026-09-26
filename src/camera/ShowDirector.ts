@@ -51,7 +51,10 @@ export function zoomFov(a: number, b: number, k: number): number {
 /** minimal duck type of the crowd system (Tribe mode density field) */
 interface CrowdLike {
   densityAt?(x: number, z: number): number;
+  subjectAt?(who: string, t: number, out: THREE.Vector3): boolean;
 }
+/** where a `subject` shot frames when the performer is not available (crowd system off): the portal front */
+const SUBJECT_FALLBACK = new THREE.Vector3(0, 2.2, -4.5);
 /** minimal duck type of the player controller (walkable ground height) */
 interface GroundLike {
   groundAt?(x: number, z: number): number;
@@ -276,6 +279,7 @@ export class ShowDirector {
   private readonly u = new THREE.Vector3();
   private readonly corner = new THREE.Vector3();
   private readonly probe = new THREE.Vector3();
+  private readonly subj = new THREE.Vector3();
   private crowd: CrowdLike | null | undefined;
   private ground: GroundLike | null | undefined;
   /** metres the current shot was lifted over the crowd (debug) */
@@ -480,16 +484,29 @@ export class ShowDirector {
       preset.frame(this.L, k, rand01(cue.seed), t, o);
       this.current = CUE_LABEL.get(preset.id)!;
     } else if (altOn && alt && vec(alt.pos, o.pos) && vec(alt.look, o.look)) {
+      if (typeof p.subject === 'string') {
+        const sp = this.subjectAt(p.subject, t);
+        o.pos.add(sp);
+        o.look.add(sp);
+      }
       o.fov = clamp(num(alt.fov, num(p.fov, 50)), SHOT_FOV.min, SHOT_FOV.max);
       o.roll = num(alt.roll, 0);
       this.current = 'cue:alt';
       return true;
     } else {
       if (!vec(p.pos, o.pos) || !vec(p.look, o.look)) return false;
+      // `subject` (e.g. 'mc'): pos / look / to / lookTo are offsets from the performer's feet, so the
+      // camera follows him like the handheld deck operator in the film (no PA nudge: the framing is his)
+      const subject = typeof p.subject === 'string' ? p.subject : null;
       // PA hangs out of the centre of the framing (constant offset for the whole shot)
-      const nudge = this.clearance(cue.id, o.pos, o.look, clamp(num(p.fov, 50), SHOT_FOV.min, SHOT_FOV.max));
+      const nudge = subject ? null : this.clearance(cue.id, o.pos, o.look, clamp(num(p.fov, 50), SHOT_FOV.min, SHOT_FOV.max));
       if (vec(p.to, this.tmp)) o.pos.lerp(this.tmp, k);
       if (vec(p.lookTo, this.tmp2)) o.look.lerp(this.tmp2, k);
+      if (subject) {
+        const sp = this.subjectAt(subject, t);
+        o.pos.add(sp);
+        o.look.add(sp);
+      }
       if (nudge) {
         o.pos.add(nudge);
         this.nudged = nudge.length();
@@ -504,6 +521,13 @@ export class ShowDirector {
       o.fov = typeof p.fovTo === 'number' ? zoomFov(f0, clamp(p.fovTo, SHOT_FOV.min, SHOT_FOV.max), k) : f0;
     }
     return true;
+  }
+
+  /** a performer's feet at show time t (see `subject`), or the portal front when unavailable */
+  private subjectAt(who: string, t: number): THREE.Vector3 {
+    const crowd = (this.crowd ??= (this.app.get('crowd') as unknown as CrowdLike | undefined) ?? null);
+    if (crowd?.subjectAt?.(who, t, this.subj)) return this.subj;
+    return this.subj.copy(SUBJECT_FALLBACK);
   }
 
   // --- automatic director ----------------------------------------------------------------------
