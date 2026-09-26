@@ -396,7 +396,7 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
       // rolled lip on the band's upper edge
       W.armor.add(tube(edge.map((p) => p.clone().addScaledVector(nrm, 0.1)), () => 0.12, { radial: 5 }), null, GOLD_DEEP);
     }
-    W.strips.add(edge.map((p) => p.clone().addScaledVector(nrm, 0.14)), WING_LED, 0.13, 0, 0.3 + pi * 0.2);
+    W.strips.add(edge.map((p) => p.clone().addScaledVector(nrm, 0.14)), WING_EDGE, 0.13, 0, 0.3 + pi * 0.2);
     // warm festoon along the sagging top edge, hanging just in front of the gold band
     {
       const g: V3[] = [];
@@ -583,7 +583,7 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
       const a = (j / 40) * Math.PI * 2;
       rp.push(v3(Math.cos(a) * 2.42, Math.sin(a) * 2.42, 0.3).applyMatrix4(m));
     }
-    W.strips.add(rp, WING_ACCENT, 0.12, 0, 0.5 + i * 0.1);
+    W.strips.add(rp, WING_RING, 0.12, 0, 0.5 + i * 0.1);
   });
   for (const [g] of sun) g.dispose();
 
@@ -648,6 +648,13 @@ export const WING_FX = 2;
 /** strip groups of the wing LEDs (crownLed: +2 = wing colours and the wing level) */
 const WING_LED = 2;
 const WING_ACCENT = 3;
+/**
+ * dimmed secondary outlines (crownDim: a fractional group f dims a strip to 1 - 2f): the sagging top
+ * edges and the rosette rings. The footage reads the wings by their lit spars and blades; the top
+ * hems carry bulbs, not a continuous bright arc, and the suns have no bright ring.
+ */
+const WING_EDGE = WING_LED + 0.25;
+const WING_RING = WING_ACCENT + 0.4;
 
 function withAxis(g: THREE.BufferGeometry, m: THREE.Matrix4): THREE.BufferGeometry {
   g.rotateX(Math.PI / 2);

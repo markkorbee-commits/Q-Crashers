@@ -340,11 +340,14 @@ export class DragonCrown {
     U.uWashB.value.copy(wash).lerp(this.tmpC2.copy(look.led2).multiplyScalar(wi * 5), 0.18);
     // a faint FOH work light that goes out with the practicals (blackouts: only sky + moon remain)
     addScaled(U.uKey.value.setRGB(0.05, 0.06, 0.1).multiplyScalar(0.35 + 0.65 * E), wash, 0.22);
+    // pyro / firework flash: fireworks burst far above the crown and the pyro fires away from it, so
+    // the metal takes a glint, not a floodlight (video 1438.5: a full canopy over a dark red dragon;
+    // round 3 had ~6x the flash colour as irradiance and lit the crown white-orange on every burst)
     const flash = look.flash;
-    U.uFlash.value.copy(flash).multiplyScalar(6);
-    addScaled(addScaled(U.uRim.value.setRGB(0.06, 0.08, 0.18), flash, 2.5), look.led, 0.35 * U.uLedI.value);
+    U.uFlash.value.copy(flash).multiplyScalar(1.6);
+    addScaled(addScaled(U.uRim.value.setRGB(0.06, 0.08, 0.18), flash, 1.0), look.led, 0.35 * U.uLedI.value);
     // the env map carries the rig's hot fixture spots: dim them with the practicals
-    addScaled(addScaled(U.uEnvTint.value.setRGB(0.3, 0.34, 0.46).multiplyScalar(0.2 + 0.8 * E), look.wash, wi * 0.9), flash, 1.2);
+    addScaled(addScaled(U.uEnvTint.value.setRGB(0.3, 0.34, 0.46).multiplyScalar(0.2 + 0.8 * E), look.wash, wi * 0.9), flash, 0.5);
     addScaled(U.uAmbient.value.setRGB(0.015, 0.018, 0.03), look.led, 0.05 * U.uLedI.value);
     // inner fire: throat point light + lava cracks
     // throat light: pale pink-red (the mouth interior glows pink / white, not orange), lava stays fiery

@@ -131,12 +131,18 @@ uniform vec3 uLedW2;
 uniform float uDragonG;
 uniform float uWingG;
 float crownHash(float n) { return fract(sin(n * 12.9898) * 43758.5453); }
-// strip / dot group: 0 primary, 1 accent (dragon); 2 primary, 3 accent (wings: own colours + level)
+// overall LED output of the crown (strips, pixel dots, membrane lanes, rosette spokes), calibrated
+// against the official video (round 4): at 1.0 the lines clipped to white-pink under the tone curve
+// and outshone the lit sculpture; the footage keeps them saturated (1463 / 1389.5 / 843 / 191.5)
+const float CROWN_LED_K = 0.6;
+// strip / dot group: 0 primary, 1 accent (dragon); 2 primary, 3 accent (wings: own colours + level).
+// A fractional part f (0..0.45) dims the strip to 1 - 2f (secondary outlines: top edges, rings).
 float crownWing(float g) { return step(1.5, g); }
+float crownDim(float g) { return clamp(1.0 - 2.0 * fract(g + 0.001), 0.05, 1.0); }
 vec3 crownSteady(float g) {
   float w = crownWing(g);
   vec3 c = (g - 2.0 * w) > 0.5 ? mix(uLed2, uLedW2, w) : mix(uLed, uLedW, w);
-  return c * mix(uDragonG, uWingG, w);
+  return c * mix(uDragonG, uWingG, w) * CROWN_LED_K;
 }
 // 'ember': the dragon and the inner wings stay lit, the outer wings fade to a dim red silhouette
 float emberMask(float x) { return mix(1.0, mix(0.2, 1.0, 1.0 - smoothstep(16.0, 36.0, abs(x))), uEmber); }
@@ -171,7 +177,7 @@ vec3 crownLed(float u, float grpIn, float side, float seed) {
     b = 0.85 + 0.15 * sin(u * 0.9 - uPhase * 6.2831);
   }
   b *= 1.0 + 1.4 * uPulse;
-  return (base * b * uLedI + vec3(uPulse * uLedI * 0.25)) * mix(uDragonG, uWingG, wing);
+  return (base * b * uLedI + vec3(uPulse * uLedI * 0.25)) * mix(uDragonG, uWingG, wing) * CROWN_LED_K;
 }
 `;
 
@@ -363,9 +369,11 @@ iblIrradiance *= uEnvTint * max(crownWashReg(), 0.03);`,
   float em = emberMask(vCrownPos.x);
   totalEmissiveRadiance += lc * line * feather * grow * uWings * 2.4 * em;
   // the printed skin is flooded by its own warm uplights from below (follows the wing glow level):
-  // saturated print, brightest at the lower edge, falling off towards the scalloped top
+  // saturated print, brightest at the lower edge, falling off towards the scalloped top. Kept below
+  // the blades / spars (video 1047.25, 1389.5: the skin reads as a dim red-orange ground under the
+  // lit blades and the printed suns, never as a glowing orange sheet)
   vec3 print = crownAlb * crownAlb * ${(o.printGain ?? 1.9).toFixed(3)};
-  totalEmissiveRadiance += print * (0.04 * uEmit + 0.8 * uWings) * em * mix(1.15, 0.45, smoothstep(3.0, 18.0, vMemb.y)) * (1.0 - uDay);
+  totalEmissiveRadiance += print * (0.03 * uEmit + 0.42 * uWings) * em * mix(1.15, 0.4, smoothstep(3.0, 18.0, vMemb.y)) * (1.0 - uDay);
   // printed fabric lets some of the back light (sky, fireworks behind the stage) shine through
   totalEmissiveRadiance += crownAlb * uRim * ${(0.35 * (o.printGain ?? 1.9) / 1.9).toFixed(3)};
 }`;
@@ -451,7 +459,7 @@ void main() {
   // is pushed above the lit haze around the crown, so the wing ribs read as lines of light
   vec3 steady = crownSteady(vInfo.x) * uLedI * 0.7;
   c = max(c, steady * vFar) * (1.0 + 1.2 * vFar);
-  gl_FragColor = vec4(c * core * dots * vFade * 3.2 * emberMask(vWX), 1.0);
+  gl_FragColor = vec4(c * core * dots * vFade * 3.2 * crownDim(vInfo.x) * emberMask(vWX), 1.0);
 }`,
   });
 }
@@ -793,17 +801,21 @@ void main() {
   float a = atan(vP.y, vP.x);
   float R = 2.25;
   float fr = fwidth(r);
-  // central star (8 points) + 16 spokes + rim ring
-  float star = smoothstep(0.62 + fr, 0.62 - fr, r / (0.55 + 0.35 * pow(abs(cos(a * 4.0)), 6.0)));
-  float spokes = pow(abs(cos(a * 8.0)), 60.0) * smoothstep(0.35, 0.6, r) * smoothstep(R * 0.93, R * 0.8, r);
+  // a SUNBURST (official footage 338 / 1047.25: orange suns of long and short rays on the dark
+  // skin), not a lit disc in a bright ring: small 8-point star + 16 tapered rays of alternating
+  // length + a faint core glow; the ring LED only as a thin dim accent
+  float star = smoothstep(0.5 + fr, 0.5 - fr, r / (0.5 + 0.32 * pow(abs(cos(a * 4.0)), 6.0)));
+  float ca = cos(a * 8.0);
+  float rayLen = ca > 0.0 ? R * 0.95 : R * 0.62;
+  float rays = pow(abs(ca), 14.0) * smoothstep(0.3, 0.55, r) * (1.0 - smoothstep(rayLen * 0.45, rayLen, r));
   float sa = fwidth(a * 8.0);
-  spokes = mix(spokes, 0.06, clamp(sa * 0.8, 0.0, 1.0));
-  float rim = smoothstep(0.09 + fr, 0.0, abs(r - R * 0.86));
-  float glow = exp(-r * 1.7) * 0.6;
+  rays = mix(rays, 0.08 * (1.0 - smoothstep(R * 0.4, R * 0.9, r)), clamp(sa * 0.8, 0.0, 1.0));
+  float rim = smoothstep(0.07 + fr, 0.0, abs(r - R * 0.86));
+  float glow = exp(-r * 2.6) * 0.3;
   vec3 led = crownLed(r * 2.0 + vSeed * 0.1, 3.0, sign(vSeed), 0.3);
   float lv = max(uLedI, 0.2);
-  vec3 c = uRosette * (star * 2.2 + glow) * (0.35 + 0.9 * uWings) + (uRosette * 0.5 + led * 0.6) * spokes * 1.5 * lv + led * rim * 0.9;
-  gl_FragColor = vec4(c * 1.5 * emberMask(vSeed), 1.0);
+  vec3 c = uRosette * (star * 1.5 + glow + rays * (0.5 + 0.6 * lv)) * (0.3 + 0.8 * uWings) + led * (rays * 0.4 + rim * 0.3);
+  gl_FragColor = vec4(c * 1.2 * emberMask(vSeed), 1.0);
 }`,
   });
 }

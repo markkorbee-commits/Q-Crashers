@@ -93,8 +93,10 @@ export class StageMaterials {
       envMap: this.env,
       envMapIntensity: 0.55,
     });
-    // the off-white print of the daytime photos is ~2x the old grey: scaled back in the show
-    patchStageShading(this.stone, this.u, { flood: 1, nightK: 0.487 });
+    // the off-white print of the daytime photos is ~2x the old grey: scaled back in the show, and a
+    // little further (round 4, objective match to the official video): at night the printed castle
+    // is a dark flat that only reads where the show lights it
+    patchStageShading(this.stone, this.u, { flood: 1, nightK: 0.36 });
 
     this.paint = new THREE.MeshStandardMaterial({
       name: 'stage-paint',

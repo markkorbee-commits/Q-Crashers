@@ -33,21 +33,36 @@ const LED_COLOURS = ['uLed', 'uLed2', 'uAccent', 'uLedS', 'uLed2S', 'uAccentS', 
  * outlined like a lit palace: every cornice a bright line, windows as glowing panes, strong floods.)
  */
 const CALIB = {
-  /** HDR gain of the content-coloured battens (was 9) */
-  batten: 1.5,
+  /**
+   * HDR gain of the content-coloured battens (was 9, then 1.5; round 4 matched to the official
+   * video with the objective metric: the castle battens clipped towards white-pink and lit the set)
+   */
+  batten: 0.95,
   /** pilaster strips relative to the battens */
   pilaster: 0.9,
   /** horizontal cornice / eave / ledge battens relative to the content colour */
   outline: 0.3,
   /** window tube gain (the pane itself is ~10 % of the tubes) */
-  window: 1.0,
-  arcade: 0.8,
-  lamp: 3.8,
-  lantern: 2.6,
+  window: 0.8,
+  arcade: 0.7,
+  lamp: 2.8,
+  lantern: 2.3,
   /** decor backlights (banners, skull eyes, emblem) */
   decor: 0.6,
   /** virtual floods relative to the lighting wash */
   flood: 0.32,
+  /**
+   * share of the world's sky light (hemisphere incl. the site glow, moon, twilight) on the set: the
+   * printed castle never reads by sky light in the footage (round 4: sky + env + FOH washes summed
+   * up into a grey-white castle and side houses in every wide shot)
+   */
+  sky: 0.45,
+  /** env-reflection (IBL) share of the lighting wash */
+  envWash: 0.55,
+  /** how far a site-wide `atmos.glow` (red smoke, flame walls) pulls the floods towards its hue */
+  glowTint: 0.8,
+  /** virtual pyro / firework flash on the set print (was 1.6: bursts lit the castle white) */
+  flash: 0.7,
 };
 
 /** c += src * k (THREE.Color has no addScaled) */
@@ -56,6 +71,17 @@ function addScaled(c: THREE.Color, src: THREE.Color, k: number): THREE.Color {
   c.g += src.g * k;
   c.b += src.b * k;
   return c;
+}
+
+const _glow = new THREE.Color();
+/** re-tint c towards the hue `hue` (max channel 1) by k, keeping its luminance */
+function tintTowards(c: THREE.Color, hue: THREE.Color, k: number): void {
+  const lum = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+  const hl = Math.max(1e-4, 0.2126 * hue.r + 0.7152 * hue.g + 0.0722 * hue.b);
+  const s = lum / hl;
+  c.r += (hue.r * s - c.r) * k;
+  c.g += (hue.g * s - c.g) * k;
+  c.b += (hue.b * s - c.b) * k;
 }
 
 /**
@@ -390,6 +416,7 @@ export class MainStageSystem implements System {
     u.uGlow.value.set(0, 0, 0, 0);
     u.uRegionF.value.set(1, 1, 0, 0);
     u.uDay.value = 1;
+    u.uSkyK.value = 1;
     const l = this.mats.led.uniforms;
     for (let i = 0; i < LED_COLOURS.length; i++) (l[LED_COLOURS[i]].value as THREE.Color).setRGB(0, 0, 0);
     l.uContentGain.value = 0;
@@ -419,13 +446,26 @@ export class MainStageSystem implements System {
     const fl = CALIB.flood * wi * (0.55 + 0.6 * look.energy);
     u.uFloodA.value.copy(look.wash).multiplyScalar(3.2 * fl);
     u.uFloodB.value.copy(look.wash).lerp(look.castleLed2, 0.55).multiplyScalar(2.8 * fl);
+    // a site-wide coloured glow (atmos.glow: red smoke, flame walls) TINTS the set's floods (same
+    // level) instead of adding white light; the world's hemisphere share of it is cut by uSkyK
+    const g = this.app.env.glowColor;
+    const gm = Math.max(g.r, g.g, g.b);
+    if (gm > 1e-3) {
+      const k = CALIB.glowTint * Math.min(1, gm * 2);
+      _glow.setRGB(g.r / gm, g.g / gm, g.b / gm);
+      tintTowards(u.uFloodA.value, _glow, k);
+      tintTowards(u.uFloodB.value, _glow, k);
+    }
+    u.uSkyK.value = CALIB.sky;
     addScaled(u.uFront.value.copy(look.wash).multiplyScalar(wi * 0.42), look.pulseColor, 1.2);
     u.uFront.value.r += look.strobe * 2.5;
     u.uFront.value.g += look.strobe * 2.5;
     u.uFront.value.b += look.strobe * 2.5;
     addScaled(u.uBack.value.setRGB(0.012, 0.02, 0.045), look.castleLed, 0.06 * look.ledIntensity * Math.min(1, look.castleGain));
-    u.uFlash.value.copy(look.flash).multiplyScalar(1.6);
+    // pyro / firework flash on the print: a soft top light from well above the set (see StageLights)
+    u.uFlash.value.copy(look.flash).multiplyScalar(CALIB.flash);
     u.uFlashPos.value.copy(this.app.env.flashPos);
+    u.uFlashPos.value.y = Math.max(u.uFlashPos.value.y, 36);
     // region isolation of floods + decor glow (castle core / side sections, colour overrides)
     u.uRegionF.value.set(look.castleGain, look.sidesGain, look.castleFloodTint, look.sidesFloodTint);
     u.uFloodTintC.value.copy(look.castleLed);
@@ -434,7 +474,7 @@ export class MainStageSystem implements System {
     const E = look.emit;
     const castle = E * (1 - look.ember);
     const setLvl = Math.min(1, Math.max(look.castleGain, look.sidesGain));
-    addScaled(u.uEnvTint.value.setRGB(0.35, 0.35, 0.42).multiplyScalar((0.12 + 0.88 * E) * (0.25 + 0.75 * setLvl)), look.wash, wi * 1.2 * setLvl);
+    addScaled(u.uEnvTint.value.setRGB(0.35, 0.35, 0.42).multiplyScalar((0.12 + 0.88 * E) * (0.25 + 0.75 * setLvl)), look.wash, wi * CALIB.envWash * setLvl);
     u.uGlow.value.set(look.bannerGlow, look.skullGlow * (0.6 + look.eyesIntensity * 0.5), look.emblemGlow, 1);
 
     const l = this.mats.led.uniforms;

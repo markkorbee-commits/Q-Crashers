@@ -33,6 +33,13 @@ export interface StageUniforms {
    * keeps the level it was calibrated to.
    */
   uDay: THREE.IUniform<number>;
+  /**
+   * Share of the WORLD's sky light (hemisphere + moon / twilight directionals, incl. the site glow
+   * the EnvironmentSystem adds to the hemisphere) that reaches the set. The castle is a dark printed
+   * flat that the official footage never shows by sky light (it only reads where the show lights it),
+   * so the set takes a reduced share; 1 in the dev `?daylight` view.
+   */
+  uSkyK: THREE.IUniform<number>;
 }
 
 export function createStageUniforms(): StageUniforms {
@@ -49,8 +56,18 @@ export function createStageUniforms(): StageUniforms {
     uFloodTintC: { value: new THREE.Color(1, 1, 1) },
     uFloodTintS: { value: new THREE.Color(1, 1, 1) },
     uDay: { value: 0 },
+    uSkyK: { value: 1 },
   };
 }
+
+/**
+ * three's lights_fragment_begin with the world's directional lights (moon / twilight: the only
+ * directional lights in the scene; the stage's own lights are spots / points) scaled by uSkyK.
+ */
+const LIGHTS_BEGIN_SKY = THREE.ShaderChunk.lights_fragment_begin.replace(
+  'getDirectionalLightInfo( directionalLight, directLight );',
+  'getDirectionalLightInfo( directionalLight, directLight );\n\t\tdirectLight.color *= uSkyK;',
+);
 
 const FLOOD_GLSL = /* glsl */ `
 uniform vec3 uFloodA;
@@ -64,6 +81,7 @@ uniform vec4 uRegionF;
 uniform vec3 uFloodTintC;
 uniform vec3 uFloodTintS;
 uniform float uDay;
+uniform float uSkyK;
 varying vec3 vStageWP;
 float stageSideW(vec3 wp) { return smoothstep(37.3, 38.3, abs(wp.x)); }
 float stageRegion(vec3 wp) { return mix(uRegionF.x, uRegionF.y, stageSideW(wp)); }
@@ -170,6 +188,7 @@ ${
     : ''
 }`,
       )
+      .replace('#include <lights_fragment_begin>', LIGHTS_BEGIN_SKY)
       .replace(
         '#include <lights_fragment_maps>',
         `#include <lights_fragment_maps>
@@ -178,6 +197,8 @@ ${
 #endif
 #if defined( RE_IndirectDiffuse )
   iblIrradiance *= uEnvTint;
+  // ambient + hemisphere (the world's sky dome and its site glow): the set takes its own share
+  irradiance *= uSkyK;
 #endif`,
       )
       .replace(
