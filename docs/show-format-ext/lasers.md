@@ -138,6 +138,45 @@ any beam that points within about 1–2° of the camera now adds a smaller versi
   low-fog density 0.65 → 0.9) makes the lighting's flood volume glow in that colour over the field and the
   stage (see lights.md, round 5).
 
+### Round 7 (similarity against the exact-time frames, 64 moments 64.7/46.5 → see the round report)
+
+* **Blue diode colour.** 450 nm lies outside sRGB below the blue primary; in linear sRGB it has a negative
+  green part (about −0.1 of its blue) and, as filmed, no red. `laserColor.ts` now mixes with the unclipped
+  primary `[0, −0.09, 1]` and clips the mix at 0: the faint green of a blue cue colour (`#2040FF`,
+  `#2A60FF`, `#1A2AFF`) cancels instead of turning periwinkle, violet stays violet (its red is the red
+  diode), cyan keeps most of its green, a requested white reads slightly lavender-cool. The video's blue
+  laser haze is a pure royal blue (Embers mean sRGB ≈ [0, 5, 123] at v1120.5; ours was [21, 28, 112]).
+  1120.5 +16 points, 1145 +2.5, 1389.5 +2.3, 1257.5 +7.
+* **Lit smoke ceiling.** A sheet seen from far below its plane (round 5) now lights broad, soft clouds
+  (tens of metres) instead of the fine smoke texture, brightest over the set (`stageHaze` weight) and
+  without the scan-line rays; its gain went from 7 to 12. A sheet tilted up into the sky from the roof
+  (castle / wing units, Y > 8) turns into that ceiling from about 4 m under its plane already (a deck sheet,
+  also one rising to 14 m over the field at v1505.8, keeps its crisp line to ~12 m under it): v1134–1140,
+  the frontal medium under the roof sheet, shows the whole sky lit blue (1135 +18, 1138 +10).
+* **Low beams end on the side banks.** A beam that runs low across the bowl stops where the side bank
+  (terrain-layout.json: rising 0.096 per m from |x| 46 to 5.2 m, Z −20…105) rises above it, with a dim
+  grazing spot: the white lines along the deck front to the side sections (1485.3, aim ±92) and the web
+  over the field no longer run on over the grass (1486 / 1487.5 +1.5).
+* **Ground web** (grid looks drawn flat by the plinths, pillars, turrets or the deck at a `height`) at 0.3
+  of its former level: v133.7–143.4 shows thin dim lines on the field, not bright white bars (142.5 +2.4).
+* **Looking into a cone.** When the camera sits inside a `cone` look's aperture (the lantern starbursts
+  aimed at the camera, v1380–1409), the beams all around the view direction light the smoke at the aperture
+  into a soft glow (7 m sprite) in the cue's colours: v1389.5 is a violet disc around the lantern with
+  faint rays (1389.5 +1, 1384.5 / 1394 +1).
+* **Scanned deck figures** (`zigzag`, `trees`) draw 1.5× brighter with a 1.6× wider glow: the filmed
+  figures (v798, v804, v838) are dense, luminous scans, ours were thin dark-blue lines.
+* **Air light from sheets only.** `airLight` (the lighting's flood volume glowing in the laser colour) now
+  comes from the sheets over a dense bank only; a skimming `tunnel` still lights the sea layer, but no
+  longer the whole smoke volume (v1371–1380 is dark with gold streaks; ours turned the whole frame orange).
+
+**Calibration hooks** (`LaserSystem.tune`, read every frame; experiments set them in the page, e.g.
+`--eval "__app.get('lasers').tune.ceilGain = 9"`): `blueR` / `blueG` (the diode primary), `seaFloor` /
+`seaFall` / `seaGain` (the sea on a dense bank), `seaBank` / `seaBankX` (off: the sea follows the side banks
+up to |x| seaBankX on a dense bank), `ceilGain` / `ceilD0` / `ceilD1` / `ceilRoofK` / `ceilSmooth` /
+`ceilStage` (the ceiling), `webK`, `glowK` / `glowSize`, `bankClip`, `scanK` / `scanW`. Tried and left at
+their old behaviour (no gain on the Embers moments): a brighter / more even sea, wisps along x, the sea on
+the side banks (1169.5 +1 but 1165 −4), extra sheet light inside a dense bank.
+
 ## Proposed cue updates for public/show/endshow-2026.json (tested side by side with the video)
 
 Cue times are show times; `…` keeps the other params. Before these updates are made, the validator
@@ -164,3 +203,14 @@ needs the new presets in `EXT_ENUM`.
 | 1492.82 `hit` | `{color:'#7090FF', lens:true}` | v1492.88 |
 | new (optional) 1321.0, 3 s | thin white lines at deck height to the frame edges: `{preset:'fan', target:['deck_front','left'], count:2, spread:3, tilt:0, aim:[-92,2.4,-3], intensity:0.6}` + the mirror with `right` / `aim:[92,2.4,-3]` | v1321–1324 |
 | new (optional) 635.0, 3 s | thin vertical beams above the centre (the 4 centre deck units): `{preset:'sky', target:['deck_front','center'], count:1, spread:0, tilt:90, intensity:0.35}` | v635–638 |
+
+### Round 7 cue proposals (measured in-page against the exact-time frames; not applied, the show group owns the cues)
+
+| cue | change | effect |
+|---|---|---|
+| 1051.265 deck_front `grid` ("blue web at the deck") | + `height` 1.2, intensity 0.3: the deck units then draw the flat web at the deck instead of the tall vertical lattice (v1051.75–1053 is dark with small blue shapes low at the deck) | 1051.75 +19, 1053 +12 points |
+| 1503.66 `grid` (zig-zag web above the field) | color `#B040FF`, color2 `#6040FF` (the filmed web is violet-pink, not lavender-white) | 1504 +12.5, 1505 +6 |
+| 133.315 / 145.544 deck_front `grid` | intensity 0.3 / 0.25 (the aerial v139.5–143.4 shows no bright rising X fans at the deck) | 139.75 +2.5, 142.5 +1 |
+| 1124.428 `crossfire` (the cyan X) | tilt 12 → 4: the filmed beams cross just over the set and run out low to the frame edges | 1124.75 +1, 1125.5 +1.3 |
+| 803.734 split (show group, round 7) | the filmed figure changes every frame (12.5 fps): diagonal lines v803.80, wedges + web v803.88–804.0, X bow-ties v804.04–804.12, V fans v804.20–804.28, **Λ tents v804.36**, hourglass v804.44, V fans v804.52–804.60. The `trees` look belongs around show 804.30–804.45 (tents of about the V fans' width, apex ~1.6 × their height, i.e. `height` ≈ 10); the f4 frame of the 803.9 moment (v804.0) shows wedges + bow-ties, not tents | — |
+| tried, rejected | 1163.241 `sweep` on the towers only (count 2, intensity 0.5): 1165 +3, but 1169.5 −2; 1269.178 `grid` on the deck only: −15; 317.979 as a `zigzag`: −6; a roof `sheet` for the 206.69 roof fans: −14 … −44 | — |
