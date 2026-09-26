@@ -3,10 +3,15 @@ import type { App } from '../core/App';
 import { clamp, lerp, smoothstep } from '../core/rng';
 import type { FrameContext, Interactable, NamedSpot, System } from '../core/types';
 import type { MotorEffects } from '../intoxication/PerceptionSystem';
+import { stageWalk, surfaceTop, type StageWalk } from '../world/stageWalk';
 import { damp, wobble } from './motion';
 import { DEFAULT_SPOTS, DEFAULT_START_PITCH, DEFAULT_START_SPOT, START_CHOICES, type StartChoice } from './spots';
 
-/** A raised walkable area (e.g. the stage deck). Walkers below its top treat it as a wall. */
+/**
+ * A flat raised walkable area (stage deck, podium, vault floor, castle platform …), highest first.
+ * Read by the camera rig (floor under the third-person camera); the player itself walks the full
+ * stage walk map (world/stageWalk.ts: flat tops, stair ramps, walls with a height range).
+ */
 export interface Platform {
   minX: number;
   maxX: number;
@@ -18,6 +23,7 @@ export interface Platform {
 
 type DensityProvider = { densityAt(x: number, z: number): number };
 type HeightProvider = { heightAt(x: number, z: number): number };
+type CameraModeProvider = { mode?: string };
 
 const SOBER: MotorEffects = { sway: 0, inputLag: 0, balance: 0, lookJitter: 0, speedScale: 1 };
 const GRAVITY = 9.81;
@@ -130,6 +136,10 @@ export class PlayerController implements System {
   static readonly JUMP_HEIGHT = 0.35;
   /** highest ledge you can simply walk onto */
   static readonly STEP_HEIGHT = 0.45;
+  /** drops up to this are stepped down; deeper ones are a (short) fall */
+  static readonly STEP_DOWN = 0.5;
+  /** third-person camera keeps this far under a roof (the vault) */
+  static readonly ROOF_MARGIN = 0.28;
 
   /** look direction (radians, 0 = facing -Z = the stage) */
   yaw = 0;
@@ -158,8 +168,8 @@ export class PlayerController implements System {
   readonly bodyLean = { roll: 0, pitch: 0 };
   /** incremented on every teleport so cameras can snap instead of gliding */
   teleports = 0;
-  /** raised walkable areas; default = the MainStage deck (spots with y > 0 stand on it) */
-  readonly platforms: Platform[] = [{ minX: -70, maxX: 70, minZ: -20, maxZ: 0, y: 2.2 }];
+  /** flat raised walkable areas of the stage walk map, highest first (the camera rig reads them) */
+  readonly platforms: Platform[] = [];
   /** walkable fallback bounds (the world registers the real perimeter as colliders) */
   readonly bounds = { minX: -280, maxX: 280, minZ: -40, maxZ: 460 };
   /** optional hook for footstep sounds (called on every heel strike) */
@@ -168,7 +178,13 @@ export class PlayerController implements System {
   private app!: App;
   private jumpV = 0;
   private jumpQueued = false;
-  private platform: Platform | null = null;
+  /** the walkable stage (null: flat ground only) */
+  private walk: StageWalk | null = null;
+  /** feet supported by a stage surface (deck, stairs, podium, vault …) rather than the terrain */
+  private onStage = false;
+  /** vertical speed while falling off a ledge (m/s, <= 0; 0 = supported) */
+  private fallV = 0;
+  private rig: CameraModeProvider | null | undefined;
   private delay = new InputDelay();
   private densityValid = false;
   private reduced = false;
@@ -183,8 +199,13 @@ export class PlayerController implements System {
 
   init(app: App): void {
     this.app = app;
-    const deck = app.anchors.get('deck_front');
-    if (deck.length) this.platforms[0].y = deck[0].y; // stage system owns the deck height
+    // the walkable stage (pure data: deck, stairs, podium, vault, castle platform) + its flat tops for the camera
+    this.walk = stageWalk();
+    this.platforms.length = 0;
+    for (const s of this.walk.surfaces) if (s.axis === 0) this.platforms.push({ minX: s.minX, maxX: s.maxX, minZ: s.minZ, maxZ: s.maxZ, y: s.y0 });
+    this.platforms.sort((a, b) => b.y - a.y);
+    // third-person camera: never through the vault roof (runs after the camera rig placed the camera)
+    app.onFrame(() => this.clampCameraUnderRoof());
     for (const s of DEFAULT_SPOTS) if (!app.spots.some((x) => x.id === s.id)) app.addSpot(s);
     const P = app.params;
     const rm = P.get('reducemotion') ?? P.get('comfort');
@@ -245,9 +266,12 @@ export class PlayerController implements System {
     if (remember && START_CHOICES.some((c) => c.id === spot.id)) writeStorage(LS_START_SPOT, spot.id);
     const p = this.app.playerPos;
     p.copy(spot.position);
-    this.platform = this.platformAt(p.x, p.z, p.y);
-    if (this.platform) p.y = this.platform.y;
-    else p.y = this.groundAt(p.x, p.z);
+    // stand on the stage surface the spot names (its y), else on the ground
+    const g = this.groundAt(p.x, p.z);
+    const t = this.walk ? this.walk.topAt(p.x, p.z, spot.position.y + 0.3) : NaN;
+    this.onStage = t >= g - 0.01;
+    p.y = this.onStage ? t : g;
+    this.fallV = 0;
     this.yaw = spot.yaw;
     this.pitch = spot.pitch ?? 0;
     this.velocity.set(0, 0, 0);
@@ -279,9 +303,16 @@ export class PlayerController implements System {
     return this.current;
   }
 
-  /** true while standing on a raised platform (stage deck) */
+  /** true while standing on the stage (deck, stairs, podium, vault, castle platform) */
   get onPlatform(): boolean {
-    return this.platform !== null;
+    return this.onStage;
+  }
+
+  /** feet height of the walkable surface under (x, z): the stage walk map, else the terrain */
+  floorAt(x: number, z: number, maxY = Infinity): number {
+    const g = this.groundAt(x, z);
+    const t = this.walk ? this.walk.topAt(x, z, maxY) : NaN;
+    return t >= g ? t : g;
   }
 
   update(ctx: FrameContext): void {
@@ -354,7 +385,7 @@ export class PlayerController implements System {
     p.z += (this.velocity.z + ez) * dt;
 
     // --- jump / fall -------------------------------------------------------------------------
-    if (cmd.jump && this.grounded && this.controlsActive) {
+    if (cmd.jump && this.grounded && this.fallV === 0 && this.controlsActive) {
       this.jumpV = Math.sqrt(2 * GRAVITY * PlayerController.JUMP_HEIGHT);
       this.grounded = false;
     }
@@ -391,6 +422,25 @@ export class PlayerController implements System {
     return Number.isFinite(d) ? Math.max(0, d) : 0;
   }
 
+  /**
+   * Third-person spring arm under a roof: the camera rig's arm collides in 2D only, so inside the
+   * vault (and the portal throat) a long arm or a steep look down would put the lens through the
+   * gold roof. Frame hook after all systems: clamp the lens under the ceiling (no allocation).
+   */
+  private clampCameraUnderRoof(): void {
+    const w = this.walk;
+    if (!w) return;
+    if (this.rig === undefined) this.rig = (this.app.get('camera') as CameraModeProvider | undefined) ?? null;
+    if (!this.rig || this.rig.mode !== 'third') return;
+    const cam = this.app.camera.position;
+    if (!w.underRoof(cam.x, cam.z)) return;
+    const c = w.ceilingAt(cam.x, cam.z) - PlayerController.ROOF_MARGIN;
+    if (cam.y > c) {
+      cam.y = Math.max(c, this.app.playerPos.y + 0.6);
+      this.app.camera.updateMatrixWorld();
+    }
+  }
+
   /** terrain height (m) at x,z; 0 when the terrain system has no height field */
   groundAt(x: number, z: number): number {
     if (this.terrain === undefined) {
@@ -401,39 +451,65 @@ export class PlayerController implements System {
     return typeof h === 'number' && Number.isFinite(h) ? h : 0;
   }
 
-  private platformAt(x: number, z: number, y: number): Platform | null {
-    for (const pl of this.platforms) {
-      if (x >= pl.minX && x <= pl.maxX && z >= pl.minZ && z <= pl.maxZ && y >= pl.y - PlayerController.STEP_HEIGHT) return pl;
-    }
-    return null;
-  }
-
+  /**
+   * Feet follow the highest surface within a step (stage walk map) or the terrain: stepping up / down
+   * (stair ramps, the 0.3 m podium) eases over ~0.1 s, a deeper drop (off the vault landing, off a
+   * step's side) is a short fall with gravity and a knee dip on landing.
+   */
   private updateHeight(p: THREE.Vector3, dt: number): void {
-    if (this.platform) {
-      p.y = this.platform.y;
+    const g = this.groundAt(p.x, p.z);
+    const w = this.walk;
+    const t = w ? w.topAt(p.x, p.z, p.y + PlayerController.STEP_HEIGHT) : NaN;
+    const stage = t >= g - 0.01;
+    this.onStage = stage;
+    const sup = stage ? t : g;
+    const d = sup - p.y;
+    if (this.fallV < 0 || d < -PlayerController.STEP_DOWN) {
+      // falling: gravity until the feet meet the support
+      this.fallV -= GRAVITY * dt;
+      p.y += this.fallV * dt;
+      if (p.y <= sup) {
+        this.dipV -= Math.min(4, -this.fallV) * 0.2;
+        p.y = sup;
+        this.fallV = 0;
+      }
       return;
     }
-    const h = this.groundAt(p.x, p.z);
-    p.y += (h - p.y) * damp(18, dt);
+    if (!stage) p.y += d * damp(18, dt);
+    else if (Math.abs(d) < 0.004) p.y = sup;
+    else p.y += d * damp(22, dt);
   }
 
-  /** push the body circle out of colliders / platform walls, sliding along them */
+  /** push the body circle out of colliders, stage walls and higher stage tops, sliding along them */
   private collide(p: THREE.Vector3): void {
     const r = PlayerController.RADIUS;
-    const pl = this.platform;
-    if (pl) {
-      // on the deck: stay on it (edge rail), only deck obstacles collide
-      p.x = clamp(p.x, pl.minX + r, pl.maxX - r);
-      p.z = clamp(p.z, pl.minZ + r, pl.maxZ - r);
-    }
+    const stage = this.onStage;
+    const feet = p.y;
+    const head = feet + PlayerController.BODY_HEIGHT;
+    const reach = feet + PlayerController.STEP_HEIGHT;
+    const w = this.walk && this.walk.near(p.x, p.z, 2) ? this.walk : null;
     for (let pass = 0; pass < 2; pass++) {
+      // the world's 2D colliders: on the ground everything but the stage's own ('deck…'); on the stage
+      // only the deck obstacles other builders register ('deck…', not the walk map's 'deckw…' copies)
       for (const c of this.app.colliders) {
-        if (pl && !(c.tag && c.tag.startsWith('deck'))) continue;
+        const tag = c.tag;
+        const deck = tag !== undefined && tag.startsWith('deck');
+        if (stage ? !deck || tag.startsWith('deckw') : deck) continue;
         if (c.kind === 'circle') this.pushCircle(p, c.x, c.z, c.r + r);
         else this.pushBox(p, c.minX, c.maxX, c.minZ, c.maxZ, r);
       }
-      if (!pl) {
-        for (const w of this.platforms) if (p.y < w.y - PlayerController.STEP_HEIGHT) this.pushBox(p, w.minX, w.maxX, w.minZ, w.maxZ, r);
+      if (!w) continue;
+      // stage walls with a height range: only those the body overlaps vertically
+      for (const wl of w.walls) {
+        if (wl.y1 <= feet + 0.05 || wl.y0 >= head) continue;
+        if (wl.round) this.pushCircle(p, wl.x, wl.z, wl.r + r);
+        else this.pushBox(p, wl.minX, wl.maxX, wl.minZ, wl.maxZ, r);
+      }
+      // stage tops more than a step above the feet are walls (deck front, landing, stair sides)
+      for (const s of w.surfaces) {
+        if (p.x < s.minX - r || p.x > s.maxX + r || p.z < s.minZ - r || p.z > s.maxZ + r) continue;
+        if (surfaceTop(s, clamp(p.x, s.minX, s.maxX), clamp(p.z, s.minZ, s.maxZ)) <= reach) continue;
+        this.pushBox(p, s.minX, s.maxX, s.minZ, s.maxZ, r);
       }
     }
     const b = this.bounds;
