@@ -224,7 +224,9 @@ export class FogSystem extends CueFxSystem {
     const deckY = Math.max(0, y - 0.3);
     if (area !== 'field') regions.push([new THREE.Vector3(cx, deckY + 0.5, z - 9), new THREE.Vector3(w, 0.7, 20), 0.35, deckY]);
     if (area !== 'deck' || p.spill !== false) regions.push([new THREE.Vector3(cx, 0.45, z + 16), new THREE.Vector3(w * 0.95, 0.5, 34), area === 'deck' ? 0.55 : 1, 0]);
-    if (area === 'field' || area === 'all') regions.push([new THREE.Vector3(0, 0.45, 90), new THREE.Vector3(90, 0.5, 130), 1, 0]);
+    // (the bank thins out over the far field: machines on the deck, the fog flows out and settles —
+    // the lit laser sea over it is the lasers' own layer; the video's far field reads dark, v1536)
+    if (area === 'field' || area === 'all') regions.push([new THREE.Vector3(0, 0.45, 90), new THREE.Vector3(90, 0.5, 130), 0.65, 0]);
     regions.forEach(([c, ext, dk, floorY], i) => {
       // the big field regions use larger, fainter sheets so the bank reads continuous, not as discs
       const big = ext.x * ext.z > 4000;

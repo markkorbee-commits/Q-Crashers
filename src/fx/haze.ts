@@ -84,7 +84,9 @@ void main() {
   float stageF = 1.0 / (1.0 + dot(q, q) * 1.5);
   vec3 df = c - uFlashPos;
   float flashF = 1.0 / (1.0 + dot(df, df) * (1.0 / 4900.0));
-  vec3 light = uAmbient + (uStageLight * 0.4 + uStageWash * 0.3) * stageF;
+  // (the high firework-smoke band hardly sees the rig and the wash, which light the set and the field:
+  // on the video the sky over a red or pink look stays a clean deep blue, v509 / v754)
+  vec3 light = uAmbient + (uStageLight * 0.4 + uStageWash * 0.3) * stageF * (zone == 2 ? 0.35 : 1.0);
   // the low field layer sits right next to the flame units: only a trace of the flash term there
   light += uFlashCol * flashF * (zone == 1 ? 0.1 : 0.28);
   if (zone == 0) light += (min(uStageLight, vec3(2.0)) * 0.25 + uStageWash * 0.3) * uStageBoost;
