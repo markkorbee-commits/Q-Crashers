@@ -98,6 +98,18 @@ const SCATTER_SAT = 4;
 const SCATTER_GAIN = 0.5;
 /** storm haze: how far the beams bloom into soft shafts (was 0.85: wide milky shafts; the video's are crisp) */
 const STORM_SOFT = 0.45;
+/**
+ * Laser light held by the smoke (LaserSystem.airLight: sheets scanning a dense low fog) in the flood
+ * volume: the air over the field and the stage glows in the sea colour (Embers v1112-1175: the whole frame
+ * a saturated blue smoke volume, sRGB ≈ [0, 4, 100] where ours was black). Per unit of air light.
+ */
+const LASER_AIR_K = 0.012;
+/**
+ * saturation of that glow (as SCATTER_SAT): the sheets' #2A60FF reads periwinkle in a flat veil; the video's
+ * lit smoke is a deep pure blue. Round 5: 1169.5 s 29 -> 42 %, 1165 26 -> 43 %; a flat periwinkle veil at the
+ * same level lost 2-15 points (it greys the frame out)
+ */
+const LASER_AIR_SAT = 3;
 /** static downlights (arch crown): PAR-can beam half angle and the lit lens face seen off-axis */
 const TAN_CAN = Math.tan((6 * Math.PI) / 180);
 const CAN_GAIN = 5;
@@ -190,6 +202,13 @@ export class LightingSystem implements System {
   /** saturated wash / rig colour of the storm-haze scatter (scratch) */
   private readonly cSW = new THREE.Color();
   private readonly cSR = new THREE.Color();
+  /** this frame's flood colours before the laser air (the frame hook adds it idempotently) */
+  private readonly floodBase: THREE.Vector3[] = Array.from({ length: FLOOD_BLOBS }, () => new THREE.Vector3());
+  private laserSys: { airLight?: unknown } | null | undefined = undefined;
+  /** laser air gain (LASER_AIR_K), exposed for side-by-side calibration */
+  laserAirK = LASER_AIR_K;
+  laserAirSat = LASER_AIR_SAT;
+  private readonly cSL = new THREE.Color();
   private baseHaze = 0.6;
   private hazeCam: { hazeScale?: number } | null = null;
   private festoonLit = 0;
@@ -248,6 +267,8 @@ export class LightingSystem implements System {
       glowScale();
       this.flood.fit(camera);
     };
+    // the lasers update after us: their light in the smoke joins the flood volume once every system ran
+    app.onFrame(() => this.applyLaserAir());
 
     // visual lifetimes: looks fade out, blinders glow down, strobe flashes decay
     app.show.registerLifetime('lights', (c) => {
@@ -750,6 +771,7 @@ export class LightingSystem implements System {
     const washGlow = env.stageWashIntensity / (1 + 0.45 * env.stageWashIntensity);
     this.glow.update(cam.position, env.stageWashColor, washGlow + strobe * 0.35, this.floorGlow, floorI, 0.02 * hz);
     this.writeFloodGlow(env, haze, sumDim / nf, strobe);
+    for (let i = 0; i < FLOOD_BLOBS; i++) this.floodBase[i].copy(this.flood.cols[i]);
     this.flood.update();
 
     this.dev?.update(ctx);
@@ -1064,6 +1086,29 @@ export class LightingSystem implements System {
     }
   }
   private scatter = 0;
+
+  /**
+   * flood colours = this frame's floods + the laser light held by the smoke (LaserSystem.airLight, read
+   * after all systems ran; idempotent, so a frame hook that runs twice adds it once)
+   */
+  private applyLaserAir(): void {
+    if (!this.flood || !this.app.isSystemEnabled('lights')) return;
+    const cols = this.flood.cols;
+    for (let i = 0; i < FLOOD_BLOBS; i++) cols[i].copy(this.floodBase[i]);
+    if (this.laserSys === undefined) this.laserSys = (this.app.get('lasers') as unknown as { airLight?: unknown } | undefined) ?? null;
+    const la = this.laserSys && this.app.isSystemEnabled('lasers') ? this.laserSys.airLight : null;
+    if (la instanceof THREE.Color && la.r + la.g + la.b > 1e-4) {
+      // (saturated like the storm scatter: the video's lit smoke is a deep pure blue, not periwinkle)
+      const c = saturateColor(la, this.laserAirSat, this.cSL);
+      const k = this.laserAirK;
+      this.addGlow(FB_FIELD, c, k);
+      this.addGlow(FB_FIELD_FAR, c, k * 1.2);
+      this.addGlow(FB_STAGE, c, k * 0.5);
+      this.addGlow(FB_STAGE_HIGH, c, k * 0.8);
+    }
+    this.flood.update();
+  }
+
   /** add colour x k to a flood glow slot (bound once: no per-frame closure) */
   private readonly addGlow = (slot: number, c: THREE.Color, k: number): void => {
     if (k <= 0) return;
