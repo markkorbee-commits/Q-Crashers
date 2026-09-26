@@ -421,7 +421,8 @@ export function buildBars(bars: BarDef[], lowDetail: boolean): BuiltBars {
     group.add(mesh);
   }
 
-  const bulbGeo = new THREE.IcosahedronGeometry(0.045, 1);
+  // 4.5 cm bulbs: 80 tris each on desktop, 20 on phones (~200 bulbs: 17k -> 4k triangles)
+  const bulbGeo = new THREE.IcosahedronGeometry(0.045, lowDetail ? 0 : 1);
   const bulbs = new THREE.InstancedMesh(bulbGeo, mats.warm, bulbMatrices.length);
   bulbs.name = 'bars-bulbs';
   bulbMatrices.forEach((m, i) => bulbs.setMatrixAt(i, m));

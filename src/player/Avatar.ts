@@ -351,8 +351,9 @@ export class Avatar {
       tex.needsUpdate = true;
     };
     draw();
-    // redraw once the display font is available
+    // redraw once the display font is available (the font stylesheet loads without blocking the page)
     document.fonts?.ready.then(draw).catch(() => {});
+    document.getElementById('webfonts')?.addEventListener('load', () => document.fonts?.load("700 40px 'Oswald'").then(draw).catch(() => {}), { once: true });
     return tex;
   }
 

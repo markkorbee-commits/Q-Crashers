@@ -25,8 +25,10 @@ const LOCK_MODES = new Set(['first', 'third', 'free', 'photo']);
 const DIGIT_MODES: Record<string, CamMode> = { Digit1: 'first', Digit2: 'third', Digit3: 'free', Digit4: 'flyover', Digit5: 'showcam', Digit6: 'photo' };
 /** play / skip / mute: also active while a panel is open */
 const MEDIA_KEYS = new Set(['KeyK', 'KeyJ', 'KeyL', 'KeyM']);
-/** shortcuts still active in photo mode */
+/** shortcuts still active in photo mode (F = autofocus there, not fullscreen) */
 const PHOTO_KEYS = new Set(['KeyO', 'KeyH', 'KeyF', 'KeyK', 'KeyJ', 'KeyL', 'KeyM', ...Object.keys(DIGIT_MODES)]);
+/** seconds between the last show frame and the "Thank you" card (the final image breathes first) */
+const END_CARD_DELAY = 5;
 
 /**
  * DOM overlay: landing, audio source, onboarding, HUD show controls, menus, photo / cinema modes,
@@ -63,6 +65,11 @@ export class UI {
   private wroteExposure = -1;
   private wroteBloom = -1;
   private coachTimer = 0;
+  private endTimer = 0;
+  /** double tap on the left / right third of the view (touch): ±10 s */
+  private lastTap = { t: -1e9, x: 0, side: 0 };
+  private ripple: HTMLElement | null = null;
+  private rippleTimer = 0;
   private externalPrompt = false;
   private externalLabel: string | null = null;
   private nearest: Interactable | null = null;
@@ -81,6 +88,13 @@ export class UI {
     this.touch = app.device.touch;
     this.autostart = app.params.has('autostart');
     installGrain();
+    // web fonts load without blocking the first paint (index.html): switch the stylesheet on once it
+    // arrived, also where an inline onload handler is not allowed (strict CSP / sandboxed page)
+    const fontCss = document.getElementById('webfonts') as HTMLLinkElement | null;
+    if (fontCss && fontCss.media !== 'all') {
+      if (fontCss.sheet) fontCss.media = 'all';
+      else fontCss.addEventListener('load', () => (fontCss.media = 'all'), { once: true });
+    }
     // phones / tablets get the touch layout (slim show bar, thumb controls above it)
     let coarse = false;
     try {
@@ -108,7 +122,7 @@ export class UI {
     this.hud = new Hud(app, this.root, this.actions(), this.touch);
     this.perc = new PerceptionUI(this, this.root);
     this.photo = new PhotoPanel(this, this.root);
-    this.pip = new PiP(this.root);
+    this.pip = new PiP(this.root, this.root.classList.contains('touch'));
     this.barMenu = new BarMenu(this);
     this.audio = new AudioFlow(this);
     this.cinemaExit = h('button', { class: 'btn cinema-exit glass strong', type: 'button', html: `${icon('eye')}<span>Show interface</span>` });
@@ -117,10 +131,16 @@ export class UI {
 
     // ---- app events
     const ev = app.events;
-    ev.on('loading:progress', ({ label, progress }) => this.landing?.setProgress(label, progress));
+    ev.on('loading:progress', ({ label, progress, next, etaMs }) => this.landing?.setProgress(label, progress, next, etaMs));
     ev.on('toast', ({ text, ms }) => this.toast(text, ms));
     ev.on('show:ended', () => {
-      if (this.entered && !this.autostart) openEnded(this);
+      if (!this.entered || this.autostart) return;
+      // let the last firework / cold-fire moment breathe before the card fades in over it
+      clearTimeout(this.endTimer);
+      this.endTimer = window.setTimeout(() => {
+        const c = this.app.clock;
+        if (!c.playing && c.time >= this.app.show.duration - 1 && !this.layers.modalOpen) openEnded(this);
+      }, END_CARD_DELAY * 1000);
     });
     ev.on('audio:source', () => this.refreshSource());
     ev.on('audio:analysis', ({ status, message }) => {
@@ -164,7 +184,7 @@ export class UI {
     window.addEventListener('pointerup', (e) => {
       if (e.pointerType === 'mouse' || e.pointerId !== this.tapStart.id) return;
       const moved = Math.hypot(e.clientX - this.tapStart.x, e.clientY - this.tapStart.y);
-      if (moved < 14 && e.timeStamp - this.tapStart.t < 450) this.onTap();
+      if (moved < 14 && e.timeStamp - this.tapStart.t < 450) this.onTap(e.target === app.canvas ? e.clientX : -1, e.timeStamp);
     });
     app.canvas.addEventListener('click', () => {
       this.tryLock();
@@ -237,13 +257,14 @@ export class UI {
     this.tryLock();
     // keep the show bar up for a while so first-time viewers see where the controls are
     this.poke(7500);
-    if (this.touch) this.coach();
+    this.coach();
   }
 
-  /** one-time labels under the toolbar icons (touch devices have no hover tooltips) */
+  /** one-time labels under the toolbar icons (icons alone do not say 'Perception' or 'Quality') */
   private coach(): void {
-    if (store.get('dq26.coach') === '1') return;
-    store.set('dq26.coach', '1');
+    const key = this.touch ? 'dq26.coach' : 'dq26.coachDesk';
+    if (store.get(key) === '1') return;
+    store.set(key, '1');
     this.root.classList.add('coach');
     clearTimeout(this.coachTimer);
     const off = () => {
@@ -341,9 +362,13 @@ export class UI {
     this.poke();
   }
 
+  /** from the top, playing (a paused show restarts too: 'Restart' means replay, not rewind) */
   restart(): void {
-    this.app.clock.restart();
-    this.toast('Back to the start of the Endshow', 1600, 'restart');
+    clearTimeout(this.endTimer);
+    if (this.layers.isOpen('ended')) this.layers.close('ended');
+    this.app.clock.seek(0);
+    void this.play();
+    this.toast('Restarting the Endshow', 1600, 'restart');
     this.poke();
   }
 
@@ -359,6 +384,10 @@ export class UI {
     store.set('dq26.volume', String(this.volume));
     store.set('dq26.muted', this.muted ? '1' : '0');
     this.applyVolume();
+  }
+
+  get isMuted(): boolean {
+    return this.muted;
   }
 
   toggleMute(): void {
@@ -623,13 +652,62 @@ export class UI {
     this.hudUntil = Math.max(this.hudUntil, performance.now() + holdMs);
   }
 
-  private onTap() {
+  private onTap(x = -1, ts = 0) {
     this.poke(this.touch ? 4000 : 3000);
+    if (x >= 0) this.doubleTapSkip(x, ts);
     if (this.cinema && this.touch) {
       this.cinemaExit.classList.add('show');
       clearTimeout(this.cinemaExitTimer);
       this.cinemaExitTimer = window.setTimeout(() => this.cinemaExit.classList.remove('show'), 3500);
     }
+  }
+
+  /**
+   * Touch: double tap on the left or right third of the picture skips 10 s back / forward (video-app
+   * convention), with a ripple on that side. Not in photo mode (taps there aim the shot).
+   */
+  private doubleTapSkip(x: number, ts: number): void {
+    if (!this.entered || this.photo.open || this.layers.anyOpen || !this.root.classList.contains('touch')) return;
+    const w = window.innerWidth;
+    const side = x < w / 3 ? -1 : x > (2 * w) / 3 ? 1 : 0;
+    // event timestamps: a slow frame between the two taps must not break the double tap
+    const now = ts || performance.now();
+    const lt = this.lastTap;
+    if (side !== 0 && lt.side === side && now - lt.t < 360) {
+      this.skip(side * 10);
+      this.showRipple(side);
+      lt.t = -1e9;
+      return;
+    }
+    lt.t = now;
+    lt.side = side;
+    lt.x = x;
+  }
+
+  private showRipple(side: number): void {
+    if (!this.ripple) {
+      this.ripple = h('div', { class: 'skip-ripple', 'aria-hidden': 'true' });
+      this.root.appendChild(this.ripple);
+    }
+    const r = this.ripple;
+    r.className = `skip-ripple ${side < 0 ? 'left' : 'right'}`;
+    r.innerHTML = `${icon(side < 0 ? 'back10' : 'fwd10')}<span>${side < 0 ? '−10 s' : '+10 s'}</span>`;
+    void r.offsetWidth;
+    r.classList.add('go');
+    clearTimeout(this.rippleTimer);
+    this.rippleTimer = window.setTimeout(() => r.classList.remove('go'), 700);
+  }
+
+  /** comfort: no head bob, sway, roll, jostle, drone drift or bass shake (player + perception follow) */
+  setReduceMotion(on: boolean): void {
+    tryCall(player(this.app), 'setReduceMotion', on);
+    const perc = this.app.get('perception') as unknown as { setReducedMotion?(v: boolean | null): void } | undefined;
+    perc?.setReducedMotion?.(null);
+  }
+
+  get reduceMotion(): boolean {
+    const p = player(this.app) as unknown as { reduceMotion?: boolean } | undefined;
+    return !!p?.reduceMotion;
   }
 
   /** let Tab move focus through the interface while the mouse is free (Input blocks it otherwise) */
@@ -676,10 +754,10 @@ export class UI {
         openPositions(this);
         break;
       case 'KeyX':
-        this.perc.open();
+        this.perc.open(this.hud.btn.perception);
         break;
       case 'KeyG':
-        openCrowd(this);
+        openCrowd(this, this.hud.btn.crowd);
         break;
       case 'KeyH':
         this.toggleCinema();
@@ -688,7 +766,9 @@ export class UI {
         this.toggleMute();
         break;
       case 'KeyF':
-        this.toggleFullscreen();
+        // photo mode: F = autofocus (the camera rig focuses; the panel follows)
+        if (this.photo.open) this.photo.autofocus();
+        else this.toggleFullscreen();
         break;
       case 'KeyE':
         this.interact();
@@ -768,7 +848,10 @@ export class UI {
     if (tr.kind !== 'youtube') this.stallWarned = false;
 
     // roll fallback for photo mode when the rig has no setRoll
-    if (this.photo.open && this.photo.fallbackRoll !== 0) this.app.camera.rotation.z = this.photo.fallbackRoll;
+    if (this.photo.open) {
+      this.photo.tick();
+      if (this.photo.fallbackRoll !== 0) this.app.camera.rotation.z = this.photo.fallbackRoll;
+    }
   }
 
   /**

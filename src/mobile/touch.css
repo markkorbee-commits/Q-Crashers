@@ -307,7 +307,8 @@
   align-items: center;
   justify-content: center;
   padding: calc(24px + env(safe-area-inset-top, 0px)) 24px calc(24px + env(safe-area-inset-bottom, 0px));
-  background: radial-gradient(ellipse at 50% 40%, rgba(42, 3, 3, 0.9) 0%, rgba(7, 7, 10, 0.94) 70%);
+  /* opaque: the landing's glowing title and ENTER button must not show through the advice */
+  background: radial-gradient(ellipse at 50% 40%, #2a0303 0%, #07070a 70%) #07070a;
   pointer-events: auto;
   touch-action: none;
   font-family: 'Oswald', 'Impact', system-ui, sans-serif;

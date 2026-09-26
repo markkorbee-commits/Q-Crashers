@@ -16,9 +16,36 @@ interface Layer {
   el: HTMLElement;
   root: HTMLElement;
   opts: LayerOpts;
+  dispose: () => void;
 }
 
 const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])';
+
+/**
+ * Scroll cue for a scrollable panel / card: `more-below` / `more-above` classes (CSS fades that
+ * edge) while there is more content in that direction. Updates on scroll and on size changes.
+ */
+export function trackScrollEdges(el: HTMLElement): () => void {
+  const sync = () => {
+    const max = el.scrollHeight - el.clientHeight;
+    const below = max > 4 && el.scrollTop < max - 4;
+    const above = max > 4 && el.scrollTop > 4;
+    if (el.classList.contains('more-below') !== below) el.classList.toggle('more-below', below);
+    if (el.classList.contains('more-above') !== above) el.classList.toggle('more-above', above);
+  };
+  el.addEventListener('scroll', sync, { passive: true });
+  let ro: ResizeObserver | null = null;
+  if (typeof ResizeObserver !== 'undefined') {
+    ro = new ResizeObserver(sync);
+    ro.observe(el);
+    for (const c of Array.from(el.children)) ro.observe(c);
+  }
+  requestAnimationFrame(sync);
+  return () => {
+    el.removeEventListener('scroll', sync);
+    ro?.disconnect();
+  };
+}
 
 /** was the last user interaction a keyboard press? (focus moves into new layers only then) */
 let keyboardMode = false;
@@ -82,8 +109,11 @@ export class Layers {
     } else {
       el.setAttribute('role', 'dialog');
     }
+    // a toolbar button focused by an earlier layer must not look active for this one
+    const prev = document.activeElement as HTMLElement | null;
+    if (prev && prev !== opts.trigger && prev.closest?.('[data-keep-panel]')) prev.blur();
     this.host.appendChild(root);
-    this.stack.push({ id, el, root, opts });
+    this.stack.push({ id, el, root, opts, dispose: trackScrollEdges(el) });
     opts.trigger?.setAttribute('aria-expanded', 'true');
     requestAnimationFrame(() => {
       if (!keyboardMode) {
@@ -106,6 +136,7 @@ export class Layers {
     if (idx < 0) return;
     const [l] = this.stack.splice(idx, 1);
     const hadFocus = l.root.contains(document.activeElement);
+    l.dispose();
     l.root.remove();
     l.opts.trigger?.setAttribute('aria-expanded', 'false');
     if (hadFocus && l.opts.trigger && document.contains(l.opts.trigger)) l.opts.trigger.focus({ preventScroll: true });

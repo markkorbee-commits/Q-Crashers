@@ -76,7 +76,8 @@ export class Hud {
     // ---- toolbar (top-right)
     const LABEL: Record<string, string> = { positions: 'Spots', crowd: 'Crowd', perception: 'Perception', photo: 'Photo', quality: 'Quality', cinema: 'Hide UI', fullscreen: 'Full', help: 'Help' };
     const tb = (id: string, ico: string, tip: string, fn: (el: HTMLButtonElement) => void, extra = '') => {
-      const b = h('button', { class: `icon-btn ${extra}`, type: 'button', 'aria-label': tip, 'data-tip': tip, 'data-label': LABEL[id], 'data-tip-pos': id === 'help' ? 'left' : undefined, html: icon(ico) });
+      // the text label is shown next to the icon on wide screens (CSS), the coach marks use data-label
+      const b = h('button', { class: `icon-btn ${extra}`, type: 'button', 'aria-label': tip, 'data-tip': tip, 'data-label': LABEL[id], 'data-tip-pos': id === 'help' ? 'left' : undefined, html: `${icon(ico)}<span class="tb-l" aria-hidden="true">${LABEL[id]}</span>` });
       b.addEventListener('click', (e) => {
         fn(b);
         if ((e as PointerEvent).detail > 0) b.blur();
@@ -191,9 +192,29 @@ export class Hud {
 
     parent.append(this.brand, this.toolbar, this.showbar, this.prompt, this.resume);
     this.updateNarrow();
-    window.addEventListener('resize', () => this.updateNarrow());
+    window.addEventListener('resize', () => {
+      this.updateNarrow();
+      this.publishSpace();
+    });
     this.paintRange(this.vol);
+    // panels and the Moments popover size themselves against the show bar (--sb-space)
+    if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => this.publishSpace()).observe(this.showbar);
+    this.publishSpace();
   }
+
+  /** px from the bottom of the window to the top of the show bar (+ its gap), as --sb-space on #ui */
+  private publishSpace(): void {
+    const host = this.showbar.parentElement;
+    if (!host) return;
+    const top = this.showbar.offsetTop;
+    if (!(top > 0) || !this.showbar.offsetHeight) return;
+    const space = Math.max(0, Math.round(host.clientHeight - top));
+    if (space !== this.lastSpace) {
+      this.lastSpace = space;
+      host.style.setProperty('--sb-space', `${space}px`);
+    }
+  }
+  private lastSpace = -1;
 
   /** on very narrow screens and on touch devices the segmented camera control collapses into one button (camera sheet) */
   private updateNarrow() {
@@ -211,6 +232,7 @@ export class Hud {
   build(): void {
     this.timeline.build();
     setText(this.timeDur, fmtTime(this.app.show.duration));
+    this.publishSpace();
   }
 
   setVolumeUi(v: number, muted: boolean): void {
@@ -255,7 +277,7 @@ export class Hud {
   setFullscreen(on: boolean): void {
     const b = this.btn.fullscreen;
     if (!b) return;
-    b.innerHTML = icon(on ? 'unfullscreen' : 'fullscreen');
+    b.innerHTML = `${icon(on ? 'unfullscreen' : 'fullscreen')}<span class="tb-l" aria-hidden="true">${on ? 'Exit full' : 'Full'}</span>`;
     b.setAttribute('aria-label', on ? 'Exit fullscreen (F)' : 'Fullscreen (F)');
     b.setAttribute('data-tip', on ? 'Exit fullscreen (F)' : 'Fullscreen (F)');
   }

@@ -105,7 +105,8 @@ export class BarSystem implements System {
         const it: Interactable = {
           id: `bar_${b.id}_${i}`,
           position: v.clone(),
-          radius: Math.max(2.4, W / n / 2 + 0.6),
+          // reaches the arrival point of the bar spot (teleport -> E works at once) and the queue lanes
+          radius: Math.max(2.8, W / n / 2 + 1.0),
           label: 'Order a drink',
           // with a drink in hand the same action takes a sip (consistent for E, touch and the player controller)
           onInteract: () => {
@@ -134,15 +135,16 @@ export class BarSystem implements System {
   }
 
   /**
-   * Arrival point for a bar: 4 m out from the counter in the gap between the last two queue lanes
-   * at the end farther from the stage (the crowd keeps the queue field thin, the queues stand in
-   * their lanes to either side), looking at the counter ~28° off-axis so the bar recedes towards
-   * the stage end.
+   * Arrival point for a bar: 2.8 m out from the counter (inside the order radius of the nearest
+   * serving point, so the 'Order a drink' prompt shows on arrival) in the gap between the last two
+   * queue lanes at the end farther from the stage (the crowd keeps the queue field thin, the queues
+   * stand in their lanes to either side), looking at the counter ~28° off-axis so the bar recedes
+   * towards the stage end.
    */
   private viewSpot(b: BarDef): { position: THREE.Vector3; yaw: number } {
     const W = b.width;
     const n = Math.max(1, Math.round(W / 5));
-    const lz = COUNTER_FRONT_Z + 4;
+    const lz = COUNTER_FRONT_Z + 2.8;
     // midway between the last two interaction points (lanes), each end
     const gap = n > 1 ? W / 2 - W / n : 0;
     const a = barToWorld(b, gap, lz, new THREE.Vector3());

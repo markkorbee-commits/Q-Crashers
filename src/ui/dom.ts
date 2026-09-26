@@ -91,7 +91,7 @@ export function downloadBlob(blob: Blob, name: string): void {
 }
 
 /** Make an element draggable by a handle, constrained to the viewport. Returns a dispose fn. */
-export function makeDraggable(el: HTMLElement, handle: HTMLElement, onMove?: () => void): () => void {
+export function makeDraggable(el: HTMLElement, handle: HTMLElement, onMove?: () => void, onEnd?: () => void): () => void {
   let sx = 0,
     sy = 0,
     ox = 0,
@@ -123,7 +123,7 @@ export function makeDraggable(el: HTMLElement, handle: HTMLElement, onMove?: () 
     onMove?.();
   };
   const up = (e: PointerEvent) => {
-    if (e.pointerId !== pid) return;
+    if (e.pointerId !== pid || !dragging) return;
     dragging = false;
     el.classList.remove('dragging');
     try {
@@ -131,6 +131,7 @@ export function makeDraggable(el: HTMLElement, handle: HTMLElement, onMove?: () 
     } catch {
       /* already released */
     }
+    onEnd?.();
   };
   handle.addEventListener('pointerdown', down);
   handle.addEventListener('pointermove', move);

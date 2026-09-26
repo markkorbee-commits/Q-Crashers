@@ -24,6 +24,8 @@ const GRAVITY = 9.81;
 const TAU = Math.PI * 2;
 /** hard cap on camera roll from sway / bob / jostle (1°): rolled horizons cause simulator sickness */
 const MAX_ROLL = 0.0175;
+/** eye height (m) when sitting / slumped on the ground (perception motor.seated) */
+const SEATED_EYE = 1.0;
 /** localStorage keys (per-viewer conveniences, never required) */
 const LS_REDUCE_MOTION = 'defqon.reduceMotion';
 const LS_START_SPOT = 'defqon.startSpot';
@@ -202,6 +204,11 @@ export class PlayerController implements System {
 
   /** Comfort setting: no head bob, sway, roll or jostle (motion-sensitive viewers). */
   get reduceMotion(): boolean {
+    return this.reduced;
+  }
+
+  /** alias read by the perception system (screen swim, nystagmus and look lag follow this flag) */
+  get reducedMotion(): boolean {
     return this.reduced;
   }
 
@@ -527,10 +534,20 @@ export class PlayerController implements System {
       idle * 0.004 * wobble(t * 0.21, 13) +
       still * bal * 0.22 * wobble(t * 0.43, 7) +
       press * 0.035 * wobble(t * 1.7, 11);
-    o.y = -ampV * Math.cos(2 * ph) + this.dip * (this.reduced ? 0.5 : 1) + sway * 0.02 * wobble(t * 0.29, 2) + idle * 0.0025 * Math.sin(t * 1.45);
+    // intoxication outcomes (perception motor): a stumble dips the head ~6 cm and ~3° for a moment,
+    // sitting / slumping down lowers the eyes towards ~1 m (walking is frozen by speedScale)
+    const trip = smoothstep(0.5, 1, motor.stumble ?? 0) * (this.reduced ? 0.4 : 1);
+    const seated = smoothstep(0, 1, motor.seated ?? 0);
+    o.y =
+      -ampV * Math.cos(2 * ph) +
+      this.dip * (this.reduced ? 0.5 : 1) +
+      sway * 0.02 * wobble(t * 0.29, 2) +
+      idle * 0.0025 * Math.sin(t * 1.45) -
+      0.06 * trip -
+      (PlayerController.EYE_HEIGHT - SEATED_EYE) * seated;
     o.z = press * 0.045 * wobble(t * 1.3, 5);
     const r = this.eyeRot;
-    r.x = 0.0015 * Math.sin(2 * ph) * bob + sway * 0.012 * wobble(t * 0.31, 5) + jit * 0.004 * wobble(t * 6.1, 8) + idle * 0.0006 * wobble(t * 0.33, 14);
+    r.x = 0.0015 * Math.sin(2 * ph) * bob + sway * 0.012 * wobble(t * 0.31, 5) + jit * 0.004 * wobble(t * 6.1, 8) + idle * 0.0006 * wobble(t * 0.33, 14) - 0.052 * trip;
     r.y = sway * 0.02 * wobble(t * 0.19, 4) + jit * 0.005 * wobble(t * 5.3, 9) + idle * 0.0008 * wobble(t * 0.17, 15);
     // roll is the most nauseating component: never more than 1°
     r.z = clamp(0.0022 * Math.sin(ph) * bob + sway * 0.012 * wobble(t * 0.23, 3) + crowd01 * m * 0.004 * wobble(t * 1.9, 12), -MAX_ROLL, MAX_ROLL);
