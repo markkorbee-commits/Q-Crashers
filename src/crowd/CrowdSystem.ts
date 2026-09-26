@@ -189,6 +189,9 @@ export class CrowdSystem implements System {
   private readonly nAllow = new Int32Array(CAND_BINS);
   private frame = 0;
   private cpuMs = 0;
+  /** update() ran this frame: lateUpdate() owes the camera-dependent part */
+  private lateDue = false;
+  private updMs = 0;
   private rebuildTimer = 0;
   private testEnv = false;
   private testColor: THREE.Color | null = null;
@@ -294,6 +297,7 @@ export class CrowdSystem implements System {
     this.u = this.makeUniforms();
     await app.loadStep('bodies', 0.08);
     this.buildMeshes();
+    app.onFrame((ctx) => this.lateUpdate(ctx));
 
     // the piano riser is ours (bible §5.11): block the player, offer it as a viewpoint
     app.addCollider({ kind: 'box', minX: -2.8, maxX: 2.8, minZ: 57, maxZ: 61, tag: 'piano-riser' });
@@ -661,7 +665,6 @@ export class CrowdSystem implements System {
       this.perf.timing.load(app.show.file ? app.show : null);
     }
     this.perf.update(t, ctx.time, ctx.beat.beat, ctx.beat.bpm, m[M.LOOKUP], this.populated);
-    this.uploadPerformers(ctx.camera);
     (u.uLantern.value as THREE.Vector4).copy(this.perf.lantern);
     // set wash spilling onto the deck (follow spots / key lights are per performer, see Performers)
     const env = app.env;
@@ -672,8 +675,31 @@ export class CrowdSystem implements System {
     const cam = ctx.camera;
     u.uPixel.value = (2 * Math.tan((cam.fov * Math.PI) / 360)) / Math.max(200, app.renderer.domElement.height);
 
-    // --- crowd LOD bucketing (every 3rd frame, or at once when the camera jumps / turns)
     if (this.populated) {
+      this.lightsMesh.visible = m[M.PHONES] > 0.01 || m[M.LIGHTERS] > 0.01;
+      this.flagMesh.visible = this.layout.flags.length > 0;
+    }
+    // the camera-dependent work (LOD lists, near-lens fade list, crew culling) runs in lateUpdate(),
+    // after the camera rig has placed this frame's camera
+    this.updMs = performance.now() - t0;
+    this.lateDue = true;
+  }
+
+  /**
+   * After every system updated (App.onFrame hook, before render): LOD bucketing and the performer
+   * upload with the camera pose this frame is rendered with. Run inside update() (crowd updates
+   * before the camera rig) they used the previous frame's camera: the first frame after every show
+   * camera cut or teleport drew the crowd bucketed for the old viewpoint — the people around the
+   * new camera were missing for one frame (a flicker at each cut).
+   */
+  private lateUpdate(ctx: FrameContext): void {
+    if (!this.lateDue) return;
+    this.lateDue = false;
+    const t0 = performance.now();
+    const cam = ctx.camera;
+    this.uploadPerformers(cam);
+    // --- crowd LOD bucketing (every 3rd frame, or at once when the camera jumps / turns)
+    if (this.populated && this.layout && this.meshes) {
       cam.getWorldDirection(this.tmpV);
       // 0.6 m: the near-lens fade list must follow a fast camera (slower moves re-bucket every 3rd frame)
       const moved = cam.position.distanceToSquared(this.lastCam) > 0.36 || this.tmpV.dot(this.lastDir) < 0.995;
@@ -682,10 +708,8 @@ export class CrowdSystem implements System {
         this.bucket(cam);
         this.bucketMs = this.bucketMs * 0.8 + (performance.now() - tb) * 0.2;
       }
-      this.lightsMesh.visible = m[M.PHONES] > 0.01 || m[M.LIGHTERS] > 0.01;
-      this.flagMesh.visible = this.layout.flags.length > 0;
     }
-    const ms = performance.now() - t0;
+    const ms = this.updMs + performance.now() - t0;
     this.cpuMs = this.cpuMs * 0.9 + ms * 0.1;
   }
 

@@ -224,8 +224,10 @@ const MC_PATH = new Path([
   { t: 465, x: -4, z: -3.5 },
   { t: 478, x: 8, z: -3.5 },
   { t: 489, x: 12, z: -3.8 },
-  { t: 498.4, x: 7, z: -5.0 },
-  { t: 502, x: 1.5, z: -7.2 },
+  // back towards the booth for the close-ups v496.16 / v497.64 (cameras at x 5.6 / 0.4 aimed at
+  // x ~3), then he dances on the spot in the cyan backlight (v498.36–502.04) until the drop's cut
+  { t: 495.6, x: 3.8, z: -6.1 },
+  { t: 502.2, x: 2.6, z: -6.8 },
 ]);
 const MC_T0 = 332;
 const TROUPE_T0 = 642;
@@ -403,9 +405,9 @@ export class Performers {
       const moving = clamp(pp.speed / 0.8, 0, 1);
       const walkYaw = Math.atan2(pp.dx, pp.dz);
       f.yaw = moving > 0.15 ? lerp(0, walkYaw, 0.55 * moving) : 0.15 * Math.sin(t * 0.3);
-      if (tm < 339 || tm > 499) f.yaw = walkYaw;
+      if (tm < 339) f.yaw = walkYaw;
       // white follow spot from the FOH tower while he performs
-      f.glow = -0.9 * smoothstep(MC_T0 + 4, MC_T0 + 7, tm) * (1 - smoothstep(499, 501.5, tm));
+      f.glow = -0.9 * smoothstep(MC_T0 + 4, MC_T0 + 7, tm) * (1 - smoothstep(501.4, 502.1, tm));
       walk(p, pp.dist / 1.45, moving);
       // mic at the mouth (left hand)
       setArm(p.armL, 58, -14, 142, 10);
