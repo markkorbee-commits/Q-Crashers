@@ -291,12 +291,14 @@ const LED_FRAG = /* glsl */ `
         float bx = (p.x + h11(row * 1.7 + seed) * bl) / bl;
         vec2 f = vec2(fract(bx) * bl, fract(p.y / ch) * ch);
         vec2 e = min(f, vec2(bl, ch) - f);
-        float jw = 0.045 + fw * 0.7;
-        float joint = mix(smoothstep(jw * 0.5, jw * 1.5, min(e.x, e.y)), 0.85, far);
-        float shade = 0.5 + 0.5 * h21(vec2(floor(bx), row) + seed * 3.0);
-        float grain = 0.82 + 0.18 * vnoise(p * vec2(5.0, 8.0) + seed * 11.0);
-        // uplit from the deck floods: bright foot fading into the dark top
-        float up = mix(1.0, 0.28, smoothstep(0.0, size.y * 0.95, p.y));
+        float jw = 0.07 + fw * 0.7;
+        float joint = mix(smoothstep(jw * 0.5, jw * 1.5, min(e.x, e.y)), 0.8, far);
+        float shade = 0.38 + 0.62 * h21(vec2(floor(bx), row) + seed * 3.0);
+        float grain = 0.78 + 0.22 * vnoise(p * vec2(5.0, 8.0) + seed * 11.0);
+        // uplit from the deck floods: a pool on the panel's centre line at the foot, fading into the
+        // dark top and the edges
+        float cx = (p.x - size.x * 0.5) / (size.x * 0.5);
+        float up = mix(1.0, 0.25, smoothstep(0.0, size.y * 0.95, p.y)) * mix(0.5, 1.0, exp(-cx * cx * 1.6));
         float lit = joint * shade * grain * up;
         float rec = 1.0 - joint;
         // arcade at the foot: round arches, dark openings with a faint glow at their sill
@@ -305,8 +307,9 @@ const LED_FRAG = /* glsl */ `
         float spring = 0.35 + aw * 1.1;
         vec2 ad = vec2(ax, max(p.y - spring, 0.0));
         float open = (1.0 - smoothstep(aw * 0.5 - 0.03, aw * 0.5, length(ad))) * step(0.35, p.y);
-        float ring = (1.0 - smoothstep(aw * 0.5 + 0.1, aw * 0.5 + 0.17, length(ad))) * step(0.3, p.y) * (1.0 - open);
-        lit = mix(lit, 0.95 * up, ring * 0.6);
+        // voussoir band round the arch + its jambs (a 12 cm dressed-stone frame)
+        float ring = (1.0 - smoothstep(0.06, 0.08 + fw, abs(length(ad) - aw * 0.5 - 0.07))) * step(0.3, p.y) * (1.0 - open);
+        lit = mix(lit, 0.9 * up, ring * 0.7);
         lit = mix(lit, 0.05 + 0.18 * (1.0 - smoothstep(0.35, 1.0, p.y)), open);
         rec = mix(rec, 0.5, open);
         // cornice band above the arcade
@@ -355,7 +358,10 @@ const LED_FRAG = /* glsl */ `
           // colour / pulse: the castle print lit in the content colour, recesses in the 2nd colour
           vec2 art = castleArt(p, size, seed);
           float env = m < 1.5 ? 1.0 : 0.35 + 1.1 * exp(-fract(uBeat) * 5.0);
-          return (col * art.x * uArtLevel.x + uContentCol2 * art.y * uArtLevel.y) * env;
+          vec3 lit = col * art.x * uArtLevel.x;
+          // the print is off-white stone: its brightest faces lean pastel under the coloured light
+          lit = mix(lit, vec3(max(lit.r, max(lit.g, lit.b))) * 0.8, 0.28 * smoothstep(0.3, 1.0, art.x));
+          return (lit + uContentCol2 * art.y * uArtLevel.y) * env;
         } else if (m < 2.5) {
           // fire: the castle print under flickering fire light rising from the deck (video 656 / 705:
           // the pale stone and stairs under a warm red-orange light, never a picture of flames)
@@ -542,7 +548,7 @@ const LED_FRAG = /* glsl */ `
           float grid = smoothstep(0.0, 0.2, f.x) * smoothstep(1.0, 0.8, f.x) * smoothstep(0.0, 0.2, f.y) * smoothstep(1.0, 0.8, f.y);
           grid = mix(grid, 0.6, clamp(fwidth(p.x / 0.05) - 0.4, 0.0, 1.0));
           // the castle print (colour / pulse looks) keeps a softer grid so its stone and scrolls read
-          float gridK = uContent < 1.5 || uContent > 8.5 ? 0.45 : 0.65;
+          float gridK = uContent < 2.5 || uContent > 8.5 ? 0.32 : 0.65;
           col = panelContent(p, size) * (1.0 - gridK + gridK * grid) * pulse * uContentGain;
         }
         col += vec3(uStrobe) * 3.0 * step(kind, 0.5) * uRegion.z;
