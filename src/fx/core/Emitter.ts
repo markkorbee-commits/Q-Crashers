@@ -153,8 +153,9 @@ export class Emitter {
   stamp = -1;
   /**
    * Budget share (FxLayer): fraction of `count` this emitter draws, fixed from the first frame it is
-   * drawn until it dies (0 = not decided yet). A layer over its budget thins the NEWBORN emitters;
-   * the ones already on screen keep their particles, so nothing flickers or reshuffles.
+   * drawn until it dies (0 = not decided yet, -1 = left out for its life: born when even the lowest
+   * share did not fit). A layer over its budget thins the NEWBORN emitters; the ones already on
+   * screen keep their particles, so nothing flickers or reshuffles.
    */
   keep = 0;
   /** particles actually drawn (count * keep, never below a couple of slots) */

@@ -6,16 +6,30 @@ const SLOT_TEX_W = 256;
 /** slot texture capacity relative to the preset's budget (a later preset switch reuses the layer) */
 const SLOT_CAPACITY = 8;
 const MAX_SLOT_CAPACITY = 16384;
+/**
+ * Ribbon layers (additive sparks / stars) address their particles in slots of at most this many:
+ * most of their emitters are small (a comet's tail, a crackle star's pops, a shell's 40 stars), and
+ * every slot costs slotSize instances whatever the emitter uses of it.
+ */
+const RIBBON_SLOT = 16;
+/**
+ * The budget is counted in DRAWN particles. The instances a layer issues (slots x slotSize: the
+ * partly used last slot of every emitter included) may reach SLOT_OVERDRAW x the budget, so a crowd
+ * of tiny emitters (hundreds of 1-5 puff shell smokes) is drawn whole instead of being skipped.
+ */
+const SLOT_OVERDRAW = 2;
+/** newborns may take the layer up to this share of its budget before one is left out (see commit) */
+const HARD_LIMIT = 1.25;
 /** trail samples every ribbon geometry is built with (a preset uses a draw range of it) */
 export const MAX_RIBBON_SEGMENTS = 10;
 
-/** budget shares a newborn emitter can get when its layer is short of slots (quantised) */
+/** budget shares a newborn emitter can get when its layer is short of particles (quantised) */
 const KEEP_LEVELS = [1, 0.75, 0.5, 0.35, 0.25];
 /** thinning starts when the full demand exceeds this share of the budget ... */
 const PRESSURE_HI = 0.92;
-/** ... and relaxes one level after the demand stayed below this share for RELAX_FRAMES frames */
+/** ... and relaxes one level after the demand stayed below this share for RELAX_S seconds of show time */
 const PRESSURE_LO = 0.72;
-const RELAX_FRAMES = 90;
+const RELAX_S = 1.5;
 
 export interface FxLayerOptions {
   name: string;
@@ -101,20 +115,28 @@ function maxPartialQuotient(a: number, n: number): number {
  * "slots" (groups of `slotSize` particles) to (emitter row, first particle, particles drawn, index
  * permutation). Per frame the CPU work is O(alive emitters); nothing is simulated.
  *
- * Budget: an emitter's share (Emitter.keep) is decided on the first frame it is drawn and then fixed
- * for its whole life, so a layer over its budget never reshuffles or flickers the particles that are
- * already on screen. The share of newborn emitters follows a quantised pressure level (fast attack,
- * slow release) and is lowered further only when they would not fit. The shaders always derive
- * directions, phases and timing from the RECORDED count (R.COUNT), a thinned emitter draws a
- * golden-ratio subset of its particles (see permMultiplier) with a little light compensation.
+ * Budget (particles actually drawn): an emitter's share (Emitter.keep) is decided on the first frame
+ * it is drawn and then fixed for its whole life, so a layer over its budget never reshuffles or
+ * flickers the particles that are already on screen. The share of newborn emitters follows a
+ * quantised pressure level (fast attack, slow release in show time) and is lowered further only
+ * when they would not fit. Small emitters (<= 2 slots) are never thinned. A newborn that does not
+ * fit even at the lowest share (HARD_LIMIT x the budget, or the slot cap) is left out for its whole
+ * life instead of popping in later. The shaders always derive directions, phases and timing from
+ * the RECORDED count (R.COUNT); a thinned emitter draws a golden-ratio subset of its particles (see
+ * permMultiplier) with a little light compensation.
  */
 export class FxLayer {
   readonly mesh: THREE.Mesh;
   readonly name: string;
+  /** particles per slot (ribbon layers use at most RIBBON_SLOT) */
   readonly slotSize: number;
   readonly maxEmitters: number;
-  /** current particle budget in slots (<= capacity) */
+  /** particle budget of the current preset (drawn particles) */
+  budget: number;
+  /** nominal slots of the budget (stats) */
   maxSlots: number;
+  /** slots the layer may issue (instances / slotSize), <= capacity */
+  slotCap: number;
   /** slots the slot texture can address */
   readonly capacity: number;
   /** additive ribbons (the draw order of their particles does not matter) */
@@ -145,16 +167,18 @@ export class FxLayer {
   scaled = 1;
   /** budget share given to newborn emitters right now */
   keepNow = 1;
-  /** alive emitters whose drawn count had to change (emergency re-thinning), cumulative */
-  changes = 0;
+  /** alive emitters left out (born when even the lowest share did not fit) */
+  hidden = 0;
 
   constructor(opts: FxLayerOptions) {
     this.name = opts.name;
-    this.slotSize = opts.slotSize;
-    this.maxEmitters = Math.max(16, Math.min(2048, opts.maxEmitters));
-    this.maxSlots = Math.max(8, Math.ceil(layerBudget(opts.name, opts.maxParticles) / opts.slotSize));
-    this.capacity = Math.max(this.maxSlots, Math.min(MAX_SLOT_CAPACITY, this.maxSlots * SLOT_CAPACITY));
     this.orderFree = opts.geometry.userData.segments !== undefined;
+    this.slotSize = this.orderFree ? Math.min(opts.slotSize, RIBBON_SLOT) : opts.slotSize;
+    this.maxEmitters = Math.max(16, Math.min(2048, opts.maxEmitters));
+    this.budget = Math.max(8 * this.slotSize, layerBudget(opts.name, opts.maxParticles));
+    this.maxSlots = Math.ceil(this.budget / this.slotSize);
+    this.capacity = Math.min(MAX_SLOT_CAPACITY, this.maxSlots * SLOT_CAPACITY);
+    this.slotCap = Math.min(this.capacity, this.maxSlots * SLOT_OVERDRAW);
 
     this.emitData = new Float32Array(this.maxEmitters * REC_FLOATS);
     this.emitTex = new THREE.DataTexture(this.emitData, REC_TEXELS, this.maxEmitters, THREE.RGBAFormat, THREE.FloatType);
@@ -225,8 +249,11 @@ export class FxLayer {
     if ((e.drawn < e.count || this.orderFree) && e.perm <= 0) e.perm = permMultiplier(e.count);
   }
 
-  /** assign rows + slots and upload what changed */
-  commit(): void {
+  /**
+   * assign rows + slots and upload what changed. `dt` = show time step of this frame (0 while
+   * paused): the budget pressure relaxes in show time, so a paused frame never changes.
+   */
+  commit(dt = 1 / 60): void {
     const frame = ++this.frame;
     const list = this.list;
     const n = this.listLen;
@@ -274,29 +301,30 @@ export class FxLayer {
       this.uploads++;
     }
 
-    // ---- budget: full demand, slots held by the emitters already on screen, newborn demand
+    // ---- budget (drawn particles): full demand, what the emitters on screen hold, newborn demand
     const S = this.slotSize;
-    const max = this.maxSlots;
+    const B = this.budget;
+    const SC = this.slotCap;
     // after a jump of the show clock the picture is new anyway: every share is decided again, so the
     // frame after a seek is the same whatever was on screen before it
     if (this.jumped) for (let i = 0; i < n; i++) list[i].keep = 0;
     let full = 0;
-    let fixed = 0;
+    let fixedP = 0;
+    let fixedS = 0;
     let fresh = 0;
-    let fullParticles = 0;
     for (let i = 0; i < n; i++) {
       const e = list[i];
       if (e.row < 0) continue;
-      const w = Math.ceil(e.count / S);
-      full += w;
-      fullParticles += e.count;
-      if (e.keep > 0) fixed += Math.ceil(e.drawn / S);
-      else fresh++;
+      full += e.count;
+      if (e.keep > 0) {
+        fixedP += e.drawn;
+        fixedS += Math.ceil(e.drawn / S);
+      } else if (e.keep === 0) fresh++;
     }
     // quantised pressure level with hysteresis: newborns born during a dense passage all get the
     // same share, instead of the first ones taking everything and the last ones the leftovers
     let target = 0;
-    while (target < KEEP_LEVELS.length - 1 && full * KEEP_LEVELS[target] > PRESSURE_HI * max) target++;
+    while (target < KEEP_LEVELS.length - 1 && full * KEEP_LEVELS[target] > PRESSURE_HI * B) target++;
     if (this.jumped) {
       // the show clock jumped (seek): start from the pressure of the new moment
       this.jumped = false;
@@ -305,8 +333,9 @@ export class FxLayer {
     } else if (target > this.pressure) {
       this.pressure = target;
       this.relax = 0;
-    } else if (target < this.pressure && full * KEEP_LEVELS[this.pressure - 1] <= PRESSURE_LO * max) {
-      if (++this.relax >= RELAX_FRAMES) {
+    } else if (target < this.pressure && full * KEEP_LEVELS[this.pressure - 1] <= PRESSURE_LO * B) {
+      this.relax += Math.max(0, dt);
+      if (this.relax >= RELAX_S) {
         this.pressure--;
         this.relax = 0;
       }
@@ -317,61 +346,60 @@ export class FxLayer {
       let li = this.pressure;
       for (;;) {
         const k = KEEP_LEVELS[li];
-        let need = 0;
+        let needP = 0;
+        let needS = 0;
         for (let i = 0; i < n; i++) {
           const e = list[i];
-          if (e.row >= 0 && e.keep === 0) need += Math.ceil(this.drawnAt(e, Math.min(k, keepCap(e.f[R.FLAGS]))) / S);
+          if (e.row < 0 || e.keep !== 0) continue;
+          const d = this.drawnAt(e, Math.min(k, keepCap(e.f[R.FLAGS])));
+          needP += d;
+          needS += Math.ceil(d / S);
         }
-        if (fixed + need <= max || li === KEEP_LEVELS.length - 1) break;
+        if ((fixedP + needP <= B && fixedS + needS <= SC) || li === KEEP_LEVELS.length - 1) break;
         li++;
       }
       const k = KEEP_LEVELS[li];
       this.keepNow = k;
+      const hardP = B * HARD_LIMIT;
       for (let i = 0; i < n; i++) {
         const e = list[i];
-        if (e.row >= 0 && e.keep === 0) {
-          this.setShare(e, k);
-          fixed += Math.ceil(e.drawn / S);
+        if (e.row < 0 || e.keep !== 0) continue;
+        this.setShare(e, k);
+        const s = Math.ceil(e.drawn / S);
+        if (fixedS + s > SC || fixedP + e.drawn > hardP) {
+          // no room even at the lowest share: this one stays out for its whole life (it never pops
+          // in later when an older emitter dies, and nothing on screen is re-thinned for it)
+          e.keep = -1;
+          e.drawn = 0;
+          continue;
         }
+        fixedP += e.drawn;
+        fixedS += s;
       }
     } else this.keepNow = KEEP_LEVELS[this.pressure];
-
-    // emergency (rare: everything alive at the lowest share would still not fit): re-thin the
-    // emitters on screen. The subsets are nested, so their particles only thin out, never reshuffle.
-    if (fixed > max) {
-      for (let li = 1; li < KEEP_LEVELS.length && fixed > max; li++) {
-        const k = KEEP_LEVELS[li];
-        fixed = 0;
-        for (let i = 0; i < n; i++) {
-          const e = list[i];
-          if (e.row < 0) continue;
-          if (e.keep > k) {
-            const before = e.drawn;
-            this.setShare(e, k);
-            if (e.drawn !== before) this.changes++;
-          }
-          fixed += Math.ceil(e.drawn / S);
-        }
-      }
-    }
 
     // ---- slots
     let slot = 0;
     let dirty = false;
     let particles = 0;
     let emitters = 0;
+    let hidden = 0;
     const sd = this.slotData;
-    for (let i = 0; i < n && slot < max; i++) {
+    for (let i = 0; i < n; i++) {
       const e = list[i];
       if (e.row < 0) continue;
       const eff = e.drawn;
-      // additive ribbons always run through the permutation (same set of particles at full count, so
-      // an emergency re-thinning only removes some); puffs blend in order and keep theirs when whole
-      const pa = eff < e.count || this.orderFree ? e.perm : 1;
       const slots = Math.ceil(eff / S);
+      if (slots <= 0 || slot + slots > SC) {
+        hidden++;
+        continue;
+      }
+      // additive ribbons always run through the permutation (the same set of particles whatever
+      // their share); puffs blend in order and keep theirs when whole
+      const pa = eff < e.count || this.orderFree ? e.perm : 1;
       emitters++;
       particles += eff;
-      for (let s = 0; s < slots && slot < max; s++, slot++) {
+      for (let s = 0; s < slots; s++, slot++) {
         const o = slot * 4;
         const off = s * S;
         if (sd[o] !== e.row || sd[o + 1] !== off || sd[o + 2] !== eff || sd[o + 3] !== pa) {
@@ -383,6 +411,7 @@ export class FxLayer {
         }
       }
     }
+    this.hidden = hidden;
     if (dirty || slot !== this.usedSlotsPrev) {
       if (dirty) {
         this.slotTex.needsUpdate = true;
@@ -390,7 +419,7 @@ export class FxLayer {
       }
       this.usedSlotsPrev = slot;
     }
-    this.scaled = fullParticles > 0 ? particles / fullParticles : 1;
+    this.scaled = full > 0 ? particles / full : 1;
     this.usedSlots = slot;
     this.emitters = emitters;
     this.particles = particles;
@@ -431,7 +460,9 @@ export class FxLayer {
     if (o.name !== this.name || o.slotSize !== this.slotSize || o.maxEmitters !== this.maxEmitters || o.maxSlots > this.capacity) return false;
     if (a.vertexShader !== b.vertexShader || a.fragmentShader !== b.fragmentShader) return false;
     if (o.geo.index?.count !== this.geo.index?.count) return false;
+    this.budget = o.budget;
     this.maxSlots = o.maxSlots;
+    this.slotCap = Math.min(this.capacity, o.maxSlots * SLOT_OVERDRAW);
     this.geo.setDrawRange(o.geo.drawRange.start, o.geo.drawRange.count);
     this.geo.userData.segments = o.geo.userData.segments;
     if (a.uniforms.uSegments && b.uniforms.uSegments) a.uniforms.uSegments.value = b.uniforms.uSegments.value;

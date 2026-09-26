@@ -124,9 +124,12 @@ export abstract class CueFxSystem implements System {
     this.checkInvalidation();
     const t = ctx.showTime;
     const layers = this.layers;
-    // a jump of the show clock (seek, restart): the layers re-derive their budget pressure from the
-    // new moment instead of carrying over the old one
-    if (Math.abs(t - this.lastT) > 1) for (let i = 0; i < layers.length; i++) layers[i].rebase();
+    // a jump of the show clock (a seek back, or more than a second forward): the layers re-derive
+    // their budget shares from the new moment instead of carrying over the old one. The show time
+    // step (0 while paused) paces the release of their budget pressure.
+    const jump = t < this.lastT - 1e-3 || t - this.lastT > 1;
+    if (jump) for (let i = 0; i < layers.length; i++) layers[i].rebase();
+    const dt = jump ? 0 : Math.min(0.1, t - this.lastT);
     this.lastT = t;
     for (let i = 0; i < layers.length; i++) layers[i].begin();
     const cues = this.app.show.active(this.sys, t, this.cueBuf);
@@ -191,7 +194,7 @@ export abstract class CueFxSystem implements System {
     const kl = (this.lightSum > capL ? (capL * (1 + Math.log(this.lightSum / capL))) / this.lightSum : 1) * (calm < 1 ? 0.6 : 1);
     const lights = this.shared.lights;
     for (let k = 0; k < this.lightN; k++) lights.add(this.lightBuf[k], this.lightI[k] * kl);
-    for (let i = 0; i < layers.length; i++) layers[i].commit();
+    for (let i = 0; i < layers.length; i++) layers[i].commit(dt);
     // the frame that already built alive cues synchronously (a seek) does no background work
     if (expanded === 0) this.prefetch(t);
     this.afterUpdate(ctx);
@@ -331,7 +334,7 @@ export abstract class CueFxSystem implements System {
       if (l.dropped) out[`${l.name}.dropped`] = l.dropped;
       if (l.scaled < 1) out[`${l.name}.scaled`] = +l.scaled.toFixed(2);
       if (l.keepNow < 1) out[`${l.name}.keep`] = l.keepNow;
-      if (l.changes) out[`${l.name}.changes`] = l.changes;
+      if (l.hidden) out[`${l.name}.hidden`] = l.hidden;
     }
     return out;
   }
