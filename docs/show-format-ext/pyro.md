@@ -15,7 +15,27 @@ listed under "Engine behaviour". Unknown params are still ignored.
   * the haze sprites (`src/fx/haze.ts`), lit per corner.
   * the floor: `src/fx/core/FieldLight.ts`, one additive sheet that follows the terrain, with paved
     and grass albedo. It is hidden while no pyro light is alive.
-  Fireworks light the smoke and the floor from their flashes at a lower gain.
+  Fireworks light the smoke and the floor from their flashes at a lower gain; comet and cake rows,
+  and drone flares, push their own lights (see fireworks.md, round 5).
+* **Lights over far-apart targets (round 5).** A `burst` pushes one light per group of units (units
+  more than 30 m apart form separate groups): a burst on both arm ends (X ±94) lights the two ends,
+  not the empty field between them. The flash term of `envLight()` (smoke, CO2, low fog) uses
+  d² + spread² instead of d² (spread = `LightEnv.flashSpread`, the RMS distance of this frame's flash
+  sources from their centroid), so smoke near the centroid of spread-out sources is not lit as if a
+  source sat there (v484.75).
+* **Lit smoke of the big moments (round 5).** The row smoke of fountains, flame rows and billowing
+  walls follows the row in stretches of at most ~40 m along the U (one smoke emitter per stretch),
+  instead of one box over the bounding box of all units (which filled the empty field inside a U
+  row). Fountain smoke is self-lit in the fountain colour while it burns (x 1.4 at `intensity` 1,
+  up to x 2.8 at `intensity` ≥ 2). A burning cloud (continuously renewed, strongly self-lit smoke
+  around the lower third of the sprays, one per stretch) stands around a gerb row with `intensity`
+  > 1.5 from the ignition on (full at `intensity` 3: the gold-white glare walls of v600.2), and
+  builds up over ~3 s on burns of 4 s or longer (the finale fans and walls, v1510–1537). A short
+  normal burst (v69 roof gerbs, v1192 pink U) stays a row of clean fountains with a little smoke.
+  Mobile draws fewer, larger cloud puffs.
+* **Flame soot (round 5).** The soot a hydrocarbon flame rolls into has albedo ~0.13 (was 0.055):
+  a flame wall lights its own smoke cap orange from below (v1508.4–1510) instead of leaving a
+  black band over the fire.
 * **Tall flame rows billow.** `flame` or `firewall` with `height` ≥ 14 on more than 8 units (not the
   wings) becomes a mass eruption: rolling fireballs 20–35 m high that reach full height about
   0.4 s after ignition. The flames are partly opaque, so they don't add up to a clipped white

@@ -19,6 +19,20 @@ Engine: `src/fireworks/FireworkSystem.ts`, `src/fireworks/shells.ts`, `src/firew
 * **Shells**: thin, dim tails behind small heads; `crackle`, `strobe`, `brocade` and `glitter` are
   sparse (fewer stars, crackle spread over 0.75 s, brocade/glitter shed twinkling flitter, small
   break flash): canopies read as sparkling bands, not solid peonies.
+* **Lit launch smoke (round 5).** The smoke cloud at a comet / cake / mine launch point glows in
+  the stars' colour while they climb out of it (comets: ~0.35 s + the stagger of the fan, growing
+  with sqrt(comets per point), so a single comet hardly lights it; cakes and fountain mines: while
+  they fire). The pink V-fans (v558) and comet rows stand in a cloud of their own colour.
+* **Row lights (round 5).** Comet and cake rows light the smoke, haze and floor along the U: one line
+  light per stretch of at most ~40 m of launch points (a gap of more than 24 m starts a new one),
+  sharing the total light by point count, instead of one light derived from the flash at the
+  centroid of the row (which lit the middle of the field). The total equals that derived light
+  (0.3–0.36 x the flash peak). All firework lights (these and the lights derived from shell breaks)
+  share one soft cap (2.7), so a barrage never lights the site like a flame wall.
+* **Serpent trails (round 5).** `serpent: true` comets leave, by default, a wriggling trail (±1.3 m
+  sideways) along their climb that glows in the comet colour for ~2 s and hangs ~4 s (v460.2–462.5:
+  the white serpent rows stand as wriggling lines from the ground to their pearls). `smoke: false`
+  turns it off.
 
 ## New params
 
@@ -54,7 +68,7 @@ Engine: `src/fireworks/FireworkSystem.ts`, `src/fireworks/shells.ts`, `src/firew
 | `wave` | m/s: how much the tail drifts into waves (default 0.9, serpent 2.2). |
 | `width` | head size multiplier (default 1). |
 | `intensity` | brightness multiplier 0..3 (default 1). |
-| `smoke` | `true`: a lingering smoke trail along the climb (puffs stay ~10 s). |
+| `smoke` | `true`: a lingering smoke trail along the climb (puffs stay ~10 s). Default `true` for `serpent` comets (a wriggling, self-lit trail that hangs ~4 s), else `false`. |
 | `pearlTime` | s the pearl head hangs on at the top (with `end: pearl`, default 1). |
 
 ### cake
@@ -94,6 +108,12 @@ white glitter volcano behind the dragon head (v1087.5).
 
 Each flare is a blinding point with a glow halo in its own smoke; the cluster lights the grounds in
 its colour as it passes. Targets are ignored (use `target: "all"`).
+
+Round 5: the smoke is a continuous trail along the flight path (not a row of round puffs), 13 m
+clouds per `size` unit, self-lit in the flare colour (6.5 x `intensity`, ~3 s) and lingering 5–8 s;
+the cluster pushes its own light (reach 30 + 8 x `size` m, following the flight in overlapping
+chunks), so the smoke, the haze and the field around the flares turn red (v313.25–315, v43–64).
+Mobile draws half the smoke puffs, 25 % larger.
 
 ## Appendix: proposed cue updates (verified side by side against the video)
 

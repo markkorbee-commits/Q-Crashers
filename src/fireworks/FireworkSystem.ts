@@ -1260,26 +1260,34 @@ export class FireworkSystem extends CueFxSystem {
     const P = new THREE.Vector3();
     const A = new THREE.Vector3();
     const Bq = new THREE.Vector3();
-    const reach = 22 + 6 * size + spacing * n * 0.5;
+    const reach = 30 + 8 * size + spacing * n * 0.5;
+    const mob = this.quality.level === 'mobile';
     for (let j = 0; j < K; j++) {
       const f = (j + 0.5) / K;
       const tb = cue.t + f * dur;
       at(f, P);
+      at(j / K, A);
+      at((j + 1) / K, Bq);
       if (smoke) {
+        // a trail, not a row of balls: the puffs are spread along the leg of this chunk and across
+        // the cluster's width, born as the flares pass
+        const ns = mob ? 3 : 6;
         out.add(
-          new Emitter(DIST.SPHERE, F.SELFLIT)
+          new Emitter(DIST.LINE, F.SELFLIT)
             .on(L_SMOKE)
-            .originV(P)
-            .time(tb)
-            .speed(0.6, 2.2)
+            .originV(A)
+            .axis(Bq.x - A.x, Bq.y - A.y, Bq.z - A.z)
+            .time(cue.t + (j / K) * dur)
+            .dir(0, 1, 0, 1.4)
+            .speed(0.8, 2.6)
             .physics(1, 0.25)
-            .color(GREY, 0.26)
-            .color2(this.c2.copy(col).multiplyScalar(4.5 * I), 0)
+            .color(GREY, 0.24)
+            .color2(this.c2.copy(col).multiplyScalar(6.5 * I), 0)
             // (it lingers less than a shell's smoke: low flare smoke drifts off the grounds)
             .life(5, 8)
             // mobile: fewer, larger puffs
-            .emit(this.quality.level === 'mobile' ? 2 : 4)
-            .size((3.5 * size + spacing * n * 0.4) * (this.quality.level === 'mobile' ? 1.25 : 1), 11 * size)
+            .emit(ns, 0, dur / K / ns)
+            .size((2.6 * size + spacing * n * 0.35) * (mob ? 1.25 : 1), 13 * size)
             .trail(0.45, 0.35)
             .seed((cue.seed ^ Math.imul(j + 1, 0x51ed27)) & 0xffffff)
             .set(R.X0, 3)
@@ -1290,15 +1298,13 @@ export class FireworkSystem extends CueFxSystem {
             .set(R.Y3, 1.2)
             .set(R.Z0, 1)
             .set(R.Z3, PUFF.SMOKE)
-            .window(tb, tb + 8.2),
+            .window(cue.t + (j / K) * dur, tb + 8.2),
         );
       }
       // flares are the brightest thing in the sky: they light the field and the trees in their colour
       out.flashes.push({ kind: 1, t0: cue.t + (j / K) * dur, t1: cue.t + ((j + 1) / K) * dur + 0.15, color: col.clone(), peak: Math.min(2.2, 0.55 * n * I), decay: 0.12, pos: P.clone(), strobe: 0 });
       // ... and their smoke, the haze and the floor below them (spatial light following the cluster;
       // overlapping chunks so the light never dips)
-      at(j / K, A);
-      at((j + 1) / K, Bq);
       out.lights.push({
         kind: 1,
         t0: cue.t + (j / K) * dur,
@@ -1306,7 +1312,7 @@ export class FireworkSystem extends CueFxSystem {
         decay: j === K - 1 ? 0.3 : 0.1,
         strobe: 0,
         color: col.clone(),
-        peak: 0.75 * Math.sqrt(n) * I * size,
+        peak: 1.1 * Math.sqrt(n) * I * size,
         pos: A.clone().add(Bq).multiplyScalar(0.5),
         a: A.clone(),
         b: Bq.clone(),
