@@ -70,6 +70,13 @@ export class LightEnv {
   pillarShaftIntensity = 0.8;
   /** per-pillar intensity multipliers for chases (index = pillar index in anchors 'pillars_top'); empty = all 1 */
   pillarChase: number[] = [];
+  /**
+   * DJ-portal arch-crown downlights (written by LightingSystem each frame): normalised colour (max channel 1)
+   * and mean level 0..1.5 of the 7 cans focused on the deck in front of the portal (0 = off). Performers in
+   * the arch / on the podium can take their key light from it.
+   */
+  readonly archSpotColor = new THREE.Color(1, 0.7, 0.4);
+  archSpotIntensity = 0;
   /** accumulated flash from pyro / fireworks / strobes (all sources) */
   flashColor = new THREE.Color(0, 0, 0);
   /** weighted centre of the current flash sources (all sources) */
@@ -101,6 +108,7 @@ export class LightEnv {
   reset(): void {
     this.stageIntensity = 0;
     this.audienceWash = 0;
+    this.archSpotIntensity = 0;
     this.flashColor.setRGB(0, 0, 0);
     this.flashWeight = 0;
     this.flashM2 = 0;

@@ -587,7 +587,19 @@ export const FB_FIELD = 4;
 export const FB_FIELD_FAR = 5;
 export const FB_BACK = 6;
 export const FB_BOOTH = 7;
-export const FLOOD_BLOBS = 8;
+/** the backlight arc's wide, fainter veil around the tight glow at the lamps (FB_BACK) */
+export const FB_BACK_WIDE = 8;
+/** the lit air around the performers on the deck, seen by a close-up camera on / at the deck */
+export const FB_DECK = 9;
+/** (FLOOD_FRAG sizes its uniform arrays to this) */
+export const FLOOD_BLOBS = 10;
+/**
+ * near edges (m) of the pre-slices in which only the local blobs glow (two, so a performer 2–3 m in front
+ * of a close-up camera occludes the lit haze behind him and only carries the thin veil in front of him)
+ */
+const FLOOD_PRE = [1.2, 3.2];
+/** per blob: share of its glow in the near pre-slice (only the lamps aimed at the lens: backlight, booth) */
+const FLOOD_NEAR = [0, 0, 0, 0, 0, 0, 1, 0.6, 1, 1];
 
 /**
  * Light floods and dense lit haze ("the whole frame glows pink / red / teal / blue"): an analytic
@@ -627,8 +639,15 @@ export class FloodGlow {
     sig[FB_FIELD] = S(72, 12, 28);
     centres[FB_FIELD_FAR] = C(0, 3, 95, 0.4);
     sig[FB_FIELD_FAR] = S(95, 10, 60);
-    centres[FB_BACK] = C(0, 4.5, -4.5, 1);
-    sig[FB_BACK] = S(12, 4, 3.5);
+    // backlight arc in the DJ portal (round 6): the lit haze hangs in and in front of the portal mouth, over
+    // the deck where the performers stand, and reaches the lens of a close-up camera (near slice)
+    centres[FB_BACK] = C(0, 5.2, -7.2, 1);
+    sig[FB_BACK] = S(2.8, 1.8, 2.2);
+    centres[FB_BACK_WIDE] = C(0, 3.6, -5.2, 0.25);
+    sig[FB_BACK_WIDE] = S(8, 3.5, 4.5);
+    // deck air (round 6): the smoke over the deck and the pit, lit by the wash and the rig (close-ups only)
+    centres[FB_DECK] = C(0, 3.4, -1.5, 1);
+    sig[FB_DECK] = S(18, 3.2, 8);
     centres[FB_BOOTH] = C(0, 3.2, -4, 1);
     sig[FB_BOOTH] = S(3.5, 2.5, 3.5);
     this.material = new THREE.ShaderMaterial({
@@ -639,6 +658,8 @@ export class FloodGlow {
         uBlobC: { value: centres },
         uBlobS: { value: sig },
         uBlobCol: { value: this.cols },
+        uBlobNear: { value: FLOOD_NEAR },
+        uNearEdge: { value: 4 },
         uTan: { value: this.tan },
         uScale: { value: 1 },
       },
@@ -657,30 +678,50 @@ export class FloodGlow {
     this.mesh.visible = false;
   }
 
-  /** (re)build the slice set: view-depth edges, geometric from `near` to `far` */
+  /**
+   * (re)build the slice set: view-depth edges, geometric from `near` to `far`, plus the pre-slices
+   * FLOOD_PRE… near as the LAST instances. Only the local blobs (backlight / booth, uBlobNear) glow in them
+   * — lamps aimed at the lens light the haze right in front of it — and they are drawn only while one of
+   * them is lit (instanceCount n + pre), so every other flood keeps the clear air at the lens.
+   */
   build(n: number, near = 4, far = 620): void {
     this.geo?.dispose();
     const base = new THREE.PlaneGeometry(2, 2);
     const geo = new THREE.InstancedBufferGeometry();
     geo.index = base.index;
     geo.setAttribute('position', base.getAttribute('position'));
-    const a = new Float32Array(n * 2);
+    const np = FLOOD_PRE.length;
+    const a = new Float32Array((n + np) * 2);
     for (let i = 0; i < n; i++) {
       a[i * 2] = near * Math.pow(far / near, i / n);
       a[i * 2 + 1] = near * Math.pow(far / near, (i + 1) / n);
     }
+    for (let j = 0; j < np; j++) {
+      a[(n + j) * 2] = FLOOD_PRE[j];
+      a[(n + j) * 2 + 1] = j + 1 < np ? FLOOD_PRE[j + 1] : near;
+    }
     geo.setAttribute('aSlice', new THREE.InstancedBufferAttribute(a, 2));
     geo.instanceCount = n;
+    this.material.uniforms.uNearEdge.value = near * 0.999;
     this.geo = geo;
     this.mesh.geometry = geo;
     this.slices = n;
   }
 
-  /** after writing `cols`: visibility */
+  /** after writing `cols`: visibility (+ the near pre-slice while a local blob is lit) */
   update(): void {
     let lit = false;
     for (let i = 0; i < FLOOD_BLOBS && !lit; i++) lit = this.cols[i].x + this.cols[i].y + this.cols[i].z > 1e-4;
     this.mesh.visible = lit && this.slices > 0;
+    this.syncSlices();
+  }
+
+  /** the near pre-slices draw only while a local blob is lit (also callable right before drawing) */
+  syncSlices(): void {
+    if (!this.geo) return;
+    let local = false;
+    for (let i = 0; i < FLOOD_BLOBS && !local; i++) local = FLOOD_NEAR[i] > 0 && this.cols[i].x + this.cols[i].y + this.cols[i].z > 1e-4;
+    this.geo.instanceCount = this.slices + (local ? FLOOD_PRE.length : 0);
   }
 
   /**

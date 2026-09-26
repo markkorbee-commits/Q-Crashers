@@ -5,6 +5,7 @@ import type { Cue } from '../show/ShowTypes';
 import { CueFxSystem, EmitterSet } from './core/CueFxSystem';
 import { DIST, Emitter, F, PUFF, R } from './core/Emitter';
 import { fxColor, num, str } from './core/fxColors';
+import { clusters } from './core/placement';
 import { HazeField } from './haze';
 import { installFxProxy } from './proxy';
 
@@ -175,16 +176,25 @@ export class FogSystem extends CueFxSystem {
       });
     }
     if (self && pts.length) {
-      // the glowing cloud lights the haze and the floor around it
-      const mn = new THREE.Vector3(Infinity, Infinity, Infinity);
-      const mx = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
-      for (const q of pts) {
-        mn.min(q);
-        mx.max(q);
-      }
-      mn.y = mx.y = (mn.y + mx.y) * 0.5 + 4 * sq;
+      // the glowing cloud lights the haze and the floor around it: one line light per group of targets
+      // that lie together (round 6: roof + wings or deck front + side sections are separate clouds, not
+      // one light stretched across the empty space between them)
       const dur = Math.max(0.5, Math.min(cue.dur, 3) + 0.8);
-      out.lights.push({ kind: 1, t0: cue.t, t1: cue.t + dur, decay: dur * 0.6, strobe: 0, color: tint.clone(), peak: glow * 0.7 * sq * Math.min(2, Math.sqrt(pts.length)), pos: mn.clone().add(mx).multiplyScalar(0.5), a: mn.clone(), b: mx.clone(), radius: 8 + 6 * sq });
+      // (the groups share the one cloud's light: the total stays that of the single light it replaces)
+      const groups = clusters(pts, 30);
+      const total = glow * 0.7 * sq * Math.min(2, Math.sqrt(pts.length));
+      let wSum = 0;
+      for (const grp of groups) wSum += Math.min(2, Math.sqrt(grp.length));
+      for (const grp of groups) {
+        const mn = new THREE.Vector3(Infinity, Infinity, Infinity);
+        const mx = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+        for (const q of grp) {
+          mn.min(q);
+          mx.max(q);
+        }
+        mn.y = mx.y = (mn.y + mx.y) * 0.5 + 4 * sq;
+        out.lights.push({ kind: 1, t0: cue.t, t1: cue.t + dur, decay: dur * 0.6, strobe: 0, color: tint.clone(), peak: (total * Math.min(2, Math.sqrt(grp.length))) / wSum, pos: mn.clone().add(mx).multiplyScalar(0.5), a: mn.clone(), b: mx.clone(), radius: 8 + 6 * sq });
+      }
     }
   }
 

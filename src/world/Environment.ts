@@ -336,6 +336,11 @@ export class EnvironmentSystem implements System {
   private readonly poleAxis = dirFromAzAlt(0, 52.44);
   private readonly rotM = new THREE.Matrix4();
   private fogBase = 0.0012;
+  /**
+   * site smoke tuning (side-by-side calibration): `fog` = height-fog density gain per unit env.smoke,
+   * `glow` = share of the site glow in the fog colour per unit smoke, `sky` = the lit smoke veil on the sky
+   */
+  readonly smokeTune = { fog: 7, glow: 0.4, sky: 1 };
   private level = 1;
   private stats_ = { level: 0, sunAlt: 0, moonAlt: 0, cover: 0, lightning: 0 };
 
@@ -617,18 +622,18 @@ export class EnvironmentSystem implements System {
     // the haze itself takes the colour of the lit smoke (distant trees / terrain glow with the site);
     // with `smoke` the air is full of it and the veil is as bright as the light it scatters
     const sm = clamp(env.smoke, 0, 1);
-    const gk = 0.03 + 0.4 * sm;
+    const gk = 0.03 + this.smokeTune.glow * sm;
     this.fog.color.r += glow.r * gk + bc.r * 0.006;
     this.fog.color.g += glow.g * gk + bc.g * 0.006;
     this.fog.color.b += glow.b * gk + bc.b * 0.006;
-    U.uSmoke.value = sm;
+    U.uSmoke.value = sm * this.smokeTune.sky;
     const sb = env.strobe * 0.01;
     this.fog.color.r += sb;
     this.fog.color.g += sb;
     this.fog.color.b += sb;
     U.uFogColor.value.copy(this.fog.color);
     // atmos.glow `smoke`: the site fills with smoke (red smoke v1510–1537, pink whiteout v76)
-    this.fog.density = this.fogBase * (0.75 + 0.45 * clamp(env.haze, 0, 1.5)) * (1 + 7 * env.smoke);
+    this.fog.density = this.fogBase * (0.75 + 0.45 * clamp(env.haze, 0, 1.5)) * (1 + this.smokeTune.fog * env.smoke);
     (this.app.scene.background as THREE.Color).copy(this.fog.color);
 
     // --- lights (sky ambient follows the sky; the moon keeps a floor of cool-warm fill). Round 4: the
