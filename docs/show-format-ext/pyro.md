@@ -133,10 +133,11 @@ listed under "Engine behaviour". Unknown params are still ignored.
 
 ## Engine behaviour, round 7 (no cue changes needed)
 
-* **Tall wall gerbs are spikes.** The spray cone of a gerb narrows with its height above 14 m, to
-  0.4 x its `spread` (default or authored) at 30 m and above: a 30–40 m wall reads as a row of
-  separate thin columns with the set visible between them (v1189–1197, v1536), not one sheet of
-  sparks that hides the stage (1194). Walls up to 14 m are unchanged.
+* **Tall wall gerbs are spikes.** Without an authored `spread`, the spray cone of a gerb narrows
+  with its height above 14 m, to 0.4 x the default at 30 m and above (4° instead of 10°): a 30–40 m
+  wall reads as a row of separate thin columns with the set visible between them (v1189–1197), not
+  one sheet of sparks that hides the stage (1194). An authored `spread` is used as written (the broad
+  white-gold fan behind the dragon of v1510–1537 has `spread: 30`); walls up to 14 m are unchanged.
 * **Burning cloud of 2.5–4 s walls.** The burning cloud of a long burn of tall units (round 5/6)
   ramps in between 2.5 s and 4 s of burn instead of starting at 4 s: the 3.6 s white 32 m wall of
   v1565.3–1568.8 stands in a little of its own lit cloud. Walls of 4 s and more are unchanged.

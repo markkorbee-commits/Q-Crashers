@@ -50,7 +50,7 @@ Engine: `src/fireworks/FireworkSystem.ts`, `src/fireworks/shells.ts`, `src/firew
   * Comet-top breaks (`end` a shell type: `crackle`, `spider`, `strobe`, …) burn out sooner than a
     shell: burn x r / 16 of the shell's burn time (at least x 0.35; r = the break radius, 3.5–10 m), the
     crackle spread with it. The red crackle tops of v333.9–336.2 are gone by v336.5–337 instead of
-    popping on to ~338 (measured: 338 +2.4, 336.75 +1.5, 264.75 +2.4 points).
+    popping on to ~338 (measured: 338 +2.2, 336.75 +1.7, 337.25 +1.0, 264.75 +2.4 points).
   * Crossette breaks have no glow ball (flash size 0.45 like the other textured shells): the
     crossette lines of v553.5 / v557.0 open as spiky star bursts, not as a row of white moons.
   * New comet param `glow` (below).

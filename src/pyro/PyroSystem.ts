@@ -1099,11 +1099,12 @@ export class PyroSystem extends CueFxSystem {
     const pattern = str(p.pattern, 'all');
     const stagger = num(p.stagger, pattern === 'all' ? 0 : 0.05, 0, 2);
     const angle = num(p.angle, 0, -80, 80);
-    // big gerbs (15–20 m wall units) throw a wider, fuller plume than a small stage gerb; the tall wall
-    // units (> 14 m) are straight spikes: their cone narrows to 0.4 x `spread` at 30 m, so a wall reads
-    // as a row of separate columns with the set between them (v1189-1197, v1536), not one sheet
+    // big gerbs (15–20 m wall units) throw a wider, fuller plume than a small stage gerb; but without an
+    // authored `spread` the tall wall units (> 14 m) are straight spikes: the default cone narrows to
+    // 0.4 x at 30 m, so a wall reads as a row of separate columns with the set between them (v1189-1197),
+    // not one sheet. An authored `spread` is kept (the broad white-gold fan behind the dragon, v1510-1537)
     const tallK = cold ? 1 : 1 - 0.6 * smooth01(14, 30, H);
-    const spread = ((num(p.spread, cold ? 7 : Math.min(10, 4 + 0.28 * H), 0, 60) * Math.PI) / 180) * tallK;
+    const spread = (num(p.spread, cold ? 7 : Math.min(10, 4 + 0.28 * H) * tallK, 0, 60) * Math.PI) / 180;
     const steps = patternSteps(pts, pattern, cue.seed, cue.step);
     const dur = Math.max(0.3, cue.dur);
     const k = cold ? 1.9 : 1.05;
