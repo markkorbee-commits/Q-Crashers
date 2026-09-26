@@ -54,13 +54,13 @@ export class GeoBuilder {
   }
 
   /** box between two points (a tube / beam of square section `t`) */
-  beam(a: THREE.Vector3, b: THREE.Vector3, t: number, color: THREE.ColorRepresentation | [number, number, number] = 0xffffff, round = false): this {
+  beam(a: THREE.Vector3, b: THREE.Vector3, t: number, color: THREE.ColorRepresentation | [number, number, number] = 0xffffff, round = false, uvRect?: [number, number, number, number]): this {
     const d = new THREE.Vector3().subVectors(b, a);
     const len = d.length();
     if (len < 1e-4) return this;
     const q = new THREE.Quaternion().setFromUnitVectors(THREE.Object3D.DEFAULT_UP, d.normalize());
     const m = new THREE.Matrix4().compose(new THREE.Vector3().addVectors(a, b).multiplyScalar(0.5), q, new THREE.Vector3(t, len, t));
-    return this.add(GeoBuilder.unit(round ? 'cyl6' : 'box'), m, color);
+    return this.add(GeoBuilder.unit(round ? 'cyl6' : 'box'), m, color, uvRect);
   }
 
   cylinder(r: number, h: number, x: number, y: number, z: number, color: THREE.ColorRepresentation | [number, number, number] = 0xffffff, seg: 6 | 8 | 12 | 16 = 8, rTop = r): this {

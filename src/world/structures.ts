@@ -2,18 +2,32 @@ import * as THREE from 'three';
 import { Rng } from '../core/rng';
 import type { Collider2D } from '../core/types';
 import { GeoBuilder, lin } from './geom';
-import { ARM, BACKSTAGE_Z, CAM_PEN, DECKING, PILLAR, PILLARS, PREMIUM, TERRACE, terrainHeight, WATER_Y } from './site';
-import { canvasTexture, makeCanvas } from './tex';
+import { ARM, BACKSTAGE_Z, CAM_PEN, DECKING, FOH_PEN, PILLAR, PILLARS, PREMIUM, TERRACE, terrainHeight, WATER_Y } from './site';
+import { BARRIER_SOLID_UV, barrierTexture, canvasTexture, makeCanvas } from './tex';
 import { patchWorldMaterial } from './worldLights';
 
 /**
- * Man-made field structures: crowd barriers (FOH platform ring), Heras perimeter / backstage fences
- * with black scrim banners, the low FOH / camera platform on the axis, the RED entrance gates, the
- * photo terrace on the decking and the Exclusive RED Experience deck over the lake. Everything is
- * instanced or merged per material. The front-of-stage and arm
- * crowd barriers belong to the MainStage (src/stage/deck/Deck.ts barrierRuns), which lays them on
- * the terrain together with the stage outline.
+ * Man-made field structures: the black barrier FOH / camera pen on the axis, Heras perimeter /
+ * backstage fences with black scrim banners, the RED entrance gates, the photo terrace on the decking
+ * and the Exclusive RED Experience deck over the lake. Everything is instanced or merged per material.
+ * The front-of-stage and arm crowd barriers belong to the MainStage (src/stage/deck/Deck.ts
+ * barrierRuns), which lays them on the terrain together with the stage outline; the pillar fences are
+ * instanced with the pillars (pillars.ts) and share barrierMaterial().
  */
+
+let barrierMat: THREE.MeshStandardMaterial | null = null;
+/**
+ * Black steel crowd-barrier material (Mojo-style panels, alpha-tested bars; vertex colours, so the
+ * same material also draws the solid rails, feet, risers and cases mapped to BARRIER_SOLID_UV).
+ * Shared by the pillar fences and the FOH pen: one texture, one program.
+ */
+export function barrierMaterial(): THREE.MeshStandardMaterial {
+  barrierMat ??= patchWorldMaterial(
+    new THREE.MeshStandardMaterial({ map: barrierTexture(), alphaTest: 0.5, side: THREE.DoubleSide, vertexColors: true, metalness: 0.35, roughness: 0.55 }),
+    { key: 'barrier' },
+  );
+  return barrierMat;
+}
 
 export interface StructureOut {
   colliders: Collider2D[];
@@ -83,20 +97,12 @@ export function buildStructures(scene: THREE.Object3D, lowDetail: boolean): Stru
     return m;
   };
 
-  // ------------------------------------------------------------------ crowd barrier panels (2.5 m)
-  const crowd: THREE.Matrix4[] = [];
-  {
-    // the pillar plinths carry their own bronze lattice railing (pillars.ts); only the collider here
-    for (const p of PILLARS) {
-      colliders.push({ kind: 'box', minX: p.x - PILLAR.fence / 2, maxX: p.x + PILLAR.fence / 2, minZ: p.z - PILLAR.fence / 2, maxZ: p.z + PILLAR.fence / 2, tag: 'pillar' });
-    }
-    // crowd barrier ring around the FOH / camera platform (1 m clearance, gate at the back)
-    for (const loop of rectLoop(CAM_PEN.x, CAM_PEN.z, CAM_PEN.w + 2, CAM_PEN.d + 2, 2.5)) crowd.push(...panelsAlong(loop, 2.5));
-    colliders.push({ kind: 'box', minX: CAM_PEN.x - CAM_PEN.w / 2 - 1, maxX: CAM_PEN.x + CAM_PEN.w / 2 + 1, minZ: CAM_PEN.z - CAM_PEN.d / 2 - 1, maxZ: CAM_PEN.z + CAM_PEN.d / 2 + 1, tag: 'campen' });
-    // the piano riser (+ its railing and collider) is built by the crowd module's props (src/crowd/props.ts)
+  // ------------------------------------------------------------------ pillar fences: colliders only
+  // (the black barrier fences themselves are instanced with the pillars, pillars.ts)
+  for (const p of PILLARS) {
+    colliders.push({ kind: 'box', minX: p.x - PILLAR.fence / 2, maxX: p.x + PILLAR.fence / 2, minZ: p.z - PILLAR.fence / 2, maxZ: p.z + PILLAR.fence / 2, tag: 'pillar' });
   }
-  const crowdGeo = crowdBarrierGeometry(lowDetail);
-  addInst(crowdGeo, metal, crowd, 'crowd-barriers');
+  // the piano riser (+ its railing and collider) is built by the crowd module's props (src/crowd/props.ts)
 
   // ------------------------------------------------------------------ Heras fences (3.5 m) with scrim / bare mesh
   const herasScrim: THREE.Matrix4[] = [];
@@ -160,63 +166,74 @@ export function buildStructures(scene: THREE.Object3D, lowDetail: boolean): Stru
     addInst(g, mat, [...herasScrim, ...herasBare], 'heras-scrim');
   }
 
-  // ------------------------------------------------------------------ FOH / camera platform on the axis
-  // (design-bible §5.11, photo P: a low fenced deck with the camera operator — nothing tall on the axis)
+  // ------------------------------------------------------------------ FOH / camera pen on the axis
+  // (design-bible §5.11, round 4 from the daytime photo day2 + photo P: a long low rectangle of black
+  // crowd barriers on the paving, grey foot plates outside, a black camera / fixture riser inside —
+  // nothing tall on the axis). One merged mesh with the barrier material (solid parts map to its
+  // opaque texel column), one collider.
   {
+    const P = FOH_PEN;
     const b = new GeoBuilder();
-    const { x: cx, z: cz, w: W, d: D, deckY } = CAM_PEN;
-    const yp = terrainHeight(cx, cz);
-    const top = yp + deckY;
-    const x0 = cx - W / 2,
-      x1 = cx + W / 2,
-      z0 = cz - D / 2,
-      z1 = cz + D / 2;
-    // stage deck (plywood on scaffold) with a black skirt, two steps at the back
-    b.box(W, 0.1, D, cx, top - 0.05, cz, lin('#2c2824'));
-    b.box(W, deckY - 0.1, D - 0.1, cx, yp + (deckY - 0.1) / 2, cz, blackCloth);
-    for (let k = 0; k < 2; k++) b.box(2.4, (deckY / 3) * (k + 1), 0.35, cx, yp + (deckY / 6) * (k + 1), z1 + 0.52 - k * 0.35, lin('#1e1c1a'));
-    // aluminium railing 1.1 m on three sides + the back beside the steps
-    const railY = [top + 1.1, top + 0.55];
-    const rail = (ax: number, az: number, bx: number, bz: number) => {
-      for (const y of railY) b.beam(new THREE.Vector3(ax, y, az), new THREE.Vector3(bx, y, bz), y > top + 1 ? 0.05 : 0.035, alu, true);
+    const yp = terrainHeight(P.x, P.z);
+    const x0 = P.x - P.w / 2,
+      x1 = P.x + P.w / 2,
+      z0 = P.z - P.d / 2,
+      z1 = P.z + P.d / 2;
+    const black = lin('#2e2e30');
+    const S = BARRIER_SOLID_UV;
+    const side = (ax: number, az: number, bx: number, bz: number) => {
       const len = Math.hypot(bx - ax, bz - az);
-      const n = Math.max(1, Math.round(len / 1.6));
-      for (let k = 0; k <= n; k++) {
-        const t = k / n;
-        b.beam(new THREE.Vector3(ax + (bx - ax) * t, top, az + (bz - az) * t), new THREE.Vector3(ax + (bx - ax) * t, top + 1.1, az + (bz - az) * t), 0.045, alu, true);
-      }
+      const yaw = Math.atan2(-(bz - az), bx - ax);
+      const panels = Math.max(1, Math.round(len / 1.05));
+      const g = new THREE.PlaneGeometry(len, P.fenceH);
+      const uv = g.getAttribute('uv') as THREE.BufferAttribute;
+      for (let i = 0; i < uv.count; i++) uv.setX(i, uv.getX(i) * panels);
+      const mx = (ax + bx) / 2,
+        mz = (az + bz) / 2;
+      const q = new THREE.Quaternion().setFromAxisAngle(THREE.Object3D.DEFAULT_UP, yaw);
+      b.add(g, new THREE.Matrix4().compose(new THREE.Vector3(mx, yp + P.fenceH / 2, mz), q, new THREE.Vector3(1, 1, 1)), black);
+      b.box(len, 0.05, 0.05, mx, yp + P.fenceH - 0.02, mz, black, yaw, S);
+      b.box(0.07, P.fenceH, 0.07, ax, yp + P.fenceH / 2, az, black, yaw, S);
     };
-    rail(x0, z0, x1, z0);
-    rail(x0, z0, x0, z1);
-    rail(x1, z0, x1, z1);
-    // back rail with the opening over the steps (in line with the barrier-ring gate)
-    rail(x1, z1, cx + 1.3, z1);
-    rail(cx - 1.3, z1, x0, z1);
-    // camera operator's tripod camera (front of the deck, filming the stage) and a jib base
-    const tri = new THREE.Vector3(cx + 1.0, top + 1.45, z0 + 1.2);
-    for (let k = 0; k < 3; k++) {
-      const a = (k / 3) * Math.PI * 2;
-      b.beam(new THREE.Vector3(tri.x + Math.cos(a) * 0.5, top, tri.z + Math.sin(a) * 0.5), tri, 0.03, lin('#222'), true);
+    side(x0, z0, x1, z0);
+    side(x1, z0, x1, z1);
+    side(x1, z1, x0, z1);
+    side(x0, z1, x0, z0);
+    const grey = lin('#8a8c90');
+    if (!lowDetail) {
+      // galvanised foot plates of the end runs, sticking out at both ends (day2 + photo P: the light
+      // plates beyond the pen ends; the long sides show none)
+      for (const x of [x0 - 0.45, x1 + 0.45]) b.box(0.9, 0.024, P.d + 0.5, x, yp + 0.012, P.z, grey, 0, S);
     }
-    b.box(0.26, 0.28, 0.55, tri.x, tri.y + 0.18, tri.z - 0.08, lin('#0d0d0d'));
-    // FOH control: low desks (sound / light / pyro / laser) facing the stage, road cases behind
-    const desk = lin('#141417');
-    for (const [x, w] of [[-5.0, 2.0], [3.8, 2.2]] as [number, number][]) {
-      b.box(w, 0.85, 0.9, cx + x, top + 0.425, cz + 0.4, desk);
-      b.box(w * 0.96, 0.06, 0.8, cx + x, top + 0.88, cz + 0.36, lin('#222226'));
+    // black camera / fixture riser (the operator stands on it, photo P) and a step at the back
+    const deck = lin('#1c1c1e');
+    const rz0 = z0 + 0.06,
+      rz1 = z1 - 0.5;
+    b.box(P.w - 0.7, P.riserY, rz1 - rz0, P.x, yp + P.riserY / 2, (rz0 + rz1) / 2, deck, 0, S);
+    b.box(1.6, P.riserY / 2, 0.36, P.x + 2.6, yp + P.riserY / 4, z1 - 0.3, deck, 0, S);
+    // the FOH laser stands (the 'laser_field' FOH emitters at CAM_PEN.z − d/2 + 0.4, 2.2 m over the riser)
+    const zL = CAM_PEN.z - CAM_PEN.d / 2 + 0.4;
+    const yL = yp + CAM_PEN.deckY + 2.2;
+    for (const sx of [-5.6, 5.6]) {
+      b.box(0.06, yL - 0.18 - (yp + P.riserY), 0.06, sx, (yL - 0.18 + yp + P.riserY) / 2, zL, black, 0, S);
+      b.box(0.34, 0.2, 0.46, sx, yL - 0.1, zL, deck, 0, S);
+      // weighted base plate + sleeve
+      if (!lowDetail) {
+        b.box(0.34, 0.04, 0.34, sx, yp + P.riserY + 0.02, zL + 0.02, black, 0, S);
+        b.box(0.1, 0.3, 0.1, sx, yp + P.riserY + 0.19, zL, black, 0, S);
+      }
     }
-    for (let k = 0; k < 5; k++) b.box(0.6, 0.9, 0.8, cx - 5.4 + k * 1.3 + (k > 2 ? 3.2 : 0), top + 0.45, z1 - 0.6, lin('#101012'));
-    addMesh(b.build(), metal, 'foh-platform');
-    // desk screens (emissive, dimmed show mode)
-    const scr = new GeoBuilder();
-    for (const [x, w] of [[-5.0, 2.0], [3.8, 2.2]] as [number, number][]) {
-      const m = new THREE.Matrix4().compose(new THREE.Vector3(cx + x, top + 1.12, cz + 0.62), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -0.35), new THREE.Vector3(w * 0.55, 0.36, 0.02));
-      scr.add(GeoBuilder.unit('box'), m, lin('#8fb4ee'));
+    if (!lowDetail) {
+      // road cases / a desk along the back of the riser
+      for (const [x, w, h] of [[-4.6, 1.2, 0.8], [-3.2, 1.2, 0.8], [4.2, 1.6, 0.9]] as [number, number, number][]) b.box(w, h, 0.6, x, yp + P.riserY + h / 2, rz1 - 0.35, deck, 0, S);
     }
-    const screenMat = new THREE.MeshBasicMaterial({ vertexColors: true, color: new THREE.Color(0.7, 0.7, 0.7) });
-    addMesh(scr.build(), screenMat, 'foh-screens');
+    const pen = new THREE.Mesh(b.build(), barrierMaterial());
+    pen.name = 'foh-pen';
+    scene.add(pen);
+    drawables.push(pen);
+    tris += pen.geometry.getAttribute('position').count / 3;
+    colliders.push({ kind: 'box', minX: x0 - 0.1, maxX: x1 + 0.1, minZ: z0 - 0.1, maxZ: z1 + 0.1, tag: 'campen' });
   }
-
   // ------------------------------------------------------------------ photo terrace (Exclusive RED Experience)
   // open scaffold deck at Y 5 over the back edge of the decking (bible §6.3), wide bays so the field
   // cameras below it (hero cam (0, 1.8, 172)) look through, rails only on the front, stairs at both ends
@@ -372,23 +389,6 @@ export function buildStructures(scene: THREE.Object3D, lowDetail: boolean): Stru
 
 // -------------------------------------------------------------------------------------------------
 // panel geometries
-
-/** galvanised crowd-control barrier ("dranghek"), 2.5 m × 1.1 m, local width along X */
-function crowdBarrierGeometry(low: boolean): THREE.BufferGeometry {
-  const b = new GeoBuilder();
-  const W = 2.5,
-    H = 1.1;
-  b.box(W, 0.04, 0.04, 0, H, 0, galv);
-  b.box(W, 0.035, 0.035, 0, 0.2, 0, galv);
-  for (const x of [-W / 2 + 0.03, W / 2 - 0.03]) {
-    b.box(0.04, H, 0.04, x, H / 2, 0, galv);
-    // flat feet across the panel
-    b.box(0.05, 0.03, 0.72, x, 0.02, 0, galv);
-  }
-  const bars = low ? 7 : 13;
-  for (let i = 1; i <= bars; i++) b.box(0.016, H - 0.22, 0.016, -W / 2 + (W * i) / (bars + 1), 0.2 + (H - 0.2) / 2, 0, galv);
-  return b.build();
-}
 
 /** Heras temporary fence frame (3.5 × 2 m) on two concrete feet */
 function herasFrameGeometry(): THREE.BufferGeometry {

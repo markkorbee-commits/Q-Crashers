@@ -127,6 +127,51 @@ export function canvasTexture(c: HTMLCanvasElement, opts: { srgb?: boolean; repe
   return t;
 }
 
+/**
+ * Black steel crowd barrier ("Mojo"-style panel, as on the daytime photos around the pillars and the
+ * FOH pen), alpha mask + shading: one tile = one 1.0 m panel × the full barrier height (v 0 → 1).
+ * Opaque top rail (the top 7 %), a second rail below it, bottom rail, the panel posts at the tile edges,
+ * dense flat vertical bars every 10 cm (≈ 55 % cover, so the far mips stay above the alpha cut and a
+ * distant barrier reads as the solid dark band of the photos). The texel column u ∈ [0.02, 0.06] is
+ * opaque over the full height: solid parts sharing the material (rails, feet, cases) map their UVs
+ * there (BARRIER_SOLID_UV).
+ */
+export function barrierTexture(): THREE.CanvasTexture {
+  const S = 128;
+  const [c, g] = makeCanvas(S, S);
+  g.clearRect(0, 0, S, S);
+  // canvas y 0 = top of the barrier (texture v = 1)
+  const shade = (y0: number, h: number, a: number, b: number) => {
+    const gr = g.createLinearGradient(0, y0, 0, y0 + h);
+    gr.addColorStop(0, `rgb(${a},${a},${a})`);
+    gr.addColorStop(1, `rgb(${b},${b},${b})`);
+    g.fillStyle = gr;
+  };
+  // bars (flat, a lit edge on one side)
+  for (let x = 12; x < S - 6; x += 12.8) {
+    shade(0, S, 170, 120);
+    g.fillRect(Math.round(x), 0, 7, S);
+    g.fillStyle = 'rgba(255,255,255,0.25)';
+    g.fillRect(Math.round(x), 0, 1, S);
+  }
+  // rails: top (rolled, lit), second rail, bottom rail
+  shade(0, 10, 255, 150);
+  g.fillRect(0, 0, S, 10);
+  shade(20, 6, 210, 140);
+  g.fillRect(0, 20, S, 6);
+  shade(S - 12, 12, 190, 110);
+  g.fillRect(0, S - 12, S, 12);
+  // panel posts at the tile edges (+ the opaque solid column used by the solid parts)
+  shade(0, S, 220, 140);
+  g.fillRect(0, 0, 9, S);
+  g.fillRect(S - 3, 0, 3, S);
+  const t = canvasTexture(c, { repeat: true, aniso: 4 });
+  t.wrapT = THREE.ClampToEdgeWrapping;
+  return t;
+}
+/** uv rect inside the opaque post column of barrierTexture() (for solid parts drawn with that material) */
+export const BARRIER_SOLID_UV: [number, number, number, number] = [0.02, 0.2, 0.05, 0.8];
+
 export function makeCanvas(w: number, h: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
   const c = document.createElement('canvas');
   c.width = w;

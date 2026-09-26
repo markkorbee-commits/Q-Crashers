@@ -426,28 +426,52 @@ on the same site.
 - **Inner hangs** at (±11, −, −4) and **outer hangs** at (±31, −, −6): 20 × K1 each (box 1.34 × 0.44 m;
   array Y 4.9–14.2, bumper 14.6), hung from black 1 m lattice truss towers standing on the deck/ground (top
   Y 16.5 with 8 fixtures and a blade finial). Beside each main array a 10 × K2 side hang (1.34 × 0.35 m).
-- **Delays:** 2 × 6 K2 flown on the +Z face of each obelisk at Y 4.2–8.2, aimed +Z (FACT look).
+- **Delays:** 1 × 11 K2-class flown on the +Z face of each obelisk at Y 4.5–8.45, aimed +Z (FACT look, day2; §5.10).
 - Subs: §5.4. (2025 reference, FACT text: "120 K1, 78 KS28 and 84 K2"; 2026 counts ASSUMPTION.)
 
 ### 5.10 Delay-tower obelisks ("lantern pillars")
+(Round 4, 2026-09-26: rebuilt from the daytime photos day2 / day3 and re-measured on photo P — see §5.14.
+The round-1 description from the night photo — bronze lattice railing, bronze cannons, 2.6 m shaft, dark
+bronze hood — is superseded.)
 - **8 towers: X = ±20; Z = 36, 69, 102, 135** (rows 1–4 from the stage). They form the processional aisle;
-  clear walkway between plinths = 31.5 m.
-- **Plinth** 8.5 × 8.5 m, deck Y 0.4, dark bronze lattice railing 1.1 m, 4 bronze cannon/mortar props (1.8 m
-  barrels) at the corners (FACT look).
-- **Shaft** 2.6 × 2.6 m, stone-clad (cream by day, near-black at night) with gothic arched panels; base
-  moulding 3.4 m square to Y 1.6; **vertical RGB LED strips on all 4 faces** (the "shaft" colour) + 4 RGB
-  uplights at the base; capital/cornice 3.4 m square at Y 8.8–9.6; red flame banner 1.2 × 3 m under the
-  delay arrays.
-- **Crystal lantern:** elongated octahedron 2.5 m wide, 3.2 m tall (Y 9.6–12.8); upper pyramid dark cap,
-  lower inverted pyramid emissive with mullions and a bright point at the bottom (FACT f113). RGB, default
-  blue #40A0FF. Crystals of rows 1 and 2 act as **laser mirrors** in Domitor Draconis.
+  clear walkway between the fences = 33 m.
+- **Fence:** a square of **black steel crowd barriers** (Mojo-style panels, 1.1 m, dense vertical bars, grey
+  galvanised foot plates outside the side runs) around each tower, **7.0 m square** (collider 7.1 m) — FACT look
+  (day2, photo P; measured on photo P: front face 6.6 m, side 7.3 m; day2 ≈ 6.6 m).
+  Inside: a black equipment deck (Y 0.4) with black road cases / an amp rack, and **two SFX launchers at the
+  front corners, angled up and outwards** (photo P: the "cannon" silhouettes) — black, not bronze props.
+- **Shaft:** slim **1.8 × 1.8 m**, **white / light-grey painted stone blocks** (FACT day2), on a 2.2 m stone
+  base block to Y 1.62; shaft Y 1.62 → 8.6. A **round-topped window niche low on every face** (Y 1.74–3.2,
+  0.7 m, dark, a small robed figure inside — day2 shows red and white in it), a mid niche (Y 4.25–5.6) and a
+  small high window (Y 7.15–7.95) on the sides (photo P), two string courses. RGB LED strips in the four
+  edges (the "shaft" colour) + 4 RGB uplights on the base ledge (night look, video 1272–1276 s).
+  **No banner.**
+- **Delay array:** ONE hang of 11 × K2-class boxes (1.34 m wide, narrower than the shaft) flown on the +Z face,
+  Y 4.5 → 8.45, slight J at the bottom (FACT look day2; replaces "2 × 6 K2").
+- **Capital:** stone cornice (2.24 m) at Y 8.6–8.84, black steel lighting band to 9.45, 2.9 m black top plate
+  to **Y 9.6** (the moving heads on its corners are the lighting rig's, the capital flame / gerb units the
+  pyro's). A short red-bronze neck to 10.15.
+- **Crystal lantern** (turned 45° to the shaft, a corner towards the aisle): a flat **inverted glass pyramid
+  Y 10.15 → 11.05** that glows in the lamp colour with a bright point at its bottom apex (night: the glowing
+  "bowl" of the video), a chrome girdle band to 11.3, and a **silver / chrome faceted glass pyramid to the tip
+  at Y 12.8** (girdle 2.4 m across the corners), chrome frame on all edges + kite facets, a small finial to
+  13.05. By day the whole crystal reads silver (day2); at night the upper pyramid stays dark with a faint
+  glimmer (video) and picks up the flashes (photo P). RGB, default blue #40A0FF. Crystals of rows 1 and 2
+  act as **laser mirrors** in Domitor Draconis (LANTERN_Y 11.2 = the girdle).
+- **Night calibration:** the white paint is ~5.5× the albedo of the old dark stone; in the show its albedo is
+  scaled back (×0.18, texture-mean ratio) so the dark night shafts and the calibrated uplight / lantern /
+  flash levels stay as filmed; `?daylight` shows the true albedo.
 - On each capital: 1 flame head (2–3 m), 1 gerb, 1 beam fixture, 1 laser (row 1–4 capitals).
+- Show anchors unchanged: pillars_top Y 12.8, capital top 9.6, pillars_base Y 0.4.
 - Colour states over the show: see §7.2.
 
 ### 5.11 Field furniture on the axis
-- **FOH / camera platform:** X −6.4…+6.4, Z 87–93, deck Y 0.5, railing 1.1 m, camera operator on a tripod
-  (FACT photo). Festival-mode option: add a 2-tier black scaffold FOH (roof Y 8) on the same footprint
-  (ASSUMPTION).
+- **FOH / camera pen** (round 4, FACT look day2 + photo P, position measured on photo P): a long low
+  rectangle of **black crowd barriers on the paving**, 1.1 m, **X −7…+7, Z 87.2–90.4** (14 × 3.2 m), grey foot
+  plates at the ends; inside a black 0.5 m camera / fixture riser — the camera operator on a tripod stands on it (photo P:
+  head and shoulders above the barrier), the two FOH laser stands and the floor fixtures at its front. No
+  desks, no screens, nothing tall on the axis. Collider = the pen. (Replaces the 12.8 × 6 m aluminium-railed
+  platform + galvanised barrier ring; the rigs' 'foh' anchor (0, 0.5, 90) stays inside it.)
 - **Piano riser:** X −2.8…+2.8, Z 57–61, deck Y 0.6, railing on 3 sides; white grand piano with a vertical
   white light tube (laser source at Y 1.8) for Domitor Draconis (INFERENCE: the small fenced riser in the
   photo sits exactly where the laser bounce converges).
@@ -490,6 +514,36 @@ numbers above, the geometry was changed and the entry above is marked "Round 3".
   leopard hide, decor); every such material scales its albedo back by a measured `nightK` (texture-mean ratio
   old / new) in the show, so the dark night castle and the calibrated looks keep their levels; the dev-only
   `?daylight` URL flag (off by default) shows the true albedo under a flat afternoon sun for art review.
+
+
+### 5.14 Change log: round-4 lantern pillars + FOH pen from the daytime photos (2026-09-26)
+
+Sources: day2 (axis telephoto, elevated, ≈ (0, 11–13, 141), HFOV ≈ 29°: the row-1 pillars, the pen, the row-2
+fences in the bottom corners), day3 / day4 (drone), photo P (0, 6.8, 168) and the video (26–30 s, 1272–1276 s).
+
+- **Pillars (§5.10):** white-painted stone shaft 2.6 → **1.8 m**, low arched niche on each face, single delay
+  hang on the +Z face; **silver faceted crystal** (double pyramid, chrome frame) instead of the dark bronze hood;
+  crystal 3.0 → 2.4 m, tip 14.5 → **12.8** (now = the bible tip and the pillars_top anchor; proportions measured
+  on photo P: capital top 0.76 H, crystal bottom 0.80 H, girdle 0.88 H); stepped pedestal, 3.4 m frieze capital
+  and the flame banner removed. **Bronze lattice railing → black barrier fence; bronze cannons → black SFX
+  launchers + road cases.** Anchors kept (capital top 9.6, LANTERN_Y 11.2, base deck 0.4).
+- **Measurement note:** on day2 the pillar height reads ~14.6 m (scale from X ±20) against ~12.3 m on photo P;
+  the PA hangs in day2 read ~1.3× longer than §5.9 too, so day2 is probably vertically stretched by the
+  re-post (portrait crop). Heights follow photo P; day2 gives the look and the horizontal proportions.
+- **Fences:** 8.4 → **7.0 m** (photo P: front face 6.6 m, receding side 7.3 m; day2 front face ≈ 6.6 m).
+- **FOH (§5.11):** the platform + barrier ring became the **black barrier pen** of the photos: 14 × 3.2 m,
+  Z 87.2–90.4. Photo P (the show night): front edge at Z ≈ 90.3 by 1/d interpolation between the row-2 and
+  row-3 fence fronts (camera-independent), barrier 1.06 m, width 14.3 m, depth ≈ 2.5–3 m (top-rail rise of the
+  end run). CONFLICT: on day2 the pen's front edge sits level with the row-2 fence fronts (Z ≈ 72.5) — it was
+  probably moved before the Endshow (or day2 shows another pen); the night position of photo P is used.
+- **Night:** white paint scaled back ×0.18 in the show (dark shafts, blue uplit foot, bright crystal bowl as
+  in the video); the silver upper pyramid has only a faint inner glow.
+- **Draw calls / mobile:** pillars 5 instanced draw calls for all 8 (4 on mobile: metal merged into the stone
+  mesh); the pen is 1 merged mesh (it replaces 3); the small field props (sign posts, water points, first aid,
+  stalls, bins, flag poles, masts) share 1 merged mesh (was 7). On mobile the small pillar / pen props (cases,
+  launchers, uplights, foot plates, frame ribs, per-box array) are left out. Measured (SwiftShader, same poses):
+  desktop high 104 → 99 draw calls, grounds triangles 59.0 k → 51.7 k; mobile 122 → 114 calls, pillar
+  triangles 6.2 k → 3.4 k.
 
 ---
 
@@ -536,10 +590,10 @@ Heightmap: `refs/terrain/ahn_heightmap_redframe_2m.json` (161 × 186 samples, 2 
 
 | Object | Position / size | Tag |
 |---|---|---|
-| Delay-tower obelisks ×8 | X ±20; Z 36, 69, 102, 135; plinth 8.5 m; crystal tip Y 12.8 | INFERENCE (§5.3) |
+| Delay-tower obelisks ×8 | X ±20; Z 36, 69, 102, 135; black barrier fence 7 m; crystal tip Y 12.8 | INFERENCE (§5.3), look FACT (§5.10) |
 | Aisle | between tower rows, X ±15.75 clear | INFERENCE |
 | Piano riser | (0, 0.6, 59), 5.6 × 4 m | INFERENCE |
-| FOH / camera platform | (0, 0.5, 90), 12.8 × 6 m | INFERENCE |
+| FOH / camera pen | black barrier pen X ±7, Z 87.2–90.4 (riser Y 0.5 inside) | FACT look, INFERENCE ±2 m (§5.11) |
 | Pit barrier | (−92,−1)→(−46,6)→(46,6)→(92,−1), 1.2 m | ASSUMPTION |
 | Backstage/side fences | Z −6 from X ±92 to ±108 (2.0 m Heras + black scrim), continuing up the crest | FACT 2024 position |
 | Cable ramps (optional) | along the tower rows X ±20, Z 3…135, 0.6 m wide, 0.1 m high | ASSUMPTION (2024 red lines) |

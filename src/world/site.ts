@@ -66,32 +66,42 @@ export const PILLARS: { x: number; z: number; row: number; side: -1 | 1 }[] = PI
   { x: PILLAR_X, z, row, side: 1 as const },
 ]);
 /**
- * pillar build dimensions (design-bible §5.10 + the official Endshow photo P and frame f113):
- * 8.4 m plinth deck (Y 0.4) inside a dark bronze lattice railing, stepped pedestal to Y 2.7,
- * slim 2.6 m square shaft to Y 8.8, plain 3.4 m capital to Y 9.6 (no pinnacles), a 0.6 m neck, then
- * the crystal lantern: glowing inverted glass pyramid Y 10.2 → 11.7 (girdle Ø 3.0 m, turned 45° to
- * the shaft, bright point at the bottom apex), a metal crown band, and a tall dark metal hood with
- * mullions to Y 13.9, finial to 14.5.
+ * pillar build dimensions (design-bible §5.10, round 4: the daytime photos day2 / day3 + the official
+ * Endshow photo P, proportions measured on both; the show anchors keep capital top 9.6 / crystal tip 12.8):
+ *  - a square black crowd-barrier fence (Mojo-style panels, 1.1 m) of 7 m (photo P: front face 6.6 m, side
+ *    7.3 m; day2 ≈ 6.6 m) around a black equipment deck (Y 0.4) with road cases and two SFX launchers
+ *    (photo P: the angled "cannons" at the front corners inside the fences)
+ *  - a 2.2 m stone base block to Y 1.62, then a SLIM 1.8 m square shaft of white-painted stone blocks to
+ *    Y 8.6 with a round-topped window niche low on every face (day2), a mid niche and a small high window
+ *    on the sides (photo P), RGB LED strips in the four edges
+ *  - one delay line array (11 × K2-class, 1.34 m) on the audience (+Z) face, Y 4.5 → 8.45 (day2)
+ *  - a stone cornice, a black steel lighting band and a 2.9 m top plate to Y 9.6 (the moving heads on
+ *    its corners are the lighting rig's, the capital flame / gerb units the pyro's), a short red-bronze neck
+ *  - the crystal lantern, turned 45° to the shaft: a flat inverted glass pyramid Y 10.15 → 11.05 that
+ *    glows in the lamp colour (bright point at its bottom apex), a chrome girdle band to 11.3, and a
+ *    SILVER faceted glass pyramid to the tip at 12.8 (girdle Ø 2.4 m across the corners), chrome frame
  */
 export const PILLAR = {
-  deck: 8.4,
+  deck: 7.0,
   deckH: 0.4,
-  fence: 8.5,
-  pedestal: 3.3,
-  pedestalTop: 2.45,
-  shaft: 2.6,
-  baseTop: 2.73,
-  shaftTop: 8.8,
-  capital: 3.4,
+  fence: 7.1,
+  fenceH: 1.1,
+  base: 2.2,
+  baseTop: 1.62,
+  shaft: 1.8,
+  shaftTop: 8.6,
+  capital: 2.9,
   capTop: 9.6,
-  lanternBottom: 10.2,
-  girdle: 11.7,
-  girdleTop: 11.9,
-  crystalTop: 13.9,
-  top: 14.5,
-  crystalR: 1.5,
+  lanternBottom: 10.15,
+  girdle: 11.05,
+  girdleTop: 11.3,
+  crystalTop: 12.8,
+  top: 13.05,
+  crystalR: 1.2,
+  arrayTop: 8.45,
+  arrayBottom: 4.5,
 };
-/** lantern light centre (inside the glowing lower glass; also the laser mirror height 11.2) */
+/** lantern light centre (the girdle of the crystal, over the glowing lower glass; laser mirror height) */
 export const LANTERN_Y = 11.2;
 /**
  * height registered as the 'pillars_top' anchor: the lighting rig and laser rig read the capital
@@ -118,12 +128,20 @@ export const BACKSTAGE_Z = -6;
 export const ARM_BARRIER_X = 90;
 
 /**
- * FOH / camera platform on the axis (design-bible §5.11 / §6.4: X ±6.4, Z 87–93, deck Y 0.5, 1.1 m
- * railing, camera operator on a tripod — FACT photo P). On the empty-grounds Endshow night this low
- * platform is the only FOH position between the pillar rows: nothing tall stands on the axis, so the
- * official photo (0, 6.8, 168) and the hero field camera (0, 1.8, 172) see the whole aisle.
+ * FOH / camera position on the axis as the show anchors see it (design-bible §5.11 / §6.4): 'foh' =
+ * (x, deckY, z), the FOH laser stands at z − d/2 + 0.4, the lighting rig's floor fixtures at z − 2.7.
+ * Kept as registered by the rigs; the physical build is FOH_PEN below, which contains all of them.
  */
 export const CAM_PEN = { x: 0, z: 90, w: 12.8, d: 6, deckY: 0.5 };
+/**
+ * The FOH / camera PEN as built (round 4, design-bible §5.11: daytime photo day2 + photo P, measured):
+ * a long low rectangle of black crowd barriers (Mojo-style, 1.1 m) standing on the paving, 14 × 3.2 m,
+ * Z 87.2 → 90.4 (photo P: front edge at Z ≈ 90.3 by 1/d interpolation between the row-2 and row-3 fence
+ * fronts, barrier 1.06 m, width 14.3 m, depth ≈ 2.5–3 m), grey foot plates at the ends; inside a black
+ * 0.5 m camera / fixture riser (the camera operator stands on it, photo P: head and shoulders above the
+ * barrier). Nothing tall on the axis.
+ */
+export const FOH_PEN = { x: 0, z: 88.8, w: 14, d: 3.2, fenceH: 1.1, riserY: 0.5 };
 /**
  * "Exclusive RED Experience" photo terrace at the back edge of the decking (design-bible §6.3:
  * X ±30, Z 166…172, deck Y 5, INFERENCE) — the official Endshow photo P was taken from its front
