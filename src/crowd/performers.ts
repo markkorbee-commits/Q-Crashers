@@ -293,7 +293,7 @@ export class Performers {
       this.perfs.push({ name, k: m ? Number(m[1]) : 0, mode, look: l, height, build, seed: hash32(this.perfs.length * 977 + 31) & 0xffffff });
     };
     add('mc', 'both', (l) => {
-      l.skin = 3; l.hairColor = 0; l.headwear = HEAD.CAP; l.capColor = 0; l.top = TOP.DENIM; l.bottom = BOTTOM.BLACK;
+      l.skin = 3; l.hairColor = 0; l.headwear = HEAD.CAP; l.capColor = 0; l.top = TOP.CHARCOAL; l.bottom = BOTTOM.BLACK;
       l.shoe = 0; l.socks = true; l.props = PROP.MIC; l.wristband = true;
     }, 1.8, 1.12);
     for (let i = 0; i < DANCERS; i++) {

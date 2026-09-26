@@ -210,7 +210,8 @@ vec3 toWorld(Person P, Pose Q, vec3 lp) {
 
 /**
  * Near-lens fade (1 visible … 0 gone): a person whose body axis (feet to raised hands, ~2.2 m) passes
- * within ~1.2 m of the lens and who is in front of the camera dissolves, so walking through the Tribe,
+ * within ~1.2 m of the lens and who is in front of the camera dissolves (gone inside 0.9 m, a short
+ * dithered band to 1.3 m so few bodies show the screen-door at once), so walking through the Tribe,
  * a low show camera or a teleport never fills the frame with a head. CrowdSystem routes everyone
  * within ~2.4 m of the camera to the dithered 'crowd-fade' draw, which evaluates this per instance.
  */
@@ -218,10 +219,10 @@ float lensFade(vec3 feet, float h) {
   float top = feet.y + 2.2 * h / 1.75;
   vec3 cp = vec3(feet.x, clamp(cameraPosition.y, feet.y, top), feet.z);
   float da = distance(cameraPosition, cp);
-  if (da > 1.6) return 1.0;
+  if (da > 1.35) return 1.0;
   vec3 vc = (viewMatrix * vec4(cp, 1.0)).xyz;
   float inView = smoothstep(-0.25, 0.3, -vc.z / max(length(vc), 1e-3));
-  return mix(1.0, smoothstep(0.95, 1.55, da), inView);
+  return mix(1.0, smoothstep(0.9, 1.3, da), inView);
 }
 `;
 

@@ -26,7 +26,7 @@ environment for testing without the lighting system), `crowdslope` (analytic ban
 | far | camera-facing impostors from a procedural silhouette atlas (8 poses × 4 bodies, region + rim channels) |
 | flags | pole + waving cloth attached to the carrier's hand; lowered away from and furled next to a viewer |
 | phones | 7 × 15 cm screens showing a dim "video of the stage", flashlight LEDs from the stage side, lighter flames; energy-conserving sub-pixel dots, fogged |
-| crowd-fade | everyone whose body axis is within 2.4 m of the lens (walkers: within their stroll): hero body (near body on mobile) with a per-instance near-lens dissolve — dithered out within ~1.55 m, gone within ~0.95 m, only when in front of the camera. Its own program, so the big hero / near draws keep early-Z |
+| crowd-fade | everyone whose body axis is within 2.4 m of the lens (walkers: within their stroll): hero body (near body on mobile) with a per-instance near-lens dissolve — dithered out within ~1.3 m, gone within ~0.9 m, only when in front of the camera. Its own program, so the big hero / near draws keep early-Z |
 | performers | MC, fire-ritual troupe (10 lantern bearers, lead on a pedestal, aerialist), pianist, DJ, crew, pit security (hero body; near body on mobile). Only the performers on at the current time are uploaded (compacted rows), so an off-stage cast costs no triangles; they carry the same near-lens dissolve |
 | props | piano riser, white grand piano + light tube, pedestal, aerial strap, tripods |
 
@@ -79,8 +79,10 @@ Flag carriers never stand within ~5 m of a named viewpoint or in the pit front c
 **Clear viewpoints** (`LayoutInput.clear`, layout.ts `ClearZone`): every start choice (front, crowd,
 middle, foh, photo) plus dragon view, the piano riser and the deck spots keeps nobody within 2.5 m,
 nobody in the ±60° forward cone out to 6 m and ~35 % of the people between 6 and 9 m (soft edges:
-+12° and +1.5 m), so the first image after ENTER is the show and not the back of a head. Raised
-spots (y ≥ 8) look over the heads. Every other named ground spot gets a 1.8 m ring. The final
++12° and +1.5 m), so the first image after ENTER is the show and not the back of a head. Spots
+≥ 1.5 m above the ground (deck, photo terrace) keep their cone clear but do not thin the 6–9 m band
+(the barrier rows stay packed); spots at y ≥ 8 look over the heads and need nothing. Every other
+named ground spot gets a 1.8 m ring. The final
 position of each person is re-tested (jitter, warp, group pull), walkers along their whole stroll.
 At runtime the near-lens dissolve (crowd-fade above) covers walking, free / third-person cameras
 and low show cameras.
