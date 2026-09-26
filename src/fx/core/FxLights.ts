@@ -20,6 +20,13 @@ export interface LightSpec extends FlashSpec {
   b: THREE.Vector3;
   /** reach (m): distance at which the light on smoke has fallen to one half */
   radius: number;
+  /**
+   * 0..1: how much of this light is a glowing smoke volume itself (1: a self-lit fog burst, the pink
+   * whiteout cloud) rather than a source lighting the air around it (0, default: flames, gerbs, shells).
+   * The haze field scatters the two differently (haze.ts): a glowing cloud fills the air in its colour,
+   * a white gerb wall only lights the smoke right at it. Packed into uFxLB.w (the other fx shaders ignore it).
+   */
+  haze?: number;
 }
 
 /** compile-time maximum of lights in the shaders (keep in sync with FX_MAX_LIGHTS in glsl.ts) */
@@ -48,6 +55,8 @@ export class FxLights {
   private readonly cg = new Float32Array(CAP);
   private readonly cb = new Float32Array(CAP);
   private readonly w = new Float32Array(CAP);
+  /** haze share (LightSpec.haze) * intensity: folds with the light's energy */
+  private readonly hw = new Float32Array(CAP);
   private readonly pick = new Int32Array(FX_MAX_LIGHTS);
   private readonly used = new Uint8Array(CAP);
   /** total light intensity this frame (stats) */
@@ -87,6 +96,8 @@ export class FxLights {
     this.cg[k] = s.color.g * I;
     this.cb[k] = s.color.b * I;
     this.w[k] = I;
+    const h = s.haze;
+    this.hw[k] = typeof h === 'number' && h > 0 ? Math.min(1, h) * I : 0;
   }
 
   /**
@@ -134,13 +145,16 @@ export class FxLights {
         this.cr[p] += this.cr[i] * k;
         this.cg[p] += this.cg[i] * k;
         this.cb[p] += this.cb[i] * k;
+        // (the haze share folds with the energy; picking is done, so w may grow now)
+        this.w[p] += this.w[i] * k;
+        this.hw[p] += this.hw[i] * k;
       }
     }
     for (let j = 0; j < FX_MAX_LIGHTS; j++) {
       if (j < N) {
         const p = this.pick[j];
         u.uFxLA.value[j].set(this.ax[p], this.ay[p], this.az[p], this.rad[p]);
-        u.uFxLB.value[j].set(this.bx[p], this.by[p], this.bz[p], 0);
+        u.uFxLB.value[j].set(this.bx[p], this.by[p], this.bz[p], this.hw[p] / Math.max(1e-6, this.w[p]));
         u.uFxLC.value[j].set(this.cr[p], this.cg[p], this.cb[p], 0);
       } else u.uFxLC.value[j].set(0, 0, 0, 0);
     }
