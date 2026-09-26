@@ -7,9 +7,8 @@ import { terrainHeight } from '../world/site';
  *
  * Where the bible's castle numbers collide with the (fixed, camera-calibrated) dragon crown the
  * castle yields — documented next to each value:
- *  - inner castle towers: bible X ±14. The crown's gold right foreleg (X +7…+15, Z −17…−12.5)
- *    grips the parapet exactly there, so the inner towers stand at X ±17.3 (4 m wide, rising behind
- *    the facade) and the claw reads in front of them, as in the official thumbnail.
+ *  - inner castle towers: bible X ±14; they stand at X ±17.3 (4 m wide) set back to Z −15 so the
+ *    wing arm arches in front of them (round 3, daytime photos: towers under the wing arches).
  *  - logo shield: bible Y 7.4–9.0; kept below 8.5 because the dragon's chin hangs at Y 8.7 right
  *    behind it (crown layout).
  *  - skull medallions: bible Y 6.5; lifted to 7.1 so the gallery floor (Y 5.5) does not cut them.
@@ -26,10 +25,18 @@ export const L = {
   // ---- castle core ----------------------------------------------------------------------------
   facadeZ: -12,
   coreHalf: 37,
-  /** crenellation line = wall walk (core and side sections) */
+  /** crenellation line = wall walk of the side sections (bible 9.5; the lamp row sits on it) */
   wallTop: 9.5,
   merlonH: 1.05,
-  /** dark roof over the core and its scaffold back wall */
+  /**
+   * wall walk of the castle CORE facade (X ±37). Round 3: the daytime photos show the white core
+   * front topping out level with the skull cubes / just over the portal crown (~8 m), under the
+   * lower wings - the bible's 9.5 hid the wing bottoms and the towers under the arches.
+   */
+  coreTop: 8.1,
+  /** dark roof over the core (just under its wall walk) and the side sections' roof */
+  coreRoofY: 7.75,
+  /** dark roof over the side sections and their scaffold back wall */
   roofY: 9.2,
   coreBackZ: -30,
   /** gate porch (DJ portal block) in front of the facade */
@@ -52,9 +59,8 @@ export const L = {
   /** upper castle platform (Y 5.5): porch rear + a gallery along the facade */
   platformY: 5.5,
   galleryFrontZ: -10.4,
-  /** raised battlement block the right foreleg's talons hook over */
-  clawBlock: [10.4, 14.6] as const,
-  clawBlockTop: 10.85,
+  /** plain coping over the dragon's chest (|X| below this), merlons outboard */
+  copingHalf: 10.4,
 
   // ---- PA (K1 ruler) ------------------------------------------------------------------------------
   innerHangX: 11,

@@ -27,6 +27,12 @@ export interface StageUniforms {
   uRegionF: THREE.IUniform<THREE.Vector4>;
   uFloodTintC: THREE.IUniform<THREE.Color>;
   uFloodTintS: THREE.IUniform<THREE.Color>;
+  /**
+   * 0 = the show, 1 = the dev `?daylight` view. Surfaces re-painted to the daytime photos (the
+   * off-white castle stone) scale their albedo by their `nightK` in the show, so every night look
+   * keeps the level it was calibrated to.
+   */
+  uDay: THREE.IUniform<number>;
 }
 
 export function createStageUniforms(): StageUniforms {
@@ -42,6 +48,7 @@ export function createStageUniforms(): StageUniforms {
     uRegionF: { value: new THREE.Vector4(1, 1, 0, 0) },
     uFloodTintC: { value: new THREE.Color(1, 1, 1) },
     uFloodTintS: { value: new THREE.Color(1, 1, 1) },
+    uDay: { value: 0 },
   };
 }
 
@@ -56,6 +63,7 @@ uniform vec3 uEnvTint;
 uniform vec4 uRegionF;
 uniform vec3 uFloodTintC;
 uniform vec3 uFloodTintS;
+uniform float uDay;
 varying vec3 vStageWP;
 float stageSideW(vec3 wp) { return smoothstep(37.3, 38.3, abs(wp.x)); }
 float stageRegion(vec3 wp) { return mix(uRegionF.x, uRegionF.y, stageSideW(wp)); }
@@ -107,12 +115,15 @@ export interface PatchOpts {
   glowGroups?: boolean;
   /** strength of the virtual flood field on this material */
   flood?: number;
+  /** albedo scale in the show (see StageUniforms.uDay) */
+  nightK?: number;
 }
 
 /** Patch a MeshStandardMaterial/MeshPhysicalMaterial with the stage flood field + env tint. */
 export function patchStageShading(mat: THREE.MeshStandardMaterial, u: StageUniforms, o: PatchOpts = {}): void {
   const flood = (o.flood ?? 1).toFixed(3);
-  const key = `stage-shading-${o.glowGroups ? 'g' : ''}-${flood}`;
+  const nk = (o.nightK ?? 1).toFixed(3);
+  const key = `stage-shading-${o.glowGroups ? 'g' : ''}-${flood}-${nk}`;
   mat.customProgramCacheKey = () => key;
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, u);
@@ -145,7 +156,7 @@ ${o.glowGroups ? 'uniform vec4 uGlow;\nvarying float vGroup;' : ''}`,
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
-diffuseColor.rgb *= stageAO(vStageWP);`,
+diffuseColor.rgb *= stageAO(vStageWP) * mix(${nk}, 1.0, uDay);`,
       )
       .replace(
         '#include <emissivemap_fragment>',

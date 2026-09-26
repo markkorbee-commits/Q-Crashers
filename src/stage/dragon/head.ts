@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Polyline, basisZ, frameY, gradientY, plate, ring, spike, surface, tube, v2, v3, type V3 } from './geom';
+import { HEAD } from './layout';
 import { PAL, segs, type Kit } from './kit';
 import { BULB } from './shading';
 
@@ -34,6 +35,8 @@ function interp(xs: number[], ys: number[], x: number): number {
   return ys[i - 1] + (ys[i] - ys[i - 1]) * (0.35 * t + 0.65 * s);
 }
 const gauss = (x: number) => Math.exp(-x * x);
+/** the spiky orange-bronze crest plates between the horns (daytime photos) */
+const CREST_ORANGE = new THREE.Color('#c0682c');
 
 interface RimPt {
   p: V3;
@@ -264,7 +267,7 @@ export function buildHead(k: Kit): HeadResult {
       hp.z -= 1.6 + i * 1.1;
       hp.y += 0.3;
       const dir = v3(side * 0.5, 0.45, -1).normalize();
-      W.steel.add(spike(2.4 - i * 0.6, 0.38, { sides: 8, segs: 4, bend: side * 0.3 }), HM.clone().multiply(frameY(hp, dir)));
+      W.steel.add(spike(2.4 - i * 0.6, 0.38, { sides: 8, segs: 4, bend: side * 0.3 }), HM.clone().multiply(frameY(hp, dir)), 0xdfe2e8);
     }
     // cheek blade fan (sickle blades sweeping back/out, like the jaw-side spikes in the photos)
     for (let i = 0; i < 5; i++) {
@@ -477,19 +480,21 @@ export function buildHead(k: Kit): HeadResult {
   {
     const Cw = v3(0, -0.8, -4.4).applyMatrix4(HM);
     const zc = -4.35;
+    // daytime photos: 7-8 long silver-white horns fanning out and back from the skull like a crown
+    // (the longest sweep out to viewer-left / back-right), smaller cones between them
     const list: [number, number, number, number][] = [
       // side, psi, length, radius
-      [-1, 0.12, 6.2, 0.85],
-      [-1, 0.32, 8.6, 1.1],
-      [-1, 0.52, 7.8, 1.0],
-      [-1, 0.72, 6.6, 0.92],
-      [-1, 0.9, 5.6, 0.84],
-      [1, 1.0, 5.4, 0.82],
-      [1, 0.88, 5.2, 0.78],
-      [1, 0.7, 5.4, 0.78],
-      [1, 0.5, 5.6, 0.8],
-      [1, 0.3, 5.0, 0.72],
-      [1, 0.12, 3.8, 0.58],
+      [-1, 0.12, 7.2, 0.95],
+      [-1, 0.32, 9.6, 1.15],
+      [-1, 0.52, 9.0, 1.08],
+      [-1, 0.72, 7.4, 0.95],
+      [-1, 0.9, 5.4, 0.8],
+      [1, 1.0, 5.0, 0.76],
+      [1, 0.84, 6.4, 0.86],
+      [1, 0.66, 7.6, 0.95],
+      [1, 0.46, 8.4, 1.02],
+      [1, 0.28, 7.2, 0.9],
+      [1, 0.1, 5.0, 0.7],
     ];
     const sides = segs(k, 12, 6);
     const baseFor = (side: number, psi: number, z: number) => {
@@ -499,19 +504,19 @@ export function buildHead(k: Kit): HeadResult {
     const dirFor = (b: V3, back: number) => {
       const fr = v3(b.x - Cw.x, b.y - Cw.y, 0);
       let ang = Math.atan2(fr.y, fr.x);
-      // bias towards vertical so the fan reads as a crown
-      ang = Math.PI / 2 + (ang - Math.PI / 2) * 0.7;
+      // fanned wide (the photos' crown of horns spreads well past 45 deg each side)
+      ang = Math.PI / 2 + (ang - Math.PI / 2) * 1.05;
       return v3(Math.cos(ang), Math.sin(ang), -back).normalize();
     };
     for (const [side, psi, len, r] of list) {
       const b = baseFor(side, psi, zc);
-      const d = dirFor(b, 0.62);
-      const bend = len * 0.12;
-      // tall central spikes are kept shorter so the crest tops out near Y 22 (design bible 21.5)
-      const L2 = len * (0.78 - 0.55 * Math.max(0, d.y - 0.4));
-      const g = spike(L2, r * 1.55, { sides, segs: segs(k, 7, 4), bendZ: -bend, tipR: 0.03 });
+      const d = dirFor(b, 0.85);
+      const bend = len * 0.16;
+      // the near-vertical middle horns stay shorter so the crown tops out near Y 23-24 (photos)
+      const L2 = len * HEAD.scale * (0.95 - 0.5 * Math.max(0, d.y - 0.55));
+      const g = spike(L2, r * 0.95 * HEAD.scale, { sides, segs: segs(k, 8, 4), bendZ: -bend, bend: side * len * 0.06, tipR: 0.03 });
       const m = frameY(b, d, 0, 1, v3(0, 0, 1));
-      W.steel.add(g, m, 0x9aa2ac);
+      W.steel.add(g, m, 0xe2e5ea);
       const tip = v3(0, L2, -bend).applyMatrix4(m);
       crestTips.push(tip);
       // accent LED along the front edge
@@ -523,7 +528,7 @@ export function buildHead(k: Kit): HeadResult {
       }
       W.strips.add(line, 1, 0.1);
       // collar ring at the base
-      W.armor.add(withRot(ring(r * 1.4, 0.16, 5, 16), frameY(b.clone().addScaledVector(d, 0.3), d)), null, PAL.bronze);
+      W.armor.add(withRot(ring(r * 1.4 * HEAD.scale, 0.16, 5, 16), frameY(b.clone().addScaledVector(d, 0.3), d)), null, PAL.bronze);
     }
     // second row: shorter, thick cones in front of the frill
     for (let i = 0; i < 6; i++) {
@@ -531,8 +536,8 @@ export function buildHead(k: Kit): HeadResult {
       const psi = 0.35 + (i % 3) * 0.25;
       const b = baseFor(side, Math.min(1, psi), -2.9);
       const d = dirFor(b, 0.25);
-      const len = 2.2 + rnd() * 0.9;
-      W.steel.add(spike(len, 0.55, { sides: 8, segs: 3, bendZ: -0.3 }), frameY(b, d, 0, 1, v3(0, 0, 1)));
+      const len = (2.2 + rnd() * 0.9) * HEAD.scale;
+      W.steel.add(spike(len, 0.55 * HEAD.scale, { sides: 8, segs: 3, bendZ: -0.3 }), frameY(b, d, 0, 1, v3(0, 0, 1)));
     }
     // jagged frill: big dark sawtooth blades between/behind the cones (the crown's spiky collar)
     for (let i = 0; i < 18; i++) {
@@ -540,11 +545,22 @@ export function buildHead(k: Kit): HeadResult {
       const psi = 0.02 + (i % 9) * 0.122;
       const b = baseFor(side, Math.min(1, psi), -4.9);
       const d = dirFor(b, 0.5);
-      const len = 3.6 + rnd() * 1.8 + (side < 0 ? 0.8 : 0);
-      const w = 1.2 + rnd() * 0.4;
+      const len = (2.6 + rnd() * 1.4 + (side < 0 ? 0.5 : 0)) * HEAD.scale;
+      const w = (0.9 + rnd() * 0.3) * HEAD.scale;
       const blade = plate([v2(-w, 0), v2(w, 0), v2(w * 0.35, len * 0.45), v2(w * 0.6, len * 0.52), v2(w * 0.1, len)], 0.16, 0.04);
       const m = frameY(b, d, (rnd() - 0.5) * 0.4, 1, v3(0, 0, 1));
-      W.armor.add(blade, m, i % 3 === 0 ? PAL.darkBronze : PAL.plateRed);
+      W.armor.add(blade, m, i % 3 === 0 ? PAL.darkBronze : CREST_ORANGE);
+    }
+    // the two long cheek horns sweeping back and out from behind the jaw hinge (photos: the
+    // longest white horns of the head, curving up at the tips)
+    for (const side of [1, -1]) {
+      const b = baseFor(side, 0.22, -3.2);
+      const d = v3(side * 0.62, 0.12, -1).applyMatrix4(new THREE.Matrix4().extractRotation(HM)).normalize();
+      d.y = Math.max(d.y, 0.05);
+      d.normalize();
+      const g = spike(8.2 * HEAD.scale, 0.72 * HEAD.scale, { sides, segs: segs(k, 9, 5), bendZ: 1.6, tipR: 0.03 });
+      W.steel.add(g, frameY(b, d, 0, 1, v3(0, 1, 0)), 0xe2e5ea);
+      W.armor.add(withRot(ring(1.2, 0.18, 5, 16), frameY(b.clone().addScaledVector(d, 0.35), d)), null, PAL.bronze);
     }
   }
 

@@ -117,7 +117,8 @@ export class DragonCrown {
       armor: std('armor', { metalness: 0.82, roughness: 0.55, envMapIntensity: 1.2 }, panel, { key: 'armor' }),
       steel: std('steel', { metalness: 0.95, roughness: 0.7, envMapIntensity: 0.8 }, steel),
       copper: std('copper', { metalness: 0.7, roughness: 0.75, envMapIntensity: 0.9 }, steel),
-      lava: std('lava', { map: lava.map, emissiveMap: lava.emissiveMap, emissive: 0x000000, normalMap: scale.normalMap, metalness: 0.35, roughness: 0.6, envMapIntensity: 0.6 }, undefined, { key: 'lava', lava: true }),
+      // leopard hide (daytime photos): ~2.5x the albedo of the old lava hide, scaled back in the show
+      lava: std('lava', { map: lava.map, emissiveMap: lava.emissiveMap, emissive: 0x000000, normalMap: scale.normalMap, metalness: 0.2, roughness: 0.62, envMapIntensity: 0.6 }, undefined, { key: 'lava', lava: true, nightK: 0.74 }),
       ivory: std('ivory', { metalness: 0.0, roughness: 0.3, envMapIntensity: 0.5 }),
       flesh: std('flesh', { metalness: 0.0, roughness: 0.38, envMapIntensity: 0.4, side: THREE.DoubleSide }),
       rider: std('rider', { metalness: 0.7, roughness: 0.75, envMapIntensity: 0.9 }, panel),
@@ -131,8 +132,11 @@ export class DragonCrown {
       envMapIntensity: 0.35,
       vertexColors: true,
     });
-    patchStandard(membraneMat, U, { key: 'membrane', membrane: true, lite });
-    const rosetteMat = new THREE.MeshStandardMaterial({ color: '#c8a060', metalness: 0.9, roughness: 0.35, envMap: env, envMapIntensity: 1.1, map: panel.map, normalMap: panel.normalMap });
+    // the painted inferno of the daytime photos is ~1.9x brighter than the old print: its night
+    // albedo and its self-lit level are normalised to the old means (texture statistics)
+    patchStandard(membraneMat, U, { key: 'membrane', membrane: true, lite, nightK: 0.53, printGain: 0.75 });
+    // the white spiky crown ring round each printed sun (daytime photos): painted white metal
+    const rosetteMat = new THREE.MeshStandardMaterial({ color: '#e9ebef', metalness: 0.45, roughness: 0.4, envMap: env, envMapIntensity: 1.0 });
     patchStandard(rosetteMat, U, { key: 'rosette', lite });
     const stripMat = createStripMaterial(U);
     const bulbMat = createBulbMaterial(U);
@@ -376,6 +380,25 @@ export class DragonCrown {
     }
   }
 
+  /** DEV `?daylight` (MainStage): every crown emitter off, the wash rig replaced by bright sky reflections */
+  daylight(): void {
+    const U = this.U;
+    for (let i = 0; i < DAY_OFF.length; i++) (U[DAY_OFF[i]].value as THREE.Color).setRGB(0, 0, 0);
+    U.uEnvTint.value.setRGB(3.2, 3.3, 3.5);
+    U.uLedI.value = 0;
+    U.uWings.value = 0;
+    U.uEmit.value = 0;
+    U.uMouth.value = 0;
+    U.uPulse.value = 0;
+    U.uPoolAmt.value = 0;
+    U.uWingWash.value = 1;
+    U.uDragonWash.value = 1;
+    U.uGarl.value.set(0, 0, 0);
+    U.uDay.value = 1;
+    if (this.garlandMesh) this.garlandMesh.visible = false;
+    this.eyeMat.color.setRGB(0.04, 0.015, 0.01);
+  }
+
   /**
    * Share the crown's virtual wash rig with another set piece (e.g. the castle): the material then
    * receives the same stage wash / rim / flash / throat light as the dragon. Call after build().
@@ -432,6 +455,8 @@ export class DragonCrown {
 }
 
 const FROST = new THREE.Color(0.55, 0.8, 1.0);
+/** colour uniforms of the wash rig / emitters switched off by the dev `?daylight` view */
+const DAY_OFF = ['uWashA', 'uWashB', 'uKey', 'uRim', 'uFlash', 'uAmbient', 'uMouthCol', 'uLava', 'uRosette', 'uEyes'] as const;
 
 function addScaled(c: THREE.Color, o: THREE.Color, s: number): THREE.Color {
   c.r += o.r * s;

@@ -63,6 +63,12 @@ export interface CrownUniforms {
   /** 0..1 how much of the wash rig + reflections reach the wings / the dragon (mask isolations) */
   uWingWash: THREE.IUniform<number>;
   uDragonWash: THREE.IUniform<number>;
+  /**
+   * 0 = the show (night calibration), 1 = the dev `?daylight` view. Materials whose printed art was
+   * brightened to match the daytime photos scale their albedo back by their `nightK` at 0, so every
+   * show look keeps the brightness it was calibrated for (the photos set the art, not the exposure).
+   */
+  uDay: THREE.IUniform<number>;
 }
 
 export function createUniforms(): CrownUniforms {
@@ -106,6 +112,7 @@ export function createUniforms(): CrownUniforms {
     uGarlRate: { value: 2 },
     uWingWash: { value: 1 },
     uDragonWash: { value: 1 },
+    uDay: { value: 0 },
   };
 }
 
@@ -183,6 +190,7 @@ uniform float uShowT;
 uniform float uPoolAmt;
 uniform float uWingWash;
 uniform float uDragonWash;
+uniform float uDay;
 
 // soft light pools of the moving-head washes sweeping across the set (deterministic in show time)
 float crownPools(vec3 p) {
@@ -251,6 +259,10 @@ export interface PatchOpts {
   membrane?: boolean;
   /** cheaper lighting (no light pools, no rim light) for mobile GPUs */
   lite?: boolean;
+  /** albedo scale in the show (see CrownUniforms.uDay): keeps the night level of re-painted art */
+  nightK?: number;
+  /** membrane: gain of the self-lit print (normalised to the print's mean brightness) */
+  printGain?: number;
 }
 
 /** Inject the virtual wash rig (+ optional effects) into a MeshStandardMaterial. */
@@ -290,6 +302,13 @@ transformed += objectNormal * (sin(uTime * 0.9 + position.x * 0.16 + position.y 
 }`,
       );
     let fs = sh.fragmentShader;
+    const nk = (o.nightK ?? 1).toFixed(3);
+    fs = fs.replace(
+      '#include <color_fragment>',
+      `#include <color_fragment>
+vec3 crownAlb = diffuseColor.rgb;
+diffuseColor.rgb *= mix(${nk}, 1.0, uDay);`,
+    );
     fs = fs.replace(
       '#include <lights_physical_pars_fragment>',
       `#include <lights_physical_pars_fragment>
@@ -312,7 +331,7 @@ iblIrradiance *= uEnvTint * max(crownWashReg(), 0.03);`,
 {
   #ifdef USE_EMISSIVEMAP
   float crack = texture2D(emissiveMap, vEmissiveMapUv).r;
-  totalEmissiveRadiance += uLava * crack * crack * 0.8 * step(0.5, vCrownFx);
+  totalEmissiveRadiance += uLava * crack * crack * 4.3 * step(0.5, vCrownFx);
   #endif
 }`;
     }
@@ -345,16 +364,16 @@ iblIrradiance *= uEnvTint * max(crownWashReg(), 0.03);`,
   totalEmissiveRadiance += lc * line * feather * grow * uWings * 2.4 * em;
   // the printed skin is flooded by its own warm uplights from below (follows the wing glow level):
   // saturated print, brightest at the lower edge, falling off towards the scalloped top
-  vec3 print = diffuseColor.rgb * diffuseColor.rgb * 1.9;
-  totalEmissiveRadiance += print * (0.04 * uEmit + 0.8 * uWings) * em * mix(1.15, 0.45, smoothstep(3.0, 18.0, vMemb.y));
+  vec3 print = crownAlb * crownAlb * ${(o.printGain ?? 1.9).toFixed(3)};
+  totalEmissiveRadiance += print * (0.04 * uEmit + 0.8 * uWings) * em * mix(1.15, 0.45, smoothstep(3.0, 18.0, vMemb.y)) * (1.0 - uDay);
   // printed fabric lets some of the back light (sky, fireworks behind the stage) shine through
-  totalEmissiveRadiance += diffuseColor.rgb * uRim * 0.35;
+  totalEmissiveRadiance += crownAlb * uRim * ${(0.35 * (o.printGain ?? 1.9) / 1.9).toFixed(3)};
 }`;
     }
     if (emissive) fs = fs.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n${emissive}`);
     sh.fragmentShader = fs;
   };
-  mat.customProgramCacheKey = () => 'crown-' + o.key + (o.lite ? '-lite' : '');
+  mat.customProgramCacheKey = () => 'crown-' + o.key + (o.lite ? '-lite' : '') + '-' + (o.nightK ?? 1).toFixed(3) + '-' + (o.printGain ?? 1.9).toFixed(3);
   return mat;
 }
 

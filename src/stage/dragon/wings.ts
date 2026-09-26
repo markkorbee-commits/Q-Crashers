@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Polyline, basisZ, box, circle, frameY, gem, plate, qbez, ring, sickleOutline, spike, tube, v2, v3, type V3 } from './geom';
+import { Polyline, basisZ, box, circle, frameY, gem, gradientY, plate, qbez, ring, sickleOutline, spike, surface, tube, v2, v3, withFx, type V3 } from './geom';
 import { wingLayout, type WingLayout } from './layout';
 import { PAL, segs, type Kit } from './kit';
 import { BULB } from './shading';
@@ -80,16 +80,23 @@ class MembraneBuilder {
 
 function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult {
   const W = k.world;
-  const rnd = k.rnd;
   const L = wingLayout(side);
   const s = side;
   const radial = segs(k, 16, 8);
-  // wing plane normal (towards the audience)
+  // wing plane normal (towards the audience; the plane leans back ~30 deg: wrist low in front, finials high behind)
   const nrm = v3().subVectors(L.tips[0], L.wrist).cross(v3().subVectors(L.tips[2], L.wrist)).normalize();
   if (nrm.z < 0) nrm.negate();
 
+  // ------------------------------------------------------------------ arm (shoulder -> wrist)
+  const armAt = (t: number, o = v3()) => qbez(L.shoulder, L.armCtrl, L.wrist, t, o);
+  const armPts: V3[] = [];
+  const an = segs(k, 34, 14);
+  for (let j = 0; j <= an; j++) armPts.push(armAt(j / an));
+  const arm = new Polyline(armPts);
+  const armR = (t: number) => THREE.MathUtils.lerp(1.2, 0.78, t);
+
   // ------------------------------------------------------------------ fingers
-  const bows = [1.3, 0.35, -1.5];
+  const bows = [1.2, 0.3, -0.7];
   const fingers: Finger[] = L.tips.map((tip, i) => {
     const base = L.bases[i];
     const mid = v3().lerpVectors(base, tip, 0.5);
@@ -97,23 +104,23 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
     const perp = v3().crossVectors(nrm, along).normalize();
     // perp points to the finger's left in the wing plane; make it point outward (+x*s)
     if (perp.x * s < 0) perp.negate();
-    const ctrl = mid.clone().addScaledVector(perp, bows[i]).addScaledVector(nrm, -0.6);
+    const ctrl = mid.clone().addScaledVector(perp, bows[i]).addScaledVector(nrm, -0.5);
     const pts: V3[] = [];
     const n = segs(k, 30, 14);
     for (let j = 0; j <= n; j++) pts.push(qbez(base, ctrl, tip, j / n));
     return { line: new Polyline(pts), pts };
   });
-  // heel bar tying the spar roots together through the wrist knuckle
-  W.copper.add(tube([L.bases[0].clone(), L.wrist.clone(), L.bases[2].clone()], () => 0.6, { radial, capStart: true, capEnd: true }), null, PAL.copperDeep);
+  const fingerR = (t: number) => THREE.MathUtils.lerp(0.66, 0.4, t);
+  // heel bar tying the outer / middle spar roots together through the wrist knuckle
+  W.copper.add(tube([L.bases[0].clone(), L.wrist.clone(), L.bases[1].clone()], () => 0.62, { radial, capStart: true, capEnd: true }), null, PAL.copperDeep);
   fingers.forEach((f, i) => {
-    W.copper.add(tube(f.pts, (t) => THREE.MathUtils.lerp(0.66, 0.4, t), { radial, vScale: 3, capEnd: true }), null, i === 1 ? PAL.copper : PAL.copperDeep.clone().lerp(PAL.copper, 0.5));
+    W.copper.add(tube(f.pts, fingerR, { radial, vScale: 3, capStart: i < 2, capEnd: true }), null, i === 1 ? PAL.copper : PAL.copperDeep.clone().lerp(PAL.copper, 0.5));
     // knuckle joints
     for (const t of [0.3, 0.55, 0.78]) {
       const p = f.line.at(t);
       const d = f.line.tangent(t);
-      const r = THREE.MathUtils.lerp(0.66, 0.4, t);
+      const r = fingerR(t);
       W.armor.add(tube([p.clone().addScaledVector(d, -0.3), p.clone().addScaledVector(d, 0.3)], () => r + 0.14, { radial, capStart: true, capEnd: true }), null, PAL.darkBronze);
-      W.armor.add(gem(r * 0.9), new THREE.Matrix4().makeTranslation(p.x + nrm.x * r, p.y + nrm.y * r, p.z + nrm.z * r), PAL.plateRed);
     }
     // LED strips along the front face of the spar
     for (const off of [-0.26, 0.26]) {
@@ -123,61 +130,61 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
         const p = f.line.at(t);
         const d = f.line.tangent(t);
         const lat = v3().crossVectors(nrm, d).normalize();
-        const r = THREE.MathUtils.lerp(0.66, 0.4, t);
-        pts.push(p.addScaledVector(nrm, r * 0.9 + 0.06).addScaledVector(lat, off));
+        pts.push(p.addScaledVector(nrm, fingerR(t) * 0.9 + 0.06).addScaledVector(lat, off));
       }
       W.strips.add(pts, WING_LED, 0.13, 0, i * 0.2 + (off > 0 ? 0.1 : 0));
     }
   });
 
-  // wrist knuckle + down claw
+  // wrist knuckle + the hooked ivory tusks the wing bottom ends in (they hang to the deck)
   W.armor.add(gem(1.5, 0), new THREE.Matrix4().makeTranslation(L.wrist.x, L.wrist.y, L.wrist.z + 0.2), PAL.plateRed);
   W.armor.add(withAxis(ring(1.1, 0.2, 6, 24), frameY(L.wrist, nrm)), null, PAL.bronze);
-  W.steel.add(spike(3.0, 0.55, { sides: 8, segs: 6, bend: -s * 0.9, tipR: 0.03 }), frameY(L.wrist.clone().add(v3(0, -0.8, 0.3)), v3(s * 0.15, -1, 0.15).normalize(), 0, 1, v3(0, 0, 1)));
+  for (const [dx, len, bend] of [
+    [0.4, 3.0, 1.3],
+    [2.4, 2.4, 1.0],
+  ] as const) {
+    const g = spike(len, 0.42, { sides: 10, segs: 7, bend: s * bend, tipR: 0.03 });
+    gradientY(g, 0, len, PAL.toothRoot, PAL.ivory, 0.35);
+    W.ivory.add(g, frameY(L.wrist.clone().add(v3(s * dx, -0.6, 0.5)), v3(s * 0.35, -1, 0.1).normalize(), 0, 1, v3(0, 0, 1)));
+  }
 
-  // ------------------------------------------------------------------ arm (shoulder -> inner finger)
-  const armCtrl = v3().lerpVectors(L.shoulder, L.armJoin, 0.45).add(v3(0, 2.6, 0.2));
-  const armPts: V3[] = [];
-  const an = segs(k, 28, 12);
-  for (let j = 0; j <= an; j++) armPts.push(qbez(L.shoulder, armCtrl, L.armJoin, j / an));
-  const arm = new Polyline(armPts);
-  const armR = (t: number) => THREE.MathUtils.lerp(1.15, 0.72, t);
-  W.shell.add(tube(armPts, armR, { radial, capStart: true, capEnd: true, vScale: 3 }), null, PAL.scaleRed);
-  for (let i = 1; i < 7; i++) {
-    const t = i / 7;
+  // ------------------------------------------------------------------ arm dressing
+  // leopard-patterned arm (daytime photos: the coil arching from the dragon's back into the wing is
+  // the same orange / dark-brown hide as the neck, lined with silver scimitars)
+  W.lava.add(withFx(tube(armPts, armR, { radial, capStart: true, capEnd: true, vScale: 6 }), 1));
+  for (let i = 1; i < 10; i++) {
+    const t = i / 10;
     const p = arm.at(t);
     const d = arm.tangent(t);
     W.armor.add(tube([p.clone().addScaledVector(d, -0.25), p.clone().addScaledVector(d, 0.25)], () => armR(t) + 0.12, { radial, capStart: true, capEnd: true }), null, i % 2 ? PAL.darkBronze : PAL.bronze);
   }
   {
     const pts: V3[] = [];
-    for (let j = 0; j <= 20; j++) {
-      const t = j / 20;
-      const p = arm.at(t);
-      pts.push(p.addScaledVector(nrm, armR(t) + 0.06));
+    for (let j = 0; j <= 28; j++) {
+      const t = j / 28;
+      pts.push(arm.at(t).addScaledVector(nrm, armR(t) + 0.06));
     }
     W.strips.add(pts, WING_LED, 0.14, 0, 0.77);
   }
   // perforated bone fin riding along the top of the arm (one continuous curved plate with holes)
   {
-    const e1 = v3().subVectors(L.armJoin, L.shoulder).normalize();
+    const e1 = v3().subVectors(L.wrist, L.shoulder).normalize();
     const e2 = v3().crossVectors(nrm, e1).normalize();
     if (e2.y < 0) e2.negate();
     const origin = L.shoulder.clone();
     const to2 = (p: V3) => v2(v3().subVectors(p, origin).dot(e1), v3().subVectors(p, origin).dot(e2));
-    const n = 24;
+    const n = 30;
     const lower: THREE.Vector2[] = [];
     const upper: THREE.Vector2[] = [];
     for (let i = 0; i <= n; i++) {
-      const t = 0.06 + (i / n) * 0.86;
+      const t = 0.05 + (i / n) * 0.55;
       const p = arm.at(t);
       const d = arm.tangent(t);
       let up = v3().crossVectors(nrm, d).normalize();
       if (up.y < 0) up.negate();
-      const h = 0.35 + 1.5 * Math.pow(Math.sin(Math.PI * (i / n)), 0.8);
+      const h = 0.35 + 1.3 * Math.pow(Math.sin(Math.PI * (i / n)), 0.8);
       lower.push(to2(p.clone().addScaledVector(up, armR(t) * 0.6)));
-      // scalloped top edge
-      const scal = 0.18 * Math.abs(Math.sin((i / n) * Math.PI * 6));
+      const scal = 0.18 * Math.abs(Math.sin((i / n) * Math.PI * 7));
       upper.push(to2(p.clone().addScaledVector(up, armR(t) * 0.6 + h - scal)));
     }
     const outline = [...lower, ...upper.reverse()];
@@ -186,36 +193,36 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
       const a = lower[i];
       const b = upper[n - i];
       const c = a.clone().lerp(b, 0.5);
-      const r = Math.min(0.32, a.distanceTo(b) * 0.28);
-      if (r > 0.12) holes.push(circle(c.x, c.y, r, 10, true));
+      const r = Math.min(0.3, a.distanceTo(b) * 0.28);
+      if (r > 0.12) holes.push(circle(c.x, c.y, r, 8, true));
     }
     const fin = plate(outline, 0.16, 0.04, holes);
     const m = new THREE.Matrix4().makeBasis(e1, e2, v3().crossVectors(e1, e2)).setPosition(origin.clone().addScaledVector(nrm, 0.15));
-    W.steel.add(fin, m, 0x9ea4ae);
+    W.steel.add(fin, m, 0xb4b8c0);
   }
   // sickle hooks hanging below the arm (like scales)
-  const hookProto = plate(sickleOutline(2.6, 0.75, 0.8, 8), 0.14, 0.04, [circle(0.05, 0.75, 0.16, 8, true), circle(0.3, 1.45, 0.12, 8, true)]);
-  const nHooks = 11;
+  const hookProto = plate(sickleOutline(2.9, 0.8, 0.9, 7), 0.14, 0.03, [circle(0.05, 0.75, 0.16, 7, true), circle(0.3, 1.45, 0.12, 7, true)]);
+  const nHooks = segs(k, 15, 8);
   for (let i = 0; i < nHooks; i++) {
-    const t = 0.08 + (i / (nHooks - 1)) * 0.86;
+    const t = 0.06 + (i / (nHooks - 1)) * 0.8;
     const p = arm.at(t);
     const d = arm.tangent(t);
     const down = v3().crossVectors(d, nrm).normalize();
     if (down.y > 0) down.negate();
     const hd = down.clone().addScaledVector(d, -0.55 * s * Math.sign(d.x || 1) * s).normalize();
     const m = basisZ(nrm, hd, p.clone().addScaledVector(down, armR(t) * 0.7).addScaledVector(nrm, 0.3));
-    W.steel.add(hookProto.clone(), m, 0xc4c8d0);
+    W.steel.add(hookProto.clone(), m, 0xe4e7ec);
   }
 
   // ------------------------------------------------------------------ membranes (Coons patches)
   const rosetteFrames: THREE.Matrix4[] = [];
   const fixtureRows: V3[][] = [];
   const garlands: V3[][] = [];
-  // warm festoon riding on top of the arched arm (dragon shoulder -> inner finger)
+  // warm festoon riding on top of the arched arm (dragon shoulder -> wrist)
   {
     const g: V3[] = [];
-    for (let j = 0; j <= 24; j++) {
-      const t = 0.04 + (j / 24) * 0.9;
+    for (let j = 0; j <= 28; j++) {
+      const t = 0.04 + (j / 28) * 0.84;
       const p = arm.at(t);
       const d = arm.tangent(t);
       let up = v3().crossVectors(nrm, d).normalize();
@@ -234,7 +241,7 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
     c.addScaledVector(nrm, -0.5);
     return (u: number, o: V3) => qbez(a, c, b, u, o);
   };
-  const ATT = 0.95; // membranes attach right under the finial collars
+  const ATT = 0.93; // membranes attach right under the finial discs
   const tipBelow = (f: Finger) => f.line.at(ATT);
   const membPts: V3[] = [];
   const panels: {
@@ -244,39 +251,54 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
     bot: (u: number, o: V3) => V3;
     uvOff: number;
     lenL: number;
+    /** bottom trim / hooks on the free lower edge (the outer panel) */
+    freeBottom: boolean;
   }[] = [];
-  const fanPanel = (fa: Finger, fb: Finger, sag: number, uvOff: number) => {
-    const t0 = 0.12;
-    const top = sagCurve(tipBelow(fa), tipBelow(fb), sag);
+  // shallow concave top edges between the finials (photos: ~4 m / ~5.5 m below the chord), the
+  // membrane reaching down to the wrist: outer panel between the outer and middle spars
+  {
+    const fa = fingers[0];
+    const fb = fingers[1];
+    const t0 = 0.05;
     const b0 = fingerAt(fa, t0);
     const b1 = fingerAt(fb, t0);
-    const bc = v3().lerpVectors(b0, b1, 0.5).add(v3(0, 1.4, 0));
+    const bc = v3().lerpVectors(b0, b1, 0.5).add(v3(0, 1.0, 0));
     panels.push({
       left: (v, o) => o.copy(fingerAt(fa, t0 + (ATT - t0) * v)),
       right: (v, o) => o.copy(fingerAt(fb, t0 + (ATT - t0) * v)),
-      top,
+      top: sagCurve(tipBelow(fa), tipBelow(fb), 3.8),
       bot: (u, o) => qbez(b0, bc, b1, u, o),
-      uvOff,
+      uvOff: 0.0,
       lenL: fa.line.length * (ATT - t0),
+      freeBottom: true,
     });
-  };
-  // deep concave top edges between the finials: the "pagoda roof" silhouette of the official photos
-  // (tall spiky tips, the membrane and its festoon sagging well below them)
-  fanPanel(fingers[0], fingers[1], 7.0, 0.0);
-  fanPanel(fingers[1], fingers[2], 8.0, 0.33);
+  }
+  // middle panel: middle spar / inner spar, its bottom edge is the arm (wrist -> inner spar root)
   {
-    // inner panel: inner finger (from the arm join up) / sag edge to the shoulder / arm
-    const fi = fingers[2];
-    const tJ = 0.37;
-    const sTop = L.shoulder.clone().add(v3(0, 2.6, -0.4));
-    const top = sagCurve(tipBelow(fi), sTop, 3.4);
+    const fa = fingers[1];
+    const fb = fingers[2];
     panels.push({
-      left: (v, o) => o.copy(fingerAt(fi, tJ + (ATT - tJ) * v)),
+      left: (v, o) => o.copy(fingerAt(fa, ATT * v)),
+      right: (v, o) => o.copy(fingerAt(fb, ATT * v)),
+      top: sagCurve(tipBelow(fa), tipBelow(fb), 5.4),
+      bot: (u, o) => armAt(1 - (1 - L.armJoinT) * u, o),
+      uvOff: 0.33,
+      lenL: fa.line.length * ATT,
+      freeBottom: false,
+    });
+  }
+  // inner panel: inner spar / riser over the shoulder, sagging down to the dragon; bottom = the arm
+  {
+    const fi = fingers[2];
+    const sTop = L.shoulder.clone().add(v3(0, 2.6, -0.4));
+    panels.push({
+      left: (v, o) => o.copy(fingerAt(fi, ATT * v)),
       right: (v, o) => o.lerpVectors(L.shoulder, sTop, v),
-      top,
-      bot: (u, o) => o.copy(arm.at(1 - u)),
+      top: sagCurve(tipBelow(fi), sTop, 3.4),
+      bot: (u, o) => armAt(L.armJoinT * (1 - u), o),
       uvOff: 0.66,
-      lenL: fi.line.length * (ATT - tJ),
+      lenL: fi.line.length * ATT,
+      freeBottom: false,
     });
   }
   const P00 = v3(), P10 = v3(), P01 = v3(), P11 = v3();
@@ -352,22 +374,36 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
         const o = (j * (nu + 1) + ci) * 3;
         rib.push(v3(pos[o], pos[o + 1], pos[o + 2]).addScaledVector(nrm, 0.08));
       }
-      if (rib.length > 2) W.copper.add(tube(rib, () => 0.08, { radial: 5 }), null, PAL.copperDeep);
+      if (rib.length > 2) W.copper.add(tube(rib, () => 0.07, { radial: 5 }), null, PAL.copperDeep);
     }
 
-    // top edge: LED strip, small spikes, dots
+    // top edge: gold trim band (the printed skin's gilded hem), LED strip, small spikes, dots
     const edge: V3[] = [];
     const ne = 24;
     for (let i = 0; i <= ne; i++) edge.push(pn.top(i / ne, v3()).addScaledVector(nrm, 0.12));
-    W.strips.add(edge, WING_LED, 0.13, 0, 0.3 + pi * 0.2);
-    // warm festoon along the sagging top edge, hanging just in front of the LED line
+    const eLine = new Polyline(edge);
+    {
+      const band = surface(ne, 1, (u, v, o) => {
+        const t = u;
+        const p = eLine.at(t);
+        const d = eLine.tangent(t);
+        let dn = v3().crossVectors(nrm, d).normalize();
+        if (dn.y > 0) dn.negate();
+        o.copy(p).addScaledVector(dn, v * 0.85 - 0.08).addScaledVector(nrm, 0.1);
+      }, [eLine.length / 3, 1]);
+      orientTo(band, nrm);
+      W.armor.add(band, null, GOLD);
+      // rolled lip on the band's upper edge
+      W.armor.add(tube(edge.map((p) => p.clone().addScaledVector(nrm, 0.1)), () => 0.12, { radial: 5 }), null, GOLD_DEEP);
+    }
+    W.strips.add(edge.map((p) => p.clone().addScaledVector(nrm, 0.14)), WING_LED, 0.13, 0, 0.3 + pi * 0.2);
+    // warm festoon along the sagging top edge, hanging just in front of the gold band
     {
       const g: V3[] = [];
-      for (let i = 0; i <= ne; i++) g.push(pn.top(i / ne, v3()).addScaledVector(nrm, 0.42).add(v3(0, -0.25, 0)));
+      for (let i = 0; i <= ne; i++) g.push(pn.top(i / ne, v3()).addScaledVector(nrm, 0.42).add(v3(0, -0.35, 0)));
       garlands.push(g);
     }
-    const eLine = new Polyline(edge);
-    const nSp = pi === 2 ? 6 : 10;
+    const nSp = pi === 2 ? 5 : 8;
     for (let i = 1; i < nSp; i++) {
       const t = i / nSp;
       const p = eLine.at(t);
@@ -375,7 +411,6 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
       let out = v3().crossVectors(d, nrm).normalize();
       if (out.y < 0) out.negate();
       out.addScaledVector(v3(s, 0, 0), 0.15).normalize();
-      W.steel.add(spike(0.9 + rnd() * 0.5, 0.16, { sides: 4, segs: 2 }), frameY(p, out, 0, 1, nrm));
       W.bulbs.add(p.clone().addScaledVector(nrm, 0.25).addScaledVector(out, -0.3), BULB.wingLed, t * eLine.length, 0.14, (i * 0.13 + pi * 0.3) % 1);
     }
     // row of moving-head bodies on short arms along the top edge (1.3 m pitch; beams are the
@@ -399,90 +434,132 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
       }
       fixtureRows.push(row);
     }
-    // scalloped bottom edge trim (copper tube)
-    const bot: V3[] = [];
-    for (let i = 0; i <= 12; i++) bot.push(pn.bot(i / 12, v3()));
-    if (pi < 2) W.copper.add(tube(bot, () => 0.22, { radial: 6 }), null, PAL.copperDeep);
-  });
-
-  // ------------------------------------------------------------------ blade combs on the spars
-  const bladeProto = (len: number) => plate(sickleOutline(len, 0.62, len * 0.18, 6), 0.1, 0.03);
-  const protos = [bladeProto(1.5), bladeProto(1.9), bladeProto(2.3)];
-  fingers.forEach((f, fi) => {
-    const n = segs(k, 9, 6);
-    for (const sideSign of [-1, 1]) {
-      for (let i = 0; i < n; i++) {
-        const t = 0.22 + (i / (n - 1)) * 0.74;
-        const p = f.line.at(t);
-        const d = f.line.tangent(t);
-        let lat = v3().crossVectors(nrm, d).normalize();
-        if (lat.x * s < 0) lat.negate();
-        lat.multiplyScalar(sideSign);
-        // barbs point away from the spar and back down towards the wrist
-        const dir = lat.clone().addScaledVector(d, -0.62).normalize();
-        const r = THREE.MathUtils.lerp(0.66, 0.4, t);
-        const size = Math.sin(Math.PI * (0.25 + 0.75 * (i / (n - 1)))) > 0.6 ? 2 : 1;
-        const proto = protos[fi === 1 ? Math.min(2, size) : size];
-        const m = basisZ(nrm, dir, p.clone().addScaledVector(dir, r * 0.8).addScaledVector(nrm, 0.15));
-        W.steel.add(proto.clone(), m, 0xd0d4dc);
-        // edge LED on the blade
-        const len = fi === 1 ? [1.5, 1.9, 2.3][Math.min(2, size)] : [1.5, 1.9, 2.3][size];
-        const e0 = v3(-0.2, 0.2, 0.08).applyMatrix4(m);
-        const e1 = v3(-0.31 + len * 0.18 * 0.6, len * 0.8, 0.08).applyMatrix4(m);
-        W.strips.add([e0, e1], WING_LED, 0.12, t * 20, (fi * 0.3 + i * 0.07) % 1);
+    // the free lower edge of the outer panel: copper trim + a row of hooked spikes (wing bottom)
+    if (pn.freeBottom) {
+      const bot: V3[] = [];
+      for (let i = 0; i <= 12; i++) bot.push(pn.bot(i / 12, v3()));
+      W.copper.add(tube(bot, () => 0.24, { radial: 6 }), null, PAL.copperDeep);
+      for (let i = 1; i < 4; i++) {
+        const p = pn.bot(i / 4, v3());
+        const g = spike(1.5 + (i === 2 ? 0.5 : 0), 0.22, { sides: 6, segs: 4, bend: -s * 0.5, tipR: 0.02 });
+        W.steel.add(g, frameY(p.addScaledVector(nrm, 0.2), v3(s * 0.25, -1, 0.1).normalize(), 0, 1, nrm), 0xe8eaee);
       }
     }
   });
 
+  // ------------------------------------------------------------------ arrowheads + kunai blades on the spars
+  // (white / silver plates: a chain of big arrowheads ON the spar pointing up to the finial, and at
+  // every arrowhead a long perforated kunai blade pointing out sideways, alternating on the middle
+  // and inner spars, always outboard on the outer spar - the daytime photos' signature detail)
+  const arrowProto = plate([v2(-0.62, 0), v2(-0.2, 0.18), v2(0.2, 0.18), v2(0.62, 0), v2(0, 1.35)], 0.12, 0.025);
+  const kunaiOutline = [v2(0, -0.1), v2(0.35, -0.2), v2(1.55, -0.12), v2(2.35, 0), v2(1.55, 0.12), v2(0.35, 0.2), v2(0, 0.1)];
+  const kHoles = [0.55, 0.95, 1.35].map((x) => circle(x, 0, 0.07, 6, true));
+  const kunaiProto = plate(kunaiOutline, 0.08, 0, k.detail > 0.5 ? kHoles : []);
+  fingers.forEach((f, fi) => {
+    const n = fi === 2 ? segs(k, 10, 5) : segs(k, 13, 6);
+    const t0 = fi === 2 ? 0.1 : 0.14;
+    for (let i = 0; i < n; i++) {
+      const t = t0 + (i / (n - 1)) * (0.88 - t0);
+      const p = f.line.at(t);
+      const d = f.line.tangent(t);
+      let lat = v3().crossVectors(nrm, d).normalize();
+      if (lat.x * s < 0) lat.negate();
+      const r = fingerR(t);
+      // arrowhead on the spar front, pointing along the spar towards the finial
+      const sc = THREE.MathUtils.lerp(1.12, 0.86, t);
+      const am = basisZ(nrm, d, p.clone().addScaledVector(nrm, r + 0.08).addScaledVector(d, -0.3));
+      am.scale(v3(sc, sc, 1));
+      W.steel.add(arrowProto.clone(), am, 0xf0f2f6);
+      // kunai blade out to the side (outboard on the outer spar, alternating on the others)
+      const sideSign = fi === 0 ? 1 : i % 2 ? 1 : -1;
+      const dir = lat.clone().multiplyScalar(sideSign).addScaledVector(d, -0.12).normalize();
+      const km = basisZ(nrm, v3().crossVectors(nrm, dir), p.clone().addScaledVector(dir, r * 0.7).addScaledVector(nrm, 0.12));
+      // basisZ puts local +Y on the hint: rotate so the blade's +X runs along `dir`
+      const kx = v3().setFromMatrixColumn(km, 0);
+      if (kx.dot(dir) < 0) km.multiply(new THREE.Matrix4().makeRotationZ(Math.PI));
+      km.scale(v3(sc, sc, 1));
+      W.steel.add(kunaiProto.clone(), km, 0xe6e9ee);
+      // black fixture clamp where the blade meets the spar + an LED along the blade's spine
+      if (k.detail > 0.5) W.armor.add(box(0.3, 0.3, 0.34), new THREE.Matrix4().makeTranslation(0, 0, 0).setPosition(p.clone().addScaledVector(dir, r + 0.1).addScaledVector(nrm, 0.3)), 0x1a1a1e);
+      const e0 = v3(0.3, 0, 0.06).applyMatrix4(km);
+      const e1 = v3(2.1, 0, 0.06).applyMatrix4(km);
+      W.strips.add([e0, e1], WING_LED, 0.1, t * 20, (fi * 0.3 + i * 0.07) % 1);
+    }
+  });
+
   // ------------------------------------------------------------------ finials
+  // (photos: a red-gold sun disc on the spar end, a crescent crown of white blades fanning round it,
+  // two perforated gold ear plates below, an orange flame blade above and a white spear point on top)
   const roof: V3[] = [];
   const points: V3[] = [];
   const flameOutline: THREE.Vector2[] = [
     v2(-1.0, 0), v2(-1.15, 0.9), v2(-0.75, 0.7), v2(-0.85, 1.7), v2(-0.35, 1.3), v2(-0.2, 2.5), v2(0.15, 1.6), v2(0.55, 2.2), v2(0.6, 1.2), v2(1.05, 1.5), v2(1.0, 0),
   ];
-  const flameProto = plate(flameOutline, 0.24, 0.05);
-  flameProto.scale(1.35, 1.35, 1);
+  const flameProto = plate(flameOutline, 0.2, 0.04);
+  const crescentO = sickleOutline(1.9, 0.5, 0.55, 7);
+  const crescent = plate(crescentO, 0.1, 0.02);
+  const crescentM = plate(mirrorX(crescentO), 0.1, 0.02);
+  const earOutline: THREE.Vector2[] = [];
+  for (let i = 0; i <= 10; i++) {
+    const a = -0.3 + (i / 10) * 2.0;
+    earOutline.push(v2(Math.cos(a) * 1.15, Math.sin(a) * 1.15));
+  }
+  for (let i = 10; i >= 0; i--) {
+    const a = -0.1 + (i / 10) * 1.55;
+    earOutline.push(v2(0.35 + Math.cos(a) * 0.62, 0.18 + Math.sin(a) * 0.62));
+  }
+  const earProto = plate(earOutline, 0.1, 0.02, [circle(0.2, 0.95, 0.12, 6, true)]);
+  const earProtoM = plate(mirrorX(earOutline), 0.1, 0.02, [mirrorX(circle(0.2, 0.95, 0.12, 6, true))]);
+  const discProto = new THREE.SphereGeometry(1, segs(k, 20, 10), segs(k, 12, 6));
+  discProto.scale(0.95, 0.95, 0.42);
   fingers.forEach((f, i) => {
     const tip = L.tips[i];
     const d = f.line.tangent(1);
     const m = frameY(tip, d, 0, 1, nrm);
     W.armor.add(withAxis(ring(0.55, 0.16, 6, 20), m), null, PAL.bronze);
-    // flame plate in the wing plane
-    const fm = basisZ(nrm, d, tip.clone().addScaledVector(d, 0.1));
-    W.copper.add(flameProto.clone(), fm, i === 1 ? PAL.flameOrange : PAL.flameRed);
-    // a second, smaller flame plate across the first so the finial reads as a flame from the side too
-    W.copper.add(flameProto.clone(), fm.clone().multiply(new THREE.Matrix4().makeRotationY(Math.PI / 2)).multiply(new THREE.Matrix4().makeScale(0.72, 0.85, 1)), i === 1 ? PAL.flameRed : PAL.flameOrange);
-    const fo = flameOutline.map((p) => v3(p.x * 1.35, p.y * 1.35, 0.2).applyMatrix4(fm));
+    // sun disc: glowing red-orange orb in a gold rim
+    const dc = tip.clone().addScaledVector(d, 0.75).addScaledVector(nrm, 0.25);
+    const dm = basisZ(nrm, d, dc);
+    W.ivory.add(discProto.clone(), dm, SUN_ORB);
+    W.armor.add(ring(1.0, 0.13, 6, 28), dm, GOLD);
+    // gold ear plates below the disc, curling outwards
+    for (const e of [-1, 1]) {
+      const em = dm.clone().multiply(new THREE.Matrix4().makeRotationZ(e * 2.3)).multiply(new THREE.Matrix4().makeTranslation(0, 1.0, -0.1));
+      W.armor.add((e < 0 ? earProtoM : earProto).clone(), em, GOLD);
+    }
+    // crescent crown of white blades fanning round the disc
+    for (const a of [-1.35, -0.85, -0.4, 0.4, 0.85, 1.35]) {
+      const cm = dm.clone().multiply(new THREE.Matrix4().makeRotationZ(-a)).multiply(new THREE.Matrix4().makeTranslation(0, 0.9, 0.05));
+      cm.multiply(new THREE.Matrix4().makeScale(0.9 + 0.25 * (1.35 - Math.abs(a)), 0.9 + 0.25 * (1.35 - Math.abs(a)), 1));
+      W.steel.add((a < 0 ? crescentM : crescent).clone(), cm, 0xf2f4f8);
+    }
+    // flame blade above the disc (in the wing plane + a smaller cross plate so it reads from the side)
+    const fm = basisZ(nrm, d, tip.clone().addScaledVector(d, 1.55));
+    W.copper.add(flameProto.clone(), fm, i === 1 ? PAL.flameOrange : FLAME_YEL);
+    W.copper.add(flameProto.clone(), fm.clone().multiply(new THREE.Matrix4().makeRotationY(Math.PI / 2)).multiply(new THREE.Matrix4().makeScale(0.72, 0.85, 1)), PAL.flameRed);
+    const fo = flameOutline.map((p) => v3(p.x, p.y, 0.16).applyMatrix4(fm));
     fo.push(fo[0].clone());
     W.strips.add(fo, WING_LED, 0.1, 0, 0.9);
     // spear point
     const top = L.finialTops[i];
-    const sd = v3().subVectors(top, tip);
+    const sBase = tip.clone().addScaledVector(d, 2.6);
+    const sd = v3().subVectors(top, sBase);
     const sl = sd.length();
-    W.steel.add(spike(sl, 0.42, { sides: 4, segs: 3, tipR: 0.02 }), frameY(tip.clone().addScaledVector(d, 0.2), sd.normalize(), Math.PI / 4));
+    W.steel.add(spike(sl, 0.4, { sides: 4, segs: 3, tipR: 0.02 }), frameY(sBase, sd.normalize(), Math.PI / 4), 0xeef0f4);
     roof.push(top.clone());
-    // claw hooks fanning around the base
-    for (const ang of [-1.0, -0.5, 0.5, 1.0]) {
-      const dir = d.clone().applyAxisAngle(nrm, ang * 0.95).normalize();
-      const hm = frameY(tip.clone().addScaledVector(dir, 0.35), dir, 0, 1, nrm);
-      W.steel.add(spike(1.2 + (1 - Math.abs(ang)) * 0.6, 0.2, { sides: 5, segs: 4, bendZ: -0.5, bend: ang * 0.35 }), hm);
-    }
     // a dot on the collar
     W.bulbs.add(tip.clone().addScaledVector(nrm, 0.7), BULB.wingAccent, i * 3, 0.2, 0.2 * i);
     points.push(tip.clone(), top.clone());
   });
+  discProto.dispose();
   // wrist and arm join points (for flames along the slopes)
   for (const f of fingers) for (const t of [0.35, 0.6, 0.82]) points.push(f.line.at(t).addScaledVector(nrm, 0.8));
 
   // ------------------------------------------------------------------ rosette frames + printed suns
-  const sunOutline: THREE.Vector2[] = [];
-  for (let i = 0; i < 32; i++) {
-    const a = (i / 32) * Math.PI * 2;
-    const r = i % 2 ? 2.25 : 2.75;
-    sunOutline.push(v2(Math.cos(a) * r, Math.sin(a) * r));
-  }
-  const sunProto = plate(sunOutline, 0.08, 0.02);
-  const rScale = [0.98, 1.04, 0.86];
+  // (a yellow sunburst printed on the skin inside a dark red ring; the instanced white spiky rim
+  // turns with the show)
+  const sun = sunburstParts();
+  const rScale = [1.05, 1.08, 0.72];
   L.rosettes.forEach((c0, i) => {
     // sit the rosette just in front of the (billowing) membrane
     let best = membPts[0];
@@ -499,7 +576,7 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
     const m = basisZ(nrm, v3(0, 1, 0), c);
     m.scale(v3(rScale[i], rScale[i], 1));
     rosetteFrames.push(m);
-    W.armor.add(sunProto.clone(), m.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0, -0.25)), '#f0a030');
+    for (const [g, col] of sun) W.ivory.add(g.clone(), m.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0, -0.3)), col);
     // static accent ring
     const rp: V3[] = [];
     for (let j = 0; j <= 40; j++) {
@@ -508,8 +585,62 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
     }
     W.strips.add(rp, WING_ACCENT, 0.12, 0, 0.5 + i * 0.1);
   });
+  for (const [g] of sun) g.dispose();
 
   return { layout: L, rosetteFrames, points, roof, fixtureRows, garlands };
+}
+
+const GOLD = new THREE.Color('#d9a444');
+const GOLD_DEEP = new THREE.Color('#a8762a');
+const SUN_ORB = new THREE.Color('#e04a18');
+const FLAME_YEL = new THREE.Color('#f39a26');
+
+/** mirror a 2D outline across the Y axis (keeps the winding, so no negative-scale matrices) */
+function mirrorX(pts: THREE.Vector2[]): THREE.Vector2[] {
+  return pts.map((p) => v2(-p.x, p.y)).reverse();
+}
+
+/** flip the winding of a surface so its average normal faces `n` */
+function orientTo(g: THREE.BufferGeometry, n: V3): void {
+  const nr = g.getAttribute('normal');
+  let dot = 0;
+  for (let i = 0; i < nr.count; i++) dot += nr.getX(i) * n.x + nr.getY(i) * n.y + nr.getZ(i) * n.z;
+  if (dot >= 0) return;
+  const idx = g.index!;
+  for (let i = 0; i < idx.count; i += 3) {
+    const a = idx.getX(i + 1);
+    idx.setX(i + 1, idx.getX(i + 2));
+    idx.setX(i + 2, a);
+  }
+  idx.needsUpdate = true;
+  g.computeVertexNormals();
+}
+
+/** the printed sunburst of a rosette (local XY, facing +Z, radius ~2.5): [geometry, colour] layers */
+function sunburstParts(): [THREE.BufferGeometry, THREE.Color][] {
+  const star = (n: number, rIn: number, rOut: number, rot: number, z: number) => {
+    const pts: THREE.Vector2[] = [];
+    for (let i = 0; i < n * 2; i++) {
+      const a = rot + (i / (n * 2)) * Math.PI * 2;
+      const r = i % 2 ? rIn : rOut * (0.86 + 0.14 * Math.sin(i * 2.7));
+      pts.push(v2(Math.cos(a) * r, Math.sin(a) * r));
+    }
+    const g = new THREE.ShapeGeometry(new THREE.Shape(pts));
+    g.translate(0, 0, z);
+    return g;
+  };
+  const disc = (r: number, z: number) => {
+    const g = new THREE.CircleGeometry(r, 40);
+    g.translate(0, 0, z);
+    return g;
+  };
+  return [
+    [disc(2.55, 0), new THREE.Color('#4a0c0c')],
+    [disc(2.2, 0.02), new THREE.Color('#d4561a')],
+    [star(18, 1.15, 2.18, 0, 0.04), new THREE.Color('#f2a52a')],
+    [star(18, 0.95, 1.7, Math.PI / 18, 0.06), new THREE.Color('#ffd23c')],
+    [disc(0.9, 0.08), new THREE.Color('#ffe47a')],
+  ];
 }
 
 /** fx tag of wing geometry (crown shading: step(1.5, fx) = wing) */
@@ -524,35 +655,34 @@ function withAxis(g: THREE.BufferGeometry, m: THREE.Matrix4): THREE.BufferGeomet
   return g;
 }
 
-/** Rosette gear geometry (local XY plane, facing +Z, radius ~2.3). */
+/**
+ * Rosette rim geometry (local XY plane, facing +Z, radius ~2.9): the white spiky crown ring round the
+ * printed sunburst (photos) - a rolled rim, a thin inner ring, 24 outward spikes and 12 small inward
+ * teeth. Instanced; the show turns it (look.rosetteAngle).
+ */
 export function rosetteGear(detail: number): THREE.BufferGeometry[] {
   const parts: THREE.BufferGeometry[] = [];
-  const seg = Math.max(24, Math.round(48 * detail));
-  parts.push(ring(2.22, 0.17, 6, seg));
-  parts.push(ring(1.55, 0.1, 5, seg));
-  parts.push(ring(0.62, 0.14, 5, 20));
-  const teeth = 24;
-  for (let i = 0; i < teeth; i++) {
-    const a = (i / teeth) * Math.PI * 2;
-    const b = new THREE.BoxGeometry(0.42, 0.34, 0.26);
-    b.translate(2.48, 0, 0);
-    b.rotateZ(a);
-    parts.push(b);
+  const seg = Math.max(24, Math.round(56 * detail));
+  parts.push(ring(2.5, 0.13, 6, seg));
+  parts.push(ring(2.24, 0.06, 4, seg));
+  const spikeO = plate([v2(-0.13, 0), v2(0.13, 0), v2(0, 0.48)], 0.1, 0);
+  const spikeI = plate([v2(-0.09, 0), v2(0.09, 0), v2(0, 0.3)], 0.08, 0);
+  for (let i = 0; i < 24; i++) {
+    const a = (i / 24) * Math.PI * 2;
+    const g = spikeO.clone();
+    g.translate(0, 2.58, 0);
+    g.rotateZ(a);
+    parts.push(g);
   }
-  const spokes = 12;
-  for (let i = 0; i < spokes; i++) {
-    const a = (i / spokes) * Math.PI * 2 + 0.13;
-    const b = new THREE.BoxGeometry(1.6, 0.13, 0.18);
-    b.translate(1.4, 0, -0.02);
-    b.rotateZ(a);
-    parts.push(b);
+  for (let i = 0; i < 12; i++) {
+    const a = ((i + 0.5) / 12) * Math.PI * 2;
+    const g = spikeI.clone();
+    g.rotateZ(Math.PI);
+    g.translate(0, 2.42, 0.02);
+    g.rotateZ(a);
+    parts.push(g);
   }
-  // star blades between the rings
-  for (let i = 0; i < 8; i++) {
-    const a = (i / 8) * Math.PI * 2;
-    const blade = plate([v2(0.6, -0.16), v2(1.5, 0), v2(0.6, 0.16)], 0.12, 0.02);
-    blade.rotateZ(a);
-    parts.push(blade);
-  }
+  spikeO.dispose();
+  spikeI.dispose();
   return parts;
 }

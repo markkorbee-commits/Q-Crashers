@@ -375,129 +375,206 @@ export function steelTextures(size: number, aniso: number): PbrSet {
 }
 
 /**
- * Printed wing membrane: rising flame tongues (sun-yellow cores, orange, red, crimson) with black
- * soot outlines on a dark crimson ground. u = across the panel, v = from the wrist to the top edge.
- * Wraps horizontally.
+ * Printed wing membrane (daytime photos): a painted inferno - billowing orange / yellow flame
+ * streams rising from the wrist through black smoke clouds and dark soot "bubbles" on a deep red
+ * ground, fine glowing veins in the dark areas and a warm yellow glow under the gilded top hem.
+ * u = across the panel, v = from the wrist (canvas bottom) to the top edge. Wraps horizontally.
  */
 export function flameTexture(w: number, h: number, aniso: number): THREE.Texture {
   const [c, a] = canvas(w, h);
   const rnd = mulberry(7);
-  // ground: soot-dark crimson at the top, glowing red towards the root (the fire rises from the wrist)
+  const S = w / 2048;
+  // ground: hot red low down, maroon / soot higher up
   const bg = a.createLinearGradient(0, h, 0, 0);
-  bg.addColorStop(0, '#8a2016');
-  bg.addColorStop(0.35, '#5e1418');
-  bg.addColorStop(1, '#2a080c');
+  bg.addColorStop(0, '#a8300f');
+  bg.addColorStop(0.22, '#7a1a10');
+  bg.addColorStop(0.55, '#4a0e0c');
+  bg.addColorStop(0.88, '#380a0a');
+  bg.addColorStop(1, '#5a1a0c');
   a.fillStyle = bg;
   a.fillRect(0, 0, w, h);
-  // smoky swirls in the dark upper part
-  for (let i = 0; i < 40; i++) {
-    const x = rnd() * w;
-    const y = rnd() * h * 0.7;
-    const r = w * (0.02 + rnd() * 0.05);
-    a.strokeStyle = `rgba(${rnd() < 0.5 ? '120,30,26' : '16,6,8'},${0.35 + rnd() * 0.4})`;
-    a.lineWidth = Math.max(1.5, w / 400) * (1 + rnd() * 2);
-    const st = rnd() * Math.PI * 2;
-    wrapDraw(w, h, x, y, r * 2, (dx) => {
+  const blob = (x: number, y: number, r: number, c0: string, c1: string) => {
+    wrapDraw(w, h, x, y, r, (dx) => {
+      const g = a.createRadialGradient(x + dx, y, 0, x + dx, y, r);
+      g.addColorStop(0, c0);
+      g.addColorStop(1, c1);
+      a.fillStyle = g;
       a.beginPath();
-      for (let k = 0; k <= 24; k++) {
-        const t = k / 24;
-        const ang = st + t * Math.PI * 2.4;
-        const rr = r * (1 - t * 0.75);
-        const px = x + dx + Math.cos(ang) * rr;
-        const py = y + Math.sin(ang) * rr - t * r * 0.8;
-        if (k === 0) a.moveTo(px, py);
-        else a.lineTo(px, py);
+      a.arc(x + dx, y, r, 0, Math.PI * 2);
+      a.fill();
+    });
+  };
+  // red under-glow patches (the ground is never flat in the print)
+  for (let i = 0; i < 40; i++) blob(rnd() * w, h * (0.15 + rnd() * 0.8), w * (0.03 + rnd() * 0.05), 'rgba(170,40,20,0.45)', 'rgba(170,40,20,0)');
+  // flame streams: tall soft tongues, each a hot core in an orange body (additive glow)
+  const tongue = (x: number, base: number, fh: number, fw: number, sway: number, phase: number, body: string, bodyTip: string, core: string | null) => {
+    const N = 22;
+    const side = (sgn: number, dx: number, k: number) => {
+      const pts: [number, number][] = [];
+      for (let j = 0; j <= N; j++) {
+        const t = j / N;
+        const cx = x + dx + sway * Math.sin(t * Math.PI * 1.6 + phase) * t;
+        const hw = fw * k * Math.pow(1 - t, 0.8) * (0.7 + 0.5 * Math.sin(t * Math.PI + 0.3));
+        pts.push([cx + sgn * hw, base - t * fh]);
       }
+      return pts;
+    };
+    wrapDraw(w, h, x, base - fh / 2, Math.max(fh, fw * 6), (dx) => {
+      const draw = (k: number, fill: string | CanvasGradient) => {
+        const l = side(-1, dx, k);
+        const r = side(1, dx, k).reverse();
+        a.beginPath();
+        a.moveTo(l[0][0], l[0][1]);
+        for (const [px, py] of l) a.lineTo(px, py);
+        for (const [px, py] of r) a.lineTo(px, py);
+        a.closePath();
+        a.fillStyle = fill;
+        a.fill();
+      };
+      const g = a.createLinearGradient(0, base, 0, base - fh);
+      g.addColorStop(0, body);
+      g.addColorStop(0.65, bodyTip);
+      g.addColorStop(1, 'rgba(120,20,10,0)');
+      a.shadowColor = 'rgba(255,110,30,0.6)';
+      a.shadowBlur = 14 * S;
+      draw(1, g);
+      a.shadowBlur = 0;
+      if (core) {
+        const g2 = a.createLinearGradient(0, base, 0, base - fh * 0.75);
+        g2.addColorStop(0, core);
+        g2.addColorStop(0.7, 'rgba(255,190,60,0.55)');
+        g2.addColorStop(1, 'rgba(255,160,40,0)');
+        draw(0.42, g2);
+      }
+    });
+  };
+  // back layer: tall dark-orange tongues through the whole panel
+  for (let i = 0; i < 26; i++) {
+    const fh = h * (0.45 + rnd() * 0.5);
+    tongue(rnd() * w, h * (1.02 + rnd() * 0.05), fh, w * (0.02 + rnd() * 0.022), w * (rnd() - 0.5) * 0.08, rnd() * 6, 'rgba(220,70,20,0.9)', 'rgba(170,40,16,0.75)', null);
+  }
+  // black smoke clouds: clusters of soft dark puffs, mostly in the upper two thirds
+  for (let i = 0; i < 22; i++) {
+    const cx = rnd() * w;
+    const cy = h * (0.08 + rnd() * 0.62);
+    const n = 5 + Math.floor(rnd() * 7);
+    for (let j = 0; j < n; j++) {
+      const r = w * (0.012 + rnd() * 0.03);
+      blob(cx + (rnd() - 0.5) * w * 0.07, cy + (rnd() - 0.5) * h * 0.1, r, 'rgba(14,6,6,0.82)', 'rgba(14,6,6,0)');
+    }
+  }
+  // soot bubbles: dark spheres with a warm rim light
+  for (let i = 0; i < 34; i++) {
+    const x = rnd() * w;
+    const y = h * (0.1 + rnd() * 0.75);
+    const r = w * (0.004 + rnd() * 0.011);
+    wrapDraw(w, h, x, y, r * 1.4, (dx) => {
+      const g = a.createRadialGradient(x + dx - r * 0.35, y - r * 0.35, r * 0.1, x + dx, y, r);
+      g.addColorStop(0, '#5a2a1c');
+      g.addColorStop(0.6, '#1c0c0a');
+      g.addColorStop(0.92, '#140806');
+      g.addColorStop(1, 'rgba(255,120,40,0.7)');
+      a.fillStyle = g;
+      a.beginPath();
+      a.arc(x + dx, y, r, 0, Math.PI * 2);
+      a.fill();
+    });
+  }
+  // glowing veins in the dark areas
+  a.lineCap = 'round';
+  for (let i = 0; i < 70; i++) {
+    let x = rnd() * w;
+    let y = h * (0.05 + rnd() * 0.7);
+    a.strokeStyle = `rgba(255,${(90 + rnd() * 60) | 0},30,${0.25 + rnd() * 0.3})`;
+    a.lineWidth = Math.max(1, 2.2 * S * (0.5 + rnd()));
+    let ang = rnd() * Math.PI * 2;
+    const pts: [number, number][] = [[x, y]];
+    for (let j = 0; j < 8; j++) {
+      ang += (rnd() - 0.5) * 1.4;
+      x += Math.cos(ang) * w * 0.008;
+      y += Math.sin(ang) * w * 0.008;
+      pts.push([x, y]);
+    }
+    wrapDraw(w, h, pts[0][0], pts[0][1], w * 0.08, (dx) => {
+      a.beginPath();
+      a.moveTo(pts[0][0] + dx, pts[0][1]);
+      for (const [px, py] of pts) a.lineTo(px + dx, py);
       a.stroke();
     });
   }
-  // flame tongues: tall, swaying, tapering; back layers dark and tall, front layers hot and short
-  const layers: { n: number; hMin: number; hMax: number; wMul: number; base: string; tip: string; core?: string }[] = [
-    { n: 18, hMin: 0.55, hMax: 0.95, wMul: 1.2, base: '#9c2a1c', tip: '#4a0e12' },
-    { n: 26, hMin: 0.4, hMax: 0.75, wMul: 1.0, base: '#c8401e', tip: '#7a1a16' },
-    { n: 30, hMin: 0.3, hMax: 0.58, wMul: 0.85, base: '#ec7424', tip: '#b8381c', core: '#f6b23a' },
-    { n: 26, hMin: 0.16, hMax: 0.36, wMul: 0.6, base: '#ffd660', tip: '#f08a28', core: '#fff0b0' },
-  ];
-  const outline = Math.max(1.2, w / 520);
-  for (const L of layers) {
-    for (let i = 0; i < L.n; i++) {
-      const x = rnd() * w;
-      const base = h * (1.02 + rnd() * 0.08);
-      const fh = h * (L.hMin + rnd() * (L.hMax - L.hMin));
-      const fw = w * (0.018 + rnd() * 0.024) * L.wMul;
-      const sway = (rnd() - 0.5) * fw * 5;
-      const phase = rnd() * Math.PI * 2;
-      const curl = (rnd() - 0.5) * fw * 3;
-      const N = 18;
-      const side = (sgn: number, dx: number) => {
-        const pts: [number, number][] = [];
-        for (let k = 0; k <= N; k++) {
-          const t = k / N;
-          const cx = x + dx + sway * Math.sin(t * Math.PI * 1.3 + phase) * t + curl * t * t * t;
-          const hw = fw * Math.pow(1 - t, 0.75) * (0.75 + 0.35 * Math.sin(t * Math.PI));
-          pts.push([cx + sgn * hw, base - t * fh]);
-        }
-        return pts;
-      };
-      wrapDraw(w, h, x, base - fh / 2, Math.max(fh, fw * 6), (dx) => {
-        const left = side(-1, dx);
-        const right = side(1, dx).reverse();
-        a.beginPath();
-        a.moveTo(left[0][0], left[0][1]);
-        for (const [px, py] of left) a.lineTo(px, py);
-        for (const [px, py] of right) a.lineTo(px, py);
-        a.closePath();
-        const g = a.createLinearGradient(0, base, 0, base - fh);
-        g.addColorStop(0, L.base);
-        g.addColorStop(0.7, L.tip);
-        g.addColorStop(1, L.tip);
-        a.fillStyle = g;
-        a.fill();
-        a.lineWidth = outline;
-        a.strokeStyle = 'rgba(26,8,8,0.85)';
-        a.stroke();
-        if (L.core) {
-          // hot inner core: a slimmer, shorter tongue inside
-          a.beginPath();
-          const inner = side(-1, dx).slice(0, Math.round(N * 0.6));
-          const innerR = side(1, dx).slice(0, Math.round(N * 0.6)).reverse();
-          const cxs = inner.map((p, k) => [(p[0] + innerR[innerR.length - 1 - k][0]) / 2, p[1]] as [number, number]);
-          a.moveTo(inner[0][0] * 0.5 + cxs[0][0] * 0.5, inner[0][1]);
-          for (let k = 0; k < inner.length; k++) a.lineTo(inner[k][0] * 0.45 + cxs[k][0] * 0.55, inner[k][1]);
-          for (let k = innerR.length - 1; k >= 0; k--) a.lineTo(innerR[innerR.length - 1 - k][0] * 0.45 + cxs[k][0] * 0.55, innerR[innerR.length - 1 - k][1]);
-          a.closePath();
-          a.fillStyle = L.core;
-          a.globalAlpha = 0.85;
-          a.fill();
-          a.globalAlpha = 1;
-        }
-      });
-    }
+  // front layer: bright orange streams with yellow cores rising from the wrist
+  for (let i = 0; i < 34; i++) {
+    const fh = h * (0.25 + rnd() * 0.5);
+    tongue(rnd() * w, h * (1.0 + rnd() * 0.06), fh, w * (0.012 + rnd() * 0.02), w * (rnd() - 0.5) * 0.06, rnd() * 6, 'rgba(255,128,26,0.95)', 'rgba(236,84,20,0.8)', '#ffe070');
   }
+  // floating flame licks higher up (the fire climbs through the smoke)
+  for (let i = 0; i < 18; i++) {
+    const fh = h * (0.12 + rnd() * 0.18);
+    tongue(rnd() * w, h * (0.35 + rnd() * 0.45), fh, w * (0.008 + rnd() * 0.012), w * (rnd() - 0.5) * 0.04, rnd() * 6, 'rgba(255,140,30,0.85)', 'rgba(230,80,20,0.6)', '#ffd860');
+  }
+  // warm glow under the gilded top hem
+  const top = a.createLinearGradient(0, 0, 0, h * 0.14);
+  top.addColorStop(0, 'rgba(255,196,80,0.75)');
+  top.addColorStop(0.45, 'rgba(250,140,40,0.35)');
+  top.addColorStop(1, 'rgba(230,100,30,0)');
+  a.fillStyle = top;
+  a.fillRect(0, 0, w, h * 0.14);
   const t = canvasTex(c, true, aniso);
   t.wrapT = THREE.ClampToEdgeWrapping;
   return t;
 }
 
 /**
- * Lava-crack hide for the neck and chest: voronoi cracks. Albedo = soot black plates with ember
- * rims; emissive = crack mask (driven by the inner-fire uniform).
+ * Leopard / giraffe hide for the neck, back and chest (daytime photos): rounded orange-tan patches
+ * separated by an irregular dark-brown network, darker spots inside the bigger patches, a paler
+ * centre per patch. Emissive = the patch interiors (the inner fire shines through the orange skin
+ * in rage / ember looks while the dark network stays black) - weighted so its mean matches the old
+ * lava-crack map.
  */
 export function lavaTextures(size: number, aniso: number): { map: THREE.Texture; emissiveMap: THREE.Texture } {
   const rnd = mulberry(555);
   const cells = 9;
   const pts: number[] = [];
-  for (let j = 0; j < cells; j++) for (let i = 0; i < cells; i++) pts.push((i + 0.15 + rnd() * 0.7) / cells, (j + 0.15 + rnd() * 0.7) / cells);
+  const tone: number[] = [];
+  for (let j = 0; j < cells; j++)
+    for (let i = 0; i < cells; i++) {
+      pts.push((i + 0.15 + rnd() * 0.7) / cells, (j + 0.15 + rnd() * 0.7) / cells);
+      tone.push(rnd());
+    }
   const alb = new Uint8Array(size * size * 4);
   const em = new Uint8Array(size * size * 4);
+  // cheap tileable value noise for the wobbly network edges
+  const nz = (x: number, y: number, f: number) => {
+    const X = x * f,
+      Y = y * f;
+    const xi = Math.floor(X),
+      yi = Math.floor(Y);
+    const xf = X - xi,
+      yf = Y - yi;
+    const h = (a: number, b: number) => {
+      const aa = ((a % f) + f) % f;
+      const bb = ((b % f) + f) % f;
+      const v = Math.sin(aa * 127.1 + bb * 311.7) * 43758.5453;
+      return v - Math.floor(v);
+    };
+    const u = xf * xf * (3 - 2 * xf),
+      v = yf * yf * (3 - 2 * yf);
+    return (h(xi, yi) * (1 - u) + h(xi + 1, yi) * u) * (1 - v) + (h(xi, yi + 1) * (1 - u) + h(xi + 1, yi + 1) * u) * v;
+  };
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
-      const u = x / size;
-      const v = y / size;
+      const u0 = x / size;
+      const v0 = y / size;
+      const w = (nz(u0, v0, 18) - 0.5) * 0.022;
+      const u = u0 + w;
+      const v = v0 + (nz(u0 + 0.37, v0 + 0.61, 18) - 0.5) * 0.022;
       const ci = Math.floor(u * cells);
       const cj = Math.floor(v * cells);
       let d1 = 9;
       let d2 = 9;
+      let best = 0;
+      let bx = 0;
+      let by = 0;
       for (let dj = -1; dj <= 1; dj++) {
         for (let di = -1; di <= 1; di++) {
           const ii = (((ci + di) % cells) + cells) % cells;
@@ -508,21 +585,34 @@ export function lavaTextures(size: number, aniso: number): { map: THREE.Texture;
           if (d < d1) {
             d2 = d1;
             d1 = d;
+            best = jj * cells + ii;
+            bx = px;
+            by = py;
           } else if (d < d2) d2 = d;
         }
       }
       d1 = Math.sqrt(d1);
       d2 = Math.sqrt(d2);
-      const edge = d2 - d1; // 0 at the crack
-      const crack = Math.max(0, 1 - edge * cells * 7);
-      const glow = Math.max(0, 1 - edge * cells * 2.2);
+      const edge = (d2 - d1) * cells; // 0 on the network line
+      const line = 1 - THREE.MathUtils.smoothstep(edge, 0.09, 0.2);
+      const t = tone[best];
+      const centre = 1 - Math.min(1, d1 * cells * 1.6);
+      // an inner spot in some patches
+      const spot = t > 0.55 ? 1 - THREE.MathUtils.smoothstep(Math.hypot(u - bx - 0.012, v - by + 0.01) * cells, 0.12, 0.2) : 0;
+      // patch colour: tan-orange with per-patch variation, a paler centre
+      let r = 0.68 + 0.12 * t + 0.08 * centre;
+      let g = 0.33 + 0.1 * t + 0.1 * centre;
+      let b = 0.1 + 0.05 * t + 0.05 * centre;
+      const k = Math.max(line, spot * 0.85);
+      r = r * (1 - k) + 0.2 * k;
+      g = g * (1 - k) + 0.1 * k;
+      b = b * (1 - k) + 0.05 * k;
       const i = (y * size + x) * 4;
-      const plate = 0.16 + 0.1 * (d1 * cells);
-      alb[i] = Math.min(255, (plate * 0.9 + glow * 0.5 + crack * 0.6) * 255);
-      alb[i + 1] = Math.min(255, (plate * 0.55 + glow * 0.18 + crack * 0.35) * 255);
-      alb[i + 2] = Math.min(255, (plate * 0.5 + crack * 0.08) * 255);
+      alb[i] = Math.min(255, r * 255);
+      alb[i + 1] = Math.min(255, g * 255);
+      alb[i + 2] = Math.min(255, b * 255);
       alb[i + 3] = 255;
-      const e = Math.min(1, crack + glow * 0.35);
+      const e = (1 - k) * (0.3 + 0.28 * centre);
       em[i] = em[i + 1] = em[i + 2] = e * 255;
       em[i + 3] = 255;
     }

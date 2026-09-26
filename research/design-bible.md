@@ -197,10 +197,13 @@ tagged.
 
 ### 5.1 Concept (FACT, from images)
 A giant red-orange mechanical **dragon head** with open fanged jaws crouches on a grey **gothic castle /
-cathedral**. An **armoured skeletal rider** sits on its neck (viewer-right); a **gold perforated mechanical
-foreleg** with 3 talons grips the parapet (viewer-right). Two huge **bat wings** spread left and right, each
-with **3 raised finger spars** ending in spiky flame finials, printed flame membranes, **3 sun/gear rosettes**,
-silver blade spikes, and moving-head rows on the edges. The castle continues as long **side sections**, and
+cathedral**. An **armoured rider** (dark armour, long black dreadlocks, red sun shield) sits on its
+leopard-patterned back (viewer-right). *(Round-3 correction, §5.13: the "gold perforated mechanical foreleg with
+3 talons" is not in any daytime photo; the gold element under the chin is the gold-scaled vault roof in front of
+the portal.)* Two huge **bat wings** spread left and right, each with **3 raised finger spars** ending in spiky
+flame finials, printed flame membranes, **3 sun rosettes**, white arrowhead / kunai plates along the spars, and
+moving-head rows on the gilt top edges; each wing's arm arches from the dragon's shoulder down to a wrist
+standing in front of the outer castle bays. The castle continues as long **side sections**, and
 low **forward arms** run along the side banks, so the stage is a **U enclosing the front of the field**. The
 **8 delay towers** on the field are dressed as **stone obelisks with faceted crystal lanterns** (the "lantern
 pillars"). **No LED video walls** (FACT: Q-dance "we don't use any video walls"; none visible in 160 frames):
@@ -213,9 +216,9 @@ the structure itself is the screen (pixel outlines, window bars, rosettes, mouth
 | Straight stage front incl. side sections | **184 m** (X −92…+92) | 180–190 | INFERENCE |
 | Central recess (castle core, dragon, wings) | X −37…+37 (74 m) | ±3 | FACT (floorplan) / INFERENCE |
 | Deck (central) | X −37…+37, Z −14…0, **top Y 1.9** | deck 1.8–2.2 | INFERENCE (people vs fascia 65/73 px) |
-| Wing finger tips | (±14.5, **26.5**), (±29, **28.0**), (±40.5, **26.5**) at Z −20 → **span 81 m, crown top 28 m** | span 76–89; height 25–31 (review note §5.3) | INFERENCE (3 methods, §5.3) |
+| Wing finger tips | (±14.5, **26.5**), (±29, **28.0**), (±40.5, **26.5**) at Z −20 → **span 81 m, crown top 28 m**. *Round 3 (§5.13): finial spear tops (±14.5, 29.5), (±29.4, 29.9), (±39.8, 26.8) at Z −21…−21.6; wrists at (±26.4, 4.6, −8.8)* | span 76–89; height 25–31 (review note §5.3) | INFERENCE (3 methods, §5.3) + daytime photos |
 | Dragon | skull 9 m wide; head incl. horns ~16 m; mouth 7 × 5.5 m; chin Y 9.3; **crest top Y 21.5**; rider top Y 23 | ±10 % | INFERENCE |
-| Castle core | crenellations Y 9.5; gothic towers Y 14–16 (spires to 18) | ±1.5 | INFERENCE |
+| Castle core | crenellations Y 9.5; gothic towers Y 14–16 (spires to 18). *Round 3 (§5.13): core front wall walk Y 8.1, inner towers set back to Z −15 (under the wing arm), outer towers removed* | ±1.5 | INFERENCE + daytime photos |
 | DJ portal | 5.4 m wide, apex Y 7.2, front Z −6 | ±0.5 | INFERENCE |
 | Main PA | inner hangs X ±11, outer X ±31; array Y 4.9–14.2 | ±1 | INFERENCE (K1 ruler) |
 | Side sections | X ±37…±92, front wall Z −4, rear wall Z −22 (at \|X\| 37) → −30 (at \|X\| 80) (floorplan rear band reaches −37), wall top Y 9.5, towers to 13.5, corner towers (±92, −4) to Y 15 | ±5 | INFERENCE / ASSUMPTION |
@@ -331,6 +334,14 @@ on the same site.
 - **Flame-eye banners** (red, orange flame + all-seeing eye, gold border) 2.5 × 6 m, backlit; **skull
   medallions** Ø 3.5 m with glowing eyes at (±20, 6.5); arched **skull niche** panels 4.5 m tall; **grey-blue
   stone sculptures with gold veins** in niches (FACT look).
+- *Round-3 corrections (daytime photos, §5.13):* the printed stone reads **white / light grey** (off-white
+  blocks, grey joints, dark grey window openings). The core front tops out at **Y ~8.1** (level with the skull
+  cubes, just above the portal crown), with the towers set back under the wing arches. The "skull medallions"
+  are **skull cubes**: white stone blocks ~4.2 × 4.1 m, Y 1.9–7.4, on the deck at (±19.6, Z −8.3), a skull
+  relief in a gilt arched niche on the front and outer faces (eyes glow at night). Orange-red **flame-eye
+  banners** flank the portal (X ±5) and hang in the outer bays (X ±27.4) and on the side sections; a large grey
+  **stone face relief** (mask) in a gilt niche sits on the facade right of the portal (X +15). The twin 15 m
+  flame torches stand on the wall walk at X ±11.6 (in front of the wing arm), not on the (now set-back) towers.
 
 ### 5.6 Dragon
 - **Head:** skull pivot at **(−2.5, 14, −12)**, snout pointing **yaw −12°** (towards −X) and 5° down;
@@ -346,18 +357,35 @@ on the same site.
     red LED Defqon.1 diamond on the chest (f068).
 - **Neck/body:** coils to viewer-right X 0…+12 with chest plates and a **bronze gear ring Ø 3 m at
   (+6.5, 13, −10)** (the "round ribbed disc right of the head"); flame-crack printed skin behind the jaw.
-- **Right foreleg (viewer-right):** gold perforated mechanical arm X +8…+16 with **3 glossy talons 2.5–3.5 m**
-  hooked over the parapet at Y 9.5, Z −12 (FACT). A left foreleg is UNKNOWN; the red "orb" seen left of the
-  arch in deck shots (f065–f074) is modelled as a Ø 3.5 m red scaled knuckle at (−10, 8.5, −9) (ASSUMPTION).
-- **Rider:** seated armoured skeletal knight, 5.5 m tall seated, at (+6.5, 17.5, −16), top Y 23, dark grey
-  armour, glowing white eye points (FACT look, thumbnail).
+  *Round 3 (daytime photos):* the back / neck and both wing arms wear a **leopard / giraffe hide** (orange-tan
+  patches, dark-brown network); a crest of big **leaf-shaped dorsal plates** (cream-orange, dark veins) runs
+  from the skull to beyond the rider; **silver scimitar blades** line the coil; under it a column of **dark grey
+  vertebra discs**, a rack of long **copper bars** running right and flame-crack panels behind them. The ring
+  right of the head is dark steel, not bronze.
+- ~~**Right foreleg (viewer-right):** gold perforated mechanical arm X +8…+16 with 3 glossy talons hooked over
+  the parapet~~ — **removed in round 3**: no foreleg or talons appear in any daytime photo; the gold element
+  under the chin is the gold-scaled barrel **vault** (12–15 m long, 6–7 m wide) whose front is the portal. The
+  red "orb" knuckle at (−10, 8.5, −9) is removed too (not in the daytime photos).
+- **Rider:** seated armoured knight, 5.5 m tall seated, top Y ~24, dark grey / black armour, glowing white eye
+  points (FACT look, thumbnail). *Round 3 (daytime photos): long black dreadlocks, red / white cloth, a round
+  red **sun shield** (~Ø 3.4 m) on his left arm; he sits high on the back just right of the horn crown at
+  (+5.6, 20.5, −18), level with the horn tips, not at (+6.5, 17.5, −16).*
+- *Round-3 head corrections:* the head is ~15 % bigger than built before (scaled about a hinge at
+  (−1, 15.9, −11.8); jaw tip resting on the portal crown, horn crown to Y ~23.5); the crest is **7–8 long
+  silver-white horns fanning out and back** plus two long cheek horns sweeping back, with spiky orange-bronze
+  plates between (not a mostly vertical fan of short cones).
 - **Dragon light states** (for `stage.state`): `dormant` (unlit, pixel outline 10 %), `awake` (colour wash,
   eye on), `rage` (red/green, mouth glow 100 %), `frozen` (blue/teal, white pixels), `ember` (only head + inner
   wings red #982D3E), `blackout`. No fire from the mouth was observed in any frame (FACT); keep a hidden
   mouth-flame anchor at (−4, 11, −5) unused by default.
 
 ### 5.7 Wings (mirror pair)
-- Wing plane **Z −20**, leaning back 10°. Roots at the shoulders (±5, 14, −16).
+- Wing plane **Z −20**, leaning back 10°. Roots at the shoulders (±5, 14, −16). *Round 3 (daytime photos,
+  §5.13): the spars lean back ~30°: the **arm** arches from the shoulder (±6.2, 14.6, −16.6) down to a **wrist**
+  at (±26.4, 4.6, −8.8) in front of the outer castle bays, with hooked ivory tusks hanging to the deck; the
+  middle spar rises near-vertically from the wrist, the outer spar (the wing's outer edge, base (±36.2, 6.8))
+  near-vertically at the outside, the inner spar from the arm (±21.6, 11) leaning in to the head. Under the arm
+  the castle towers show through the arch.*
 - **3 finger spars per wing** (copper tubes Ø 0.9 m): inner from (±6, 15) to (±14.5, 26.5); middle from
   (±9, 14) to (±29, 28); outer from (±12, 13) to (±40.5, 26.5). Each ends in a 3.5 m flame-shaped spiky
   finial (red/orange with silver points) and carries a comb of 8–12 silver blade spikes (1.5–2.5 m).
@@ -365,9 +393,15 @@ on the same site.
   castle shows); outer ends sweep down to the castle roof at (±41, 11, −18).
 - **Rosettes:** 3 per wing, Ø 4.5 m, centres (±16, 15.5), (±24, 16.5), (±33, 15.5); yellow sunburst print by
   day, spoked gear disc with emissive centre at night (white, purple, yellow, teal star, blue-violet, pink
-  sunburst per section).
+  sunburst per section). *Round 3: a yellow sunburst in a dark red ring framed by a **white spiky crown ring**
+  (Ø ~5.8 m outer / ~4 m inner rosette); the membrane print is a painted inferno (orange-yellow flame streams
+  through black smoke and soot bubbles on deep red); the scalloped top edges carry a **gold band** with the
+  black moving heads on it; the spars carry a chain of **white arrowheads** pointing to the finial with a
+  perforated **kunai blade** out to the side at each (10–13 per spar); the finials are a red-gold sun orb with
+  gold ear plates and a crescent of white blades, an orange flame blade and a white spear point.*
 - **Lower wing arm** (root → outer end): copper tube with perforated silver bone plates and rows of sickle
-  hooks. Ivory tusks at the wing roots.
+  hooks. Ivory tusks at the wing roots. *Round 3: the arm is leopard-patterned (the same hide as the back), with
+  silver scimitars; the tusks at the wing roots are big silver-white horns hanging either side of the head.*
 - Fixtures: continuous row of moving heads on the leading edges at 1.3 m pitch (2 × 60), LED pixel strips on
   every rib and spar, 20 strobes per wing, 6 flame heads per wing (§7.5), gerbs on the 6 finials.
 
@@ -428,6 +462,34 @@ on the same site.
 | Far-aisle cam | (0, 3, 175) | at (0, 8, 0), HFOV 55° | dark opening |
 
 Full camera family list: show-analysis §0.1.
+
+### 5.13 Change log: round-3 stage fidelity pass from the daytime photos (2026-09-26)
+
+Sources: five daytime photos of the finished 2026 MainStage on the empty grounds (ground front-left, axis
+telephoto, front, two drone views), the official photo P and the night test photo. Where they contradict the
+numbers above, the geometry was changed and the entry above is marked "Round 3".
+
+- **Wings:** re-laid (src/stage/dragon/layout.ts). The round-2 1.12x scale-up put the outer finials ~4 m too far
+  out and 2.4 m too high; the spars now lean back ~30° from a low wrist in front of the outer bays (photo P:
+  outer tips just outside the row-2 crystals; axis telephoto: outer finial clearly lower than middle / inner).
+  New art: painted-inferno print, sunburst rosettes with white spiky rims, gold hem band, arrowhead + kunai
+  plates on every spar, finials (sun orb, gold ears, white crescents, flame blade, spear), hooked tusks and
+  spikes at the wing bottoms, leopard arms with scimitars.
+- **Castle:** core front wall walk 9.5 → **8.1** (side sections stay at 9.5); outer towers (X ±25.5) removed (the
+  lower wing stands there); inner towers set back to Z −15 under the arm; skull medallions → **skull cubes** on
+  the deck; banners added at the portal and the outer bays; stone face relief right of the portal; printed stone
+  off-white. The twin torch anchors (show-analysis 6.7) moved to the wall walk at X ±11.6, and the inner towers'
+  rig anchors (towers_top, lasers, truss fixtures) to the wall walk in front of them.
+- **Dragon:** head +15 % (hinge (−1, 15.9, −11.8)), horn crown of long silver horns + cheek horns; foreleg,
+  talons and the left "orb" removed; leopard back / arms, dorsal leaf plates, scimitars, vertebra discs, copper
+  bars; rider with dreadlocks, red / white cloth and a red sun shield, seated at (+5.6, 20.5, −18).
+- **Deck:** the stage floor is painted **red** (photos; `PAINT.deckTop`). The photos show black fascia / risers
+  under the red floor (§5.4 has a dark-red skirt), red square platforms with a gold logo and a red half-round
+  platform front-left: left to the deck / vault module, like the gold vault, its stairs and the red field lines.
+- **Night calibration kept:** the re-painted art is ~2x brighter than the old albedo (castle stone, wing print,
+  leopard hide, decor); every such material scales its albedo back by a measured `nightK` (texture-mean ratio
+  old / new) in the show, so the dark night castle and the calibrated looks keep their levels; the dev-only
+  `?daylight` URL flag (off by default) shows the true albedo under a flat afternoon sun for art review.
 
 ---
 

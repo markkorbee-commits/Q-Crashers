@@ -142,8 +142,8 @@ export function makeStoneTextures(size: number, aniso: number, seed = 1337): Pbr
 
       let r: number, g: number, b: number, rough: number, metal: number, h: number;
       if (d < mortarHalf) {
-        // mortar
-        const m = 0.28 + fine * 0.08;
+        // mortar (grey painted joints)
+        const m = 0.42 + fine * 0.08;
         r = m * 1.0;
         g = m * 1.0;
         b = m * 1.04;
@@ -155,14 +155,16 @@ export function makeStoneTextures(size: number, aniso: number, seed = 1337): Pbr
         const hu = c.hue[bi] ?? 0;
         const e = Math.min(1, (d - mortarHalf) / bevel);
         const bev = e * (2 - e); // rounded arris
-        // base warm grey #A7A39B (sRGB 0.655, 0.639, 0.608) with a slight blue/beige swing per block
-        const base = tone * (0.86 + 0.22 * large) * (0.9 + 0.2 * fine);
-        r = 0.64 * base * (1 + 0.035 * hu);
-        g = 0.628 * base;
-        b = 0.6 * base * (1 - 0.04 * hu);
+        // painted light stone, off-white #DCD8CF (daytime photos: the castle flats read white / light
+        // grey with grey joints) with a slight blue / beige swing per block; the show scales the albedo
+        // back to its night calibration (StageUniforms.uDay / nightK)
+        const base = tone * (0.9 + 0.16 * large) * (0.93 + 0.14 * fine);
+        r = 0.86 * base * (1 + 0.03 * hu);
+        g = 0.845 * base;
+        b = 0.81 * base * (1 - 0.035 * hu);
         // grime: darker near the lower edge of each block and along streaks
         const lowEdge = Math.max(0, 1 - (ym - c.y0) / 0.18);
-        const grime = 0.16 * lowEdge + 0.22 * Math.max(0, streak - 0.55) * 2.2 + 0.18 * Math.max(0, 0.45 - blotch) * 2;
+        const grime = 0.12 * lowEdge + 0.16 * Math.max(0, streak - 0.55) * 2.2 + 0.14 * Math.max(0, 0.45 - blotch) * 2;
         r *= 1 - grime;
         g *= 1 - grime * 0.95;
         b *= 1 - grime * 0.9;
