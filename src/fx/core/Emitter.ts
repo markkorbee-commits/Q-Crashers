@@ -89,6 +89,7 @@ export const F = {
   FLAT: 2048, // puffs: horizontal ellipse (ground fog)
   RAMP: 4096, // continuous emission fades in over X3 s and out at the end
   SELFLIT: 8192, // puffs: self illumination COL1*INT decays with time constant X0
+  ABSCHANGE: 16384, // sparks: every alive particle switches COL1 -> COL2 at absolute show time Z3
 } as const;
 
 /**

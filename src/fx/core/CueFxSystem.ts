@@ -7,12 +7,16 @@ import type { Cue, SystemId } from '../../show/ShowTypes';
 import { hash32 } from '../../core/rng';
 import type { Emitter, FlashSpec } from './Emitter';
 import type { FxLayer } from './FxLayer';
+import type { LightSpec } from './FxLights';
 import { FxShared } from './FxShared';
 
 /** Emitters (and light flashes) a single compiled cue expands into. Built once per cue, then cached. */
 export class EmitterSet {
   readonly emitters: Emitter[] = [];
+  /** LightEnv flashes (one weighted centroid for the set, crowd and world materials) */
   readonly flashes: FlashSpec[] = [];
+  /** spatial pyro light (smoke, haze, floor), see FxLights */
+  readonly lights: LightSpec[] = [];
   lastFrame = 0;
   add(e: Emitter): Emitter {
     this.emitters.push(e);
@@ -62,8 +66,16 @@ export abstract class CueFxSystem implements System {
   private flashN = 0;
   private readonly flashBuf: FlashSpec[] = new Array(512);
   private readonly flashI = new Float32Array(512);
+  private readonly lightBuf: LightSpec[] = new Array(256);
+  private readonly lightI = new Float32Array(256);
+  private lightN = 0;
+  private lightSum = 0;
   /** total flash intensity above which additional flashes are compressed logarithmically */
   protected flashCap = 2.5;
+  /** same for the spatial pyro light (a wall of 60 fountains is brighter than two, not 30x) */
+  protected lightCap = 9;
+  /** systems without authored lights (fireworks) light the smoke / floor from their flashes */
+  protected flashLightGain = 0.3;
   cpuMs = 0;
 
   init(app: App): void {
@@ -103,6 +115,8 @@ export abstract class CueFxSystem implements System {
     const cues = this.app.show.active(this.sys, t, this.cueBuf);
     this.activeCues = cues.length;
     this.flashSum = 0;
+    this.lightSum = 0;
+    this.lightN = 0;
     for (let ci = 0; ci < cues.length; ci++) {
       const cue = cues[ci];
       let set = this.cache.get(cue.id);
@@ -111,6 +125,7 @@ export abstract class CueFxSystem implements System {
         try {
           this.app.show.paletteAt(cue.t, this.palette);
           this.expand(cue, set);
+          this.deriveLights(set);
         } catch (e) {
           if (this.frameNo % 600 === 1) console.warn(`[${this.name}] cue ${cue.fx} failed to expand`, e);
         }
@@ -131,12 +146,29 @@ export abstract class CueFxSystem implements System {
           this.flashSum += I;
         }
       }
+      const li = set.lights;
+      for (let k = 0; k < li.length; k++) {
+        const I = flashAt(li[k], t);
+        if (I > 0.002 && this.lightN < this.lightBuf.length) {
+          this.lightBuf[this.lightN] = li[k];
+          this.lightI[this.lightN++] = I;
+          this.lightSum += I;
+        }
+      }
     }
     // soft cap: a finale barrage must not blow the lighting bus up linearly
     const cap = this.flashCap;
     const kf = this.flashSum > cap ? (cap * (1 + Math.log(this.flashSum / cap))) / this.flashSum : 1;
-    for (let k = 0; k < this.flashN; k++) this.app.env.addFlash(this.flashBuf[k].color, this.flashI[k] * kf, this.flashBuf[k].pos);
+    // photosensitivity option (set by the UI on the App): flash light at ~40 %
+    const calm = (this.app as unknown as { reduceFlashing?: boolean }).reduceFlashing ? 0.4 : 1;
+    for (let k = 0; k < this.flashN; k++) this.app.env.addFlash(this.flashBuf[k].color, this.flashI[k] * kf * calm, this.flashBuf[k].pos);
     this.flashN = 0;
+    // derived (flash) lights of systems without authored light saturate early: a barrage of glitter
+    // mines must not light the ground like a flame wall
+    const capL = this.lightCap * (this.derivedOnly ? 0.3 : 1);
+    const kl = (this.lightSum > capL ? (capL * (1 + Math.log(this.lightSum / capL))) / this.lightSum : 1) * (calm < 1 ? 0.6 : 1);
+    const lights = this.shared.lights;
+    for (let k = 0; k < this.lightN; k++) lights.add(this.lightBuf[k], this.lightI[k] * kl);
     for (let i = 0; i < layers.length; i++) layers[i].commit();
     this.prefetch(t);
     this.afterUpdate(ctx);
@@ -166,6 +198,7 @@ export abstract class CueFxSystem implements System {
       try {
         this.app.show.paletteAt(cue.t, this.palette);
         this.expand(cue, set);
+        this.deriveLights(set);
       } catch {
         /* expanded again (and reported) when it becomes active */
         continue;
@@ -174,6 +207,22 @@ export abstract class CueFxSystem implements System {
       this.cache.set(cue.id, set);
       budget--;
     }
+  }
+
+  /**
+   * A cue that authored no spatial light (fireworks) lights the smoke and the floor from its flashes:
+   * a point light at the flash centre with a reach that grows with its height above the ground.
+   */
+  private deriveLights(set: EmitterSet): void {
+    if (set.lights.length || !set.flashes.length || this.flashLightGain <= 0) return;
+    for (const f of set.flashes) {
+      set.lights.push({ ...f, peak: f.peak * this.flashLightGain, a: f.pos, b: f.pos, radius: 12 + 0.2 * Math.max(0, f.pos.y) });
+    }
+  }
+
+  /** true for systems whose light comes only from their flashes (fireworks) */
+  private get derivedOnly(): boolean {
+    return this.sys === 'fireworks';
   }
 
   /** drop cached sets not used for a while (bounded memory on long scrubs) */
@@ -222,7 +271,7 @@ export abstract class CueFxSystem implements System {
   }
 
   stats(): Record<string, number | string> {
-    const out: Record<string, number | string> = { cues: this.activeCues, cached: this.cache.size, cpuMs: +this.cpuMs.toFixed(3), flash: +this.flashSum.toFixed(2) };
+    const out: Record<string, number | string> = { cues: this.activeCues, cached: this.cache.size, cpuMs: +this.cpuMs.toFixed(3), flash: +this.flashSum.toFixed(2), light: +this.lightSum.toFixed(2) };
     for (const l of this.layers) {
       out[`${l.name}.emitters`] = l.emitters;
       out[`${l.name}.particles`] = l.particles;

@@ -28,6 +28,8 @@ uniform vec3 uZoneSize[3];
 uniform vec3 uZoneAspect;
 uniform vec3 uZoneOcclusion;
 uniform float uStageBoost;
+uniform vec4 uHazePyro; // gain, knee stage, knee field, knee sky
+uniform vec3 uHazeTint; // colour of the smoke hanging in the air (albedo, from recent smoke cues)
 varying vec2 vUv;
 varying vec3 vLit;
 varying float vAlpha;
@@ -77,7 +79,13 @@ void main() {
   float Lm = max(light.r, max(light.g, light.b));
   float knee = zone == 2 ? 0.35 : 0.22;
   if (Lm > knee) light *= (knee + (Lm - knee) * 0.25) / Lm;
-  vLit = light * fogT(depth * 0.7);
+  // the pyro light field lights the haze where it burns (per corner: a flame wall at one end of a
+  // 26 m sprite lights that end), with a much higher knee than the rig: the smoke around a fire
+  // glows, the far haze stays dark
+  vec3 wc = c + vec3(dot(viewMatrix[0].xy, off), dot(viewMatrix[1].xy, off), dot(viewMatrix[2].xy, off));
+  vec3 pyro = (fxLight(wc, zone == 2 ? 0.8 : 1.2) + uFxGlow) * uHazePyro.x * (zone == 2 ? 0.12 : 1.0);
+  pyro = kneeC(pyro, zone == 0 ? uHazePyro.y : (zone == 1 ? uHazePyro.z : uHazePyro.w), 0.3);
+  vLit = (light + pyro) * uHazeTint * fogT(depth * 0.7);
   vOcc = zone == 0 ? uZoneOcclusion.x : (zone == 1 ? uZoneOcclusion.y : uZoneOcclusion.z);
   vUv = position.xy;
   vNoise = vec3(fract(aPar.w * 13.1) + t * 0.004, fract(aPar.w * 7.3) - t * 0.003, 0.55 + 0.4 * fract(aPar.w * 3.7));
@@ -152,6 +160,8 @@ export class HazeField {
       // how much each zone dims what lies behind it (the stage haze must not grey the set out)
       uZoneOcclusion: { value: new THREE.Vector3(0.35, 0.15, 0.55) },
       uStageBoost: { value: 1 },
+      uHazePyro: { value: new THREE.Vector4(7, 14, 7, 4) },
+      uHazeTint: { value: new THREE.Color(1, 1, 1) },
     };
     const mat = new THREE.ShaderMaterial({
       name: 'fx-haze',
@@ -171,6 +181,11 @@ export class HazeField {
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = 10;
     this.mesh.matrixAutoUpdate = false;
+  }
+
+  /** albedo tint of the haze (coloured smoke from recent smoke cannons), luminance ~1 */
+  setTint(c: THREE.Color): void {
+    (this.uniforms.uHazeTint.value as THREE.Color).copy(c);
   }
 
   setDensity(stage: number, field: number, sky: number): void {

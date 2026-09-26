@@ -2,7 +2,10 @@ import * as THREE from 'three';
 import type { App } from '../../core/App';
 import type { FrameContext, QualitySettings } from '../../core/types';
 import { Rng } from '../../core/rng';
+import { LANTERN_Y, PILLARS } from '../../world/site';
+import { FieldLight } from './FieldLight';
 import { FxLayer, quadGeometry, ribbonGeometry } from './FxLayer';
+import { FxLights } from './FxLights';
 import { PUFF_FRAG, PUFF_VERT } from './puffShader';
 import { SPARK_FRAG, SPARK_VERT } from './sparkShader';
 
@@ -28,6 +31,15 @@ export class FxShared {
   readonly wind = new THREE.Vector3(0.9, 0.05, -0.45);
   readonly noise: THREE.DataTexture;
   readonly uniforms: Record<string, THREE.IUniform>;
+  /** pyro light field (spatial light of burning pyro on smoke, haze and the grounds) */
+  readonly lights = new FxLights();
+  /** additive pyro light on the floor (FieldLight) */
+  readonly field: FieldLight;
+  /**
+   * false hides the floor layer — for when the world materials light the ground from the pyro light
+   * field themselves (FxShared.lights.uniforms + fxLight() in glsl.ts carry everything needed)
+   */
+  fieldLayer = true;
   private readonly size = new THREE.Vector2();
   private readonly tmpColor = new THREE.Color();
 
@@ -46,7 +58,12 @@ export class FxShared {
       uFlashCol: { value: app.env.flashColor },
       uFlashPos: { value: app.env.flashPos },
       uNoise: { value: this.noise },
+      ...this.lights.uniforms,
+      uLampPos: { value: Array.from({ length: 8 }, (_, i) => new THREE.Vector4(PILLARS[i]?.x ?? 0, LANTERN_Y + 0.8, PILLARS[i]?.z ?? -999, 0)) },
+      uLampCol: { value: new THREE.Color() },
     };
+    this.field = new FieldLight(this.uniforms, app.quality.level === 'mobile');
+    app.scene.add(this.field.mesh);
     app.onFrame((ctx) => this.sync(ctx));
   }
 
@@ -79,6 +96,19 @@ export class FxShared {
     }
     // the palette tints the ambient scatter a touch (haze glows in the section colour)
     amb.lerp(this.tmpColor.copy(env.palettePrimary).multiplyScalar(0.012), 0.25);
+    // lantern crystals (per-pillar chase levels as in the world lights)
+    const lamps = u.uLampPos.value as THREE.Vector4[];
+    const chase = env.pillarChase;
+    for (let i = 0; i < lamps.length; i++) {
+      const c = chase && chase.length ? chase[i] : 1;
+      lamps[i].w = typeof c === 'number' && Number.isFinite(c) ? Math.max(0, c) : 1;
+    }
+    (u.uLampCol.value as THREE.Color).copy(env.pillarLampColor).multiplyScalar(Math.max(0, env.pillarLampIntensity) * 0.9);
+    // pyro light field: the strongest lights of this frame (fewer on small presets)
+    const lv = app.quality.level;
+    this.lights.pack(lv === 'mobile' ? 4 : lv === 'medium' ? 8 : 12);
+    const g = this.lights.glow;
+    this.field.mesh.visible = this.fieldLayer && (this.lights.uniforms.uFxLN.value > 0 || g.r + g.g + g.b > 0.01);
   }
 
   /** spark ribbon layer (additive HDR) */
