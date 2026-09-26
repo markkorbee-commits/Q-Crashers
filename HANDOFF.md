@@ -339,7 +339,7 @@ Za 26 sep 2026, ± 21:20 (CEST).
   `docs/handoff/findings/r4_contracts_*.txt` en het plan voor de volgende ronde in `docs/handoff/findings/r5_next.md`.
 - MC-close-ups 347-459 s volgen de MC via `camera.shot` `p.subject='mc'` (`docs/show-format-ext/core.md`).
 - Podium beloopbaar (spots `dj`, `dancers`), lege DJ-booth met CDJ-achtige set zonder merklogo's, geen DJ in de show.
-- Artifact (oude versie): https://claude.ai/artifact/8ZTMp8XW6hczruUKoiJhDi
+- Artifact: https://claude.ai/artifact/8ZTMp8XW6hczruUKoiJhDi — bijgewerkt za 26 sep ± 21:25 (versie 4, stand `eb182d9`, zonder de stage-patch)
 - Meetkanttekening: dezelfde code gaf in de cloud op 1047,25 s eenmaal 27,3 % en eenmaal 12,1 % (zwaardere CPU-last,
   dus minder frames na de seek). Daarom bestaat `--min-frames` en begint stap 9 met een stabiliteitscheck.
 - Tools zijn overgezet: datamap via `ENDSHOW_DATA`, browserkeuze via `scripts/lib/browser.mjs` (Chrome + GPU op de
