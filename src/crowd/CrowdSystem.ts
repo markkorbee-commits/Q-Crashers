@@ -359,6 +359,8 @@ export class CrowdSystem implements System {
       uPixel: { value: 0.001 },
       uLantern: { value: new THREE.Vector4() },
       uKey: { value: new THREE.Vector4() },
+      uPerfKey: { value: new THREE.Color() },
+      uPerfBack: { value: new THREE.Color() },
       uGroups: { value: new THREE.Vector4() },
       uTube: { value: new THREE.Vector4(0.85, 0.92, 1, 0) },
       uLumCap: { value: 0.5 },
@@ -485,7 +487,8 @@ export class CrowdSystem implements System {
     this.crewMask = new Uint8Array(this.perf.count);
     this.perf.perfs.forEach((p, i) => {
       const crew = p.mode !== 'both' || p.name.endsWith('cam') || p.name === 'terrace';
-      this.crewMask[i] = crew ? 1 : 0;
+      // the deck operator IS the show camera's handheld: never in its own pictures (2 = hidden at any range)
+      this.crewMask[i] = p.name === 'deckcam' ? 2 : crew ? 1 : 0;
     });
     this.perfMesh = new THREE.Mesh(this.perfGeo, this.material(bodyVertex('performer', true), bodyFragment('performer', true)));
     this.perfMesh.name = 'performers';
@@ -681,6 +684,25 @@ export class CrowdSystem implements System {
     const env = app.env;
     const key = u.uKey.value as THREE.Vector4;
     key.set(env.stageWashColor.r * env.stageWashIntensity * 0.5, env.stageWashColor.g * env.stageWashIntensity * 0.5, env.stageWashColor.b * env.stageWashIntensity * 0.5, 1);
+    // deck performers in the rig's light (the film's close-ups): a key in the rig colour from the front
+    // (x the performer's key level) and a backlight from the set behind them (rig, backlight blinders,
+    // strobes, stage-side flashes) that draws coloured edges around a darker front
+    const si = clamp(env.stageIntensity, 0, 3);
+    const wi = clamp(env.stageWashIntensity, 0, 2);
+    const pk = u.uPerfKey.value as THREE.Color;
+    pk.copy(env.stageColor).multiplyScalar(0.15 + 0.28 * si);
+    pk.r += env.stageWashColor.r * wi * 0.06;
+    pk.g += env.stageWashColor.g * wi * 0.06;
+    pk.b += env.stageWashColor.b * wi * 0.06;
+    softClamp(pk, 1.2);
+    const pb = u.uPerfBack.value as THREE.Color;
+    const fs = env.flashStage;
+    const sw = clamp(env.strobe, 0, 1.2);
+    pb.copy(env.stageColor).multiplyScalar(0.12 + 0.6 * si);
+    pb.r += env.stageWashColor.r * wi * 0.12 + fs.color.r * 0.25 + sw * 0.6;
+    pb.g += env.stageWashColor.g * wi * 0.12 + fs.color.g * 0.25 + sw * 0.6;
+    pb.b += env.stageWashColor.b * wi * 0.12 + fs.color.b * 0.25 + sw * 0.6;
+    softClamp(pb, 2.4);
     (u.uGroups.value as THREE.Vector4).set(1, this.perf.pedestal, this.perf.strap, 0);
     (u.uTube.value as THREE.Vector4).w = this.perf.pianoTube;
     const cam = ctx.camera;
@@ -743,6 +765,10 @@ export class CrowdSystem implements System {
     for (let i = 0; i < P.count; i++) {
       const o = i * 4;
       if (!(attr[o] > 0)) continue; // not on this frame
+      if (showcam && this.crewMask[i] === 2) {
+        hidden++;
+        continue;
+      }
       if (showcam && this.crewMask[i]) {
         const dx = src0[o] - cp.x;
         const dy = src0[o + 1] + 1.5 - cp.y;

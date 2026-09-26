@@ -27,7 +27,7 @@ environment for testing without the lighting system), `crowdslope` (analytic ban
 | flags | pole + waving cloth attached to the carrier's hand; lowered away from and furled next to a viewer |
 | phones | 7 × 15 cm screens showing a dim "video of the stage", flashlight LEDs from the stage side, lighter flames; energy-conserving sub-pixel dots, fogged |
 | crowd-fade | everyone whose body axis is within 2.4 m of the lens (walkers: within their stroll): hero body (near body on mobile) with a per-instance near-lens dissolve — dithered out within ~1.3 m, gone within ~0.9 m, only when in front of the camera. Its own program, so the big hero / near draws keep early-Z |
-| performers | MC, fire-ritual troupe (10 lantern bearers, lead on a pedestal, aerialist), pianist, DJ, crew, pit security (hero body; near body on mobile). Only the performers on at the current time are uploaded (compacted rows), so an off-stage cast costs no triangles; they carry the same near-lens dissolve |
+| performers | MC, fire-ritual troupe (10 lantern bearers, lead on a pedestal in the arch, aerialist), pianist, DJ, crew, pit security (hero body; near body on mobile). Only the performers on at the current time are uploaded (compacted rows), so an off-stage cast costs no triangles; they carry the same near-lens dissolve |
 | props | piano riser, white grand piano + light tube, pedestal, aerial strap, tripods |
 
 Per-person data lives in three float textures (position/yaw, height/build/seed/zone, packed look).
@@ -99,7 +99,22 @@ of the ~1.3 s cold 45k build); the build yields to the browser every 12 ms (`Tim
 
 Crew members (camera operators, the terrace photographer, drone pilot, safety) are not drawn while
 the show camera (CameraRig mode `showcam`) is within 6 m of them: a film crew keeps out of its own
-shots (the photo-terrace positions of the edit are 1.7–6 m from the terrace photographer).
+shots (the photo-terrace positions of the edit are 1.7–6 m from the terrace photographer). The deck
+camera operator is the show camera's own handheld: never drawn in `showcam`.
+
+Fire-ritual troupe (2026 defaults, research/video-timeline/05.md): the lead's round pedestal stands in
+the arch at the top of the grey steps (0, 3.2, −5.3 top), the bearers in a horseshoe in front of it
+facing her; the contortion v658–666 (bearers kneel round her, filmed from the portal behind her);
+the kneel before the burning wings is short (v706.6–709.2); she steps off at 720.6 and heads the
+lantern procession down the deck (v723.8–729, half the bearers in file behind her with their lanterns
+fanned out); the human pyramid in the arch (v738.8, four at the base, two on their shoulders, the lead
+on top, four kneeling in front); off into the portal 742.6–746. The lead waits in the vault while the
+aerialist is on her strap.
+
+Deck performers are lit like the film's close-ups: a key in the rig's colour from the front (the MC:
+`uPerfKey`, no white follow spot; only a little of the red set wash reaches him), a backlight from the
+set behind the deck (`uPerfBack`: rig, backlight blinders, strobes, stage-side flashes) that draws
+coloured edges around a darker front, and for the troupe (glow > 0) the thick red wash of the section.
 
 Performers read their windows from the show file: `crowd` / `performer` cues with `p.who` = `mc` |
 `troupe` | `lead` | `aerialist` | `strap` | `pedestal` | `pianist` | `tube` (`p.level` < 0.5 = the dim

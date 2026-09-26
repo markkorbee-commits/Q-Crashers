@@ -55,6 +55,8 @@ interface CrowdLike {
 }
 /** where a `subject` shot frames when the performer is not available (crowd system off): the portal front */
 const SUBJECT_FALLBACK = new THREE.Vector3(0, 2.2, -4.5);
+/** haze scale of a shot that follows a performer (see ShotPose.haze; 1 = the full lit veil) */
+const SUBJECT_HAZE = 1;
 /** minimal duck type of the player controller (walkable ground height) */
 interface GroundLike {
   groundAt?(x: number, z: number): number;
@@ -290,6 +292,8 @@ export class ShowDirector {
   current = '';
   /** comfort (reduced motion): no handheld drift or kick shake on the operated cameras */
   steady = false;
+  /** the current authored shot follows a performer (`subject`): the deck operator's close-up */
+  private subjectShot = false;
 
   constructor(private app: App) {}
 
@@ -324,11 +328,15 @@ export class ShowDirector {
   evaluate(t: number, beat: BeatInfo, o: ShotPose): void {
     if (!this.L) this.build();
     o.roll = 0;
+    this.subjectShot = false;
     if (!this.fromCue(t, o)) this.auto(t, beat, o);
     this.clearTerrace(o);
     this.liftOverCrowd(o);
+    // the deck operator's close-ups of a performer are milky in the film (v351, v409.5, v411.5): the lit
+    // haze glows around him and the backlights bloom through it, so a subject shot keeps the full veil
+    const hz = ShowDirector.hazeFor(o.pos, o.look, o.fov);
     // a smoke-filled site (atmos.glow smoke) is the picture: long lenses keep the whole veil then
-    o.haze = lerp(ShowDirector.hazeFor(o.pos, o.look, o.fov), 1, clamp(this.app.env.smoke, 0, 1));
+    o.haze = lerp(this.subjectShot ? Math.max(hz, SUBJECT_HAZE) : hz, 1, clamp(this.app.env.smoke, 0, 1));
   }
 
   /**
@@ -488,6 +496,7 @@ export class ShowDirector {
         const sp = this.subjectAt(p.subject, t);
         o.pos.add(sp);
         o.look.add(sp);
+        this.subjectShot = true;
       }
       o.fov = clamp(num(alt.fov, num(p.fov, 50)), SHOT_FOV.min, SHOT_FOV.max);
       o.roll = num(alt.roll, 0);
@@ -506,6 +515,7 @@ export class ShowDirector {
         const sp = this.subjectAt(subject, t);
         o.pos.add(sp);
         o.look.add(sp);
+        this.subjectShot = true;
       }
       if (nudge) {
         o.pos.add(nudge);

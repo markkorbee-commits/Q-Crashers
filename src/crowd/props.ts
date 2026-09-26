@@ -6,7 +6,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
  *  - the piano riser in the field (bible §5.11: X ±2.8, Z 57–61, deck Y 0.6, railing on 3 sides,
  *    steps at the back) with the WHITE GRAND PIANO of Domitor Draconis and its vertical light tube
  *    (laser source ≈ (0, 1.8, 59), f094);
- *  - the lead dancer's round pedestal on the deck (0, 1.9, −2) (group 2, shown 640–735 s);
+ *  - the lead dancer's round pedestal in the arch at the top of the grey steps (0, 3.2, −5.3 top) (group 2, shown 639–721 s);
  *  - the aerialist's strap in the DJ arch (group 3);
  *  - tripods + cameras on the FOH platform and on the premium-deck photo terrace (photo P).
  * Attribute aProp = (group, emissive): group 0 static, 1 light tube, 2 pedestal, 3 strap.
@@ -152,9 +152,10 @@ export function buildProps(): G {
   parts.push(part(cyl(0.035, 0.035, 0.1, 0.12, 1.55, 58.75, 10), '#303036'));
   parts.push(part(cyl(0.045, 0.045, 0.72, 0.12, 1.62, 58.75, 12), '#ffffff', 1, 14));
 
-  // ---- lead dancer's pedestal on the deck
-  parts.push(part(cyl(0.8, 0.72, 0.5, 0, 1.9, -2, 24), '#5f5d62', 2));
-  parts.push(part(cyl(0.74, 0.74, 0.02, 0, 2.4, -2, 24), '#8a878c', 2));
+  // ---- lead dancer's pedestal in the arch
+  // (a round column at the top of the grey steps: base on the podium, top 0.5 m above the landing)
+  parts.push(part(cyl(0.66, 0.6, 1.0, 0, 2.2, -5.3, 24), '#5f5d62', 2));
+  parts.push(part(cyl(0.62, 0.62, 0.02, 0, 3.2, -5.3, 24), '#a08a5c', 2));
   // ---- aerialist strap from the arch crown
   parts.push(part(box(0.05, 2.0, 0.012, 0, 6.2, -6.8), '#b01a22', 3));
 

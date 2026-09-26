@@ -24,6 +24,15 @@ Engine behaviour of the show camera (no cue change, all deterministic per shot):
 * Tribe mode (crowd present): a pose below ~3.9 m over a dense crowd rises smoothly to
   camera-platform height (aim kept). The empty-grounds framings of the official edit would otherwise
   film the back of a head. "As filmed" mode is unchanged.
+* `subject` shots (the deck operator following a performer) keep the full lit haze veil (haze scale 1):
+  the film's deck close-ups are milky (v351, v409.5, v411.5), so the haze glows around the performer
+  and the backlights bloom through it. Other shots keep the long-lens / in-the-haze-cloud thinning.
+* Subjects the engine can follow (round 5, `src/crowd/performers.ts` SUBJECTS): `mc`, `lead`,
+  `aerialist`, `pianist`, `dancer0` … `dancer9` (the lantern bearers). Offsets are from the
+  performer's feet at each moment (the lead's feet are on her pedestal top while she is on it). The
+  show validator (`scripts/validate-show.mjs`) still accepts only `mc`; until its known list is
+  extended, the troupe shots of the 2026 show are authored as fixed deck poses (the troupe stands
+  on fixed formation marks while those shots run).
 * PA hangs: when a flown line array (or its truss tower) in front of the subject covers the centre
   56 % of a framing, the shot is moved sideways by the smallest step (0.5 m steps, ≤ 8 m, aim kept)
   that clears it. The offset is computed once from the shot's start pose and held for the whole shot.

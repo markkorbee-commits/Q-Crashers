@@ -9,7 +9,7 @@ import { BOTTOM, HAIR, HEAD, newLook, packLook, PRINT, PROP, TOP, type Look } fr
  * People on the grounds besides the crowd (show-analysis §0.4, design-bible §9.1):
  *  - the MC / vocalist on the deck during the anthem (335–502 s),
  *  - the Sacred Flame fire-ritual troupe: 10 lantern bearers in red, the lead dancer on a round
- *    pedestal and an aerialist on a strap in the DJ arch (642–733 s),
+ *    pedestal and an aerialist on a strap in the DJ arch (642–746 s: see the troupe phases below),
  *  - the pianist at the white grand piano on the field riser (Domitor Draconis, 882–1098 s),
  *  - a silhouette at the DJ booth, deck / FOH camera operators,
  *  - "As filmed" only: drone pilot, pit photographer, a crew member crossing the field (photo P),
@@ -38,9 +38,11 @@ export class PerfTiming {
   // the video shows the MC on the deck until v502.08 (research/video-timeline/03.md)
   mc: Win = { t0: 332.1, t1: 502.1 };
   // the troupe choreography is keyed to TROUPE_T0 (642): 641.8 lands its leap on the burning wings (709.05)
-  troupe: Win = { t0: 641.8, t1: 732.8 };
-  lead: Win = { t0: 639.5, t1: 733.6 };
-  pedestal: Win = { t0: 638.8, t1: 734.4 };
+  // until the human pyramid in the arch (v738.84) has gone off into the portal (the drone flies back from v741.2)
+  troupe: Win = { t0: 641.8, t1: 746.4 };
+  lead: Win = { t0: 639.5, t1: 746.4 };
+  // cleared while the lead heads the procession (she steps off at 720.6, during the axis-wide shots)
+  pedestal: Win = { t0: 638.8, t1: 721.4 };
   aerial: Win = { t0: 678.8, t1: 703.8 };
   strap: Win = { t0: 675.8, t1: 705.8 };
   pianist: Win = { t0: 880.4, t1: 1098.4 };
@@ -216,16 +218,24 @@ class Path {
 const MC_PATH = new Path([
   { t: 332, x: 0, z: -7.2 },
   { t: 338, x: 0, z: -3.6 },
-  { t: 347, x: -1.5, z: -3.8 },
-  { t: 351, x: -3, z: -4.0 },
+  // v347–351: in front of the red ornament screen left of the portal (the screen fills the frame behind him)
+  { t: 347, x: -4.2, z: -3.9 },
+  { t: 351, x: -4.6, z: -4.0 },
   { t: 357, x: -5.5, z: -3.8 },
-  { t: 363, x: -6.5, z: -3.6 },
-  { t: 366, x: -5.5, z: -3.5 },
-  { t: 373, x: -0.5, z: -4.4 },
+  { t: 363, x: -6.4, z: -3.7 },
+  // v363.96–367.1: filmed from behind, he walks away from the lens towards the front of the deck
+  { t: 364.0, x: -6.0, z: -2.9 },
+  { t: 365.3, x: -5.6, z: -2.0 },
+  { t: 366.9, x: -5.4, z: -1.6 },
+  { t: 369.2, x: -5.1, z: -1.8 },
+  // v367–374 he faces the lens, the arch behind him at the end: across the deck, not back upstage
+  { t: 373, x: -0.5, z: -2.4 },
   { t: 380, x: 3, z: -3.6 },
   { t: 389, x: 5.5, z: -3.7 },
   { t: 397, x: -1.2, z: -3.6 },
-  { t: 402, x: 2, z: -3.8 },
+  // v399.56–403: filmed from behind on the landing as he walks towards the front of the deck
+  { t: 401.8, x: -0.6, z: -1.8 },
+  { t: 403.4, x: 1.0, z: -2.6 },
   { t: 406, x: 3.5, z: -4.0 },
   { t: 409, x: 0.8, z: -4.3 },
   { t: 414, x: 1.2, z: -5.0 },
@@ -247,6 +257,95 @@ const MC_PATH = new Path([
 ]);
 const MC_T0 = 332;
 const TROUPE_T0 = 642;
+/**
+ * The lead's round pedestal stands in the arch at the top of the grey steps (v646–658: she is lit by the
+ * arch-crown spots above the bearers' heads; v658–666: filmed from the portal behind her, the deck and the field
+ * beyond); its top is 0.5 m above the landing (Y 2.7).
+ */
+const LEAD_Z = -5.3;
+const LEAD_FLOOR = 2.7;
+
+/*
+ * Fire-ritual troupe phases (authored 2026 show time, shifted with the 'troupe' window; the official video,
+ * research/video-timeline/05.md):
+ *  - the contortion (v658.16–666.4, filmed from upstage over the lead towards the field): the bearers kneel
+ *    close round her pedestal, open on the upstage side, lanterns reaching up to her;
+ *  - the steadicam take (v685.9–711) shows them dancing upright: the kneel before the burning wings is short;
+ *  - the lead steps off her pedestal (during the axis-wide shots v711–723.8) and heads a lantern procession
+ *    from the portal down the deck towards the backing steadicam (v723.84–728.9): half of the bearers in single
+ *    file behind her, lanterns fanned out to the sides (a halo round her from the front), the rest kneeling
+ *    at the flanks;
+ *  - a human pyramid in the arch (v738.84: four at the base, two on their shoulders, the lead on top, four
+ *    kneeling in front), built during the terrace / axis shots; off into the portal as the drone flies back.
+ */
+const CONT_IN0 = 657.0;
+const CONT_IN1 = 658.1;
+const CONT_OUT0 = 666.6;
+const CONT_OUT1 = 668.2;
+const KNEEL0 = 706.6;
+const LEAD_OFF = 720.6;
+const COL0 = 720.9;
+const COL1 = 723.0;
+const WALK0 = 723.8;
+const WALK1 = 729.2;
+const PYR0 = 729.8;
+const PYR1 = 734.6;
+const PYR_TOP0 = 734.4;
+/** feet of someone standing on another performer's shoulders, over that performer's feet */
+const PYR_LIFT = 1.42;
+const OUT0 = 742.6;
+const OUT1 = 746.4;
+const PORTAL_Z = -7.6;
+const LEAD_PATH = new Path([
+  { t: LEAD_OFF, x: 0, z: LEAD_Z },
+  { t: COL1, x: 0, z: -4.8 },
+  { t: WALK0, x: 0, z: -4.8 },
+  { t: WALK1, x: 0.45, z: -0.9 },
+  { t: PYR0, x: 0.45, z: -0.9 },
+  { t: PYR_TOP0, x: 0, z: -5.8 },
+  { t: OUT0, x: 0, z: -5.8 },
+  { t: OUT0 + 2.5, x: 0, z: PORTAL_Z },
+]);
+/** pyramid slots per bearer: x, z, level (0 base, 1 on the shoulders, -1 kneeling in front), yaw */
+const PYR_SLOTS: readonly (readonly [number, number, number, number])[] = (() => {
+  const s: [number, number, number, number][] = [];
+  const front = (x: number, z: number): [number, number, number, number] => [x, z, -1, Math.atan2(-x, -5.5 - z)];
+  const slots: Record<number, [number, number, number, number]> = {
+    0: [-1.05, -5.5, 0, 0],
+    2: [-0.35, -5.5, 0, 0],
+    4: [0.35, -5.5, 0, 0],
+    6: [1.05, -5.5, 0, 0],
+    8: [-0.38, -5.58, 1, 0],
+    1: [0.38, -5.58, 1, 0],
+    3: front(-2.0, -3.3),
+    5: front(2.0, -3.3),
+    7: front(-3.2, -2.9),
+    9: front(3.2, -2.9),
+  };
+  for (let k = 0; k < 10; k++) s.push(slots[k]);
+  return s;
+})();
+
+interface TroupePhase {
+  /** horseshoe angle (rad) */
+  th: number;
+  /** weights of the contortion ring, the procession and the pyramid */
+  cont: number;
+  col: number;
+  pyr: number;
+  /** yaw the formation asks for (procession / pyramid) */
+  faceYaw: number;
+  /** walked off into the portal */
+  gone: boolean;
+}
+
+/** a + (b - a) * k along the shorter way round (radians) */
+function lerpAngle(a: number, b: number, k: number): number {
+  let d = (b - a) % (Math.PI * 2);
+  if (d > Math.PI) d -= Math.PI * 2;
+  if (d < -Math.PI) d += Math.PI * 2;
+  return a + d * k;
+}
 
 type Mode = 'both' | 'filmed' | 'tribe';
 
@@ -272,6 +371,8 @@ export interface PerfFrame {
 
 const DANCERS = 10;
 const SECURITY = 10;
+/** cast members a show-camera shot can follow besides the MC (`camera.shot` p.subject) */
+export const SUBJECTS: ReadonlySet<string> = new Set(['lead', 'aerialist', 'pianist', ...Array.from({ length: DANCERS }, (_, i) => `dancer${i}`)]);
 
 export class Performers {
   readonly count: number;
@@ -296,6 +397,14 @@ export class Performers {
   private fr: PerfFrame = { visible: false, x: 0, y: 0, z: 0, yaw: 0, glow: 0 };
   private pp = { x: 0, z: 0, dist: 0, speed: 0, dx: 0, dz: 0 };
   private spp = { x: 0, z: 0, dist: 0, speed: 0, dx: 0, dz: 0 };
+  private lp = { x: 0, z: 0, dist: 0, speed: 0, dx: 0, dz: 0 };
+  private fp = { x: 0, z: 0, lift: 0 };
+  private fq = { x: 0, z: 0, lift: 0 };
+  private ph: TroupePhase = { th: 0, cont: 0, col: 0, pyr: 0, faceYaw: 0, gone: false };
+  /** scratch pose / frame for subjectAt (never uploaded) */
+  private sPose = newPose();
+  private sFr: PerfFrame = { visible: false, x: 0, y: 0, z: 0, yaw: 0, glow: 0 };
+  private byName = new Map<string, number>();
   private heightAt: (x: number, z: number) => number;
 
   constructor(heightAt: (x: number, z: number) => number) {
@@ -370,6 +479,7 @@ export class Performers {
     this.iLook = new Float32Array(this.count * 4);
     this.iP = Array.from({ length: 7 }, () => new Float32Array(this.count * 4));
     for (let i = 0; i < this.count; i++) packLook(this.perfs[i].look, this.iLook, i * 4);
+    this.perfs.forEach((p, i) => this.byName.set(p.name, i));
   }
 
   /**
@@ -377,12 +487,32 @@ export class Performers {
    * follow a performer (`camera.shot` p.subject). Pure; false when the subject is not on stage.
    */
   subjectAt(who: string, t: number, out: { x: number; y: number; z: number }): boolean {
-    if (who !== 'mc' || !inWin(t, this.timing.mc)) return false;
-    const pp = this.spp;
-    MC_PATH.at(t - this.timing.mc.t0 + MC_T0, pp);
-    out.x = pp.x;
-    out.z = pp.z;
-    out.y = stageFloorSmooth(pp.x, pp.z);
+    if (who === 'mc') {
+      if (!inWin(t, this.timing.mc)) return false;
+      const pp = this.spp;
+      MC_PATH.at(t - this.timing.mc.t0 + MC_T0, pp);
+      out.x = pp.x;
+      out.z = pp.z;
+      out.y = stageFloorSmooth(pp.x, pp.z);
+      return true;
+    }
+    // any other cast member of the show (lead, dancer0–9, aerialist, pianist): evaluate that performer alone
+    // at t into scratch state (pure; the pose / beat do not move the feet)
+    if (!SUBJECTS.has(who)) return false;
+    const i = this.byName.get(who);
+    if (i === undefined) return false;
+    const pf = this.perfs[i];
+    const f = this.sFr;
+    f.visible = false;
+    const T = this.timing;
+    const ped = this.pedestal;
+    this.pedestal = inWin(t, T.pedestal) ? 1 : 0;
+    this.evalOne(pf, i, t, t, 0, 150, 0, resetPose(this.sPose), f);
+    this.pedestal = ped;
+    if (!f.visible) return false;
+    out.x = f.x;
+    out.y = f.y;
+    out.z = f.z;
     return true;
   }
 
@@ -406,7 +536,8 @@ export class Performers {
       f.visible = false;
       f.glow = 0;
       const modeOk = pf.mode === 'both' || (pf.mode === 'filmed' ? !populated : populated);
-      if (modeOk) this.evalOne(pf, i, t, rt, beat, bpm, lookUp, p, f);
+      // (idle sway on show time too: the cast is a pure function of show time; rt stays for the API)
+      if (modeOk) this.evalOne(pf, i, t, t, beat, bpm, lookUp, p, f);
       if (f.visible && pf.name.startsWith('dancer')) lanternOn = 1;
       this.write(i, pf, p, f);
       if (f.visible) {
@@ -458,35 +589,52 @@ export class Performers {
     if (name.startsWith('dancer')) {
       const k = pf.k;
       // choreography authored in 2026 show time, shifted with the 'troupe' window
+      if (!(t > T.troupe.t0 - 1 && t < T.troupe.t1)) return;
       const tt = t - T.troupe.t0 + TROUPE_T0;
       const enter = TROUPE_T0 + k * 0.6;
-      const exit = TROUPE_T0 + (T.troupe.t1 - T.troupe.t0) - 8 + (DANCERS - k) * 0.5;
-      if (tt < enter || tt > exit + 8) return;
+      if (tt < enter) return;
+      // walking direction from the formation a moment later (pure: the same function at tt + 0.12)
+      const fq = this.fq;
+      this.troupeAt(k, tt + 0.12, fq);
+      const fp = this.fp;
+      const ph = this.troupeAt(k, tt, fp);
+      if (ph.gone) return;
       f.visible = true;
       f.glow = 1;
-      // a tight ritual horseshoe around the lead on her pedestal (0, −2), open to the audience
-      // (f066, f069–f071): ~7 m wide, 2 m deep, ≥ 1.2 m behind the pyro line; it breathes / sways
-      const sway = 0.1 * Math.sin((tt - enter) * 0.21 + k) * (tt < 700 || tt > 716 ? 1 : 0.2);
-      const th = ((-14 + (208 * k) / (DANCERS - 1)) * Math.PI) / 180 + sway;
-      const rx = 3.6 * Math.cos(th);
-      const rz = -2.1 - 2.0 * Math.sin(th);
-      const pe = smoothstep(enter, enter + 7, tt) * (1 - smoothstep(exit, exit + 7, tt));
-      f.x = lerp(0, rx, pe);
-      f.z = lerp(-7.5, rz, pe);
-      f.y = stageFloorSmooth(f.x, f.z);
-      const moving = tt < enter + 7 || tt > exit ? 1 : 0;
-      const walkYaw = tt > exit ? Math.atan2(-rx, -7.5 - rz) : Math.atan2(rx, rz + 7.5);
-      const faceIn = Math.atan2(-rx, -2 - rz);
-      f.yaw = moving > 0.5 ? walkYaw : tt > 700 && tt < 715 ? faceIn : lerp(faceIn, 0, 0.6);
+      f.x = fp.x;
+      f.z = fp.z;
+      f.y = stageFloorSmooth(f.x, f.z) + fp.lift;
+      const vx = fq.x - fp.x;
+      const vz = fq.z - fp.z;
+      const speed = Math.hypot(vx, vz) / 0.12;
+      const moving = clamp((speed - 0.12) / 0.5, 0, 1);
+      const th = ph.th;
+      const faceIn = Math.atan2(-f.x, LEAD_Z - f.z);
+      // the opening ritual (v646–658) faces the lead in the arch (the film shows their backs), later they open
+      // up towards the audience
+      const open = smoothstep(CONT_OUT0, CONT_OUT1 + 2, tt) * 0.6;
+      let yaw = ph.col > 0.5 || ph.pyr > 0.5 ? ph.faceYaw : ph.cont > 0.5 ? faceIn : tt > KNEEL0 && tt < 715 ? faceIn : lerp(faceIn, 0, 0.15 + open);
+      if (moving > 0.05) yaw = lerpAngle(yaw, Math.atan2(vx, vz), moving);
+      f.yaw = yaw;
       walk(p, tt * 0.9 + k * 0.37, moving);
+      if (ph.col > 0.5 || ph.pyr > 0.5) {
+        this.formationPose(p, k, ph, moving);
+        return;
+      }
       // lantern waves passing around the ring (canon)
       const wave = 0.5 + 0.5 * Math.sin((tt / 3.75) * Math.PI * 2 - th * 2);
       setArm(p.armR, 25 + 135 * wave, 18, 25, -20);
       setArm(p.armL, 25 + 135 * (1 - wave), 18, 25, -20);
       p.spine[0] += (18 - 26 * wave) * D;
-      if (tt > 700 && tt < 709.2) {
+      if (ph.cont > 0.02) {
+        // the contortion (v658–666): kneeling close around the pedestal, lanterns reaching up to her
+        dropLegs(p, 0.52 * ph.cont * (1 - moving));
+        mixArm(p.armR, 84, 16, 30, -10, ph.cont);
+        mixArm(p.armL, 70, 22, 36, -10, ph.cont);
+        p.spine[0] += 26 * D * ph.cont;
+      } else if (tt > KNEEL0 && tt < 709.2) {
         // anticipation: kneel, lanterns low towards the lead dancer
-        dropLegs(p, 0.48 * smoothstep(700, 703, tt));
+        dropLegs(p, 0.48 * smoothstep(KNEEL0, KNEEL0 + 1.2, tt));
         setArm(p.armR, 45, 20, 20, 0);
         setArm(p.armL, 45, 20, 20, 0);
         p.spine[0] += 25 * D;
@@ -513,9 +661,40 @@ export class Performers {
       if (!inWin(t, T.lead)) return;
       const tt = t - T.troupe.t0 + TROUPE_T0;
       f.visible = true;
+      // troupe member (no lanterns of her own: the glow only marks her as one for the shader's red wash)
+      f.glow = 1;
+      if (tt > LEAD_OFF) {
+        // off the pedestal: up into the portal, heading the lantern procession down to the lens, then the
+        // top of the human pyramid in the arch, finally off into the portal
+        const pp = this.pp;
+        LEAD_PATH.at(tt, pp);
+        if (tt > OUT1 - 0.4) return;
+        f.x = pp.x;
+        f.z = pp.z;
+        const step = smoothstep(LEAD_OFF, LEAD_OFF + 0.5, tt);
+        const top = smoothstep(PYR_TOP0, PYR_TOP0 + 1.2, tt) * (1 - smoothstep(OUT0, OUT0 + 1.2, tt));
+        f.y = lerp(LEAD_FLOOR + 0.5 * this.pedestal, stageFloorSmooth(f.x, f.z), step) + PYR_LIFT * 2 * top;
+        const moving = clamp(pp.speed / 0.6, 0, 1);
+        f.yaw = moving > 0.1 ? Math.atan2(pp.dx, pp.dz) : 0;
+        walk(p, pp.dist / 1.3, moving);
+        if (top > 0.5) {
+          // crowning the pyramid: arms spread up and out
+          setArm(p.armL, 30, 118, 12, 0);
+          setArm(p.armR, 30, 118, 12, 0);
+          p.head[0] -= 0.2;
+        } else {
+          // walking down the deck with the lanterns fanned out behind her: arms low and open
+          setArm(p.armL, 12, 34, 18, 0);
+          setArm(p.armR, 12, 34, 18, 0);
+          p.head[0] -= 0.05;
+        }
+        return;
+      }
+      // she hands the arch to the aerialist on her strap (v672.7–703.8) and waits in the vault
+      if (inWin(t, T.aerial)) return;
       f.x = 0;
-      f.z = -2;
-      f.y = 1.9 + 0.5 * this.pedestal;
+      f.z = LEAD_Z;
+      f.y = LEAD_FLOOR + 0.5 * this.pedestal;
       f.yaw = 0.25 * Math.sin(t * 0.12);
       const und = Math.sin(t * 1.6);
       p.rootR[2] += 7 * D * und;
@@ -534,6 +713,19 @@ export class Performers {
       }
       p.legL[0] += 8 * D;
       p.legR[0] -= 6 * D;
+      // the contortion (v658–666): she turns towards the upstage camera and bends back over her pedestal
+      const cw = smoothstep(CONT_IN0, CONT_IN1, tt) * (1 - smoothstep(CONT_OUT0, CONT_OUT1, tt));
+      if (cw > 0) {
+        const bend = cw * smoothstep(660.2, 661.4, tt) * (0.6 + 0.4 * Math.sin((tt - 661.4) * 0.8));
+        f.yaw = lerpAngle(f.yaw, 2.1, cw);
+        // legs planted, the torso arching back to nearly horizontal (v661–665)
+        p.rootR[2] *= 1 - cw;
+        p.spine[2] *= 1 - cw;
+        p.off[0] *= 1 - cw;
+        p.spine[0] -= 62 * D * bend;
+        p.head[0] -= 0.5 * bend;
+        dropLegs(p, 0.1 * bend);
+      }
       return;
     }
     if (name === 'aerialist') {
@@ -730,6 +922,112 @@ export class Performers {
       return;
     }
     void i;
+  }
+
+  /**
+   * Where lantern bearer k stands at authored time tt (pure): the horseshoe round the pedestal, blended into
+   * the contortion ring, the procession, the pyramid and the exit (see the phase notes above TROUPE phases).
+   */
+  private troupeAt(k: number, tt: number, o: { x: number; z: number; lift: number }): TroupePhase {
+    const ph = this.ph;
+    const enter = TROUPE_T0 + k * 0.6;
+    // a ritual horseshoe in front of the lead on her pedestal in the arch, on the podium and the grey steps
+    // (v646–658: their backs to the lens, facing her): ~7 m wide, 2.4 m deep; it breathes / sways
+    const sway = 0.1 * Math.sin((tt - enter) * 0.21 + k) * (tt < 700 || tt > 716 ? 1 : 0.2);
+    const th = ((-14 + (208 * k) / (DANCERS - 1)) * Math.PI) / 180 + sway;
+    const pe = smoothstep(enter, enter + 7, tt);
+    // they come out of the portal past the lead's pedestal, either side of it
+    let x = lerp(Math.cos(th) >= 0 ? 2.1 : -2.1, 3.6 * Math.cos(th), pe);
+    let z = lerp(-7.5, -4.9 + 1.9 * Math.sin(th), pe);
+    // the contortion: kneeling close round the pedestal, the upstage side open for the camera there
+    const cont = smoothstep(CONT_IN0 + 0.05 * k, CONT_IN1, tt) * (1 - smoothstep(CONT_OUT0, CONT_OUT1, tt));
+    if (cont > 0) {
+      const phi = ((-12 + (204 * k) / (DANCERS - 1)) * Math.PI) / 180;
+      x = lerp(x, 1.95 * Math.cos(phi), cont);
+      z = lerp(z, LEAD_Z + 1.75 * Math.sin(phi), cont);
+    }
+    // the procession: even k in single file behind the lead, odd k kneeling at the flanks
+    const col = smoothstep(COL0 + 0.08 * k, COL1, tt);
+    let face = 0;
+    if (col > 0) {
+      let cx: number;
+      let cz: number;
+      if (k % 2 === 0) {
+        const j = k >> 1;
+        const lp = this.lp;
+        LEAD_PATH.at(tt, lp);
+        cx = lp.x + (j % 2 === 0 ? -0.07 : 0.07);
+        cz = lp.z - 0.62 * (j + 1);
+      } else {
+        const m = k >> 1;
+        cx = (m % 2 === 0 ? -1 : 1) * (3.3 + 0.6 * (m >> 1));
+        cz = -2.3 - 0.7 * (m >> 1);
+        face = Math.atan2(-cx, -1.5 - cz);
+      }
+      x = lerp(x, cx, col);
+      z = lerp(z, cz, col);
+    }
+    // the human pyramid in the arch
+    const pyr = smoothstep(PYR0 + 0.25 * k, PYR1 - 1.2 + 0.1 * k, tt);
+    let lift = 0;
+    if (pyr > 0) {
+      const s = PYR_SLOTS[k];
+      x = lerp(x, s[0], pyr);
+      z = lerp(z, s[1], pyr);
+      if (s[2] > 0) lift = PYR_LIFT * smoothstep(PYR1 - 1.2, PYR1 - 0.2, tt) * (1 - smoothstep(OUT0, OUT0 + 1, tt));
+      face = s[3];
+    }
+    // off into the portal
+    const out = smoothstep(OUT0 + 0.3 * k, OUT0 + 2.6 + 0.3 * k, tt);
+    if (out > 0) {
+      x = lerp(x, 0, out);
+      z = lerp(z, PORTAL_Z, out);
+    }
+    o.x = x;
+    o.z = z;
+    o.lift = lift;
+    ph.th = th;
+    ph.cont = cont;
+    ph.col = col * (1 - pyr);
+    ph.pyr = pyr;
+    ph.faceYaw = face;
+    ph.gone = out > 0.97;
+    return ph;
+  }
+
+  /** arms / legs of bearer k in the procession or the pyramid */
+  private formationPose(p: CPose, k: number, ph: TroupePhase, moving: number): void {
+    if (ph.pyr > 0.5) {
+      const level = PYR_SLOTS[k][2];
+      if (level === 0) {
+        // the base: arms up, holding the ankles of the two on their shoulders
+        setArm(p.armL, 160, 16, 40, 0);
+        setArm(p.armR, 160, 16, 40, 0);
+        p.legL[1] += 6 * D;
+        p.legR[1] += 6 * D;
+      } else if (level === 1) {
+        // on the shoulders: lanterns out to the sides
+        setArm(p.armL, 25, 100, 10, 0);
+        setArm(p.armR, 25, 100, 10, 0);
+      } else {
+        // kneeling in front, lanterns raised to the pyramid
+        dropLegs(p, 0.45 * (1 - moving));
+        setArm(p.armL, 140, 22, 18, 0);
+        setArm(p.armR, 128, 26, 18, 0);
+        p.spine[0] -= 8 * D;
+      }
+      return;
+    }
+    if (k % 2 === 0) {
+      // the procession: lanterns fanned out to the sides, higher down the file (a halo round the lead from the front)
+      const a = 38 + 24 * (k >> 1);
+      setArm(p.armL, 12, a, 12, 0);
+      setArm(p.armR, 12, a, 12, 0);
+    } else {
+      dropLegs(p, 0.45 * (1 - moving));
+      setArm(p.armL, 120, 20, 22, 0);
+      setArm(p.armR, 120, 20, 22, 0);
+    }
   }
 
   private idle(p: CPose, rt: number, ph: number): void {
