@@ -92,7 +92,7 @@ the portal throat floor; the lead keeps her pedestal in the notch at deck level.
 | id | label | position | view |
 |---|---|---|---|
 | `dj` | DJ booth | (0, 2.8, −10.95), eyes ≈ 1.78 m over the vault floor | out through the portal over the gear, the troupe, the pit and the field (pitch −0.17) |
-| `dancers` | Dancers' podium | (−2.7, 2.2, −1.7), front edge left of the pedestal | over the crowd / the empty field |
+| `dancers` | Dancers' podium | (−3.6, 2.2, −1.7), front edge left of the pedestal | over the crowd / the empty field |
 | `castle` | Castle gallery | (−15.2, 5.5, −10.85) | between the skull cube and the porch, over the deck and the field |
 
 Positions menu (T): a **Stage** group first (dj, dancers, castle, stage left, stage right).

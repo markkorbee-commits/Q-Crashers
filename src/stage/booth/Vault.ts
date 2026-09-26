@@ -160,15 +160,15 @@ export class VaultBuilder {
       lg.dispose();
 
       // teeth along the inner edge (the toothed "turbine" profile of the video)
-      const pts = this.along(inner, 0.42, 0.3);
+      const pts = this.along(inner, 0.5, 0.3);
       const tp: number[] = [];
       for (const [x, y, tx, ty] of pts) {
         if (y < V.floorY + 0.6) continue;
         // inward normal of the edge: tangent rotated -90° (outline runs left floor -> apex -> right floor)
         const nx = ty,
           ny = -tx;
-        const hw = 0.09,
-          len = 0.16;
+        const hw = 0.1,
+          len = 0.19;
         const b0 = [x - tx * hw, y - ty * hw],
           b1 = [x + tx * hw, y + ty * hw],
           tip = [x + nx * len, y + ny * len];

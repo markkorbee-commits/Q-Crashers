@@ -26,9 +26,9 @@ export const VAULT = {
   apex: 7.5,
   /** the rings shrink towards the back (the forced-perspective "turbine" of the real set) */
   backScale: 0.9,
-  /** rib depth (radial) and thickness (along Z) */
-  ribDepth: 0.24,
-  ribT: 0.16,
+  /** rib depth (radial) and thickness (along Z): chunky dark-steel bands as in the video */
+  ribDepth: 0.32,
+  ribT: 0.22,
   /** rib stations (Z of the rib front faces) */
   ribs: [-7.3, -8.25, -9.2, -10.15, -11.1] as readonly number[],
   /** exterior barrel: half width where the roof springs from the porch mass, crown height */
