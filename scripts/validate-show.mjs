@@ -222,6 +222,9 @@ const LASER_TOKENS = (() => {
   const m = read('src/lasers/LaserSystem.ts').match(/const TOKENS[^=]*=\s*\{([\s\S]*?)\n\};/);
   return new Set(m ? [...m[1].matchAll(/^\s*([a-z0-9_]+):/gm)].map((x) => x[1]) : []);
 })();
+/** anchors registered at runtime by a module (not in src/data/layout.gen.ts): MainStage registers 'roof_plumes'
+ * (docs/show-format-ext/stage.md) */
+const RUNTIME_ANCHORS = new Set(['roof_plumes']);
 /** preferred extended anchors (p.at) — the cue's `target` is the contract fallback */
 const EXT_ANCHORS = new Set(['flare_pots', 'corner_towers', 'tower_torches', 'arms', 'arm_ends', 'side_fronts', 'wing_spars', 'hang_lines', 'piano']);
 const COLOR_PARAMS = new Set(['color', 'color2', 'eyes', 'rosettes', 'windowColor', 'tint', 'shaft']);
@@ -406,7 +409,7 @@ function checkTargets(list, where, sys) {
   for (const t of list) {
     if (typeof t !== 'string') err(`${where}: target must be a string`);
     else if (sys === 'lasers' && LASER_TOKENS.has(t) && !ANCHORS.has(t)) noteExt(`lasers target token "${t}"`);
-    else if (!ANCHORS.has(t) && !FILTERS.has(t)) err(`${where}: unknown target "${t}" (not an AnchorName or filter)`);
+    else if (!ANCHORS.has(t) && !FILTERS.has(t) && !RUNTIME_ANCHORS.has(t)) err(`${where}: unknown target "${t}" (not an AnchorName or filter)`);
   }
 }
 function checkParams(c, where) {
