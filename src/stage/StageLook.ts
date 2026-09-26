@@ -102,7 +102,10 @@ export interface StageLookEx extends StageLook {
   energy: number;
   /** 'screens.content' shown on the LED banner panels: CONTENT_MODE index (0 = off) */
   content: number;
+  /** content colour of the castle-core panels (the content colour with the state's castleColor override) */
   contentColor: THREE.Color;
+  /** content colour of the side-section panels (sidesColor override on top of the castle's) */
+  contentColorS: THREE.Color;
   /** 0..1 dissolve of the panels */
   contentMix: number;
   /** 0..1 master level of all castle emitters (blackouts: section 'silence' or state param 'master') */
@@ -133,6 +136,9 @@ export interface StageLookEx extends StageLook {
   sidesAccent: THREE.Color;
   wingLed: THREE.Color;
   wingLed2: THREE.Color;
+  /** 0..1 emitter level of the audience-left (x < 0) / right half (state param `side`) */
+  sideL: number;
+  sideR: number;
   /** 0..1 how much the side-section virtual floods take `sidesLed` instead of the lighting wash */
   sidesFloodTint: number;
   /** 0..1 same for the castle core floods (castleColor override) */
@@ -172,6 +178,7 @@ export function createStageLookEx(): StageLookEx {
     energy: 0.5,
     content: 0,
     contentColor: new THREE.Color('#ff5a12'),
+    contentColorS: new THREE.Color('#ff5a12'),
     contentMix: 0,
     master: 1,
     castleGain: 1,
@@ -188,6 +195,8 @@ export function createStageLookEx(): StageLookEx {
     sidesAccent: new THREE.Color('#e8f4ff'),
     wingLed: new THREE.Color('#ff2a10'),
     wingLed2: new THREE.Color('#2a60ff'),
+    sideL: 1,
+    sideR: 1,
     sidesFloodTint: 0,
     castleFloodTint: 0,
     garland: new THREE.Vector3(0, 0, 0),

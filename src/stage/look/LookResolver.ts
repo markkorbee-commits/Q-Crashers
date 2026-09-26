@@ -45,6 +45,9 @@ interface StateVals {
   crownColW: number;
   wingCol: THREE.Color;
   wingColW: number;
+  /** per-side emitter levels (state param `side`): audience-left (x < 0) / right */
+  sideL: number;
+  sideR: number;
   /** persistent festoon level (all groups) + colour / pattern / rate */
   garlands: number;
   garlandCol: THREE.Color;
@@ -79,6 +82,8 @@ const newVals = (): StateVals => ({
   crownColW: 0,
   wingCol: new THREE.Color(),
   wingColW: 0,
+  sideL: 1,
+  sideR: 1,
   garlands: 0,
   garlandCol: new THREE.Color(),
   garlandPat: 0,
@@ -149,6 +154,8 @@ const WHITE = new THREE.Color(1, 1, 1);
 const COLD_BLUE = new THREE.Color('#1e3cff');
 const VIOLET = new THREE.Color('#8a2bff');
 const RUNE_GOLD = new THREE.Color('#ffb640');
+/** how far a castle / side colour override re-colours that zone's LED panels */
+const ZONE_PANEL = 0.85;
 const _c = new THREE.Color();
 const _c2 = new THREE.Color();
 
@@ -348,6 +355,8 @@ export class LookResolver {
     base.sidesColW = 0;
     base.crownColW = 0;
     base.wingColW = 0;
+    base.sideL = 1;
+    base.sideR = 1;
     base.garlands = 0;
     base.garlandCol.copy(GARLAND_WARM);
     base.garlandPat = 0;
@@ -398,6 +407,8 @@ export class LookResolver {
     out.wingGain = cur.wingLed;
     out.wingWash = cur.wingWash;
     out.dragonWash = cur.dragonWash;
+    out.sideL = cur.sideL;
+    out.sideR = cur.sideR;
     out.garland.set(cur.garlands, cur.garlands, cur.garlands);
     out.garlandColor.copy(cur.garlandCol);
     out.garlandPattern = cur.garlandPat;
@@ -592,6 +603,12 @@ export class LookResolver {
     out.sidesLed2.copy(out.castleLed2).lerp(_c.copy(cur.sidesCol).multiplyScalar(0.55), sw);
     out.castleFloodTint = 0.5 * cw;
     out.sidesFloodTint = Math.max(0.5 * cw, sw);
+    // per-zone screen colours: a region colour override also takes that zone's LED panels (video
+    // 338: castleColor blue -> blue window / panel bars on the castle while the content is orange)
+    // (only while a content cue is alive: contentColor is re-set from the cue every frame then)
+    if (out.content > 0 && cw > 0) out.contentColor.lerp(cur.castleCol, ZONE_PANEL * cw);
+    out.contentColorS.copy(out.contentColor);
+    if (out.content > 0 && sw > 0) out.contentColorS.lerp(cur.sidesCol, ZONE_PANEL * sw);
 
     // ---- colours of the castle-only emitters --------------------------------------------------------
     // crystal lanterns on the ramparts / arm posts: the "side sections" colour of the look (the show's
@@ -754,6 +771,9 @@ export class LookResolver {
         v.rosettes.setRGB(0, 0, 0);
         break;
     }
+    // per-side isolation: only the audience-left (x < 0) or right half of the set's emitters
+    v.sideL = p.side === 'right' ? 0 : 1;
+    v.sideR = p.side === 'left' ? 0 : 1;
     // warm festoon bulb strings (persistent level; stage.garlands cues add flashes / strobes on top)
     v.garlands = clamp2(p.garlands, 0);
     if (p.garlandColor !== undefined) resolveColor(p.garlandColor, pal, v.garlandCol, 'accent');
@@ -823,6 +843,8 @@ function copyVals(dst: StateVals, src: StateVals): void {
   dst.crownColW = src.crownColW;
   dst.wingCol.copy(src.wingCol);
   dst.wingColW = src.wingColW;
+  dst.sideL = src.sideL;
+  dst.sideR = src.sideR;
   dst.garlands = src.garlands;
   dst.garlandCol.copy(src.garlandCol);
   dst.garlandPat = src.garlandPat;
@@ -846,6 +868,8 @@ function copyIsolation(dst: StateVals, src: StateVals): void {
   dst.crownColW = src.crownColW;
   dst.wingCol.copy(src.wingCol);
   dst.wingColW = src.wingColW;
+  dst.sideL = src.sideL;
+  dst.sideR = src.sideR;
 }
 
 /** resolve an optional colour override into `out`; returns its weight (1 when given, else 0) */
@@ -889,6 +913,8 @@ function lerpVals(a: StateVals, b: StateVals, k: number, out: StateVals): void {
   out.sidesColW = lerpOverride(a.sidesCol, a.sidesColW, b.sidesCol, b.sidesColW, k, out.sidesCol);
   out.crownColW = lerpOverride(a.crownCol, a.crownColW, b.crownCol, b.crownColW, k, out.crownCol);
   out.wingColW = lerpOverride(a.wingCol, a.wingColW, b.wingCol, b.wingColW, k, out.wingCol);
+  out.sideL = lerpN(a.sideL, b.sideL, k);
+  out.sideR = lerpN(a.sideR, b.sideR, k);
   out.garlands = lerpN(a.garlands, b.garlands, k);
   out.garlandCol.lerpColors(a.garlandCol, b.garlandCol, k);
   out.garlandPat = k < 0.5 ? a.garlandPat : b.garlandPat;

@@ -4,6 +4,19 @@ import { type DecorSet, makeDecorAtlas } from './decorAtlas';
 import { createLedMaterial } from './LedMaterial';
 import { createStageUniforms, makeNightEnv, patchStageShading, type StageUniforms } from './StageShading';
 import { makeGrainTextures, makeStoneTextures, type PbrSet } from './stoneTextures';
+import { texMean } from './texMean';
+
+/** one set material folded into the mobile set mix */
+export interface SetMixPart {
+  metal: number;
+  rough: number;
+  /** env-map (reflection) intensity */
+  env: number;
+  /** virtual flood strength (patchStageShading `flood`) */
+  flood: number;
+  /** linear colour factor baked into the vertex colour (material colour / texture mean ratio) */
+  tint: [number, number, number];
+}
 
 /** K1-style cabinet front: black perforated grille, chamfered frame, rigging hardware hints. */
 function makeGrilleTexture(aniso: number): THREE.Texture {
@@ -66,13 +79,14 @@ export class StageMaterials {
     const decor = makeDecorAtlas(q.level === 'mobile' ? 512 : 1024, aniso);
     ms.decor = performance.now() - t;
     await idle();
-    return new StageMaterials(aniso, { env, stone, grain, decor }, ms);
+    return new StageMaterials(aniso, { env, stone, grain, decor }, ms, q.level === 'mobile');
   }
 
   private constructor(
     aniso: number,
     tex: { env: THREE.Texture; stone: PbrSet; grain: PbrSet; decor: DecorSet },
     ms: { env: number; stone: number; decor: number },
+    mobile: boolean,
   ) {
     const { stone, grain, decor } = tex;
     this.env = tex.env;
@@ -93,8 +107,10 @@ export class StageMaterials {
       envMap: this.env,
       envMapIntensity: 0.55,
     });
-    // the off-white print of the daytime photos is ~2x the old grey: scaled back in the show
-    patchStageShading(this.stone, this.u, { flood: 1, nightK: 0.487 });
+    // the off-white print of the daytime photos is ~2x the old grey: scaled back in the show, and a
+    // little further (round 4, objective match to the official video): at night the printed castle
+    // is a dark flat that only reads where the show lights it
+    patchStageShading(this.stone, this.u, { flood: 1, nightK: 0.36 });
 
     this.paint = new THREE.MeshStandardMaterial({
       name: 'stage-paint',
@@ -172,6 +188,69 @@ export class StageMaterials {
     patchStageShading(this.barrier, this.u, { flood: 0.2 });
 
     this.led = createLedMaterial();
+
+    if (mobile) {
+      // MOBILE: paint / metal / gold / speakers / barrier in ONE draw (per-vertex PBR + flood level,
+      // the part's texture mean baked into the vertex colour; the shared grain print stays)
+      this.setMix = new THREE.MeshStandardMaterial({
+        name: 'stage-setmix',
+        map: grain.map,
+        normalMap: grain.normalMap,
+        normalScale: new THREE.Vector2(0.3, 0.3),
+        roughness: 1,
+        metalness: 1,
+        vertexColors: true,
+        envMap: this.env,
+        envMapIntensity: 1,
+      });
+      patchStageShading(this.setMix, this.u, { perVertex: true });
+      const g = texMean(grain.map);
+      const gr = texMean(grain.orm)[1];
+      const gs = texMean(grille);
+      const flat: [number, number, number] = [1, 1, 1];
+      const rel = (m: [number, number, number]): [number, number, number] => [m[0] / Math.max(1e-3, g[0]), m[1] / Math.max(1e-3, g[1]), m[2] / Math.max(1e-3, g[2])];
+      const gold = this.gold.color;
+      const bar = this.barrier.color;
+      this.mixParts = {
+        paint: { metal: 0, rough: 0.82, env: 0.35, flood: 0.7, tint: flat },
+        metal: { metal: 0.75, rough: 0.62 * gr, env: 0.9, flood: 0.6, tint: flat },
+        gold: { metal: 1, rough: 0.48 * gr, env: 1.6, flood: 1, tint: [gold.r, gold.g, gold.b] },
+        speaker: { metal: 0.15, rough: 0.78, env: 0.4, flood: 0.35, tint: rel(gs) },
+        barrier: { metal: 0.8, rough: 0.62 * gr, env: 0.6, flood: 0.2, tint: [bar.r, bar.g, bar.b] },
+      };
+    }
+  }
+
+  /** MOBILE set mix (null on the other presets) + the per-part values folded into it */
+  readonly setMix: THREE.MeshStandardMaterial | null = null;
+  readonly mixParts: Record<'paint' | 'metal' | 'gold' | 'speaker' | 'barrier', SetMixPart> | null = null;
+
+  /**
+   * Prepare a built set geometry for the mobile set mix: `smr` (metalness, roughness, reflection
+   * level, flood strength) per vertex and the part's tint / texture mean in the vertex colour.
+   */
+  toSetMix(g: THREE.BufferGeometry, part: keyof NonNullable<StageMaterials['mixParts']>): THREE.BufferGeometry {
+    const p = this.mixParts![part];
+    const n = g.attributes.position.count;
+    let col = g.getAttribute('color') as THREE.BufferAttribute | undefined;
+    if (!col) {
+      col = new THREE.BufferAttribute(new Float32Array(n * 3).fill(1), 3);
+      g.setAttribute('color', col);
+    }
+    if (!g.getAttribute('uv')) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(n * 2), 2));
+    const t = p.tint;
+    for (let i = 0; i < n; i++) col.setXYZ(i, col.getX(i) * t[0], col.getY(i) * t[1], col.getZ(i) * t[2]);
+    const a = new Float32Array(n * 4);
+    for (let i = 0; i < n; i++) {
+      a[i * 4] = p.metal;
+      a[i * 4 + 1] = p.rough;
+      a[i * 4 + 2] = p.env;
+      a[i * 4 + 3] = p.flood;
+    }
+    g.setAttribute('smr', new THREE.BufferAttribute(a, 4));
+    for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv', 'color', 'smr'].includes(k)) g.deleteAttribute(k);
+    g.clearGroups();
+    return g;
   }
 
   /** materials of the crown without an env map get ours (only when the scene has no environment) */
@@ -200,5 +279,6 @@ export class StageMaterials {
   dispose(): void {
     for (const t of this.textures) t.dispose();
     for (const m of [this.stone, this.paint, this.metal, this.gold, this.decor, this.speaker, this.barrier, this.led]) m.dispose();
+    this.setMix?.dispose();
   }
 }

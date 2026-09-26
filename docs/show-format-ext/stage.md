@@ -25,6 +25,31 @@ LED lines carry the image. The castle's own practicals are therefore recalibrate
 
 A lit castle is now something a cue asks for: `stage.state` `castle: 1.5–2`.
 
+### Round 4 calibration (objective match to the official video, no cue change needed)
+
+Measured with `scripts/similarity.mjs` against the official video (13 stage-dominated moments: mean
+score 0.362 → 0.378). The castle is a dark printed flat in every wide shot of the footage; it only
+reads where the show lights it. Engine changes:
+
+- **Sky light.** The set takes 45 % of the world's sky light (hemisphere incl. the site glow of
+  `atmos.glow`, moon, twilight). A site glow re-tints the castle floods towards its hue instead of
+  lighting the castle white.
+- **Pyro / firework flash.** The flash light over the set sits at least 36 m up (a soft top light,
+  never a lamp in front of the facade) and is ~1/10 of before; the crown takes the flash as a glint
+  (video 1438.5: a full canopy over a dark red dragon and a dark castle).
+- **FOH keys.** Two narrow (15°) warm keys on the portal, the DJ and the dancers instead of two
+  washes over the whole castle; close-ups at the portal keep a warm key (video 650 / 705).
+- **Floods and FOH wash** at ~75 % / 60 % of round 3; the side-section floods at 25 % density; a
+  masked-out castle (`mask` crown / wings / dragon, `castle: 0`) keeps only 3–8 % of them.
+- **Print.** The castle stone print is ~26 % darker at night (the daytime photos set the art, not
+  the exposure).
+- **LEDs.** The crown's LED lines, dots and membrane strokes are at 60 % (at full level they clipped
+  to white-pink under the tone curve and outshone the lit sculpture); the membrane print glow at
+  ~50 %; castle battens / windows / lamps / lanterns at 63 / 80 / 74 / 88 %. The wing top-edge
+  outlines are at 50 % and the rosette rings at 20 % of the spar lines. The rosette glow is a
+  sunburst of long and short rays (video 338 / 1047.25), not a lit disc in a ring; the white rosette
+  rims are a grey silhouette at night.
+
 ## `stage.state`: new params
 
 Like every other `stage.state` value, the new params are cross-faded over the cue's `fade`. A param
@@ -40,8 +65,9 @@ region isolation holds for the whole fade. A dragon-only fade-in therefore never
 | `dragon` | 0..2 | 1 | The dragon's LED lines and pixel dots (head, neck, body). The eyes (`eyesIntensity`) and the mouth (`mouth`) keep their own controls. |
 | `wingLed` | 0..2 | 1 | The wing LED lines: spars, top edges, blades, finial outlines, rosette rings and the membrane feather strokes. The printed-skin uplight stays on `wings`. |
 | `mask` | `all` \| `center` \| `crown` \| `wings` \| `dragon` | `all` | Hard isolation, applied over the numeric levels. `center`: side sections dark. `crown`: castle and sides dark, dragon and wings lit. `wings`: castle, sides and dragon LEDs dark, and the dragon's wash cut to 25 %. `dragon`: only the dragon. Castle, sides, wing LEDs, wing glow (`wings`), rosettes, and the wash and reflections on the wings are all set to 0. |
-| `castleColor` | colour | none | LED colour of the castle core (battens, secondary colour, and the pilasters, which lean white). Also re-tints the castle floods at 50 %. Example: a blue castle under a red content colour. |
-| `sidesColor` | colour | = castle colour | LED colour of the side sections. The side floods ("floor lights") take it at 100 %. |
+| `side` | `left` \| `right` \| `both` | `both` | Per-side isolation (round 4). `left` keeps only the audience-left half (x < 0) of the set's emitters lit, `right` only the right half: castle and side-section LEDs and panels, decor glow, virtual floods and FOH wash, the wing / dragon LED lines and dots, the membrane strokes and print glow, and the rosette suns. The seam is soft over the centre (±6 m), so the dragon's head reads half lit. The eyes, the mouth, the festoons and the lighting system's wash on the crown are not affected. Fades like every other state value. |
+| `castleColor` | colour | none | LED colour of the castle core (battens, secondary colour, and the pilasters, which lean white). Also re-tints the castle floods at 50 % and, while a `screens.content` cue is alive, the castle's LED panels at 85 % (per-zone screen colours, round 4). Example: a blue castle under a red content colour. |
+| `sidesColor` | colour | = castle colour | LED colour of the side sections. The side floods ("floor lights") take it at 100 %, the side-section LED panels at 85 %. |
 | `crownColor` | colour | none | LED colour of the dragon **and** the wings (overrides the `screens.content` colour on the crown only). |
 | `wingColor` | colour | = crown colour | LED colour of the wings only. |
 | `garlands` | 0..2 | 0 | Persistent level of the warm festoon bulb strings (all groups). |

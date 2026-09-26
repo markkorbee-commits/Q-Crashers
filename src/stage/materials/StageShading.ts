@@ -33,6 +33,15 @@ export interface StageUniforms {
    * keeps the level it was calibrated to.
    */
   uDay: THREE.IUniform<number>;
+  /**
+   * Share of the WORLD's sky light (hemisphere + moon / twilight directionals, incl. the site glow
+   * the EnvironmentSystem adds to the hemisphere) that reaches the set. The castle is a dark printed
+   * flat that the official footage never shows by sky light (it only reads where the show lights it),
+   * so the set takes a reduced share; 1 in the dev `?daylight` view.
+   */
+  uSkyK: THREE.IUniform<number>;
+  /** per-side level of the floods / FOH wash / decor glow: x audience-left (x < 0), y right (state `side`) */
+  uSide: THREE.IUniform<THREE.Vector2>;
 }
 
 export function createStageUniforms(): StageUniforms {
@@ -49,8 +58,19 @@ export function createStageUniforms(): StageUniforms {
     uFloodTintC: { value: new THREE.Color(1, 1, 1) },
     uFloodTintS: { value: new THREE.Color(1, 1, 1) },
     uDay: { value: 0 },
+    uSkyK: { value: 1 },
+    uSide: { value: new THREE.Vector2(1, 1) },
   };
 }
+
+/**
+ * three's lights_fragment_begin with the world's directional lights (moon / twilight: the only
+ * directional lights in the scene; the stage's own lights are spots / points) scaled by uSkyK.
+ */
+const LIGHTS_BEGIN_SKY = THREE.ShaderChunk.lights_fragment_begin.replace(
+  'getDirectionalLightInfo( directionalLight, directLight );',
+  'getDirectionalLightInfo( directionalLight, directLight );\n\t\tdirectLight.color *= uSkyK;',
+);
 
 const FLOOD_GLSL = /* glsl */ `
 uniform vec3 uFloodA;
@@ -64,7 +84,11 @@ uniform vec4 uRegionF;
 uniform vec3 uFloodTintC;
 uniform vec3 uFloodTintS;
 uniform float uDay;
+uniform float uSkyK;
+uniform vec2 uSide;
 varying vec3 vStageWP;
+// per-side isolation (soft over the centre line so the portal / dragon never shows a hard seam)
+float stageSide(vec3 wp) { return mix(uSide.x, uSide.y, smoothstep(-6.0, 6.0, wp.x)); }
 float stageSideW(vec3 wp) { return smoothstep(37.3, 38.3, abs(wp.x)); }
 float stageRegion(vec3 wp) { return mix(uRegionF.x, uRegionF.y, stageSideW(wp)); }
 // cheap contact occlusion where vertical faces meet the deck (1.9) / upper platform (5.5) / ground
@@ -91,8 +115,9 @@ vec3 stageFlood(vec3 wp, vec3 n) {
     vec3 c = mod(idx, 2.0) < 0.5 ? uFloodA : uFloodB;
     acc += c * (beam * prof * lam);
   }
-  // the side sections / arms get a lower flood density than the castle
-  acc *= mix(1.0, 0.4, smoothstep(37.0, 50.0, abs(wp.x)));
+  // the side sections / arms get a lower flood density than the castle (their printed houses stay
+  // dark silhouettes in the footage; round 4: 0.4 -> 0.25)
+  acc *= mix(1.0, 0.25, smoothstep(37.0, 50.0, abs(wp.x)));
   // region isolation: a castle / side colour override re-tints the floods (same brightness), the
   // region levels dim them (castle: 0 leaves the castle dark while the crown keeps its own wash)
   float sw = stageSideW(wp);
@@ -100,8 +125,11 @@ vec3 stageFlood(vec3 wp, vec3 n) {
   acc = mix(acc, mix(uFloodTintC, uFloodTintS, sw) * dot(acc, vec3(0.3, 0.59, 0.11)) * 1.4, tw);
   // level 1 = the dark default set; 2 = a fully flood-lit castle (~2.8x)
   float rg = mix(uRegionF.x, uRegionF.y, sw);
-  acc *= rg <= 1.0 ? 0.06 + 0.94 * rg : pow(rg, 1.5);
-  acc += uFront * max(dot(n, vec3(0.0, 0.2425, 0.9701)), 0.0) * min(0.3 + 0.7 * rg, 1.3);
+  // (a masked-out castle, level 0, keeps only a trace of the floods / FOH wash: masks 'crown' /
+  // 'wings' / 'dragon' leave it a dark silhouette as in the footage)
+  acc *= rg <= 1.0 ? 0.03 + 0.97 * rg : pow(rg, 1.5);
+  acc += uFront * max(dot(n, vec3(0.0, 0.2425, 0.9701)), 0.0) * min(0.08 + 0.92 * rg, 1.3);
+  acc *= stageSide(wp);
   acc += uBack * max(dot(n, vec3(0.0, 0.9285, -0.3714)), 0.0);
   vec3 fd = uFlashPos - wp;
   float fl = length(fd);
@@ -117,13 +145,19 @@ export interface PatchOpts {
   flood?: number;
   /** albedo scale in the show (see StageUniforms.uDay) */
   nightK?: number;
+  /**
+   * MOBILE set mix (one draw for paint / metal / gold / speakers / barrier): metalness, roughness,
+   * reflection level and flood strength come per vertex from the `smr` attribute (vec4)
+   */
+  perVertex?: boolean;
 }
 
 /** Patch a MeshStandardMaterial/MeshPhysicalMaterial with the stage flood field + env tint. */
 export function patchStageShading(mat: THREE.MeshStandardMaterial, u: StageUniforms, o: PatchOpts = {}): void {
-  const flood = (o.flood ?? 1).toFixed(3);
+  const pv = o.perVertex === true;
+  const flood = pv ? 'vSMR.w' : (o.flood ?? 1).toFixed(3);
   const nk = (o.nightK ?? 1).toFixed(3);
-  const key = `stage-shading-${o.glowGroups ? 'g' : ''}-${flood}-${nk}`;
+  const key = `stage-shading-${o.glowGroups ? 'g' : ''}-${pv ? 'pv' : flood}-${nk}`;
   mat.customProgramCacheKey = () => key;
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, u);
@@ -132,7 +166,8 @@ export function patchStageShading(mat: THREE.MeshStandardMaterial, u: StageUnifo
         '#include <common>',
         `#include <common>
 varying vec3 vStageWP;
-${o.glowGroups ? 'attribute float aGroup;\nvarying float vGroup;' : ''}`,
+${o.glowGroups ? 'attribute float aGroup;\nvarying float vGroup;' : ''}
+${pv ? 'attribute vec4 smr;\nvarying vec4 vSMR;' : ''}`,
       )
       .replace(
         '#include <project_vertex>',
@@ -144,15 +179,19 @@ ${o.glowGroups ? 'attribute float aGroup;\nvarying float vGroup;' : ''}`,
   #endif
   vStageWP = (modelMatrix * swp).xyz;
 }
-${o.glowGroups ? 'vGroup = aGroup;' : ''}`,
+${o.glowGroups ? 'vGroup = aGroup;' : ''}
+${pv ? 'vSMR = smr;' : ''}`,
       );
     shader.fragmentShader = shader.fragmentShader
       .replace(
         '#include <common>',
         `#include <common>
 ${FLOOD_GLSL}
-${o.glowGroups ? 'uniform vec4 uGlow;\nvarying float vGroup;' : ''}`,
+${o.glowGroups ? 'uniform vec4 uGlow;\nvarying float vGroup;' : ''}
+${pv ? 'varying vec4 vSMR;' : ''}`,
       )
+      .replace('#include <roughnessmap_fragment>', pv ? 'float roughnessFactor = vSMR.y;' : '#include <roughnessmap_fragment>')
+      .replace('#include <metalnessmap_fragment>', pv ? 'float metalnessFactor = vSMR.x;' : '#include <metalnessmap_fragment>')
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
@@ -165,19 +204,22 @@ ${
   o.glowGroups
     ? `{
   float gw = vGroup < 0.5 ? uGlow.w : (vGroup < 1.5 ? uGlow.x : (vGroup < 2.5 ? uGlow.y : uGlow.z));
-  totalEmissiveRadiance *= gw * stageRegion(vStageWP);
+  totalEmissiveRadiance *= gw * stageRegion(vStageWP) * stageSide(vStageWP);
 }`
     : ''
 }`,
       )
+      .replace('#include <lights_fragment_begin>', LIGHTS_BEGIN_SKY)
       .replace(
         '#include <lights_fragment_maps>',
         `#include <lights_fragment_maps>
 #if defined( USE_ENVMAP ) && defined( RE_IndirectSpecular )
-  radiance *= uEnvTint;
+  radiance *= uEnvTint${pv ? ' * vSMR.z' : ''};
 #endif
 #if defined( RE_IndirectDiffuse )
-  iblIrradiance *= uEnvTint;
+  iblIrradiance *= uEnvTint${pv ? ' * vSMR.z' : ''};
+  // ambient + hemisphere (the world's sky dome and its site glow): the set takes its own share
+  irradiance *= uSkyK;
 #endif`,
       )
       .replace(

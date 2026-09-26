@@ -12,6 +12,10 @@ interface Rig {
 
 const RANK: Record<QualitySettings['level'], number> = { mobile: 0, medium: 1, high: 2, ultra: 3 };
 const _c = new THREE.Color();
+/** minimum height (m) of the pyro / firework flash light over the set */
+const FLASH_MIN_Y = 36;
+/** tungsten follow-spot tint of the FOH keys */
+const WARM_KEY = new THREE.Color(1.0, 0.62, 0.34);
 
 /**
  * The few REAL lights aimed at the set (everything else is the virtual flood field + emissives):
@@ -41,9 +45,13 @@ export class StageLights {
       this.rigs.push({ light: l, rank, role, side });
     };
     point('flash', 0, 0, new THREE.Vector3(0, 25, -10), 110, 2);
-    spot('center', 0, 0, new THREE.Vector3(0, 2.3, -1.2), new THREE.Vector3(0, 13, -7), 0.6, 60);
-    spot('front', 1, -1, new THREE.Vector3(-30, 17, 38), new THREE.Vector3(-14, 7, -7), 0.5, 140);
-    spot('front', 1, 1, new THREE.Vector3(30, 17, 38), new THREE.Vector3(14, 7, -7), 0.5, 140);
+    // uplight on the dragon's chest / head: a tight cone, so it does not paint the castle core behind
+    spot('center', 0, 0, new THREE.Vector3(0, 2.3, -1.2), new THREE.Vector3(0, 13, -7), 0.42, 60);
+    // FOH key lights on the portal, the DJ and the dancers (~14 m pools at the deck): the castle
+    // facade beyond them stays the dark printed flat of the official wide shots (round 4: the old
+    // 0.5 rad washes over the whole core lit the facade like a floodlit palace)
+    spot('front', 1, -1, new THREE.Vector3(-30, 17, 38), new THREE.Vector3(-4, 4.5, -6), 0.26, 140);
+    spot('front', 1, 1, new THREE.Vector3(30, 17, 38), new THREE.Vector3(4, 4.5, -6), 0.26, 140);
     point('base', 2, -1, new THREE.Vector3(-27, 3.4, -3.2), 26, 1.4);
     point('base', 2, 1, new THREE.Vector3(27, 3.4, -3.2), 26, 1.4);
     spot('rim', 3, 0, new THREE.Vector3(0, 30, -34), new THREE.Vector3(0, 14, -6), 0.7, 90);
@@ -74,26 +82,34 @@ export class StageLights {
       if (!l.visible) continue;
       switch (rig.role) {
         case 'flash': {
+          // fireworks burst 60-150 m up and the pyro fires from the deck front / roof towards the sky:
+          // the printed facade only catches a soft top light (video 1438.5: a full canopy over a castle
+          // that stays dark; 843: deck flames, dark castle). The light sits well above the set so the
+          // vertical facade sees it at a grazing angle, never as a 25 m high point lamp before it
+          // (round 3: ~3000 cd at 20 m lit the castle white on every burst).
           l.position.copy(flashPos);
+          l.position.y = Math.max(l.position.y, FLASH_MIN_Y);
           _c.copy(look.flash);
           const m = Math.max(_c.r, _c.g, _c.b);
           if (m > 1e-4) l.color.copy(_c).multiplyScalar(1 / m);
-          l.intensity = Math.min(3, flashI) * 2600;
+          l.intensity = Math.min(3, flashI) * 260;
           break;
         }
         case 'center':
           l.color.copy(wash).lerp(look.led, 0.45 * E);
-          l.intensity = (60 * E + 140 * wi) * (0.5 + 0.7 * look.energy) * (1 + look.pulse);
+          l.intensity = (50 * E + 120 * wi) * (0.5 + 0.7 * look.energy) * (1 + look.pulse);
           break;
         case 'front':
-          // FOH washes aimed at the castle: they follow the castle level (a dark-castle look keeps them low)
-          l.color.copy(wash).lerp(look.castleLed2, (rig.side > 0 ? 0.25 : 0.1) * E);
-          l.intensity = (50 * E + 130 * wi) * (0.6 + 0.5 * look.energy) * (1 + 0.6 * look.pulse + look.strobe * 2) * (0.15 + 0.85 * Math.min(1.3, look.castleGain));
+          // FOH keys on the portal: they follow the castle level (a dark-castle look keeps them low);
+          // the wash colour warmed by the tungsten of the follow spots (video 650 / 705: the portal,
+          // the stairs and the troupe under a warm orange-red key, not a pure saturated wash)
+          l.color.copy(wash).lerp(look.castleLed2, (rig.side > 0 ? 0.25 : 0.1) * E).lerp(WARM_KEY, 0.3);
+          l.intensity = (42 * E + 115 * wi) * (0.6 + 0.5 * look.energy) * (1 + 0.6 * look.pulse + look.strobe * 2) * (0.1 + 0.9 * Math.min(1.3, look.castleGain));
           break;
         case 'base':
           // low lights on the castle base: they belong to the castle (region level / colour)
           l.color.copy(look.castleLed2).lerp(wash, 0.35);
-          l.intensity = 45 * (0.4 * E + look.ledIntensity) * Math.min(1.5, look.castleGain);
+          l.intensity = 22 * (0.4 * E + look.ledIntensity) * Math.min(1.5, look.castleGain);
           break;
         case 'rim':
           l.color.copy(look.led).lerp(wash, 0.5);
