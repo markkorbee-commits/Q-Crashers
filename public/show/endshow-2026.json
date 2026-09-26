@@ -2986,7 +2986,7 @@
     {"t":1435.918,"dur":13.936,"sys":"lasers","fx":"off"},
     {"t":1435.918,"dur":1.549,"sys":"lights","fx":"look","target":"deck_front","p":{"preset":"still","color":"#B0FF20","intensity":0.45,"beam":"narrow","groups":["floor"],"tilt":10},"note":"lime beams at the deck sides (v1436-1438.5)"},
     {"t":1435.918,"dur":13.936,"sys":"lights","fx":"pillars","p":{"color":"#FF2050","mode":"steady","intensity":1,"color2":"#FF4010","shaftIntensity":1,"fade":0.1}},
-    {"t":1435.924,"dur":3.0,"sys":"camera","fx":"shot","p":{"pos":[0,2,162],"look":[0,18.5,-10],"fov":17,"ease":"inout"},"note":"v1435.96 front telephoto, low from the far aisle between the lantern rows: gold comet columns over the dragon; the long lens keeps the silver side gerbs out of frame (r7)"},
+    {"t":1435.924,"dur":3.0,"sys":"camera","fx":"shot","p":{"pos":[0,1,130],"look":[0,20,-12],"fov":26,"ease":"inout"},"note":"front telephoto: gold comet columns over the wings (r6: low between the pillar rows, crowns and comets above the dragon, v1438.5; r7: one shot to v1438.96, a longer lens was tried and scores lower)"},
     {"t":1437.467,"dur":2.5,"sys":"crowd","fx":"cheer"},
     {"t":1437.467,"dur":1.548,"sys":"lights","fx":"wash","p":{"color":"#FF6010","intensity":0.05}},
     {"t":1437.467,"dur":1.548,"sys":"lights","fx":"look","target":"deck_front","p":{"preset":"still","color":"#B0FF20","intensity":0.3,"beam":"narrow","groups":["floor"],"tilt":4},"note":"lime beams low from the deck sides (v1438)"},
