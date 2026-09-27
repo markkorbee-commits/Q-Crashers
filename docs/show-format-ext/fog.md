@@ -31,12 +31,18 @@ out, spread over its regions, at the cue time and only fades in.
   10 s out), the deck air (`deckSmoke`, 2.5 s in / 8 s out) and the laser sea (6 s in / 3 s out before the end)
   have their own ramps and do not read `fadeIn` / `release` yet.
 
-Examples (from `$ENDSHOW_DATA/work/r11_fx/cue_patch.json`):
+Example (from `$ENDSHOW_DATA/work/r11_fx/cue_patch.json`; measured neutral, the bank now ends where the video's does):
 
 ```json
 {"t":1510.434,"dur":25.966,"sys":"fog","fx":"lowfog","p":{"area":"all","density":1,"color":"#FF0000","fadeIn":0.3,"release":1}}
-{"t":602.08,"dur":1.64,"sys":"fog","fx":"lowfog","p":{"area":"all","density":1.2,"color":"white","fadeIn":0.3,"release":0.4}}
 ```
+
+Proposed, not applied yet (the patch file's `proposed` list): the white field smoke of v602.25–603.75,
+`{"t":602.08,"dur":1.64,"sys":"fog","fx":"lowfog","p":{"area":"all","density":1.2,"color":"white","fadeIn":0.3,"release":0.4}}`.
+In the video that smoke is lit by the kick beam fans and dark between the kicks; the bank's beam light comes from
+`LightingSystem.writeLowFog`, whose 2.5 s in-ramp leaves a 1.6 s bank almost unlit by the beams, so today the bank
+reads as a grey veil lit by the wash between the kicks (measured: kick frames +1.7 to +2.3, between-kick frames −3.4
+and −3.6, 604.5–607 unchanged, net −0.2). It is meant for when the lighting honours `fadeIn` / `release`.
 
 ## `fog.burst` with `roll`: a smoke roll-out
 
