@@ -259,6 +259,18 @@ const MC_PATH = new Path([
   { t: 502.2, x: 2.0, z: -5.7 },
 ]);
 const MC_T0 = 332;
+
+/**
+ * The MC's facing (yaw) at show time t / authored time tm with his path state `pp` (MC_PATH.at(tm)): he faces
+ * the field and turns part of the way into a walk; the entrance walk (to 339) faces the way he goes. Shared by
+ * his body and by `camera.shot` `facing` (Performers.facingAt), so both always agree.
+ */
+function mcYaw(t: number, tm: number, pp: { speed: number; dx: number; dz: number }): number {
+  const walkYaw = Math.atan2(pp.dx, pp.dz);
+  if (tm < 339) return walkYaw;
+  const moving = clamp(pp.speed / 0.8, 0, 1);
+  return moving > 0.15 ? lerp(0, walkYaw, 0.55 * moving) : 0.15 * Math.sin(t * 0.3);
+}
 const TROUPE_T0 = 642;
 /**
  * The lead's round pedestal stands in the arch at the top of the grey steps (v646–658: she is lit by the
@@ -277,7 +289,9 @@ const LEAD_FLOOR = 2.7;
  *  - the lead steps off her pedestal (during the axis-wide shots v711–723.8) and heads a lantern procession
  *    from the portal down the deck towards the backing steadicam (v723.84–728.9): half of the bearers in single
  *    file behind her, lanterns fanned out to the sides (a halo round her from the front), the rest kneeling
- *    at the flanks;
+ *    at the flanks behind her. In the film she walks at an even pace the whole shot and ends right at the deck
+ *    lip, filling the frame of a wide lens with the portal small and far behind her (round 11: our portal stands
+ *    only 6 m behind the lip, so she walks all the way down to it, ahead of the whole troupe);
  *  - a human pyramid in the arch (v738.84: four at the base, two on their shoulders, the lead on top, four
  *    kneeling in front), built during the terrace / axis shots; off into the portal as the drone flies back.
  */
@@ -289,8 +303,12 @@ const KNEEL0 = 706.6;
 const LEAD_OFF = 720.6;
 const COL0 = 720.9;
 const COL1 = 723.0;
-const WALK0 = 723.8;
-const WALK1 = 729.2;
+/** the procession walk: one even segment from the foot of the steps to the deck lip, through the whole shot */
+const WALK0 = 722.2;
+const WALK1 = 729.3;
+/** where she stops: at the deck lip on the axis (the pit stairs start at Z 0) */
+const LIP_X = 0.3;
+const LIP_Z = -0.05;
 const PYR0 = 729.8;
 const PYR1 = 734.6;
 const PYR_TOP0 = 734.4;
@@ -301,10 +319,9 @@ const OUT1 = 746.4;
 const PORTAL_Z = -7.6;
 const LEAD_PATH = new Path([
   { t: LEAD_OFF, x: 0, z: LEAD_Z },
-  { t: COL1, x: 0, z: -4.8 },
-  { t: WALK0, x: 0, z: -4.8 },
-  { t: WALK1, x: 0.45, z: -0.9 },
-  { t: PYR0, x: 0.45, z: -0.9 },
+  { t: WALK0, x: 0, z: -4.4 },
+  { t: WALK1, x: LIP_X, z: LIP_Z },
+  { t: PYR0, x: LIP_X, z: LIP_Z },
   { t: PYR_TOP0, x: 0, z: -5.8 },
   { t: OUT0, x: 0, z: -5.8 },
   { t: OUT0 + 2.5, x: 0, z: PORTAL_Z },
@@ -499,11 +516,40 @@ export class Performers {
       out.y = stageFloorSmooth(pp.x, pp.z);
       return true;
     }
-    // any other cast member of the show (lead, dancer0–9, aerialist, pianist): evaluate that performer alone
-    // at t into scratch state (pure; the pose / beat do not move the feet)
-    if (!SUBJECTS.has(who)) return false;
+    const f = this.evalSubject(who, t);
+    if (!f) return false;
+    out.x = f.x;
+    out.y = f.y;
+    out.z = f.z;
+    return true;
+  }
+
+  /**
+   * The way a filmed subject faces at show time t (yaw, radians: 0 = towards the field / +z, facing direction
+   * (sin yaw, cos yaw)), exactly as his body is drawn; NaN when he is not on stage. Lets a `camera.shot` with
+   * `subject` + `facing` stay in front of the MC when he turns (the film's close-ups face the lens: v440, v446,
+   * v452, v458.5).
+   */
+  facingAt(who: string, t: number): number {
+    if (who === 'mc') {
+      if (!inWin(t, this.timing.mc)) return NaN;
+      const pp = this.spp;
+      const tm = t - this.timing.mc.t0 + MC_T0;
+      MC_PATH.at(tm, pp);
+      return mcYaw(t, tm, pp);
+    }
+    const f = this.evalSubject(who, t);
+    return f ? f.yaw : NaN;
+  }
+
+  /**
+   * Any other cast member of the show (lead, dancer0–9, aerialist, pianist): evaluate that performer alone at t
+   * into scratch state (pure; the pose / beat do not move the feet). Null when not on stage.
+   */
+  private evalSubject(who: string, t: number): PerfFrame | null {
+    if (!SUBJECTS.has(who)) return null;
     const i = this.byName.get(who);
-    if (i === undefined) return false;
+    if (i === undefined) return null;
     const pf = this.perfs[i];
     const f = this.sFr;
     f.visible = false;
@@ -512,11 +558,7 @@ export class Performers {
     this.pedestal = inWin(t, T.pedestal) ? 1 : 0;
     this.evalOne(pf, i, t, t, 0, 150, 0, resetPose(this.sPose), f);
     this.pedestal = ped;
-    if (!f.visible) return false;
-    out.x = f.x;
-    out.y = f.y;
-    out.z = f.z;
-    return true;
+    return f.visible ? f : null;
   }
 
   /** evaluate every performer at show time t (pure). populated = Tribe mode. */
@@ -568,9 +610,7 @@ export class Performers {
       f.z = pp.z;
       f.y = stageFloorSmooth(f.x, f.z);
       const moving = clamp(pp.speed / 0.8, 0, 1);
-      const walkYaw = Math.atan2(pp.dx, pp.dz);
-      f.yaw = moving > 0.15 ? lerp(0, walkYaw, 0.55 * moving) : 0.15 * Math.sin(t * 0.3);
-      if (tm < 339) f.yaw = walkYaw;
+      f.yaw = mcYaw(t, tm, pp);
       // white follow spot from the FOH tower while he performs
       f.glow = -0.9 * smoothstep(MC_T0 + 4, MC_T0 + 7, tm) * (1 - smoothstep(501.4, 502.1, tm));
       walk(p, pp.dist / 1.45, moving);

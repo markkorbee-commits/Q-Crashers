@@ -52,13 +52,30 @@ export function zoomFov(a: number, b: number, k: number): number {
 interface CrowdLike {
   densityAt?(x: number, z: number): number;
   subjectAt?(who: string, t: number, out: THREE.Vector3): boolean;
+  /** the way a performer faces at show time t (yaw: 0 = towards the field, +z), NaN when not on stage */
+  facingAt?(who: string, t: number): number;
 }
+
+/**
+ * Keyframed flight of a `camera.shot` with a `path` (FPV drones): the shot's own pose is the key at 0 s, the
+ * `path` entries the keys in between, `to` / `lookTo` / `rollTo` / `fovTo` the key at `dur`. Parsed once per cue
+ * and show compile (flat arrays, evaluated without allocation).
+ */
+interface PathKeys {
+  n: number;
+  at: Float64Array;
+  /** per key: pos xyz, look xyz, roll, log(tan(fov/2)) */
+  v: Float64Array;
+}
+const PATH_CH = 8;
 /** where a `subject` shot frames when the performer is not available (crowd system off): the portal front */
 const SUBJECT_FALLBACK = new THREE.Vector3(0, 2.2, -4.5);
 /** haze scale of a shot that follows a performer (see ShotPose.haze; 1 = the full lit veil) */
 const SUBJECT_HAZE = 1;
 /** shortest slot (s) of a stutter edit (`alt` / `altEvery`) with the photosensitivity option on */
 const ALT_CALM = 0.34;
+/** distance (m) of the fade card in front of the lens (the camera's near plane is 0.1 m) */
+const CARD_Z = 0.15;
 /** minimal duck type of the player controller (walkable ground height) */
 interface GroundLike {
   groundAt?(x: number, z: number): number;
@@ -296,6 +313,17 @@ export class ShowDirector {
   steady = false;
   /** the current authored shot follows a performer (`subject`): the deck operator's close-up */
   private subjectShot = false;
+  /** keyframed flights of `path` shots, per cue id (cleared on every show compile) */
+  private paths = new Map<number, PathKeys | null>();
+  /** 0..1 how far the current shot is faded to black (`fadeIn` / `fadeOut` / `blackIn` / `blackOut`; debug / UI) */
+  black = 0;
+  /**
+   * The fade card: a black quad just in front of the lens, drawn after everything else, so a dip to black of
+   * the edit darkens the whole picture (sky, glow, bloom) exactly like the film's fades. Created on first use;
+   * hidden (no draw call) while no shot fades, and in every frame the show camera did not evaluate.
+   */
+  private card: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial> | null = null;
+  private evalFrame = -1;
 
   constructor(private app: App) {}
 
@@ -331,7 +359,10 @@ export class ShowDirector {
     if (!this.L) this.build();
     o.roll = 0;
     this.subjectShot = false;
+    this.black = 0;
     if (!this.fromCue(t, o)) this.auto(t, beat, o);
+    this.evalFrame = this.app.frame;
+    this.setCard(this.black);
     this.clearTerrace(o);
     this.liftOverCrowd(o);
     // the deck operator's close-ups of a performer are milky in the film (v351, v409.5, v411.5): the lit
@@ -481,6 +512,44 @@ export class ShowDirector {
     return clamp(1 - 0.6 * Math.max(tele, inCloud * 0.9), 0.35, 1);
   }
 
+  /**
+   * Show the fade card at `black` (0..1, in display terms: 0.5 = the picture at half its displayed brightness).
+   * The card blends in linear light before tone mapping, so the opacity is shaped by the display gamma to make
+   * a linear `fadeOut` read as the even luma ramp of a video dip (v814.88–815.04).
+   */
+  private setCard(black: number): void {
+    if (black <= 0.001) {
+      if (this.card) this.card.visible = false;
+      return;
+    }
+    const card = this.card ?? this.makeCard();
+    card.visible = true;
+    card.material.opacity = black >= 0.999 ? 1 : 1 - Math.pow(1 - black, 2.2);
+  }
+
+  private makeCard(): THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial> {
+    const mat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 1, depthTest: false, depthWrite: false, fog: false, toneMapped: false });
+    // 2 m wide at 0.15 m: covers any show-camera lens (vertical fov ≤ 110°) at any aspect up to ~6:1
+    const card = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat);
+    card.name = 'showcam-fade-card';
+    card.position.set(0, 0, -CARD_Z);
+    card.renderOrder = 1e9;
+    card.frustumCulled = false;
+    card.matrixAutoUpdate = false;
+    card.updateMatrix();
+    card.visible = false;
+    // only the frame the show camera evaluated: another camera mode never renders the card (it hides itself)
+    card.onBeforeRender = () => {
+      if (this.evalFrame !== this.app.frame) {
+        mat.opacity = 0;
+        card.visible = false;
+      }
+    };
+    this.app.camera.add(card);
+    this.card = card;
+    return card;
+  }
+
   // --- authored cues ---------------------------------------------------------------------------
 
   /** authored camera cues (cached per show compile; empty when the show has none) */
@@ -489,6 +558,9 @@ export class ShowDirector {
     if (show.revision !== this.rev) {
       this.rev = show.revision;
       this.camCues = show.all('camera');
+      this.paths.clear();
+      // cue ids are positions in the compiled list: a recompiled show (e.g. an edited cue list) renumbers them
+      this.clearCache.clear();
     }
     return this.camCues;
   }
@@ -501,29 +573,33 @@ export class ShowDirector {
     for (let i = act.length - 1; i >= 0; i--) if (act[i].fx === 'shot') { cue = act[i]; break; }
     if (!cue) return false;
     const p = cue.p;
-    const raw = clamp((t - cue.t) / Math.max(0.001, cue.dur), 0, 1);
-    const k = p.ease === 'linear' ? raw : p.ease === 'in' ? raw * raw : p.ease === 'out' ? 1 - (1 - raw) * (1 - raw) : easeInOut(raw);
+    const dur = Math.max(0.001, cue.dur);
+    const s = t - cue.t; // seconds into the shot
+    const k = easeK(p.ease, s / dur);
+    // move window (`moveAt` / `moveDur`: `to`, `lookTo`, `rollTo`) and zoom window (`zoomAt` / `zoomDur`: `fovTo`)
+    // inside the shot, so a static shot with a short move or zoom need not be split; default = the whole shot
+    const km = windowK(p.ease, s, dur, p.moveAt, p.moveDur, k);
+    const kz = windowK(p.ease, s, dur, p.zoomAt, p.zoomDur, k);
+    // dips to black of the edit (`blackIn` → `fadeIn` at the start, `fadeOut` → `blackOut` at the end)
+    this.black = fadeBlack(p, s, dur);
     const preset = typeof p.preset === 'string' ? SHOT_BY_ID.get(p.preset) : undefined;
     this.nudged = 0;
-    // stutter edit (`alt` pose, cut every `altEvery` s): the odd slots show the second camera.
-    // Reduced motion (comfort) holds the main angle. With the photosensitivity option (App.reduceFlashing) a
-    // stutter between a dark and a bright framing is itself a flashing pattern (v1267.8: 4.2 Hz), so the
-    // angles alternate no faster than every ALT_CALM s (< 1.5 flash pairs per second).
+    // stutter edit (`alt` pose, cut every `altEvery` s): the odd slots show the second camera (v166.84–168.36:
+    // two low frontal framings of the dragon cut together every 1–4 frames). Reduced motion (comfort) holds the
+    // main angle. With the photosensitivity option (App.reduceFlashing) a stutter between a dark and a bright
+    // framing is itself a flashing pattern, so the angles alternate no faster than every ALT_CALM s (< 1.5 flash
+    // pairs per second).
     const alt = !this.steady && p.alt && typeof p.alt === 'object' ? (p.alt as Record<string, unknown>) : null;
     const every = clamp(num(p.altEvery, 0.1), 1 / 30, 10);
     const slot = this.app.reduceFlashing ? Math.max(every, ALT_CALM) : every;
-    const altOn = alt !== null && Math.floor((t - cue.t) / slot) % 2 === 1;
+    const altOn = alt !== null && Math.floor(s / slot) % 2 === 1;
+    const subject = typeof p.subject === 'string' ? p.subject : null;
     if (preset) {
       o.fov = 50;
       preset.frame(this.L, k, rand01(cue.seed), t, o);
       this.current = CUE_LABEL.get(preset.id)!;
     } else if (altOn && alt && vec(alt.pos, o.pos) && vec(alt.look, o.look)) {
-      if (typeof p.subject === 'string') {
-        const sp = this.subjectAt(p.subject, t);
-        o.pos.add(sp);
-        o.look.add(sp);
-        this.subjectShot = true;
-      }
+      if (subject) this.toSubject(subject, p.facing, cue.t, t, o);
       o.fov = clamp(num(alt.fov, num(p.fov, 50)), SHOT_FOV.min, SHOT_FOV.max);
       o.roll = num(alt.roll, 0);
       this.current = 'cue:alt';
@@ -532,31 +608,70 @@ export class ShowDirector {
       if (!vec(p.pos, o.pos) || !vec(p.look, o.look)) return false;
       // `subject` (e.g. 'mc'): pos / look / to / lookTo are offsets from the performer's feet, so the
       // camera follows him like the handheld deck operator in the film (no PA nudge: the framing is his)
-      const subject = typeof p.subject === 'string' ? p.subject : null;
       // PA hangs out of the centre of the framing (constant offset for the whole shot)
       const nudge = subject ? null : this.clearance(cue.id, o.pos, o.look, clamp(num(p.fov, 50), SHOT_FOV.min, SHOT_FOV.max));
-      if (vec(p.to, this.tmp)) o.pos.lerp(this.tmp, k);
-      if (vec(p.lookTo, this.tmp2)) o.look.lerp(this.tmp2, k);
-      if (subject) {
-        const sp = this.subjectAt(subject, t);
-        o.pos.add(sp);
-        o.look.add(sp);
-        this.subjectShot = true;
+      const keys = Array.isArray(p.path) ? this.pathKeys(cue) : null;
+      o.fov = 50;
+      o.roll = typeof p.roll === 'number' ? p.roll : 0;
+      if (keys) {
+        // `path`: a keyframed flight (FPV) through the keys, eased over the whole shot
+        samplePath(keys, k * dur, o);
+      } else {
+        if (vec(p.to, this.tmp)) o.pos.lerp(this.tmp, km);
+        if (vec(p.lookTo, this.tmp2)) o.look.lerp(this.tmp2, km);
+        // `rollTo`: the camera banks from `roll` to `rollTo` with the move
+        if (typeof p.rollTo === 'number' && Number.isFinite(p.rollTo)) o.roll = lerp(o.roll, p.rollTo, km);
       }
+      if (subject) this.toSubject(subject, p.facing, cue.t, t, o);
       if (nudge) {
         o.pos.add(nudge);
         this.nudged = nudge.length();
       }
-      o.fov = 50;
-      o.roll = typeof p.roll === 'number' ? p.roll : 0;
-      this.current = 'cue';
+      this.current = keys ? 'cue:path' : 'cue';
+      if (keys) return true;
     }
     if (typeof p.fov === 'number') {
       const f0 = clamp(p.fov, SHOT_FOV.min, SHOT_FOV.max);
-      // `fovTo`: a real zoom during the shot (even pace in focal length), eased like the move
-      o.fov = typeof p.fovTo === 'number' ? zoomFov(f0, clamp(p.fovTo, SHOT_FOV.min, SHOT_FOV.max), k) : f0;
+      // `fovTo`: a real zoom during the shot (even pace in focal length), eased like the move (or in its window)
+      o.fov = typeof p.fovTo === 'number' ? zoomFov(f0, clamp(p.fovTo, SHOT_FOV.min, SHOT_FOV.max), kz) : f0;
     }
     return true;
+  }
+
+  /**
+   * Turn pos / look offsets into world positions around a performer (`subject`). With `facing` the offsets are in
+   * the performer's own frame (+z = the way he faces, +x = his left, +y = up: the world axes while he faces the
+   * field), so a shot authored "from the front" stays in front of him when he turns: `true` follows his facing at
+   * every moment, `"start"` holds the facing of the shot's first frame (no swing during the shot).
+   */
+  private toSubject(who: string, facing: unknown, t0: number, t: number, o: ShotPose): void {
+    if (facing === true || facing === 'start') {
+      const yaw = this.facingAt(who, facing === 'start' ? t0 : t);
+      if (yaw !== 0) {
+        rotY(o.pos, yaw);
+        rotY(o.look, yaw);
+      }
+    }
+    const sp = this.subjectAt(who, t);
+    o.pos.add(sp);
+    o.look.add(sp);
+    this.subjectShot = true;
+  }
+
+  /** a performer's facing at show time t (0 when unknown) */
+  private facingAt(who: string, t: number): number {
+    const crowd = (this.crowd ??= (this.app.get('crowd') as unknown as CrowdLike | undefined) ?? null);
+    const y = crowd?.facingAt ? crowd.facingAt(who, t) : NaN;
+    return Number.isFinite(y) ? y : 0;
+  }
+
+  /** the parsed keyframes of a `path` shot (cached per cue; null when the path is unusable) */
+  private pathKeys(cue: Cue): PathKeys | null {
+    const hit = this.paths.get(cue.id);
+    if (hit !== undefined) return hit;
+    const keys = parsePath(cue.p, cue.dur);
+    this.paths.set(cue.id, keys);
+    return keys;
   }
 
   /** a performer's feet at show time t (see `subject`), or the portal front when unavailable */
@@ -716,6 +831,155 @@ function countIn(cues: readonly Cue[], a: number, b: number, fx: Set<string>): n
 }
 
 const num = (v: unknown, d: number): number => (typeof v === 'number' && Number.isFinite(v) ? v : d);
+
+/** a shot's `ease` applied to raw progress (clamped to 0..1) */
+function easeK(ease: unknown, raw: number): number {
+  const r = clamp(raw, 0, 1);
+  return ease === 'linear' ? r : ease === 'in' ? r * r : ease === 'out' ? 1 - (1 - r) * (1 - r) : easeInOut(r);
+}
+
+/**
+ * Eased progress of a window inside a shot (`moveAt` / `moveDur`, `zoomAt` / `zoomDur`: s from the shot start):
+ * 0 before it, 1 after it. Without either param the whole shot (`whole`, the shot's own eased progress).
+ */
+function windowK(ease: unknown, s: number, dur: number, at: unknown, len: unknown, whole: number): number {
+  if (typeof at !== 'number' && typeof len !== 'number') return whole;
+  const a = clamp(num(at, 0), 0, dur);
+  const l = num(len, dur - a);
+  if (!(l > 1e-3)) return s >= a ? 1 : 0;
+  return easeK(ease, (s - a) / l);
+}
+
+/**
+ * 0..1 black of the edit at s seconds into a shot of `dur` s: `blackIn` s of black, then a `fadeIn` s fade up;
+ * at the end a `fadeOut` s fade down, then `blackOut` s of black (a dip to black across a cut = the first shot's
+ * `fadeOut` / `blackOut` + the next shot's `blackIn` / `fadeIn`). Linear in displayed brightness.
+ */
+function fadeBlack(p: Record<string, unknown>, s: number, dur: number): number {
+  const fi = num(p.fadeIn, 0);
+  const fo = num(p.fadeOut, 0);
+  const bi = num(p.blackIn, 0);
+  const bo = num(p.blackOut, 0);
+  if (fi <= 0 && fo <= 0 && bi <= 0 && bo <= 0) return 0;
+  if (s < bi) return 1;
+  const r = dur - s;
+  if (r < bo) return 1;
+  let vis = 1;
+  if (fi > 0) vis = Math.min(vis, clamp((s - bi) / fi, 0, 1));
+  if (fo > 0) vis = Math.min(vis, clamp((r - bo) / fo, 0, 1));
+  return 1 - vis;
+}
+
+/** rotate an offset about the vertical axis by a performer's yaw (yaw 0 = identity; +z turns to (sin, cos)) */
+function rotY(v: THREE.Vector3, yaw: number): void {
+  const c = Math.cos(yaw);
+  const s = Math.sin(yaw);
+  const x = v.x;
+  v.x = x * c + v.z * s;
+  v.z = -x * s + v.z * c;
+}
+
+const logTan = (fov: number): number => Math.log(Math.tan((clamp(fov, SHOT_FOV.min, SHOT_FOV.max) * Math.PI) / 360));
+
+/**
+ * Parse a shot's `path`: [{ at (s from the shot start), pos [x,y,z], look?, roll? (rad), fov? (deg) }, ...].
+ * Key 0 is the shot's own pos / look / roll / fov; `to` / `lookTo` / `rollTo` / `fovTo`, when any is given, make
+ * the key at `dur` (the others of that key hold the last value). A key without look / roll / fov takes the value
+ * interpolated in time between its neighbours that have one. Null when fewer than two usable keys remain.
+ */
+function parsePath(p: Record<string, unknown>, dur: number): PathKeys | null {
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  if (!vec(p.pos, a) || !vec(p.look, b)) return null;
+  interface Key {
+    at: number;
+    pos: number[];
+    look: number[] | null;
+    roll: number | null;
+    fov: number | null;
+  }
+  const keys: Key[] = [{ at: 0, pos: [a.x, a.y, a.z], look: [b.x, b.y, b.z], roll: num(p.roll, 0), fov: num(p.fov, 50) }];
+  const mid: Key[] = [];
+  for (const e of p.path as unknown[]) {
+    if (!e || typeof e !== 'object') continue;
+    const q = e as Record<string, unknown>;
+    const at = num(q.at, NaN);
+    if (!(at > 1e-3 && at < dur - 1e-3) || !vec(q.pos, a)) continue;
+    const hasLook = vec(q.look, b);
+    mid.push({ at, pos: [a.x, a.y, a.z], look: hasLook ? [b.x, b.y, b.z] : null, roll: typeof q.roll === 'number' && Number.isFinite(q.roll) ? q.roll : null, fov: typeof q.fov === 'number' && Number.isFinite(q.fov) ? q.fov : null });
+  }
+  mid.sort((x, y) => x.at - y.at);
+  for (const m of mid) if (m.at > keys[keys.length - 1].at + 1e-3) keys.push(m);
+  const endPos = vec(p.to, a);
+  const endLook = vec(p.lookTo, b);
+  const endRoll = typeof p.rollTo === 'number' && Number.isFinite(p.rollTo) ? p.rollTo : null;
+  const endFov = typeof p.fovTo === 'number' && Number.isFinite(p.fovTo) ? p.fovTo : null;
+  if (endPos || endLook || endRoll !== null || endFov !== null) {
+    const last = keys[keys.length - 1];
+    keys.push({ at: Math.max(dur, last.at + 1e-3), pos: endPos ? [a.x, a.y, a.z] : last.pos.slice(), look: endLook ? [b.x, b.y, b.z] : null, roll: endRoll, fov: endFov });
+  }
+  if (keys.length < 2) return null;
+  const n = keys.length;
+  const at = new Float64Array(n);
+  const v = new Float64Array(n * PATH_CH);
+  // channel value of key i, or NaN when the key leaves it open
+  const raw = (k: Key, c: number): number => (c < 3 ? k.pos[c] : c < 6 ? (k.look ? k.look[c - 3] : NaN) : c === 6 ? (k.roll ?? NaN) : k.fov === null ? NaN : logTan(k.fov));
+  for (let i = 0; i < n; i++) at[i] = keys[i].at;
+  for (let c = 0; c < PATH_CH; c++) {
+    for (let i = 0; i < n; i++) {
+      let x = raw(keys[i], c);
+      if (Number.isNaN(x)) {
+        // interpolate between the nearest keys that define this channel (key 0 always does)
+        let lo = i - 1;
+        while (lo > 0 && Number.isNaN(raw(keys[lo], c))) lo--;
+        let hi = i + 1;
+        while (hi < n && Number.isNaN(raw(keys[hi], c))) hi++;
+        const x0 = v[lo * PATH_CH + c];
+        x = hi < n ? lerp(x0, raw(keys[hi], c), (at[i] - at[lo]) / Math.max(1e-6, at[hi] - at[lo])) : x0;
+      }
+      v[i * PATH_CH + c] = x;
+    }
+  }
+  return { n, at, v };
+}
+
+/**
+ * Sample a keyframed flight at u seconds into the shot: a cubic Hermite through the keys with finite-difference
+ * (Catmull-Rom, non-uniform) tangents, so position, aim, roll and lens change with a continuous velocity like a
+ * flown drone; two keys give a straight linear move. The lens is interpolated in log(tan(fov/2)) (even zoom).
+ */
+function samplePath(K: PathKeys, u: number, o: ShotPose): void {
+  const { n, at, v } = K;
+  let i = 0;
+  while (i < n - 2 && u >= at[i + 1]) i++;
+  const h = Math.max(1e-6, at[i + 1] - at[i]);
+  const f = clamp((u - at[i]) / h, 0, 1);
+  const f2 = f * f;
+  const f3 = f2 * f;
+  const h00 = 2 * f3 - 3 * f2 + 1;
+  const h10 = f3 - 2 * f2 + f;
+  const h01 = -2 * f3 + 3 * f2;
+  const h11 = f3 - f2;
+  const a0 = i * PATH_CH;
+  const a1 = a0 + PATH_CH;
+  for (let c = 0; c < PATH_CH; c++) {
+    const m0 = pathTangent(K, i, c) * h;
+    const m1 = pathTangent(K, i + 1, c) * h;
+    const x = h00 * v[a0 + c] + h10 * m0 + h01 * v[a1 + c] + h11 * m1;
+    if (c < 3) o.pos.setComponent(c, x);
+    else if (c < 6) o.look.setComponent(c - 3, x);
+    else if (c === 6) o.roll = x;
+    else o.fov = clamp((Math.atan(Math.exp(x)) * 360) / Math.PI, SHOT_FOV.min, SHOT_FOV.max);
+  }
+}
+
+/** d(channel)/dt at key j (one-sided at the ends) */
+function pathTangent(K: PathKeys, j: number, c: number): number {
+  const { n, at, v } = K;
+  const lo = Math.max(0, j - 1);
+  const hi = Math.min(n - 1, j + 1);
+  return (v[hi * PATH_CH + c] - v[lo * PATH_CH + c]) / Math.max(1e-6, at[hi] - at[lo]);
+}
 
 /** read [x,y,z] from a cue param */
 function vec(v: unknown, out: THREE.Vector3): boolean {
