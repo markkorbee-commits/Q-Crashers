@@ -17,6 +17,15 @@ export type RidePhase = 'off' | 'walk' | 'board' | 'ride' | 'alight' | 'leave';
 
 /** eye height of a seated rider above the gondola floor (bench 0.45 m) */
 export const SEAT_EYE = 1.24;
+/**
+ * where on the +Z bench the rider sits, across the car (gondola X). Seen from the bench the Mainstage lies
+ * ~24° left of the bench's facing. From the middle of the bench the car's front-left corner post stood
+ * right on that line and split the show down the middle; at the -X (door) end the wheel's own spoke
+ * (x = -0.9, straight down from the axle near the top of the wheel) became a 10° wide band over the left
+ * wing. At the +X end the post is a thin line ~8° left of the stage centre and the spokes stay out of
+ * the stage's 40° width at every point of the turn.
+ */
+export const SEAT_X = 0.35;
 const BOARD_S = 1.5;
 const ALIGHT_S = 1.3;
 const LEAVE_S = 0.9;
@@ -41,7 +50,7 @@ export class FerrisRide {
   readonly pos = new THREE.Vector3();
   /** body velocity along the path (m/s): drives the avatar's walk cycle and the head bob */
   readonly vel = new THREE.Vector3();
-  /** yaw the rider turns to while sitting down (facing the stage), null otherwise */
+  /** yaw the rider turns to while stepping in and sitting down (facing the stage), null otherwise */
   turnTo: number | null = null;
   /** facing of the seated body (the bench faces -Z) */
   readonly seatYaw = 0;
@@ -327,7 +336,7 @@ export class FerrisRide {
   /** the rider's feet under the seat (floor of the gondola) */
   private seatAt(t: number, out: THREE.Vector3, steady: boolean): THREE.Vector3 {
     const sway = gondolaPose(this.gondola, t, this.pivot);
-    return gondolaPoint(this.pivot, steady ? 0 : sway, 0, GONDOLA.floorY, GONDOLA.seatZ, out);
+    return gondolaPoint(this.pivot, steady ? 0 : sway, SEAT_X, GONDOLA.floorY, GONDOLA.seatZ, out);
   }
 
   /** the middle of the gondola floor (behind the door) */

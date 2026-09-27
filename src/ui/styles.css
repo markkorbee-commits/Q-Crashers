@@ -1583,8 +1583,9 @@ input[type='range']::-moz-range-thumb {
 }
 .pos-list {
   max-height: min(360px, calc(100vh - 330px));
-  overflow: auto;
-  padding-right: 4px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-right: 6px;
   scrollbar-width: thin;
   scrollbar-color: rgba(243, 237, 228, 0.2) transparent;
 }
@@ -1650,7 +1651,8 @@ input[type='range']::-moz-range-thumb {
 .row-btn {
   appearance: none;
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  /* minmax(0, 1fr): a long nowrap blurb must not set the row's min width (it pushed the meta column out) */
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
   width: 100%;
@@ -1699,9 +1701,14 @@ input[type='range']::-moz-range-thumb {
   color: var(--muted);
   margin-top: 1px;
 }
+.row-btn > span:nth-child(2) {
+  min-width: 0;
+}
 .row-btn .meta {
   font: 500 11.5px/1 var(--font-mono);
   color: var(--muted);
+  white-space: nowrap;
+  text-align: right;
 }
 
 /* mini map */
@@ -3459,7 +3466,7 @@ ul.fx.links a {
     gap: 6px;
   }
   .panel.camsheet .row-btn {
-    grid-template-columns: auto 1fr;
+    grid-template-columns: auto minmax(0, 1fr);
     padding: 8px 10px;
     min-height: 58px;
   }

@@ -6,8 +6,8 @@ import { comfortFromParams } from '../intoxication/comfort';
 import type { MotorEffects } from '../intoxication/PerceptionSystem';
 import { stageWalk, surfaceTop, type StageWalk } from '../world/stageWalk';
 import { FerrisRide, SEAT_EYE } from './FerrisRide';
-import { approachAngle, damp, wobble, wrapAngle } from './motion';
-import { DEFAULT_SPOTS, DEFAULT_START_PITCH, DEFAULT_START_SPOT, START_CHOICES, type StartChoice } from './spots';
+import { damp, easeInOut, wobble, wrapAngle } from './motion';
+import { DEFAULT_SPOTS, DEFAULT_START_PITCH, DEFAULT_START_SPOT, STAGE_FOCUS, START_CHOICES, yawTowards, type StartChoice } from './spots';
 
 /**
  * A flat raised walkable area (stage deck, podium, vault floor, castle platform …), highest first.
@@ -43,11 +43,18 @@ const RIDE_DETACH_BACK = 0.2;
 /** look pitch a Ferris wheel rider settles to while sitting down (just below the horizon) */
 const RIDE_PITCH = -0.04;
 /**
- * first person: the most the view turns / tilts by itself while sitting down (no input); a scripted head
- * rotation is a main trigger of simulator sickness, the mouse or a swipe does the rest
+ * The sit-down turn towards the Mainstage (Ferris wheel): one slow eased turn (no overshoot, no
+ * exponential snap) of about RIDE_TURN_RATE rad/s on average, RIDE_TURN_MIN…RIDE_TURN_MAX_S seconds
+ * long; any look input hands the view back to the viewer at once. Under reduced motion the view cuts
+ * to the stage in one step when the rider sits down (a cut is gentler than a scripted head turn).
+ * The spot at the platform faces the wheel, ~130° away from the stage: the old 46° cap left riders
+ * staring at the empty field and the lake for the whole ride.
  */
-const RIDE_TURN_MAX = 0.8;
-const RIDE_TILT_MAX = 0.3;
+const RIDE_TURN_RATE = 1.2;
+const RIDE_TURN_MIN = 0.8;
+const RIDE_TURN_MAX_S = 2.2;
+/** look input (px, accumulated) that counts as the viewer taking over: a resting hand's 1-px twitch does not */
+const RIDE_TURN_TAKEOVER = 14;
 /** eye height (m) when sitting / slumped on the ground (perception motor.seated) */
 const SEATED_EYE = 1.0;
 /** localStorage keys (per-viewer conveniences, never required) */
@@ -210,9 +217,15 @@ export class PlayerController implements System {
   /** vertical speed while falling off a ledge (m/s, <= 0; 0 = supported) */
   private fallV = 0;
   private rig: CameraModeProvider | null | undefined;
-  /** view yaw / pitch when the sit-down turn began (NaN: not turning) */
+  /** view yaw / pitch when the sit-down turn began (NaN: not turning), its progress 0..1 and duration (s) */
   private rideYaw0 = NaN;
   private ridePitch0 = 0;
+  private rideTurnK = 0;
+  private rideTurnDur = 1;
+  /** the sit-down turn of this boarding has run (or the viewer took over): never restart it */
+  private rideTurned = false;
+  /** look input (px) accumulated since boarding began: a deliberate look hands the view back */
+  private rideLook = 0;
   private delay = new InputDelay();
   private densityValid = false;
   private reduced = false;
@@ -369,7 +382,14 @@ export class PlayerController implements System {
   boardWheel(instant = false): void {
     if (this.ride.active) return;
     this.ride.board(this.app.playerPos, instant);
-    if (instant) this.app.playerPos.copy(this.ride.pos);
+    if (instant) {
+      // seated at once (tools, deep links): cut straight to the rider's view of the Mainstage
+      this.app.playerPos.copy(this.ride.pos);
+      this.yaw = yawTowards(this.ride.pos, STAGE_FOCUS);
+      this.pitch = RIDE_PITCH;
+      this.rideYaw0 = NaN;
+      this.rideTurned = true;
+    }
   }
 
   /** feet height of the walkable surface under (x, z): the stage walk map, else the terrain */
@@ -498,24 +518,7 @@ export class PlayerController implements System {
     this.jumpY = this.jumpV = this.fallV = 0;
     this.onStage = false;
     this.crowdDensity = 0;
-    // sitting down: the body turns to face the stage, eyes level (never under reduced motion; the mouse
-    // still adds on top). The third-person camera swings round with it; the first-person view turns
-    // by at most RIDE_TURN_MAX / RIDE_TILT_MAX on its own
-    if (r.turnTo !== null && this.controlsActive && !this.reduced) {
-      if (Number.isNaN(this.rideYaw0)) {
-        this.rideYaw0 = this.yaw;
-        this.ridePitch0 = this.pitch;
-      }
-      let yaw = r.turnTo,
-        pitch = RIDE_PITCH;
-      if (this.cameraMode() !== 'third') {
-        yaw = this.rideYaw0 + clamp(wrapAngle(r.turnTo - this.rideYaw0), -RIDE_TURN_MAX, RIDE_TURN_MAX);
-        pitch = this.ridePitch0 + clamp(RIDE_PITCH - this.ridePitch0, -RIDE_TILT_MAX, RIDE_TILT_MAX);
-      }
-      const k = damp(2.2, ctx.dt);
-      this.yaw = approachAngle(this.yaw, yaw, k);
-      this.pitch += (pitch - this.pitch) * k;
-    } else if (r.phase !== 'board') this.rideYaw0 = NaN;
+    this.updateRideTurn(ctx.dt, was);
     this.filterPlatforms(p.y);
     this.updateEyes(ctx, motor, 0);
     if (!on) {
@@ -526,6 +529,59 @@ export class PlayerController implements System {
       return;
     }
     this.setTarget(this.controlsActive && r.canAlight ? r.point : null);
+  }
+
+  /**
+   * Stepping in and sitting down: the view turns to face the Mainstage, eyes just below the horizon, so a
+   * rider sees the show (the platform spot faces the wheel, ~130° away). One eased turn (first and third
+   * person alike: the third-person camera swings round with it); the viewer's own look input ends it at
+   * once. Reduced motion: no scripted turn, one cut to the stage the moment the rider sits down.
+   */
+  private updateRideTurn(dt: number, was: string): void {
+    const r = this.ride;
+    // a new boarding (walking up to the car) may turn again; getting off ends a turn still running
+    if (r.phase === 'walk' || r.phase === 'alight' || r.phase === 'leave') {
+      this.rideYaw0 = NaN;
+      this.rideTurned = false;
+      this.rideLook = 0;
+      return;
+    }
+    if (!this.controlsActive || this.rideTurned) {
+      this.rideYaw0 = NaN;
+      return;
+    }
+    const look = this.app.input.look;
+    this.rideLook += Math.abs(look.x) + Math.abs(look.y);
+    if (this.rideLook > RIDE_TURN_TAKEOVER) {
+      // the viewer looks around: the view is theirs from now on
+      this.rideYaw0 = NaN;
+      this.rideTurned = true;
+      return;
+    }
+    const target = r.phase === 'board' ? r.turnTo : yawTowards(r.pos, STAGE_FOCUS);
+    if (this.reduced) {
+      if (r.phase === 'ride' && was !== 'ride') {
+        this.yaw = yawTowards(r.pos, STAGE_FOCUS);
+        this.pitch = RIDE_PITCH;
+        this.rideTurned = true;
+      }
+      return;
+    }
+    if (target === null) return;
+    if (Number.isNaN(this.rideYaw0)) {
+      this.rideYaw0 = this.yaw;
+      this.ridePitch0 = this.pitch;
+      this.rideTurnK = 0;
+      this.rideTurnDur = clamp(Math.abs(wrapAngle(target - this.yaw)) / RIDE_TURN_RATE, RIDE_TURN_MIN, RIDE_TURN_MAX_S);
+    }
+    this.rideTurnK = Math.min(1, this.rideTurnK + dt / this.rideTurnDur);
+    const e = easeInOut(this.rideTurnK);
+    this.yaw = this.rideYaw0 + wrapAngle(target - this.rideYaw0) * e;
+    this.pitch = this.ridePitch0 + (RIDE_PITCH - this.ridePitch0) * e;
+    if (this.rideTurnK >= 1) {
+      this.rideYaw0 = NaN;
+      this.rideTurned = true;
+    }
   }
 
   private motor(): MotorEffects {
