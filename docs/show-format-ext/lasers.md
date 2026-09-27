@@ -8,7 +8,9 @@ Unknown values are ignored, never thrown on.
 
 * `EXT_ENUM['lasers.look.preset']`: `chevron`, `zigzag`, `x`, `rings`, `dashes`, `trees` (round 6)
 * Non-enum params to list as known extensions: look `reach`, `rows`, `rings`, `lobes`, `lobeAmp`,
-  `squash`, `parallel`, `path`, `distance`, `segments`, `aim`, `fade`; hit `lens`, `reach`.
+  `squash`, `parallel`, `path`, `distance`, `segments`, `aim`, `fade`, `splay` (round 9); hit `lens`, `reach`.
+* Target tokens: the validator reads them from `TOKENS` in src/lasers/LaserSystem.ts, so the round-9
+  tokens `front_line`, `ramparts`, `side_rampart` and `side_sections` are valid without a validator change.
 
 ## `lasers.off`: latest start wins
 
@@ -190,6 +192,73 @@ white frame. The show's laser
 cues never switch faster than about 3 Hz (the tightest run: the four hits of v1343.6-1345.8, 0.6-0.8 s
 apart), so no rate needs a cap. The scanned dashes move at 1.7 Hz. With the option off nothing changes
 (verified bit-identical over 9 windows / 1,640 frames of the Show camera and a spectator view).
+
+### Round 9: the web and the white fans span the whole U front
+
+**Where the filmed figures stand.** From the fitted terrace tripod of the 801.804 shot (-0.72, 7, 171.95),
+fov 36, the blue web of v804.0–804.75 fills frame x 0.07–0.93 and its V bottoms (the apertures, the
+brightest points) sit at frame y 0.64–0.68; a V bottom every 0.08–0.09 of the frame (~16 m). Projected
+through the same camera, the deck units (Y 2.2) land at y 0.74, the castle wall walk (Y 8.4–9.5) at 0.67–0.69
+and the side-section wall walks (Y 9.5–10.6, |x| up to 85) at 0.66–0.67, x 0.08–0.95. The web, the white
+fans of v802.8–803.4 and the violet web of v838.2 (V bottoms under the mid-row lanterns by the same margin
+as at v804) are fired from the wall-top line of the whole U, not from the deck: our deck-front web covered
+~35 % of the width and sat 0.07 of the frame too low.
+
+**New units and tokens (no cue changes; every older cue renders as before).**
+
+| token | units |
+|---|---|
+| `ramparts`, `side_rampart`, `side_sections` | 8 side-section wall-walk units on the parapet: \|x\| 40, 55, 70, 85, Y 10.6, Z −4.3 (between the crystal lanterns) |
+| `front_line` | the whole U front at the wall-top line: the rampart units + the castle wall-walk units (group tower, Y < 12), thinned from the centre outwards to a pitch of at least 12 m: 12 units at \|x\| 7, 25.5, 40, 55, 70, 85 (the filmed V pitch) |
+
+`front_line` combined with another tower token (`towers`, `castle`, `roof` …) takes all castle units. The
+wall-walk units are not in `laser_stage` / `stage`, in a target-less `hit`, or in any preset's natural set,
+and they are appended after the older units (their indices, the piano's side and the smear order are unchanged).
+Filters `left` / `right` / `center` and `origin` work as for the other stage units.
+
+**`zigzag` / `trees` on raised units.** `height` still counts in world Y from the deck; a unit above the
+deck (Y > 5: the wall walks) lifts the figure with it (top = `height` + unit Y − 2.2). A cue retargeted from
+`deck_front` to `front_line` therefore draws the same V / tent standing on the wall-top line instead of
+firing its beams into the sky (the old top line lay below those units).
+
+**Scanned web look (engine-wide for `zigzag`).** The filmed web is a row of luminous wedges (v804: the band
+y 0.5–0.7 averages sRGB ≈ [18, 24, 100]; our thin lines gave [8, 3, 24]). Each fan's two edges now read 2×
+its inner lines (the galvo dwells where the scan turns), the lines fade out from 45 % of their length
+towards the top line (was 75 %: the apex is the bright part), the figure level is 2.2 (was 1.5, also
+`trees`), and a rising V lights the smoke in its plane: a soft wedge sprite, brightest at the apex, fading
+to the top line (`tune.webGlow` 2; deck units at their 6 m pitch glow at 0.4 so their overlapping wedges do
+not merge into one bar). Measured on the current show (deck-front cues, not retargeted): 798 +0.5, 804 +1.2,
+804.25 +0.4, 804.5 +0.3, 804.75 +1.2, 838.25 −1.0, 838.75 −0.8, 839.25 −1.2 (the 838 shot is not fitted, see
+below); no moment of the default 64 has a zigzag.
+
+**`sky` + `splay` (degrees, default 0).** The fan of a unit at \|x\| ≥ 60 m leans that many degrees outwards
+(left units to the left), proportionally less nearer the centre, so the centre fans stay upright Vs and the
+side fans open towards the frame edges (v802.8–803.4).
+
+**Reduce flashing** (round 8) still holds: the new units use the same looks / hits / offs ramps. With the
+option on, the proposed 802.796 fans and the retargeted web ramp in and out over ~0.12 s (largest mean-luma
+step 2.2 per 40 ms at 802.84 with the other light systems off; 3.6 in one frame with the option off), and
+the tightest laser change in 802.7–805 is 0.5 s apart (well under 3 Hz).
+
+**Calibration hooks** added to `LaserSystem.tune`: `webGlow`, `webFade`, `webEdge` (see the code comment).
+Cost at v804.2 with the proposed web (12 units × 10 lines + 12 wedge sprites): lasers CPU 0.054 → 0.066 ms,
+3 draw calls as before, +2.3 k triangles; mobile budget PASS (90–100 / 110 calls). If the stage engineer ever
+registers wall-walk housings in `laser_stage`, the rig's classifier would file them as `tower` / `corner` next
+to the fixed rampart list: classify Y < 12 with 37 < \|x\| < 89 as `rampart` then and drop the list.
+
+### Round 9 cue proposals (measured in-page against the exact-time frames; not applied, the show group owns the cues)
+
+Scores: scripts/similarity.mjs per moment (video time, `--settle 500 --min-frames 30`), the cue edits applied
+in the page (all proposals together), against the same round-9 engine with the show as is. Over the 13 touched
+moments 798–839.25: 63.8 → 66.7 % (calibrated 28.8 → 34.5).
+
+| cue | change | effect |
+|---|---|---|
+| 803.734 zigzag (blue web) | target `front_line`, `count` 10, `spread` 80, `height` 13 | 804.0 58.4 → 65.6, 804.25 65.0 → 71.3, 804.5 64.9 → 71.8, 804.75 52.2 → 58.7 |
+| 804.3 trees | target `castle` (the 8 castle wall-walk units; the lasers' `towers` token is the same set, but in lights `towers` means the delay towers), `height` 18, `spread` 32: v804.38 shows ~8 tents over the castle (bases at the wall walk, frame y 0.69; apexes at 0.55, ~16 m up), while the side units keep the web's wedges | not on a 4 fps frame; checked on the 25 fps frame v804.38 |
+| 797.921 zigzag (violet web) | target `front_line` | 798.0 66.3 → 68.0, 798.5 53.4 → 56.3 |
+| new 802.796, dur 0.563 (to the half beat 803.359) | `{fx:'look', target:'front_line', p:{preset:'sky', color:'white', count:10, spread:80, splay:50, tilt:84, reach:45, speed:0.25, intensity:1, fade:0.05}}`: the white fans along the whole front (v802.82–803.38); it starts after the 798.859 `off` (latest start wins) | 803.0 73.2 → 75.5, 803.25 56.7 → 60.8, 802.75 / 803.5 unchanged |
+| 838.046 zigzag (violet web) | target `front_line`, `height` 13, but only together with a refit of the 837.964 camera shot (camera group): the shot `pos [0,5,165]`, fov 30 is not the terrace tripod of the video (its near lanterns stand at frame x 0.10 / 0.91 and the V bottoms at y 0.71); with the current pose the retarget costs 838.25 66.0 → 63.8, 838.75 69.2 → 66.1, 839.25 67.8 → 64.6 | — |
 
 ## Proposed cue updates for public/show/endshow-2026.json (tested side by side with the video)
 

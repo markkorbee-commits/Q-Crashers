@@ -468,7 +468,7 @@ void main() {
 // ------------------------------------------------------------------------------------------------
 export const SPRITE_VERT = /* glsl */ `
 attribute vec4 pA; // position.xyz, world size
-attribute vec4 pB; // colour (rgb), kind (0 aperture flare, 1 hit spot)
+attribute vec4 pB; // colour (rgb), kind (0 aperture flare, 1 hit spot, 2 lens veil, 3 + tan(half aperture) / 4 lit V wedge)
 uniform float uPixAng;
 varying vec2 vUv;
 varying vec3 vColor;
@@ -479,7 +479,7 @@ void main() {
   vec3 toCam = cameraPosition - P;
   float dist = max(length(toCam), 1e-3);
   float size;
-  if (pB.w > 1.5) {
+  if (pB.w > 1.5 && pB.w < 2.5) {
     // lens veil: an in-camera effect, so it is drawn just in front of the lens at the same angular
     // size (nothing in the scene can cut it)
     float dn = 1.5;
@@ -489,21 +489,25 @@ void main() {
   } else {
     float minSize = (pB.w > 0.5 ? 2.2 : 3.2) * dist * uPixAng;
     size = max(pA.w, minSize);
-    // pull towards the camera so the billboard is not cut by the surface it sits on
-    P += toCam / dist * min(size * 1.1, dist * 0.5);
+    // pull towards the camera so the billboard is not cut by the surface it sits on (a lit V wedge stands
+    // in the air in front of the set: pulled less, and shrunk to keep its angular size)
+    float pull = pB.w > 2.5 ? min(size * 0.3, dist * 0.2) : min(size * 1.1, dist * 0.5);
+    P += toCam / dist * pull;
     // energy conservation when clamped to the minimum pixel footprint
     float k = pA.w / size;
     vColor = pB.rgb * k * k;
+    if (pB.w > 2.5) size *= (dist - pull) / dist;
   }
   vec4 mv = viewMatrix * vec4(P, 1.0);
   mv.xy += position.xy * size;
   vUv = position.xy;
   vKind = pB.w;
   // (the lens veil is not dimmed by the air between the projector and the lens: the beam is collimated)
-  vDist = pB.w > 1.5 ? 0.0 : dist;
+  bool veil = pB.w > 1.5 && pB.w < 2.5;
+  vDist = veil ? 0.0 : dist;
   gl_Position = projectionMatrix * mv;
   // the lens veil sits on the lens: nothing in the scene may cut it
-  if (pB.w > 1.5) gl_Position.z = -0.999 * gl_Position.w;
+  if (veil) gl_Position.z = -0.999 * gl_Position.w;
 }
 `;
 
@@ -517,7 +521,17 @@ void main() {
   float r2 = dot(vUv, vUv);
   if (r2 > 1.0) discard;
   float I;
-  if (vKind > 1.5) {
+  if (vKind > 2.5) {
+    // the smoke lit by a scanned V fan (zigzag web): a soft wedge, apex at the bottom, brightest near the
+    // apex where the scan is densest, fading out to the top line; a faint bloom around it
+    float tH = fract(vKind) * 4.0;
+    float h = inversesqrt(1.0 + 4.0 * tH * tH);
+    float yy = vUv.y + h;
+    float d = abs(vUv.x) - max(yy, 0.0) * tH;
+    float edge = exp(-max(d, 0.0) * max(d, 0.0) * 220.0) * smoothstep(-0.03, 0.02, yy);
+    float up = clamp(yy / (2.0 * h), 0.0, 1.0);
+    I = edge * (1.0 - up * up) * (0.15 + 0.85 * exp(-up * 4.5)) + exp(-r2 * 4.0) * 0.03;
+  } else if (vKind > 1.5) {
     // lens hit: a beam straight into the camera floods the frame (veiling glare + anamorphic streak)
     float r = sqrt(r2);
     I = exp(-r2 * 60.0) * 3.0 + exp(-r2 * 9.0) * 0.45 + 0.1 * (1.0 - r) + exp(-abs(vUv.y) * 70.0) * (1.0 - abs(vUv.x)) * 0.7;

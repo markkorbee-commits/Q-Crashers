@@ -11,6 +11,13 @@ import { Anchors, type AnchorName } from '../core/Anchors';
  *   dragon   2 × dragon flanks (±7, 15, −10) — the crossing cyan X over the head (Embers)
  *   high     4 × wing finger bases (±20, 20, −19), (±34, 19, −19) — sky fans, down-fans
  *   corner   4 × corner towers (±92, 14, −4) — sideways fans, beam-ends
+ *   rampart  8 × side-section wall walks (round 9): |X| 40, 55, 70, 85 on the parapet (Y 10.6, Z −4.3) — with
+ *            the castle wall-walk units they carry the web / fans that span the whole U front (v802.8–804.9,
+ *            v838.2: frame x 0.07–0.93 from the terrace tripod). Selected only by their own target tokens
+ *            (`ramparts`, `side_rampart`, `side_sections`, `front_line`): every older cue is unchanged.
+ * The `front` line (round 9): the rampart units plus the castle wall-walk units (Y < 12), thinned from the
+ * centre outwards to a pitch of at least FRONT_PITCH — 12 units at |X| 7, 25.5, 40, 55, 70, 85 on the stage
+ * build, the filmed web's pitch (v804.25: V bottoms every 0.08–0.09 of the frame, ~16 m).
  * Field (origin 'field'):
  *   turret   6 × arm-end turrets (±94, 12, 58) — radial bursts, cross-field fans / sheets
  *   pillar   8 × obelisk capitals (±20, 9.7, 36/69/102/135) — pillar-to-pillar beams, sky beams
@@ -21,7 +28,7 @@ import { Anchors, type AnchorName } from '../core/Anchors';
  * Other systems may override positions: a custom 'laser_stage' anchor (the stage engineer's housings) or
  * custom 'pillars_top' (the grounds engineer's obelisks, X/Z taken from it).
  */
-export type EmitterGroup = 'deck' | 'tower' | 'dragon' | 'high' | 'corner' | 'turret' | 'pillar' | 'base' | 'piano';
+export type EmitterGroup = 'deck' | 'tower' | 'dragon' | 'high' | 'corner' | 'turret' | 'pillar' | 'base' | 'piano' | 'rampart';
 export type Origin = 'stage' | 'field';
 
 export interface Emitter {
@@ -48,6 +55,8 @@ export interface Emitter {
   power: number;
   /** draw a housing box */
   housing: boolean;
+  /** one of the units along the wall-top line of the whole U front (target `front_line`) */
+  front: boolean;
 }
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -61,6 +70,20 @@ const PILLARS: readonly [number, number][] = [
 ];
 const CAPITAL_Y = 9.7;
 const CRYSTAL_MID_Y = 11.2;
+/**
+ * Side-section wall-walk units (terrain-layout.json stage.sideSections: front wall Z −4, wall walk Y 9.5,
+ * X ±37…±92; Sides.ts: merlons to Y 10.4, crystal lanterns at |X| 41 + 8k, moving-head rows around 45 / 61 /
+ * 77). The projectors stand on the parapet between the lanterns, so the row of apertures lines up with the
+ * castle wall-walk units (Y 8.4) at the wall-top line of the U front: frame y ≈ 0.66 from the terrace tripod
+ * (v804.25: the V bottoms of the blue web at 0.64–0.68; the deck front is at 0.74).
+ */
+const RAMPART_X: readonly number[] = [40, 55, 70, 85];
+const RAMPART_Y = 10.6;
+const RAMPART_Z = -4.3;
+/** castle wall-walk units above this height (the default layout's roof units at Y 16) are not on the front line */
+const FRONT_MAX_Y = 12;
+/** minimum spacing (m) of the front-line units: the filmed web has a V every ~16 m */
+const FRONT_PITCH = 12;
 
 function sameAsDefault(name: AnchorName, pts: THREE.Vector3[]): boolean {
   const d = DEFAULTS.get(name);
@@ -77,7 +100,7 @@ function signature(pts: THREE.Vector3[]): number {
 
 export class LaserRig {
   readonly emitters: Emitter[] = [];
-  readonly byGroup: Record<EmitterGroup, Emitter[]> = { deck: [], tower: [], dragon: [], high: [], corner: [], turret: [], pillar: [], base: [], piano: [] };
+  readonly byGroup: Record<EmitterGroup, Emitter[]> = { deck: [], tower: [], dragon: [], high: [], corner: [], turret: [], pillar: [], base: [], piano: [], rampart: [] };
   /** crystal mirror centres keyed by pillar id L1, R1, L2, R2 … (row-major, left first) */
   readonly mirrors: THREE.Vector3[] = [];
   /** anchors this rig registered itself (so a later rebuild can tell "customised by others" apart) */
@@ -129,6 +152,7 @@ export class LaserRig {
         order: 0,
         row: -1,
         partner: -1,
+        front: false,
         power,
         housing,
       };
@@ -182,6 +206,9 @@ export class LaserRig {
     }
     for (const s of [-1, 1]) for (const dz of [-0.5, 0, 0.5]) add('turret', v(s * 94, 12, 58 + dz), v(-s, 0, -0.18 + dz * 0.4), 1.1);
     add('piano', v(0, 1.8, 59), v(0, 0, -1), 1.2, false);
+    // side-section wall walks (round 9): appended last so every older unit keeps its index (the piano's
+    // centre side and the smear order depend on it)
+    for (const s of [-1, 1]) for (const x of RAMPART_X) add('rampart', v(s * x, RAMPART_Y, RAMPART_Z), aud, 0.9);
 
     // ranks (left → right within each group), pillar rows and pillar partners
     for (const g of Object.keys(this.byGroup) as EmitterGroup[]) {
@@ -191,6 +218,18 @@ export class LaserRig {
         e.rank = sorted.length > 1 ? i / (sorted.length - 1) : 0.5;
         e.order = i;
       });
+    }
+    // the front line: from the centre outwards per side, keep a unit when it is FRONT_PITCH from the last kept
+    for (const sd of [-1, 1]) {
+      const line = this.emitters
+        .filter((e) => (e.group === 'rampart' || (e.group === 'tower' && e.pos.y < FRONT_MAX_Y)) && Math.sign(e.pos.x) === sd)
+        .sort((p, q) => Math.abs(p.pos.x) - Math.abs(q.pos.x));
+      let last = -Infinity;
+      for (const e of line) {
+        if (Math.abs(e.pos.x) - last < FRONT_PITCH) continue;
+        e.front = true;
+        last = Math.abs(e.pos.x);
+      }
     }
     const pillars = this.byGroup.pillar;
     const rowsZ = [...new Set(pillars.map((e) => Math.round(e.pos.z)))].sort((p, q) => p - q);
@@ -221,7 +260,9 @@ export class LaserRig {
 
   /** register our final positions so other systems (camera, debug) see the real layout */
   register(a: Anchors): void {
-    a.set('laser_stage', this.emitters.filter((e) => e.origin === 'stage').map((e) => e.pos));
+    // (the wall-walk units stay out of the published layout: other systems read 'laser_stage' as the stage
+    // engineer's housings, and the side sections carry no laser anchor of their own)
+    a.set('laser_stage', this.emitters.filter((e) => e.origin === 'stage' && e.group !== 'rampart').map((e) => e.pos));
     a.set('laser_field', this.emitters.filter((e) => e.origin === 'field' && e.group !== 'base').map((e) => e.pos));
     this.mine.set('laser_stage', signature(a.get('laser_stage')));
     this.mine.set('laser_field', signature(a.get('laser_field')));
