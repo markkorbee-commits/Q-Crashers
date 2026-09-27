@@ -93,6 +93,8 @@ export interface LightCue {
   pattern: string;
   /** chase step in beats */
   every: number;
+  /** the cue set `every` itself (pillar strobes default to a half beat) */
+  everySet: boolean;
   /** strobe burst rate (Hz) */
   rate: number;
   // pillars
@@ -102,6 +104,22 @@ export interface LightCue {
   c3: THREE.Color;
   /** pillars: per-pillar mask (null = every pillar), built with the rig */
   pmask: Uint8Array | null;
+  /**
+   * pillars (round 11): lamp / shaft colour lists, per pillar (`colors` / `shafts`, index = pillars_top order,
+   * cycled) or per row (`rowColors` / `rowShafts`, 0 = the row nearest the stage, cycled); null = the cue colour
+   */
+  colors: string[] | null;
+  rowColors: string[] | null;
+  shafts: string[] | null;
+  rowShafts: string[] | null;
+  /** blinder (round 11): rise time (s, -1 = default 0.03) and release after dur (s, -1 = the tungsten afterglow) */
+  blAttack: number;
+  release: number;
+  /** event life after dur (s) when >= 0 (overrides the track tail: a blinder with a long `release`) */
+  tail: number;
+  /** flood (round 11): gate step in beats (0 = no gate) and the lit share of each step */
+  gate: number;
+  duty: number;
   // flood / zone wash / festoon
   /** flood: AREA_* bitmask; wash: zone mask (AREA_SIDES_L / _R) or 0 = the whole set */
   area: number;
@@ -120,6 +138,13 @@ export const AREA_SIDES_L = 4;
 export const AREA_SIDES_R = 8;
 export const AREA_SIDES = AREA_SIDES_L | AREA_SIDES_R;
 export const AREA_ALL = AREA_STAGE | AREA_FIELD | AREA_SIDES;
+/**
+ * round 11, flood only (explicit: never part of `all`): a local light pool on the ground, no lit air. `aisle` = the
+ * paving of the central aisle between the lantern rows, `front` = the paving in front of the deck (v742.66: orange
+ * light on the aisle and in front of the deck under blinder / capital-flame hits, the rest of the field dark)
+ */
+export const AREA_AISLE = 16;
+export const AREA_FRONT = 32;
 
 // festoon strings (bit = kind * 2 + side, side 0 = left / x < 0, 1 = right)
 export const FS_WINGS = 0;
@@ -198,7 +223,14 @@ function floodArea(c: Cue, fx: string): number {
         return 0;
     }
   };
-  if (fx === 'flood') return zone(str(p.area)) || t.reduce((m, n) => m | zone(n), 0) || AREA_ALL;
+  if (fx === 'flood') {
+    // local ground pools (explicit area names; a list combines them, e.g. ['aisle', 'front'])
+    const pools = (name: unknown): number => (name === 'aisle' ? AREA_AISLE : name === 'front' || name === 'deck_front' ? AREA_FRONT : name === 'pools' ? AREA_AISLE | AREA_FRONT : 0);
+    const list = Array.isArray(p.area) ? p.area : [p.area];
+    let m = 0;
+    for (const a of list) m |= pools(a) || zone(str(a));
+    return m || t.reduce((acc, n) => acc | zone(n), 0) || AREA_ALL;
+  }
   // wash: only a side-section target makes it a zone wash; everything else washes the whole set
   let m = 0;
   for (const n of t) if (n !== 'all' && zone(n) & AREA_SIDES) m |= sideMask;
@@ -210,7 +242,32 @@ export const PM_FLICKER = 1;
 export const PM_CHASE = 2;
 export const PM_PULSE = 3;
 export const PM_OFF = 4;
-const PILLAR_MODES = ['steady', 'flicker', 'chase', 'pulse', 'off'];
+/** round 11: the crystals flash on every `every` step (default a half beat; v1223.5–1226, v1267.9–1269.2) */
+export const PM_STROBE = 5;
+const PILLAR_MODES = ['steady', 'flicker', 'chase', 'pulse', 'off', 'strobe'];
+
+/** `every` names -> beats (chase / pillar strobe / flood gate) */
+function everyBeats(v: unknown, d: number): number {
+  switch (v) {
+    case 'quarter':
+      return 0.25;
+    case 'halfbeat':
+      return 0.5;
+    case 'beat':
+      return 1;
+    case '2beat':
+      return 2;
+    case 'bar':
+      return 4;
+    default:
+      return typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.min(16, Math.max(0.125, v)) : d;
+  }
+}
+const strList = (v: unknown): string[] | null => {
+  if (!Array.isArray(v)) return null;
+  const a = v.filter((x): x is string => typeof x === 'string' && x.length > 0);
+  return a.length ? a : null;
+};
 
 function parse(c: Cue, show: ShowEngine): LightCue {
   const p = c.p ?? {};
@@ -248,13 +305,23 @@ function parse(c: Cue, show: ShowEngine): LightCue {
     target: parseTargets(c.targets, p.groups, { tags: 0, side: 0, band: 0 }),
     mask: null,
     pattern: str(p.pattern) ?? 'lr',
-    every: p.every === 'halfbeat' ? 0.5 : p.every === 'bar' ? 4 : p.every === '2beat' ? 2 : 1,
+    every: p.every === 'halfbeat' ? 0.5 : p.every === 'bar' ? 4 : p.every === '2beat' ? 2 : p.every === 'quarter' && c.fx === 'pillars' ? 0.25 : 1,
+    everySet: p.every !== undefined,
     rate: Math.max(0.5, Math.min(30, num(p.rate, 12))),
     mode: Math.max(0, (c.fx === 'festoon' ? (FESTOON_MODES as readonly string[]) : PILLAR_MODES).indexOf(str(p.mode) ?? 'steady')),
     shaft: str(p.shaft) ?? str(p.color2),
     shaftIntensity: Math.max(0, num(p.shaftIntensity, 0.8)),
     c3: new THREE.Color(1, 1, 1),
     pmask: null,
+    colors: c.fx === 'pillars' ? strList(p.colors) : null,
+    rowColors: c.fx === 'pillars' ? strList(p.rowColors) : null,
+    shafts: c.fx === 'pillars' ? strList(p.shafts) : null,
+    rowShafts: c.fx === 'pillars' ? strList(p.rowShafts) : null,
+    blAttack: c.fx === 'blinder' && typeof p.attack === 'number' && Number.isFinite(p.attack) ? Math.max(0.01, p.attack) : -1,
+    release: c.fx === 'blinder' && typeof p.release === 'number' && Number.isFinite(p.release) ? Math.min(3, Math.max(0.02, p.release)) : -1,
+    tail: -1,
+    gate: c.fx === 'flood' && p.gate !== undefined ? everyBeats(p.gate, 0) : 0,
+    duty: Math.min(0.95, Math.max(0.05, num(p.duty, 0.5))),
     area: c.fx === 'flood' || c.fx === 'wash' ? floodArea(c, c.fx) : 0,
     attack: Math.max(0.01, num(p.attack, 0.08)),
     fieldShare: c.fx === 'wash' ? Math.min(1, Math.max(0, num(p.fieldShare, 0))) : 0,
@@ -263,11 +330,22 @@ function parse(c: Cue, show: ShowEngine): LightCue {
   // floods and festoons release over `fade` (flood default 0.8 s, festoon 0.4 s)
   if (c.fx === 'flood') lc.fade = Math.max(0, num(p.fade, 0.8));
   if (c.fx === 'festoon') lc.fade = Math.max(0, num(p.fade, 0.4));
+  // storm haze (round 11): swells in over `attack` (default 0.6 s) and clears over `fade` (default 1.2 s)
+  if (c.fx === 'storm') {
+    lc.attack = Math.max(0.01, num(p.attack, 0.6));
+    lc.fade = Math.max(0, num(p.fade, 1.2));
+  }
+  // a blinder with an explicit release lives until its release has decayed (else the 1.1 s tungsten tail)
+  if (lc.release >= 0) lc.tail = Math.max(0.05, lc.release * 3.5);
   return lc;
 }
 
 /** a cue starting within this of the previous cue's end (s, the show file's ms rounding) touches it */
 const TOUCH_EPS = 0.002;
+/** reduce flashing: state cues shorter than this that follow the previous one within CALM_GAP are stutters (s) */
+const CALM_STUTTER = 0.5;
+/** reduce flashing: minimum cross-fade of a state change (s) */
+const CALM_FADE = 0.15;
 
 /**
  * A sorted list of "state" cues (looks, washes, pillar states) where the latest-started alive
@@ -292,6 +370,29 @@ export class StateTrack {
     this.items.sort((a, b) => a.t0 - b.t0 || a.cue.id - b.cue.id);
     this.maxDur = 0;
     for (const c of this.items) this.maxDur = Math.max(this.maxDur, c.dur);
+  }
+
+  /**
+   * Round 11, photosensitivity option (App.reduceFlashing): a copy of this track without the authored stutters —
+   * a short cue (dur < CALM_STUTTER) that starts less than CALM_GAP after the previous kept cue is dropped and the
+   * kept cue covers it (the colour changes of v160.8–171.4 came 12.5 times a second: at most ~3 per second now),
+   * every kept cue cross-fades over at least CALM_FADE. Built once per compile (allocates).
+   */
+  calmCopy(): StateTrack {
+    const out = new StateTrack(this.touch);
+    let last: LightCue | null = null;
+    for (const c of this.items) {
+      if (last && c.dur < CALM_STUTTER && c.t0 - last.t0 < CALM_GAP) {
+        // the kept cue holds through the dropped one when they touch (no dark / default gap in between)
+        const end = c.t0 + c.dur;
+        if (end > last.t0 + last.dur && c.t0 <= last.t0 + last.dur + TOUCH_EPS) last.dur = end - last.t0;
+        continue;
+      }
+      last = { ...c, fade: Math.max(c.fade, CALM_FADE) };
+      out.push(last);
+    }
+    out.finish();
+    return out;
   }
 
   /** index of the last item with t0 <= t (or -1) */
@@ -378,7 +479,7 @@ export class EventTrack {
   ) {}
 
   private life(c: LightCue): number {
-    return c.dur + (this.withFade ? c.fade : this.tail);
+    return c.dur + (this.withFade ? c.fade : c.tail >= 0 ? c.tail : this.tail);
   }
 
   push(c: LightCue): void {
@@ -533,6 +634,19 @@ export class LightCueIndex {
   /** festoon strings: kind * 2 + side */
   readonly festoon: StateTrack[] = Array.from({ length: FS_KINDS * 2 }, () => new StateTrack(true));
   readonly floods = new EventTrack(0, true);
+  /** round 11: storm haze boosts (`lights.storm`), live dur + fade */
+  readonly storms = new EventTrack(0, true);
+  /** round 11: the dragon key (`lights.key`): a state track (latest cue wins, cross-faded) */
+  readonly key = new StateTrack(true);
+  /**
+   * reduce flashing (round 11): the state tracks without the authored stutters (StateTrack.calmCopy), used instead
+   * of the tracks above while App.reduceFlashing is on
+   */
+  calmLooks: StateTrack[] = [];
+  calmWash = new StateTrack(true);
+  calmWashSides: StateTrack[] = [];
+  calmPillars: StateTrack[] = [];
+  calmFestoon: StateTrack[] = [];
   readonly hits = new EventTrack(0);
   readonly chases = new EventTrack(0);
   readonly blinders = new EventTrack(BLINDER_TAIL);
@@ -566,6 +680,8 @@ export class LightCueIndex {
     this.pillars = rig.pillars.map(() => new StateTrack(true));
     for (const f of this.festoon) f.items.length = 0;
     this.floods.items.length = 0;
+    this.storms.items.length = 0;
+    this.key.items.length = 0;
     this.hits.items.length = 0;
     this.chases.items.length = 0;
     this.blinders.items.length = 0;
@@ -595,6 +711,12 @@ export class LightCueIndex {
           break;
         case 'flood':
           this.floods.push(lc);
+          break;
+        case 'storm':
+          this.storms.push(lc);
+          break;
+        case 'key':
+          this.key.push(lc);
           break;
         case 'festoon':
           for (let b = 0; b < this.festoon.length; b++) if (lc.strings & (1 << b)) this.festoon[b].push(lc);
@@ -628,11 +750,18 @@ export class LightCueIndex {
     for (const p of this.pillars) p.finish();
     for (const f of this.festoon) f.finish();
     this.floods.finish();
+    this.storms.finish();
+    this.key.finish();
     this.hits.finish();
     this.chases.finish();
     this.blinders.finish();
     this.strobes.finish();
     this.buildCalm(show.tempo ?? null);
+    this.calmLooks = this.looks.map((t) => t.calmCopy());
+    this.calmWash = this.wash.calmCopy();
+    this.calmWashSides = this.washSides.map((t) => t.calmCopy());
+    this.calmPillars = this.pillars.map((t) => t.calmCopy());
+    this.calmFestoon = this.festoon.map((t) => t.calmCopy());
     this.revision = show.revision;
   }
 

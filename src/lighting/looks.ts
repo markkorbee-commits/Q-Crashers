@@ -195,6 +195,21 @@ export function evalLook(c: LightCue | null, f: Fixture, t: number, beat: BeatIn
       break;
     }
     case P_FAN: {
+      if (c.aim) {
+        // round 11: a FLAT fan aimed at a world point (the lens: v834.88–838.08, low beams fanning from the deck
+        // towards the camera): every head aims at `aim`, turned about the vertical by its place in the row x
+        // `spread` / 2 (deg, default 36), the elevation kept, `sway` (deg) swings the whole fan slowly
+        setToward(f, c.aim.x, c.aim.y, c.aim.z, o);
+        const yaw = (f.cx * (c.spread ?? 36) * 0.5 + (c.sway > 0 ? c.sway * sin(TAU * P) : 0)) * D2R;
+        const cy = Math.cos(yaw);
+        const sy = Math.sin(yaw);
+        const x = o.x * cy + o.z * sy;
+        o.z = -o.x * sy + o.z * cy;
+        o.x = x;
+        o.mix = f.cluster & 1;
+        if (f.tags & T_SPAR && f.k & 1) dim = 0;
+        break;
+      }
       let spread = (c.spread ?? 36) * (0.72 + 0.28 * sin(TAU * P));
       let center: number;
       let lean = c.tilt !== null ? 90 - c.tilt : 16;

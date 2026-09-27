@@ -71,6 +71,26 @@ export class LightEnv {
   /** per-pillar intensity multipliers for chases (index = pillar index in anchors 'pillars_top'); empty = all 1 */
   pillarChase: number[] = [];
   /**
+   * Round 11: per-pillar lamp / shaft colours (index = pillars_top order, same units as pillarLampColor /
+   * pillarShaftColor: the resolved cue colour, not premultiplied; the level stays pillarLampIntensity x
+   * pillarChase[i]). Written by LightingSystem only while the pillars differ in colour (a `pillars` cue with
+   * `colors` / `rowColors`, or subset cues in different colours: v190 a magenta lantern among blue ones, v509.4 red
+   * near crystals and blue far ones); EMPTY while every pillar shows pillarLampColor / pillarShaftColor, so a
+   * receiver can take the fast path: colour_i = pillarLampColors[i] ?? pillarLampColor.
+   */
+  pillarLampColors: THREE.Color[] = [];
+  pillarShaftColors: THREE.Color[] = [];
+  /**
+   * Round 11: a key light on the dragon sculpture itself (`lights.key`), independent of the set wash: the film
+   * floods the head red from one side and green from the other (v944–1010, v1043.9) while the castle stays dark.
+   * dragonKeyColor = the main key (audience left / front), dragonKeyColor2 = the second side (audience right);
+   * both linear colour x level (premultiplied, 0..~2). dragonKeyIntensity = the larger level (0 = no key).
+   * Written by LightingSystem each frame (reset to 0 with the frame); the stage's dragon / crown materials read it.
+   */
+  readonly dragonKeyColor = new THREE.Color(0, 0, 0);
+  readonly dragonKeyColor2 = new THREE.Color(0, 0, 0);
+  dragonKeyIntensity = 0;
+  /**
    * DJ-portal arch-crown downlights (written by LightingSystem each frame): normalised colour (max channel 1)
    * and mean level 0..1.5 of the 7 cans focused on the deck in front of the portal (0 = off). Performers in
    * the arch / on the podium can take their key light from it.
@@ -119,6 +139,9 @@ export class LightEnv {
     this.stageIntensity = 0;
     this.audienceWash = 0;
     this.archSpotIntensity = 0;
+    this.dragonKeyColor.setRGB(0, 0, 0);
+    this.dragonKeyColor2.setRGB(0, 0, 0);
+    this.dragonKeyIntensity = 0;
     this.lowFogLight.setRGB(0, 0, 0);
     this.flashColor.setRGB(0, 0, 0);
     this.flashWeight = 0;
