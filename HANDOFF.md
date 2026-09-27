@@ -337,6 +337,7 @@ Zo 27 sep 2026, ± 00:40 (CEST), lokaal op de MacBook Pro (M4 Max, GPU-render).
   | + ronde 8 deel 1 (show, camera, pyro, lighting, env, stage, flash) | 68,1 % | 51,7 % | 68,8 / 81,0 / 56,3 |
   | + perception (Show camera ongewijzigd) + ronde 9 (8 groepen) | 68,5 % | 52,3 % | 69,2 / 81,5 / 56,6 |
   | + ronde 10 (video-match, alle 11 showdelen, exacte frames) | 69,3 % | 53,5 % | 70,3 / 82,2 / 57,1 |
+  | + ronde 11 (engine-uitbreidingen + 117 cue-patches) + features | 69,5 % | 53,8 % | 70,5 / 82,6 / 57,3 |
 
 - Ronde 5 (findings `docs/handoff/findings/r5_*.md`): schermen tonen kasteelprint i.p.v. vlakke panelen; MC met
   gekleurde key + backlight, close-ups houden de haze, troupe-choreografie en -shots 641-740 s herzien; pyro met
@@ -378,6 +379,16 @@ Zo 27 sep 2026, ± 00:40 (CEST), lokaal op de MacBook Pro (M4 Max, GPU-render).
   shot met kleinste-kwadraten-posefit (terrasstatief, telelens, zijheuvel), cutlijst gecorrigeerd. Notities per deel in
   `research/video-timeline/NN.md`. Showbestand nu 3365 cues (4068 geëxpandeerd: net boven de richtwaarde 4000,
   mobiel budget PASS).
+
+- Features ronde 8 (gemerged 27 sep ± 07:05, elk onafhankelijk gereviewd en hersteld): fotomodus verwijderd (spot
+  "Photo terrace" blijft; camera's 1-5), reuzenrad beloopbaar met instapplatform, rit (1e/3e persoon, touch) en
+  spot `ferris`; muziek komt afstand/343 s later aan (niet in Show camera/flyover); waarschuwing lichtgevoeligheid bij de
+  start + `?calm`; vergelijkmodus met de officiële YouTube-video (gesynchroniseerd, niet in de claude.ai-artifact);
+  "minder flitsen" ook voor vuurwerk-strobe, sterren, kroon, LED-pulsen, lasers en camerastutter.
+- Ronde 11 (27 sep ± 08:20): engine-uitbreidingen uit de video-match (vleugelblades, festoenkleur/glare, head flash,
+  vuurwerk-offsets en comet walls, eruptie, kleur per lantaarn, spar-lampen, laser-web en sheets, mist roll-out,
+  camera roll/zoomAt/dip naar zwart, donkere drone-lucht) plus 117 cue-patches: 64 momenten +0,3; de 381 geraakte
+  momenten 39,5 → 43,3 % na ijking (`research/video-timeline/sync-r11.md`).
 
 Eerdere stand (cloud, vóór de overdracht):
 

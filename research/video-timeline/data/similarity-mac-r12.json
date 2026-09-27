@@ -1,0 +1,535 @@
+{
+ "what": "scripts/similarity.mjs, default 64 moments, quality=medium, --settle 500 --min-frames 30 (pre-roll on), Mac M4 Max GPU (ANGLE Metal), exact-time frames, 27 Sep 2026, after round 11 (engine + cue patches) and the round-8 features. Numbers only.",
+ "overall": 69.5,
+ "baselineOtherMoment": 34.0,
+ "normalised": 53.8,
+ "parts": {
+  "colour": 70.5,
+  "light": 82.6,
+  "shape": 57.3
+ },
+ "tracks": {
+  "Vivaldi": 65.9,
+  "Discorecord": 69.9,
+  "Sacred Oath": 62.9,
+  "L.P.A.": 73.3,
+  "Sacred Flame": 63.6,
+  "Domitor Draconis": 80.9,
+  "Embers": 66.9,
+  "In The Cold": 75.6
+ },
+ "pairs": [
+  {
+   "t": 20.25,
+   "track": "Vivaldi",
+   "score": 0.647,
+   "colour": 0.593,
+   "light": 0.825,
+   "shape": 0.578
+  },
+  {
+   "t": 44.75,
+   "track": "Vivaldi",
+   "score": 0.76,
+   "colour": 0.764,
+   "light": 0.78,
+   "shape": 0.739
+  },
+  {
+   "t": 69.25,
+   "track": "Vivaldi",
+   "score": 0.642,
+   "colour": 0.689,
+   "light": 0.592,
+   "shape": 0.612
+  },
+  {
+   "t": 93.5,
+   "track": "Vivaldi",
+   "score": 0.587,
+   "colour": 0.676,
+   "light": 0.503,
+   "shape": 0.522
+  },
+  {
+   "t": 118,
+   "track": "Discorecord",
+   "score": 0.714,
+   "colour": 0.781,
+   "light": 0.696,
+   "shape": 0.627
+  },
+  {
+   "t": 142.5,
+   "track": "Discorecord",
+   "score": 0.774,
+   "colour": 0.886,
+   "light": 0.864,
+   "shape": 0.531
+  },
+  {
+   "t": 167,
+   "track": "Discorecord",
+   "score": 0.647,
+   "colour": 0.621,
+   "light": 0.819,
+   "shape": 0.543
+  },
+  {
+   "t": 191.5,
+   "track": "Discorecord",
+   "score": 0.784,
+   "colour": 0.843,
+   "light": 0.939,
+   "shape": 0.566
+  },
+  {
+   "t": 215.75,
+   "track": "Discorecord",
+   "score": 0.642,
+   "colour": 0.684,
+   "light": 0.821,
+   "shape": 0.431
+  },
+  {
+   "t": 240.25,
+   "track": "Discorecord",
+   "score": 0.688,
+   "colour": 0.72,
+   "light": 0.791,
+   "shape": 0.553
+  },
+  {
+   "t": 264.75,
+   "track": "Discorecord",
+   "score": 0.642,
+   "colour": 0.771,
+   "light": 0.691,
+   "shape": 0.408
+  },
+  {
+   "t": 289.25,
+   "track": "Sacred Oath",
+   "score": 0.61,
+   "colour": 0.593,
+   "light": 0.781,
+   "shape": 0.493
+  },
+  {
+   "t": 313.75,
+   "track": "Sacred Oath",
+   "score": 0.559,
+   "colour": 0.531,
+   "light": 0.697,
+   "shape": 0.485
+  },
+  {
+   "t": 338,
+   "track": "Sacred Oath",
+   "score": 0.637,
+   "colour": 0.627,
+   "light": 0.727,
+   "shape": 0.576
+  },
+  {
+   "t": 362.5,
+   "track": "Sacred Oath",
+   "score": 0.322,
+   "colour": 0.203,
+   "light": 0.643,
+   "shape": 0.234
+  },
+  {
+   "t": 387,
+   "track": "Sacred Oath",
+   "score": 0.753,
+   "colour": 0.821,
+   "light": 0.824,
+   "shape": 0.591
+  },
+  {
+   "t": 411.5,
+   "track": "Sacred Oath",
+   "score": 0.627,
+   "colour": 0.679,
+   "light": 0.63,
+   "shape": 0.546
+  },
+  {
+   "t": 436,
+   "track": "Sacred Oath",
+   "score": 0.64,
+   "colour": 0.682,
+   "light": 0.761,
+   "shape": 0.476
+  },
+  {
+   "t": 460.5,
+   "track": "Sacred Oath",
+   "score": 0.574,
+   "colour": 0.686,
+   "light": 0.578,
+   "shape": 0.402
+  },
+  {
+   "t": 484.75,
+   "track": "Sacred Oath",
+   "score": 0.802,
+   "colour": 0.881,
+   "light": 0.911,
+   "shape": 0.593
+  },
+  {
+   "t": 509.25,
+   "track": "Sacred Oath",
+   "score": 0.675,
+   "colour": 0.631,
+   "light": 0.792,
+   "shape": 0.644
+  },
+  {
+   "t": 533.75,
+   "track": "Sacred Oath",
+   "score": 0.741,
+   "colour": 0.641,
+   "light": 0.951,
+   "shape": 0.718
+  },
+  {
+   "t": 558.25,
+   "track": "Sacred Oath",
+   "score": 0.612,
+   "colour": 0.544,
+   "light": 0.781,
+   "shape": 0.573
+  },
+  {
+   "t": 582.75,
+   "track": "L.P.A.",
+   "score": 0.525,
+   "colour": 0.572,
+   "light": 0.593,
+   "shape": 0.399
+  },
+  {
+   "t": 607,
+   "track": "L.P.A.",
+   "score": 0.759,
+   "colour": 0.723,
+   "light": 0.932,
+   "shape": 0.669
+  },
+  {
+   "t": 631.5,
+   "track": "L.P.A.",
+   "score": 0.914,
+   "colour": 0.924,
+   "light": 0.994,
+   "shape": 0.832
+  },
+  {
+   "t": 656,
+   "track": "Sacred Flame",
+   "score": 0.47,
+   "colour": 0.482,
+   "light": 0.676,
+   "shape": 0.281
+  },
+  {
+   "t": 680.5,
+   "track": "Sacred Flame",
+   "score": 0.509,
+   "colour": 0.5,
+   "light": 0.781,
+   "shape": 0.298
+  },
+  {
+   "t": 705,
+   "track": "Sacred Flame",
+   "score": 0.556,
+   "colour": 0.633,
+   "light": 0.754,
+   "shape": 0.277
+  },
+  {
+   "t": 729.25,
+   "track": "Sacred Flame",
+   "score": 0.762,
+   "colour": 0.735,
+   "light": 0.889,
+   "shape": 0.695
+  },
+  {
+   "t": 753.75,
+   "track": "Sacred Flame",
+   "score": 0.731,
+   "colour": 0.721,
+   "light": 0.877,
+   "shape": 0.626
+  },
+  {
+   "t": 778.25,
+   "track": "Sacred Flame",
+   "score": 0.734,
+   "colour": 0.818,
+   "light": 0.884,
+   "shape": 0.481
+  },
+  {
+   "t": 802.75,
+   "track": "Sacred Flame",
+   "score": 0.569,
+   "colour": 0.499,
+   "light": 0.752,
+   "shape": 0.521
+  },
+  {
+   "t": 827.25,
+   "track": "Sacred Flame",
+   "score": 0.718,
+   "colour": 0.655,
+   "light": 0.926,
+   "shape": 0.639
+  },
+  {
+   "t": 851.75,
+   "track": "Sacred Flame",
+   "score": 0.729,
+   "colour": 0.739,
+   "light": 0.814,
+   "shape": 0.644
+  },
+  {
+   "t": 876,
+   "track": "Sacred Flame",
+   "score": 0.581,
+   "colour": 0.568,
+   "light": 0.68,
+   "shape": 0.518
+  },
+  {
+   "t": 900.5,
+   "track": "Domitor Draconis",
+   "score": 0.886,
+   "colour": 0.941,
+   "light": 0.987,
+   "shape": 0.721
+  },
+  {
+   "t": 925,
+   "track": "Domitor Draconis",
+   "score": 0.84,
+   "colour": 0.899,
+   "light": 0.965,
+   "shape": 0.648
+  },
+  {
+   "t": 949.5,
+   "track": "Domitor Draconis",
+   "score": 0.81,
+   "colour": 0.901,
+   "light": 0.935,
+   "shape": 0.569
+  },
+  {
+   "t": 974,
+   "track": "Domitor Draconis",
+   "score": 0.685,
+   "colour": 0.789,
+   "light": 0.798,
+   "shape": 0.434
+  },
+  {
+   "t": 998.25,
+   "track": "Domitor Draconis",
+   "score": 0.633,
+   "colour": 0.651,
+   "light": 0.842,
+   "shape": 0.431
+  },
+  {
+   "t": 1022.75,
+   "track": "Domitor Draconis",
+   "score": 0.944,
+   "colour": 0.982,
+   "light": 0.99,
+   "shape": 0.849
+  },
+  {
+   "t": 1047.25,
+   "track": "Domitor Draconis",
+   "score": 0.576,
+   "colour": 0.467,
+   "light": 0.81,
+   "shape": 0.545
+  },
+  {
+   "t": 1071.75,
+   "track": "Domitor Draconis",
+   "score": 0.943,
+   "colour": 0.978,
+   "light": 0.988,
+   "shape": 0.854
+  },
+  {
+   "t": 1096.25,
+   "track": "Domitor Draconis",
+   "score": 0.966,
+   "colour": 0.986,
+   "light": 0.999,
+   "shape": 0.909
+  },
+  {
+   "t": 1120.5,
+   "track": "Embers",
+   "score": 0.629,
+   "colour": 0.377,
+   "light": 0.926,
+   "shape": 0.758
+  },
+  {
+   "t": 1145,
+   "track": "Embers",
+   "score": 0.624,
+   "colour": 0.623,
+   "light": 0.85,
+   "shape": 0.435
+  },
+  {
+   "t": 1169.5,
+   "track": "Embers",
+   "score": 0.4,
+   "colour": 0.205,
+   "light": 0.764,
+   "shape": 0.389
+  },
+  {
+   "t": 1194,
+   "track": "Embers",
+   "score": 0.525,
+   "colour": 0.438,
+   "light": 0.768,
+   "shape": 0.452
+  },
+  {
+   "t": 1218.5,
+   "track": "Embers",
+   "score": 0.845,
+   "colour": 0.88,
+   "light": 0.967,
+   "shape": 0.691
+  },
+  {
+   "t": 1243,
+   "track": "Embers",
+   "score": 0.538,
+   "colour": 0.606,
+   "light": 0.719,
+   "shape": 0.285
+  },
+  {
+   "t": 1267.25,
+   "track": "Embers",
+   "score": 0.907,
+   "colour": 0.947,
+   "light": 0.988,
+   "shape": 0.781
+  },
+  {
+   "t": 1291.75,
+   "track": "Embers",
+   "score": 0.66,
+   "colour": 0.691,
+   "light": 0.863,
+   "shape": 0.445
+  },
+  {
+   "t": 1316.25,
+   "track": "Embers",
+   "score": 0.897,
+   "colour": 0.957,
+   "light": 0.933,
+   "shape": 0.776
+  },
+  {
+   "t": 1340.75,
+   "track": "In The Cold",
+   "score": 0.828,
+   "colour": 0.89,
+   "light": 0.964,
+   "shape": 0.621
+  },
+  {
+   "t": 1365.25,
+   "track": "In The Cold",
+   "score": 0.862,
+   "colour": 0.916,
+   "light": 0.974,
+   "shape": 0.689
+  },
+  {
+   "t": 1389.5,
+   "track": "In The Cold",
+   "score": 0.745,
+   "colour": 0.688,
+   "light": 0.941,
+   "shape": 0.666
+  },
+  {
+   "t": 1414,
+   "track": "In The Cold",
+   "score": 0.973,
+   "colour": 0.991,
+   "light": 1.0,
+   "shape": 0.925
+  },
+  {
+   "t": 1438.5,
+   "track": "In The Cold",
+   "score": 0.599,
+   "colour": 0.748,
+   "light": 0.568,
+   "shape": 0.399
+  },
+  {
+   "t": 1463,
+   "track": "In The Cold",
+   "score": 0.762,
+   "colour": 0.704,
+   "light": 0.958,
+   "shape": 0.685
+  },
+  {
+   "t": 1487.5,
+   "track": "In The Cold",
+   "score": 0.866,
+   "colour": 0.889,
+   "light": 0.973,
+   "shape": 0.742
+  },
+  {
+   "t": 1511.75,
+   "track": "In The Cold",
+   "score": 0.542,
+   "colour": 0.505,
+   "light": 0.682,
+   "shape": 0.481
+  },
+  {
+   "t": 1536.25,
+   "track": "In The Cold",
+   "score": 0.538,
+   "colour": 0.468,
+   "light": 0.764,
+   "shape": 0.453
+  },
+  {
+   "t": 1560.75,
+   "track": "In The Cold",
+   "score": 0.846,
+   "colour": 0.861,
+   "light": 0.983,
+   "shape": 0.708
+  }
+ ]
+}
