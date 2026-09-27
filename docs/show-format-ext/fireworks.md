@@ -97,7 +97,8 @@ Engine: `src/fireworks/FireworkSystem.ts`, `src/fireworks/shells.ts`, `src/firew
   * Point layer `fw-points`: crackle pops and shed glitter / flitter sparks are points (head and tail coincide), so
     they are drawn from their own layer with 2 triangles each instead of a full ribbon of (segments + 2) x 2. At the
     finale they are ~88 % of the star instances: ultra, spot=middle, t=1536 4.03 M -> 2.94 M triangles, t=270
-    3.77 M -> 2.78 M (every moment of the judges' > 3 M list is now below 3 M); mobile t=268 791 k -> 668 k. The two
+    3.77 M -> 2.78 M; the judges' > 3 M moments checked at ultra middle (254, 786, 788, 1526-1538, 1566-1570) are
+    2.50-2.94 M; mobile t=268 791 k -> 668 k. The two
     layers have their own budgets (`budget.ts`: both 12 k on mobile, whose worst case stays below the old shared
     15 k ribbons). One more draw call (mobile overview 1536: 106 / 110).
 

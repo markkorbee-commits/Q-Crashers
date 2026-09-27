@@ -344,7 +344,7 @@ stars and the puffs).
   walls) were treated as gold. They now keep their pale colour (no push towards gold), and their nozzle core and
   dense jet burn white; their sparks still cool like gold (orange tails), and the silver-wall rules (thinning,
   dimmed light / smoke of the 16–22 m walls) still apply only to the neutral whites.
-* **White column foot.** The dense jet at the foot of a white / gold gerb is near-white and `JET_HOT` (2.2) × ×
+* **White column foot.** The dense jet at the foot of a white / gold gerb is near-white and `JET_HOT` (2.2) ×
   min(1.2, √`intensity`) brighter; on a tall wall (> 14 m) it is wider (0.45 + 0.02 H m) and reaches ~35–40 % up
   the column (`JET_TALL` 2.2 × its life): the white columns of v1520–1537 and v1565.
 * **Hottest flame core.** A flame puff whose temperature passes 1 (a young puff's centre) runs to a near-neutral
