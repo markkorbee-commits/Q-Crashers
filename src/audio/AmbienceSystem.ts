@@ -188,7 +188,7 @@ export class AmbienceSystem implements System {
   private readonly pendingShots: PendingShot[] = [];
   private vocalsFired = 0;
   private crowdMode: { mode?: unknown } | null | undefined = undefined;
-  private player: { teleports?: unknown } | null | undefined = undefined;
+  private player: { teleports?: unknown; heightAboveGround?: number } | null | undefined = undefined;
   /**
    * camera mode / player teleport count / audio source kind / listener position of the previous mix:
    * a change of the first three, or an on-foot jump of the position, cuts the music delay
@@ -746,7 +746,10 @@ export class AmbienceSystem implements System {
     const cam = app.camera;
     if (onFoot) this.pos.set(app.playerPos.x, app.playerPos.y + 1.7, app.playerPos.z);
     else this.pos.copy(cam.position);
-    const h = Math.max(0, this.pos.y - (onFoot ? app.playerPos.y : 0));
+    if (this.player === undefined) this.player = (app.get('player') as unknown as { teleports?: unknown; heightAboveGround?: number } | undefined) ?? null;
+    // height of the ears above the ground: on foot the feet can be high up (stage deck, top of the Ferris wheel ~32 m)
+    const feetUp = onFoot && typeof this.player?.heightAboveGround === 'number' ? this.player.heightAboveGround : 0;
+    const h = Math.max(0, this.pos.y - (onFoot ? app.playerPos.y - feetUp : 0));
     cam.getWorldDirection(this.fwd);
     let fx = this.fwd.x,
       fz = this.fwd.z;
@@ -900,7 +903,7 @@ export class AmbienceSystem implements System {
 
   /** PlayerController.teleports (incremented on every teleport), 0 when not available */
   private playerTeleports(): number {
-    if (this.player === undefined) this.player = (this.app.get('player') as unknown as { teleports?: unknown } | undefined) ?? null;
+    if (this.player === undefined) this.player = (this.app.get('player') as unknown as { teleports?: unknown; heightAboveGround?: number } | undefined) ?? null;
     const n = this.player?.teleports;
     return typeof n === 'number' ? n : 0;
   }
