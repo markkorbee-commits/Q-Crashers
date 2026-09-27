@@ -281,7 +281,10 @@ void main() {
   vec3 hotCol = mix(vec3(1.0, 0.94, 0.82), mix(chn, vec3(1.0), 0.45), s2);
   // round 12: HDR white-hot core of white / gold heads (x HOT_K, near-neutral): dense columns and fans
   // reach the tone mapper's white where the video clips, their trails keep the colour
-  hot *= mix(1.0, HOT_K, 1.0 - s2);
+  // (light-neutral: the core gains what the soft body gives up, so a fan turns whiter, not brighter)
+  float hotAdd = hot * (HOT_K - 1.0) * (1.0 - s2);
+  hot += hotAdd;
+  float bodyK = 1.0 / (1.0 + hotAdd * CORE_SHARE);
   hotCol = mix(hotCol, WHITE_HOT, (1.0 - s2) * 0.7);
 
   // sparks die on the ground (no spark ever tunnels through the field)
@@ -311,8 +314,10 @@ void main() {
   // round 12: sensor clipping. A white / gold spark far brighter than the camera's white records as
   // white whatever its hue (all three channels clip): past CLIP_LO its colour runs to WHITE_HOT
   float cmx2 = max(col.r, max(col.g, col.b));
-  col = mix(col, WHITE_HOT * cmx2, (1.0 - s2) * smoothstep(CLIP_LO, CLIP_HI, I * gain * cmx2));
-  vCol = col * I * gain * fog;
+  // (only the head clips: a trail keeps its colour, v1511.75: white heads, orange tails; pops are points)
+  float headW = pops > 0 ? 1.0 : 1.0 - smoothstep(0.0, CLIP_TRAIL, sPar);
+  col = mix(col, WHITE_HOT * cmx2, (1.0 - s2) * headW * smoothstep(CLIP_LO, CLIP_HI, I * gain * cmx2));
+  vCol = col * I * gain * fog * bodyK;
   vHot = hotCol * I * gain * fog * hot;
   vUv = vec2(side, cap);
   vTS = tS;

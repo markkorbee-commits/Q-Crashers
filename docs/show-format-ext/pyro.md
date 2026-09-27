@@ -327,6 +327,45 @@ GPU, `--settle 500 --min-frames 30`, pre-roll on; mean raw score of the listed m
   authored orange glows / floods) lost 1–12 points on 275.9–289.8: the terrace-ground frames 275.9 / 277.5 gain
   (+4 to +10) but the telephoto frames lose; the show's authored glows and floods stay the better model.
 
+## Engine behaviour, round 12 (no cue changes needed)
+
+Round 12 (final judges): the fire's own core burns white where the camera clips it; the shared tone map and the
+Show camera exposure are unchanged. Constants in `src/fx/core/glsl.ts` (shared by the pyro sparks, the fireworks
+stars and the puffs).
+
+* **White-hot heads (sparks, stars, comets).** The young head of a white or gold spark turns towards
+  `WHITE_HOT` (≈ 1 / 0.96 / 0.9): white sparks by `WH_WHITE` 0.9, gold ones by `WH_GOLD` 0.6, over the first
+  `HEAT_TRAIL` (0.5) of the trail and the first ~35 % of the life; the trail keeps cooling to its colour (v1511.75:
+  white heads, orange tails). The head's HDR core is `HOT_K` (3) × stronger and near-neutral, light-neutral: the
+  soft body gives up what the core gains, so a fan turns whiter, not brighter. A white / gold head far above the
+  camera's white (`CLIP_LO`..`CLIP_HI` = 5..24 scene units) records white whatever its hue (sensor clipping, the
+  head only). Saturated metal-salt colours (red, pink, blue, green) keep their tinted core as before.
+* **Pale warm whites burn white.** `#FFF0D8`, `#FFF2E0`, `#FFF2DC` (linear saturation 0.22–0.33, authored as white
+  walls) were treated as gold. They now keep their pale colour (no push towards gold), and their nozzle core and
+  dense jet burn white; their sparks still cool like gold (orange tails), and the silver-wall rules (thinning,
+  dimmed light / smoke of the 16–22 m walls) still apply only to the neutral whites.
+* **White column foot.** The dense jet at the foot of a white / gold gerb is near-white and `JET_HOT` (2.2) × ×
+  min(1.2, √`intensity`) brighter; on a tall wall (> 14 m) it is wider (0.45 + 0.02 H m) and reaches ~35–40 % up
+  the column (`JET_TALL` 2.2 × its life): the white columns of v1520–1537 and v1565.
+* **Hottest flame core.** A flame puff whose temperature passes 1 (a young puff's centre) runs to a near-neutral
+  white-hot core up to 1 + `FLAME_HOT` (1.5) × brighter (hydrocarbon flames only). Puff `X0` on a flame adds heat:
+  the bulky eruption's balls (`width` ≈ 3, v1508.4–1509.8) get 0.25 × their bulk, the white-hot roots of a
+  billowing wall 0.3. v1509.25: white 0 → 5.9 % (video 18 %), luma 112 → 128 (video 141).
+* **Minimum on-screen size of burning puffs.** Flames, glows and flashes never shrink below `PUFF_MIN_PX` (1.6) ×
+  the spark minimum width on screen; a grown puff keeps its light × (true / drawn size)^`PUFF_SUBPX_LAW` (1): a far
+  drone camera sees a flame row as flames, not as sub-pixel specks (v535.75, v870; v827.25 +1.4 points).
+* **Valve close (`F.CUT`).** Every spark of a gerb / sparkular in flight burns out within `SPARK_CUT` (0.3 s)
+  after the unit's burn ends (all colour windows share the unit's end), and so does the spark wall of a
+  `blowout` billow: no 1–2 s rain of sparks after the cut (v613.75: the white gerb ring is gone; 614.25 85.7 →
+  92.5 %, 615 87.2 → 92.6 %).
+* **Big mines.** The self-light of the blast cloud of a mine of `size` 3 is 2 × brighter (× 1.37 at 2.5): the white
+  bloom of v1565.4 stands out of the red site glow.
+
+What stays cue-level (reported to the show agent): the red air of the finale (fog.lowfog density 1, lights.flood
+0.8 red, atmos.glow, the gerbs' `lightColor` `#FF2A08`) turns the white sparks salmon in the far drone frames: sparks
+alone at v1530 read (1, 0.79, 0.68) at their brightest, with the red air (1, 0.42, 0.36). Round 11 measured a gold
+`lightColor` as a loss on the colour score (the filmed field is red), so that is a trade-off for the show agent.
+
 ## pyro — new params
 
 | fx | param | meaning |

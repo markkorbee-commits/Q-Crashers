@@ -390,7 +390,10 @@ void main() {
   // (colour-true crackle, FW_TRUE: the pops keep their authored colour, no white-hot core, v539-545:
   // the S9 canopy crackles red / pink, not white)
   float wkS = (flags & FW_TRUE) != 0 && pops > 0 ? 0.0 : 1.0 - s2;
-  hot *= mix(1.0, HOT_K, wkS);
+  // (light-neutral: the core gains what the soft body gives up, so a fan turns whiter, not brighter)
+  float hotAdd = hot * (HOT_K - 1.0) * wkS;
+  hot += hotAdd;
+  float bodyK = 1.0 / (1.0 + hotAdd * CORE_SHARE);
   hotCol = mix(hotCol, WHITE_HOT, wkS * 0.7);
 
   // sparks die on the ground (no spark ever tunnels through the field)
@@ -419,8 +422,10 @@ void main() {
   float fog = fogT(depth);
   // round 12: sensor clipping of white / gold stars far brighter than the camera's white (glsl.ts)
   float cmx2 = max(col.r, max(col.g, col.b));
-  col = mix(col, WHITE_HOT * cmx2, wkS * smoothstep(CLIP_LO, CLIP_HI, I * gain * cmx2));
-  vCol = col * I * gain * fog;
+  // (only the head clips: a trail keeps its colour; pops and shed sparks are points)
+  float headW = pops > 0 || shed > 0 ? 1.0 : 1.0 - smoothstep(0.0, CLIP_TRAIL, sPar);
+  col = mix(col, WHITE_HOT * cmx2, wkS * headW * smoothstep(CLIP_LO, CLIP_HI, I * gain * cmx2));
+  vCol = col * I * gain * fog * bodyK;
   vHot = hotCol * I * gain * fog * hot;
   vUv = vec2(side, cap);
   vTS = tS;

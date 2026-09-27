@@ -1454,7 +1454,7 @@ export class PyroSystem extends CueFxSystem {
             .dirV(d, spread * 0.5)
             .speed(v0 * 0.55, v0 * 0.8)
             .physics(k, -9.81)
-            .color(this.c2.copy(col).lerp(WHITE, hotJet ? (white || warmW ? 0.9 : 0.7) : hotMix * 0.75), (cold ? 1.6 : 2.6) * (white || gold ? 1 : 1.15) * (hotJet ? JET_HOT * Math.sqrt(intenP) : 1))
+            .color(this.c2.copy(col).lerp(WHITE, hotJet ? (white || warmW ? 0.9 : 0.7) : hotMix * 0.75), (cold ? 1.6 : 2.6) * (white || gold ? 1 : 1.15) * (hotJet ? JET_HOT * Math.min(1.2, Math.sqrt(intenP)) : 1))
             .life(0.22 * (hotJet && tall ? JET_TALL : 1), 0.3 * (hotJet && tall ? JET_TALL : 1))
             .emit(this.pc((cold ? 14 : 20) * (hotJet && tall ? 1.5 : 1), 6), wd)
             // (the white column of a tall wall is its dense core plus the smoke it lights white: ~2-3 m wide)
