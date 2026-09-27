@@ -175,6 +175,8 @@ export class AudioFlow {
         await app.sources.useFile(file);
         ui.toast(`Playing your file: ${file.name}`, 2600, 'music');
       } else if (kind === 'youtube') {
+        // one official player at a time: the picture-in-picture master replaces the compare pane
+        ui.compare.close('Compare closed: the official video is now the audio source (picture-in-picture)');
         ui.pip.show();
         try {
           await app.sources.useYouTube(ui.pip.video);

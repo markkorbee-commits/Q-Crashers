@@ -3610,3 +3610,517 @@ ul.fx.links a {
     width: max(240px, min(420px, calc(100% - 880px)));
   }
 }
+
+/* =====================================================================================
+   PHOTOSENSITIVITY WARNING (first ENTER) + "Flashing: Reduced / Full" toggle
+   ===================================================================================== */
+/* the warning opens over the title screen (.landing is z 40) */
+.scrim.gate-scrim {
+  z-index: 45;
+  background: radial-gradient(ellipse at 50% 45%, rgba(10, 4, 6, 0.55), rgba(4, 3, 5, 0.88));
+}
+.card.gate {
+  width: min(600px, 100%);
+}
+.gate .gate-kicker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--warn);
+}
+.gate .gate-kicker .ico {
+  width: 22px;
+  height: 22px;
+}
+.gate .gate-kicker .kicker {
+  color: var(--warn);
+}
+.gate .gate-lead {
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--paper);
+}
+.gate .gate-lead b {
+  color: #ffe9c4;
+  font-weight: 600;
+}
+.gate-choices {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 16px;
+}
+.gate-opt {
+  appearance: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 14px 13px;
+  border-radius: 12px;
+  border: 1px solid var(--line-2);
+  background: rgba(255, 255, 255, 0.04);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.gate-opt:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(243, 237, 228, 0.3);
+}
+.gate-opt .gi .ico {
+  width: 24px;
+  height: 24px;
+}
+.gate-opt.safe {
+  border-color: rgba(255, 176, 32, 0.55);
+  background: rgba(255, 176, 32, 0.1);
+}
+.gate-opt.safe:hover {
+  background: rgba(255, 176, 32, 0.17);
+}
+.gate-opt.safe .gi {
+  color: var(--warn);
+}
+.gate-opt.full .gi {
+  color: var(--red-hot);
+}
+.gate-opt .gt {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.gate-opt b {
+  font: 600 14px/1.2 var(--font-ui);
+  color: var(--paper);
+}
+.gate-opt small {
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+.gate-motion {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 14px 0 4px;
+}
+.gate-motion .sw {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+.gate-motion .sw-l {
+  font: 600 11px/1 var(--font-ui);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--paper-2);
+}
+.gate-motion small {
+  font-size: 12px;
+  color: var(--muted);
+}
+.gate .note {
+  margin-top: 10px;
+}
+.gate-opt small.gate-x {
+  color: var(--dim);
+}
+/* opened again via 'Change': the saved choice is marked */
+.gate-opt .gate-cur {
+  align-self: flex-start;
+  margin: -2px 0 2px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--line-2);
+  font: 600 9.5px/1.2 var(--font-ui);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--paper-2);
+}
+.gate-opt.full.current {
+  border-color: rgba(255, 60, 30, 0.5);
+}
+.gate .gate-more .gm-short {
+  display: none;
+}
+@media (max-width: 560px) {
+  .gate-choices {
+    grid-template-columns: 1fr;
+  }
+}
+/* phones held landscape (the recommended orientation): the whole warning fits without scrolling */
+@media (max-height: 460px) {
+  .scrim.gate-scrim {
+    padding-top: calc(8px + var(--sa-t));
+    padding-bottom: calc(8px + var(--sa-b));
+  }
+  .card.gate {
+    width: min(640px, 100%);
+    padding: 14px 18px 12px;
+  }
+  .gate .gate-kicker .ico {
+    width: 18px;
+    height: 18px;
+  }
+  .gate h3 {
+    font-size: 22px;
+    margin: 4px 0 4px;
+  }
+  .gate .gate-lead {
+    font-size: 13.5px;
+    line-height: 1.4;
+    margin-bottom: 4px;
+  }
+  .gate .gate-more {
+    font-size: 12px;
+    line-height: 1.35;
+    margin-bottom: 0;
+  }
+  .gate .gate-more .gm-long {
+    display: none;
+  }
+  .gate .gate-more .gm-short {
+    display: inline;
+  }
+  .gate-choices {
+    grid-template-columns: 1fr 1fr;
+    margin-top: 10px;
+    gap: 8px;
+  }
+  .gate-opt {
+    padding: 9px 10px;
+    gap: 10px;
+  }
+  .gate-opt .gi .ico {
+    width: 20px;
+    height: 20px;
+  }
+  .gate-opt small {
+    font-size: 11.5px;
+    line-height: 1.3;
+  }
+  /* the reduce-motion switch and the 'remembered' note share one line */
+  .gate-motion {
+    display: inline-flex;
+    flex-wrap: nowrap;
+    margin: 8px 16px 0 0;
+    vertical-align: middle;
+  }
+  .gate-motion small {
+    display: none;
+  }
+  .gate .note {
+    display: inline-flex;
+    margin: 8px 0 0;
+    vertical-align: middle;
+    font-size: 11.5px;
+  }
+}
+.landing .flashing-btn {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: #fff;
+  font: inherit;
+  letter-spacing: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+/* Flashing: [Reduced | Full] (Help, Quality) */
+.fl-seg {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 999px;
+  border: 1px solid var(--line-2);
+  background: rgba(255, 255, 255, 0.04);
+}
+.fl-opt {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font: 600 11px/1.2 var(--font-ui);
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  cursor: pointer;
+}
+.fl-opt.on {
+  background: var(--paper);
+  color: var(--ink);
+}
+/* touch: a thumb-sized target */
+#ui.touch .fl-opt {
+  min-height: 38px;
+  padding: 4px 16px;
+}
+@media (pointer: coarse) {
+  .fl-opt {
+    min-height: 38px;
+    padding: 4px 16px;
+  }
+}
+.fl-opt:not(.on):hover {
+  color: var(--paper);
+}
+.safety .fl-row {
+  cursor: default;
+}
+
+/* =====================================================================================
+   VIDEO COMPARE (B): the render next to the official video (a real split: nothing overlays the player)
+   Boxes come from ui/Compare.ts as --vc-* custom properties on <html>.
+   ===================================================================================== */
+html.vcmp-on #gl {
+  inset: auto;
+  left: var(--vc-cx);
+  top: var(--vc-cy);
+  width: var(--vc-cw);
+  height: var(--vc-ch);
+}
+html.vcmp-on #ui {
+  inset: auto;
+  left: var(--vc-ux);
+  top: var(--vc-uy);
+  width: var(--vc-uw);
+  height: var(--vc-uh);
+}
+/* the brand makes room for the toolbar in the half-width interface; the pane names the video */
+html.vcmp-on #ui .brand {
+  display: none;
+}
+html.vcmp-on #ui .toolbar .tb-l,
+html.vcmp-on #ui .seg.cmp-narrow,
+html.vcmp-on #ui .toolbar.cmp-tight .src-chip .lbl,
+html.vcmp-on #ui .toolbar.cmp-tight .sep {
+  display: none;
+}
+html.vcmp-on #ui .toolbar {
+  max-width: calc(100% - 16px);
+}
+/* desktop side by side: the show bar spans both pictures in the band below them (it covers neither;
+   Compare.layout keeps that band free) instead of being squeezed into the render column */
+html.vcmp-sbw #ui .showbar {
+  position: fixed;
+  left: var(--vc-bx);
+  width: var(--vc-bw);
+  transform: none;
+}
+html.vcmp-sbw #ui .showbar.away {
+  transform: translateY(24px);
+}
+/* the half-width interface: the Help key list in two columns */
+html.vcmp-side #ui .legend.full {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+/* the perception outcome card stays in the render region like the other cards (not under the video) */
+html.vcmp-on #ui .p-outcome {
+  position: absolute;
+}
+/* touch, side by side: the left half is the video, so the thumb joystick (left half) cannot start there */
+html.vcmp-side .tc-joy,
+html.vcmp-side .tc-hint-move {
+  display: none !important;
+}
+/* the stacked compare is meant for upright phones: no rotate advice over it */
+html.vcmp-on .tc-portrait {
+  display: none !important;
+}
+.vcmp {
+  position: fixed;
+  z-index: 12;
+  display: none;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+  /* only the title bar is rounded: the player's own corners are never clipped */
+  border-radius: 12px 12px 0 0;
+  pointer-events: auto;
+}
+.vcmp.show {
+  display: flex;
+  animation: fade-in 0.3s var(--ease);
+}
+.vcmp-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  height: var(--vc-bar, 34px);
+  padding: 0 3px 0 12px;
+  min-width: 0;
+}
+.vcmp-t {
+  flex: none;
+  font: 600 10.5px/1 var(--font-ui);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.vcmp-t::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--red-hot);
+  margin-right: 8px;
+  box-shadow: 0 0 8px var(--red-hot);
+  vertical-align: 1px;
+}
+.vcmp-st {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  font: 500 11px/1 var(--font-ui);
+  color: var(--paper-2);
+  white-space: nowrap;
+}
+.vcmp-st span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vcmp-st i {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--dim);
+}
+.vcmp-st[data-s='sync'] i,
+.vcmp-st[data-s='paused'] i {
+  background: var(--ok);
+}
+.vcmp-st[data-s='drift'] i,
+.vcmp-st[data-s='syncing'] i,
+.vcmp-st[data-s='buffering'] i,
+.vcmp-st[data-s='loading'] i {
+  background: var(--warn);
+}
+.vcmp-st[data-s='stalled'] i,
+.vcmp-st[data-s='error'] i {
+  background: var(--red-hot);
+}
+.vcmp-drift {
+  flex: none;
+  font: 500 11px/1 var(--font-mono);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.vcmp .grow {
+  flex: 1;
+  min-width: 0;
+}
+.vcmp .vcmp-cam {
+  flex: none;
+  min-height: 0;
+  height: 26px;
+  padding: 0 10px;
+  font-size: 11px;
+}
+.vcmp .vcmp-cam[hidden] {
+  display: none;
+}
+.vcmp .vcmp-cam .ico {
+  width: 15px;
+  height: 15px;
+}
+.vcmp .vcmp-x {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+}
+.vcmp .vcmp-x .ico {
+  width: 16px;
+  height: 16px;
+}
+.vcmp-video {
+  position: relative;
+  flex: none;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
+}
+.vcmp-video .vcmp-host,
+.vcmp-video iframe,
+.vcmp-host > div {
+  position: absolute;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+  border: 0;
+}
+.vcmp-msg {
+  display: none;
+}
+/* the failed player is removed: the message takes its place */
+.vcmp.failed .vcmp-msg {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: var(--vc-bar, 34px);
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 14px 18px;
+  text-align: center;
+  background: #050507;
+}
+.vcmp-msg b {
+  font: 600 13px/1.3 var(--font-ui);
+  color: var(--paper);
+}
+.vcmp-msg p {
+  margin: 0;
+  max-width: 420px;
+  font-size: 12px;
+  color: var(--muted);
+}
+a.btn {
+  text-decoration: none;
+}
+.vcmp-msg-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.vcmp.compact .vcmp-bar {
+  gap: 8px;
+  padding-left: 10px;
+}
+.vcmp.compact .vcmp-t {
+  letter-spacing: 0.1em;
+}
+.vcmp.compact .vcmp-cam span {
+  display: none;
+}
+.vcmp.compact .vcmp-cam {
+  width: 28px;
+  padding: 0;
+  justify-content: center;
+}
+@media (max-width: 420px) {
+  .vcmp .vcmp-drift {
+    display: none;
+  }
+}
+
+/* "Reduce flashing is on: open the official video?" */
+.card.cmp-confirm {
+  width: min(500px, 100%);
+}
+.card.cmp-confirm .actions {
+  margin-top: 16px;
+}

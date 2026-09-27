@@ -19,7 +19,7 @@ interface Layer {
   dispose: () => void;
 }
 
-const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])';
+const FOCUSABLE = 'button:not([disabled]):not([tabindex="-1"]), [href]:not([tabindex="-1"]), input:not([disabled]):not([tabindex="-1"]), select, textarea, [tabindex]:not([tabindex="-1"])';
 
 /**
  * Scroll cue for a scrollable panel / card: `more-below` / `more-above` classes (CSS fades that

@@ -75,6 +75,8 @@ const P: Record<string, string> = {
   platform: '<path d="M3 19h18"/><path d="M5 19v-4h14v4"/><path d="M8 15v-3.5h8V15"/><path d="M12 11.5V6"/><path d="m9.5 8 2.5-2 2.5 2"/>',
   motion: '<path d="M3 8c3-3 6 3 9 0s6 3 9 0"/><path d="M3 16c3-3 6 3 9 0s6 3 9 0"/>',
   empty: '<path d="M3 19h18"/><path d="M6 19v-5l3-3 3 3 3-3 3 3v5"/><path d="M4 7h4M16 5h4"/>',
+  shield: '<path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.2 7.5 9.5 4.3-1.3 7.5-4.9 7.5-9.5V6Z"/><path d="m8.8 12.2 2.3 2.3 4.3-4.6"/>',
+  compare: '<rect x="2.5" y="6" width="8.5" height="12" rx="1.4"/><rect x="13" y="6" width="8.5" height="12" rx="1.4"/><path d="m15.8 9.8 3.2 2.2-3.2 2.2Z" fill="currentColor"/><path d="M5 10.5l1.8 2.5 1.2-1.4 1 1.4"/>',
   list: '<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="5" cy="6" r="1" fill="currentColor" stroke="none"/><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="5" cy="18" r="1" fill="currentColor" stroke="none"/>',
 };
 

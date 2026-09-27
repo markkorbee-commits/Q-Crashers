@@ -214,7 +214,9 @@ export class PerceptionUI {
     });
     this.divider.addEventListener('pointermove', (e) => {
       if (e.pointerId !== pid) return;
-      this.setSplit(e.clientX / window.innerWidth);
+      // relative to the picture (the canvas is only part of the window in the video compare)
+      const r = this.ui.app.canvas.getBoundingClientRect();
+      this.setSplit((e.clientX - r.left) / Math.max(1, r.width));
     });
     const up = (e: PointerEvent) => {
       if (e.pointerId === pid) pid = -1;
@@ -239,9 +241,26 @@ export class PerceptionUI {
     return !!this.p?.compare;
   }
 
+  /** the divider sits over the picture: in the video compare the canvas is a box inside the interface */
+  private placeDivider(): void {
+    const ds = this.divider.style;
+    if (!document.documentElement.classList.contains('vcmp-on')) {
+      ds.left = `${(this.split * 100).toFixed(2)}%`;
+      return;
+    }
+    const c = this.ui.app.canvas.getBoundingClientRect();
+    const r = this.ui.root.getBoundingClientRect();
+    ds.left = `${(c.left - r.left + this.split * c.width).toFixed(1)}px`;
+  }
+
+  /** the interface / canvas boxes changed (video compare opened, closed or re-laid out) */
+  relayout(): void {
+    this.placeDivider();
+  }
+
   setSplit(x: number): void {
     this.split = Math.max(0.04, Math.min(0.96, x));
-    this.divider.style.left = `${(this.split * 100).toFixed(2)}%`;
+    this.placeDivider();
     this.divider.setAttribute('aria-valuenow', String(Math.round(this.split * 100)));
     const p = this.p;
     if (!tryCall(p, 'setSplit', this.split)) {
