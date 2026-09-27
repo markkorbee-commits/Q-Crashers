@@ -424,6 +424,19 @@ export class LaserRenderer {
     return true;
   }
 
+  /**
+   * Round 11: extras of the sheet just pushed (SURF_SHEET), written into its cone-figure slots (sG, unused by sheets):
+   * `near` (m) where the sheet starts along its rays, `band` (m) the thin-sheet thickness (0 = off), `patches` (0-1)
+   */
+  setSheetExtras(near: number, band: number, patches: number): void {
+    if (this.surfCount <= 0) return;
+    const o = (this.surfCount - 1) * SURF_STRIDE + 24;
+    this.surfData[o] = near;
+    this.surfData[o + 1] = band;
+    this.surfData[o + 2] = patches;
+    this.surfData[o + 3] = 0;
+  }
+
   pushSprite(x: number, y: number, z: number, size: number, r: number, g: number, b: number, kind: number): boolean {
     if (this.spriteCount >= this.spriteCap) return false;
     const d = this.spriteData;

@@ -11,6 +11,10 @@ Unknown values are ignored, never thrown on.
   `squash`, `parallel`, `path`, `distance`, `segments`, `aim`, `fade`, `splay` (round 9); hit `lens`, `reach`.
 * Target tokens: the validator reads them from `TOKENS` in src/lasers/LaserSystem.ts, so the round-9
   tokens `front_line`, `ramparts`, `side_rampart` and `side_sections` are valid without a validator change.
+  The same holds for the round-11 tokens `side_floor` and `front_floor`.
+* Round 11 look params (all opt-in, see "Round 11" below): `halo`, `haloK`, `gain`, `width`, `fill`,
+  `lines`, `wave`, `band`, `extent`, `patches`, `cloud`, `cloudK`, `cloudSize`, `steps`, `loop`; `aim` now
+  also works for `sheet`. On `fog.lowfog` the lasers read `rise` and `release` (the laser low-haze ramp).
 
 ## `lasers.off`: latest start wins
 
@@ -259,6 +263,109 @@ moments 798–839.25: 63.8 → 66.7 % (calibrated 28.8 → 34.5).
 | 797.921 zigzag (violet web) | target `front_line` | 798.0 66.3 → 68.0, 798.5 53.4 → 56.3 |
 | new 802.796, dur 0.563 (to the half beat 803.359) | `{fx:'look', target:'front_line', p:{preset:'sky', color:'white', count:10, spread:80, splay:50, tilt:84, reach:45, speed:0.25, intensity:1, fade:0.05}}`: the white fans along the whole front (v802.82–803.38); it starts after the 798.859 `off` (latest start wins) | 803.0 73.2 → 75.5, 803.25 56.7 → 60.8, 802.75 / 803.5 unchanged |
 | 838.046 zigzag (violet web) | target `front_line`, `height` 13, but only together with a refit of the 837.964 camera shot (camera group): the shot `pos [0,5,165]`, fov 30 is not the terrace tripod of the video (its near lanterns stand at frame x 0.10 / 0.91 and the V bottoms at y 0.71); with the current pose the retarget costs 838.25 66.0 → 63.8, 838.75 69.2 → 66.1, 839.25 67.8 → 64.6 | — |
+
+## Round 11: bounded sheets, readable tents, cone halo, dense web, sequenced looks, lit clouds, floor units
+
+Every param below is opt-in: a cue without it renders exactly as before (the default 64 moments with this engine and
+the show as is: 69.3 % raw / 53.5 % calibrated, colour 70.3, light 82.2, shape 57.1 — identical to the round-11
+baseline). The whole cue patch together, on 64 touched moments + holdouts: 64.2 → 65.9 % raw (44.5 → 47.1 calibrated). The cue changes that use them are in the round's cue patch (`$ENDSHOW_DATA/work/r11_lasers/
+cue_patch.json`, applied by the show agent); the measurements below are per moment (video time), scripts/similarity.mjs
+`--settle 500 --min-frames 30`, Mac GPU, the patch applied in the page.
+
+### Sheet: `aim`, `wave`, `band`, `extent`, `patches` (v1470–1471.3, v1505.6–1507)
+
+| param | default | meaning |
+|---|---|---|
+| `aim` | — | [x,y,z]: the plane runs from each aperture through this world point (laterally level). A point at the lens puts the camera inside the plane. |
+| `wave` | 1 | amplitude of the sheet's waves (the 0.011–0.015 rad wave is ±2.5 m at 170 m: `wave` 0 keeps an edge-on sheet a straight line) |
+| `band` | 0 | thin sheet (m): from inside ±`band` of its plane the sheet reads as the edge-on line, and it fades out between `band` and 2 × `band` off its plane (no broad wash from just below it). A plane through the lens projects to zero area: the vertices near the camera's plane are pushed ~1.5 px off it, alternately to either side, so the line keeps its width. |
+| `extent` | — | far m, or [near, far] m along the rays: the sheet only exists there |
+| `patches` | 0 | 0–1: the sheet only lights where a coarse smoke texture is thick — a few lit patches instead of a continuous plane (1 = about half its area) |
+
+The filmed eye-level line of v1470–1471.3 lies at frame y 0.67 in the telephoto from (−0.7, 6.7, 169.9), vfov 16.3:
+an apex at about 7.4 m at the stage. A sheet from the castle wall-walk units (`["front_line","center"]`, Y 10,
+line at y 0.65) through the lens reads right; deck units (Y 2.2) put it at 0.78. The line alone (without the old 12.5 m
+wash) is darker than the film, whose whole frame is violet haze: with a violet `atmos.glow` (0.35) for the same window
+the six moments gain 1469.5 63.9 → 69.5, 1470 65.8 → 69.8, 1470.5 68.3 → 71.8, 1471 70.4 → 71.0, 1471.5 69.8 →
+69.4, 1472 69.3 → 68.1; the line without that glow costs 3–5 points per moment.
+Tried, not proposed: liquid-sky patches (`extent` + `patches`) at v1505.6–1507 from the wing units (−2.5 to −10 per
+moment: seen from the lens the plane is a bright ceiling over the whole upper frame; the web itself, a grid of long
+lines, is the larger gap there), and the web of 1503.66 as a `front_line` zigzag (its lit wedges flood the telephoto).
+
+### `trees`: `fill`, `gain`, `width` (v1052–1053.9, v1056, v1058.5–1059.6, v1061.3–1063.2)
+
+`fill` (0–4, default 0) lights the smoke inside each tent: a soft Λ sprite standing on the unit (apex at the top, the
+legs brighter than the inside, a little dimmer towards the base; sprite kind 5). `gain` (0.1–4) raises the scan level
+past `intensity` 1, `width` (0.25–6) the line width (both also for `zigzag`). From the terrace (~170 m) the filmed tents
+are luminous filled Λs about 14 m wide and 10 m tall, five across the deck. Measured: blue tents at 1051.855 (instead of
+the flat deck web), green / cyan tents at 1058.315 / 1061.715 over the webs: 1053.5 +1.2, 1058.75 +5.7, 1062.25 +3.3,
+1062.75 −3.0, 1052 −0.9.
+
+### `zigzag`: `fill`, `lines` — the dense low web (v1258.3–1259, v1264.3–1265, v1269.2–1271.2)
+
+For `zigzag`, `fill` scales the lit wedge over each V (default 1 = the engine level `tune.webGlow`), and `lines: true`
+draws that wedge as a dense fan of 16 scan lines from the apex (sprite kind 7) instead of a smooth glow: a web dense
+enough to fill a telephoto frame without more beams (the grid's fans stand in planes towards the audience, so from the
+front each fan collapses into one line). The `grid` looks of 1256.991 / 1262.991 / 1269.178 as `front_line` + deck
+zigzags with `fill` 0.25, `lines`: 1259 +8.9, 1265 +10.8, 1270 +17.7, 1270.5 +20.0, 1271 +25.8, 1258.5 +1.8, but 1269.5
+−24.1 (the first video frame after the cut is a low field view, not the authored telephoto: a camera question).
+
+### `cone`: `halo`, `haloK` (the lantern starburst v1383–1395)
+
+`halo` (degrees, default 0 = the fixed `tune.glowSize` 7 m sprite) sizes the glow of a cone the camera looks into in
+angle from the camera, drawn as a soft disc of radial rays (sprite kind 4, pulled halfway to the camera so the ground in
+front of the lantern does not cut it); its level spreads over the larger disc (× sqrt(7 m / size)) and `haloK` scales it.
+The filmed violet halo spans ~0.3 of the frame from the drone ~90 m away. 1384.202 cone + `halo` 13, `haloK` 0.3: 1384.5
++1.0, 1392 +2.0, 1394 +1.2, 1389.5 ±0 (a 16–20° halo at 0.2–0.35: +0.1 to +0.4 on the 8 moments, less light).
+
+### `cloud`, `cloudK`, `cloudSize`: the low cloud deck lit by fans and sheets (v206.7–218.5)
+
+`cloud` (m, default 0 = off) is the height of the cloud deck the look lights: where a beam crosses it, the cloud there
+lights up; a beam that stays below lights the cloud above where it ends, less the further below (e-folding 12 m; only the
+first 120 m of a beam count). Per unit, the beams are collected in two lateral bins and drawn as up to two sparse,
+smoke-textured clouds (sprite kind 6, world-space texture drifting with show time) of `cloudSize` m (default 18),
+level `cloudK` × `tune.cloudGain`. 206.69 roof + corner fans with `cloud` 32, `cloudK` 0.3: 208 +2.6, 209.5 +3.3,
+212 +3.1, 215.75 +1.8, 217.5 −2.1. On every unit of all three looks at level 1–3 the clouds form a continuous lit ceiling
+(−7 to −25 per moment).
+
+### `steps`, `loop`: a sequenced look (the 4–6 Hz tents / bursts of v1056–1057.8)
+
+`steps` is a list of `{at, …params}`: `at` = s from the cue start, the other keys override the cue's params for that step
+(preset, colour, count …; the targets stay the cue's). Before the first step the cue's own params apply. `loop` (s)
+repeats the list. Merged params are built once per cue and show revision (no per-frame allocation). The 25 fps frames of
+v1056.0–1057.3 alternate tents and sky bursts (bursts at v1056.10–1056.18, 1056.42, 1056.66–1056.70), then the violet X
+(v1056.94–1057.06): one `steps` cue replaces the 1055.964 trees and the 1056.924 X (the 1056.665 hit stays). On the 4 fps
+frames it is neutral (six moments 62.8 → 62.9); the alternation lives between them.
+**Reduce flashing:** with the option on the step clock runs in 0.34 s ticks, so the figure changes at most ~2.9 Hz
+(steps shorter than a tick may be skipped: the bursts of v1056 vanish), and every change dips to half over 0.12 s
+instead of switching hard. Verified: normal changes at 1056.07 / .17 / .39 / .43 / .89 / 1057.05, calm only at the
+cue's own boundaries and 1056.99.
+
+### Floor units: `side_floor`, `front_floor` (v317.3–320.8, v810.24–810.9)
+
+8 side-section floor units at |x| 40, 55, 70, 85, Y 2, Z −3.2 (at the foot of the side-section wall), appended after
+the ramparts (older indices unchanged), not in `laser_stage`, `stage`, a target-less `hit` or any natural set.
+`side_floor` = these 8, `front_floor` = these + the 12 deck units: a row of field-level projectors along the whole U
+front (|x| 3–85). The 810.109 fan as a `burst` from `front_floor` (count 24, spread 150, tilt 8, reach 45): 810.25 +8.0,
+810.5 +7.4, 810.75 −3.0. The flat triangular fans of v317.3–320.8 sit at frame y 0.62–0.66 from the terrace tripod,
+i.e. at the wall-walk (lantern-base) height of the side sections, not on the floor: a flat `fan` from `side_rampart`
+(tilt 0, aimed level inwards at [0, 10.6, 60], reach 40) next to the corner fans: 318.5 +0.3, 319 +0.5, 320 +0.4.
+
+### The laser low-haze ramp: `fog.lowfog` `rise` / `release`
+
+The lasers read the lowfog cues: `rise` (s, default 6) is the build-up of the low-haze layer the beams and the sea light
+(0 = there at the cue, like FogSystem's prewarmed bank); with the fog cue's own `release` (FogSystem: the bank thins out
+over it after the cue) the layer follows the bank out after the cue end, else it fades over the last 3 s before it (as
+before). No lowfog cue in the show carries `release` today, so nothing changes. Tried on the golden bank of 1373.764:
+`rise` 3 / 1 / 2 (+ the 1376.844 tunnel at 0.35) cost 2.6–5 points over 1374.5–1380 — our tunnel beams in dense haze are
+far brighter than the filmed golden smoke, so an earlier full haze makes it worse; not proposed.
+
+### Sprite kinds and hooks
+
+Laser sprites (LaserRenderer.pushSprite, `kind`): 0 aperture flare, 1 hit spot, 2 lens veil, 3 + tan / 4 lit V wedge,
+4 cone halo, 5 + tan / 4 lit tent, 6 lit cloud, 7 + tan / 4 lined V wedge. New calibration hooks in `LaserSystem.tune`:
+`haloGain`, `cloudGain` (1). Costs: all new looks draw with the existing 3 instanced draw calls (sprites and a few
+surfaces); the 8 floor housings join the housing instances (no extra call).
 
 ## Proposed cue updates for public/show/endshow-2026.json (tested side by side with the video)
 
