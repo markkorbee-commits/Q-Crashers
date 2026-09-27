@@ -205,7 +205,7 @@ export class PerceptionUI {
 
     // compare divider
     const knob = h('div', { class: 'knob', html: icon('split') });
-    this.divider = h('div', { class: 'divider hud-el keep-photo ia', role: 'slider', tabindex: '0', 'aria-label': 'Compare divider', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': '50' }, h('span', { class: 'lab l' }, 'Sober'), h('span', { class: 'lab r' }, 'Altered'), knob);
+    this.divider = h('div', { class: 'divider hud-el ia', role: 'slider', tabindex: '0', 'aria-label': 'Compare divider', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': '50' }, h('span', { class: 'lab l' }, 'Sober'), h('span', { class: 'lab r' }, 'Altered'), knob);
     let pid = -1;
     this.divider.addEventListener('pointerdown', (e) => {
       pid = e.pointerId;
@@ -332,7 +332,6 @@ export class PerceptionUI {
     const pos = tent.clone().addScaledVector(dir, 8);
     const yaw = Math.atan2(-(tent.x - pos.x), -(tent.z - pos.z));
     ui.layers.closeAll();
-    if (ui.photo.open) ui.togglePhoto(false, 'first');
     if (ui.camMode() !== 'first') ui.setCamera('first');
     player(ui.app)?.teleport?.({ id: 'first_aid', label: 'First aid post', position: pos, yaw, pitch: -0.04 });
     tryCall(this.p, 'setResting', true);

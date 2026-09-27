@@ -288,6 +288,13 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* on the Ferris wheel: nothing to walk with; the whole screen swipes to look */
+.tc.riding .tc-joy,
+.tc.riding .tc-hint-move,
+.tc.riding .tc-jump,
+.tc.riding .tc-run {
+  display: none;
+}
 .tc.can-interact[data-group='walk'] .tc-interact {
   opacity: 1;
   transform: none;
@@ -390,8 +397,4 @@
   .tc-interact {
     bottom: calc(var(--sab) + 178px);
   }
-}
-/* photo mode: the shutter sits on the right edge, keep the fly buttons below it */
-#ui.photo ~ .tc .tc-back {
-  display: none;
 }

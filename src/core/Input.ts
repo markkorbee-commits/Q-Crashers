@@ -7,7 +7,7 @@ export class Input {
   readonly move = { x: 0, y: 0 };
   /** accumulated look delta in pixels this frame (mouse or touch) */
   readonly look = { x: 0, y: 0 };
-  /** vertical intent for free/photo camera: +1 up, -1 down */
+  /** vertical intent for the free camera: +1 up, -1 down */
   vertical = 0;
   run = false;
   /** touch-driven movement (set by TouchControls) */

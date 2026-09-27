@@ -9,7 +9,7 @@ const WIDTH: Record<'wide' | 'compact', Record<PipSize, number>> = {
   compact: { small: 208, normal: 240, large: 320 },
 };
 /** HUD surfaces the panel must not cover (the show bar also counts while it is auto-hidden) */
-const OBSTACLES = ['.toolbar', '.showbar', '.status.show', '.tc-cluster', '.photo-panel', '.shutter', '.prompt.show'];
+const OBSTACLES = ['.toolbar', '.showbar', '.status.show', '.tc-cluster', '.prompt.show'];
 const GAP = 8;
 
 interface Box {
@@ -69,7 +69,7 @@ export class PiP {
     );
     this.applyWidth();
     window.addEventListener('resize', () => this.schedule());
-    // HUD surfaces appear / disappear with the #ui state classes (layers, photo, cinema, coach)
+    // HUD surfaces appear / disappear with the #ui state classes (layers, cinema, coach)
     new MutationObserver(() => this.schedule()).observe(parent, { attributes: true, attributeFilter: ['class'] });
   }
 

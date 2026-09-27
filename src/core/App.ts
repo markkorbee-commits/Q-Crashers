@@ -101,7 +101,7 @@ export class App {
   palette: ResolvedPalette = ShowEngine.newPalette();
   /** player feet position, maintained by the PlayerController */
   readonly playerPos = new THREE.Vector3(0, 0, 160);
-  /** set by UI: hides HUD for cinema/photo mode */
+  /** set by UI: hides HUD for cinema mode */
   cinema = false;
   /**
    * Photosensitivity setting (set by the UI). Show systems read it to cap strobe / blinder rates

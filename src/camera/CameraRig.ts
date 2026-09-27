@@ -5,28 +5,27 @@ import type { FrameContext, QualitySettings, System } from '../core/types';
 import { Avatar } from '../player/Avatar';
 import { damp, easeInOut, wobble } from '../player/motion';
 import { PlayerController } from '../player/PlayerController';
+import { RideArm } from '../player/rideArm';
 import { STAGE_FOCUS } from '../player/spots';
 import { FlyoverPath } from './FlyoverPath';
 import { SHOT_FOV, ShowDirector, type ShotPose } from './ShowDirector';
 
-export type CameraMode = 'first' | 'third' | 'free' | 'flyover' | 'showcam' | 'photo';
-/** keyboard order: 1..6 */
-export const CAMERA_MODES: readonly CameraMode[] = ['first', 'third', 'free', 'flyover', 'showcam', 'photo'];
+export type CameraMode = 'first' | 'third' | 'free' | 'flyover' | 'showcam';
+/** keyboard order: 1..5 */
+export const CAMERA_MODES: readonly CameraMode[] = ['first', 'third', 'free', 'flyover', 'showcam'];
 
-/** photo-mode lens range in degrees (12° ≈ 200 mm telephoto … 110° ≈ 12 mm ultra-wide, full frame) */
-export const PHOTO_FOV = { min: 12, max: 110 } as const;
-
-const DIGITS = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6'];
-const NUMPAD = ['Numpad1', 'Numpad2', 'Numpad3', 'Numpad4', 'Numpad5', 'Numpad6'];
+const DIGITS = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'];
+const NUMPAD = ['Numpad1', 'Numpad2', 'Numpad3', 'Numpad4', 'Numpad5'];
 /** modes that sit near the spectator and may glide into each other instead of cutting */
-const GLIDE = new Set<CameraMode>(['first', 'third', 'free', 'photo']);
-const CENTER = new THREE.Vector2(0, 0);
+const GLIDE = new Set<CameraMode>(['first', 'third', 'free']);
 /**
  * exposure of the Show camera: the film crew exposed for the lit set and the fire, so the dark grounds sink away.
  * Measured on the default 64 moments of the official video (scripts/similarity.mjs, Mac GPU, after round 4):
  * 1 -> 27.9 %, 0.7 -> 31.8 %, 0.6 -> 32.9 %, 0.5 -> 34.0 %, 0.4 -> 34.3 % (colour starts to drop).
  */
 const SHOWCAM_EXPOSURE = 0.5;
+/** shortest third-person arm (m) on the Ferris wheel: the rider, the car and the show all in frame */
+const RIDE_ARM = 4.5;
 
 /**
  * All camera modes:
@@ -35,8 +34,7 @@ const SHOWCAM_EXPOSURE = 0.5;
  *  - free:    fly camera (WASD + mouse, Space / C up-down, Shift fast, wheel = speed)
  *  - flyover: cinematic looping drone path derived from the stage anchors
  *  - showcam: director camera (authored `camera` cues, else automatic bar-synced cutting)
- *  - photo:   slow precise camera with roll, zoom and focus for photo mode (postfx.photo)
- * Keys: 1..6 select modes, V toggles first/third. `setMode('first')` always returns to your view.
+ * Keys: 1..5 select modes, V toggles first/third. `setMode('first')` always returns to your view.
  */
 export class CameraRig implements System {
   readonly name = 'camera';
@@ -49,10 +47,8 @@ export class CameraRig implements System {
   freeFastSpeed = 45;
   /** multiplier on free-fly speed (mouse wheel) */
   freeSpeedScale = 1;
-  /** vertical intent from touch buttons (free / photo): +1 up, -1 down */
+  /** vertical intent from touch buttons (free camera): +1 up, -1 down */
   touchVertical = 0;
-  /** photo camera state (FOV degrees, roll radians) */
-  readonly photo = { fov: 50, roll: 0 };
   avatar: Avatar | null = null;
 
   private app!: App;
@@ -73,22 +69,23 @@ export class CameraRig implements System {
   /** 0..1 third-person "this is you" rim on the avatar */
   private selfRim = 0;
   private pendingMode: CameraMode | null = null;
-  private pendingFocus = false;
+  /** third-person lens while riding the Ferris wheel (clear of rims, spokes, cars and legs) */
+  private readonly rideArm = new RideArm();
+  private readonly rideLens = new THREE.Vector3();
+  /** the player was in / at a gondola last third-person frame; seconds left of the glide back to the plain arm */
+  private wasMounted = false;
+  private dismount = 0;
   private blend = { t: 1, dur: 0.65, checked: true, pos: new THREE.Vector3(), quat: new THREE.Quaternion(), fov: 72 };
   private pose: ShotPose = { pos: new THREE.Vector3(), look: new THREE.Vector3(), fov: 50, roll: 0, haze: 1 };
   /**
    * 0.35..1 atmospheric haze scale requested by the current camera (1 = as the eye sees it).
-   * The show camera lowers it for telephoto and in-pit framings (ShowDirector.hazeFor), photo
-   * mode for long lenses. Haze renderers multiply their veil density by it (read it at render
-   * time, e.g. in onBeforeRender, to stay in sync with cuts).
+   * The show camera lowers it for telephoto and in-pit framings (ShowDirector.hazeFor). Haze
+   * renderers multiply their veil density by it (read it at render time, e.g. in onBeforeRender,
+   * to stay in sync with cuts).
    */
   hazeScale = 1;
   private euler = new THREE.Euler(0, 0, 0, 'YXZ');
   private q1 = new THREE.Quaternion();
-  private raycaster = new THREE.Raycaster();
-  private hits: THREE.Intersection[] = [];
-  private focusTargets: THREE.Object3D[] = [];
-  private tmpV = new THREE.Vector3();
 
   init(app: App): void {
     this.app = app;
@@ -105,7 +102,7 @@ export class CameraRig implements System {
     // a viewer who chose the directed show camera last time starts there again
     const remembered = !app.params.has('spot') && this.player.rememberedStart === 'showcam' ? 'showcam' : null;
     const want = (app.params.get('camera') ?? this.pendingMode ?? remembered) as CameraMode | null;
-    // free / photo start at the spectator's eyes unless ?cam= gives a pose
+    // free starts at the spectator's eyes unless ?cam= gives a pose
     const p = app.playerPos;
     this.freePos.set(p.x, p.y + PlayerController.EYE_HEIGHT, p.z);
     this.freeYaw = this.player.yaw;
@@ -156,96 +153,13 @@ export class CameraRig implements System {
     this.setMode(this.mode === 'first' ? 'third' : 'first');
   }
 
-  // --- photo mode API -------------------------------------------------------------------------
-
-  /** photo-mode field of view (degrees), same range as the photo panel slider (PHOTO_FOV) */
-  setFov(v: number): void {
-    this.photo.fov = clamp(v, PHOTO_FOV.min, PHOTO_FOV.max);
-  }
-
-  setRoll(r: number): void {
-    this.photo.roll = clamp(r, -Math.PI / 2, Math.PI / 2);
-  }
-
-  setFocus(d: number): void {
-    this.app.postfx.photo.focusDistance = Math.max(0, d);
-  }
-
-  /** current photo focus distance (m; 0 = not set): the photo panel mirrors rig-side focus changes */
-  get focusDistance(): number {
-    return this.app.postfx.photo.focusDistance;
-  }
-
-  setAperture(a: number): void {
-    const ph = this.app.postfx.photo;
-    const was = ph.aperture;
-    ph.aperture = clamp(a, 0, 1);
-    // opening the aperture for the first time: focus on the subject first (never a 10 m blur)
-    if (was <= 0 && ph.aperture > 0 && this.mode === 'photo') this.autoFocus();
-  }
-
-  setExposure(e: number): void {
-    this.app.postfx.photo.exposure = clamp(e, 0.05, 8);
-  }
-
-  /**
-   * Focus on whatever is under the centre of the frame: raycast against visible SOLID meshes (the
-   * camera-centred sky dome, back faces, beams, haze, glass and anything tagged userData.noFocus are
-   * skipped), then the ground plane; with nothing in the way, the stage when the lens points at it.
-   * Returns the focus distance in metres.
-   */
-  autoFocus(): number {
-    const cam = this.app.camera;
-    cam.updateMatrixWorld();
-    this.raycaster.setFromCamera(CENTER, cam);
-    this.raycaster.far = cam.far;
-    const targets = this.focusTargets;
-    targets.length = 0;
-    this.app.scene.traverseVisible((o) => {
-      const m = o as THREE.Mesh;
-      if (!m.isMesh || o.userData.noFocus || o.name === 'sky') return;
-      const mat = (Array.isArray(m.material) ? m.material[0] : m.material) as THREE.Material | undefined;
-      // beams, haze, glass, sky dome: additive, non-depth-writing, see-through or inside-out
-      if (!mat || mat.blending === THREE.AdditiveBlending || !mat.depthWrite || mat.side === THREE.BackSide || (mat.transparent && mat.opacity < 0.5)) return;
-      targets.push(m);
-    });
-    this.hits.length = 0;
-    let d = Infinity;
-    try {
-      this.raycaster.intersectObjects(targets, false, this.hits);
-      for (const h of this.hits) {
-        if (h.distance > 0.3) {
-          d = h.distance;
-          break;
-        }
-      }
-    } catch (e) {
-      console.warn('[camera] autofocus raycast failed', e);
-    }
-    targets.length = 0;
-    const ray = this.raycaster.ray;
-    if (!Number.isFinite(d) && ray.direction.y < -1e-4) d = -ray.origin.y / ray.direction.y;
-    if (!Number.isFinite(d)) {
-      // nothing solid under the centre (sky, fireworks): focus on the stage if it is in front of us
-      const toStage = this.tmpV.copy(STAGE_FOCUS).sub(ray.origin);
-      const dist = toStage.length();
-      d = toStage.dot(ray.direction) > 0.6 * dist ? dist : 1000;
-    }
-    this.setFocus(d);
-    return d;
-  }
-
   // --- mode switching ---------------------------------------------------------------------------
 
   private enter(mode: CameraMode, glide: boolean): void {
     const app = this.app;
     const cam = app.camera;
     const prev = this.mode;
-    if (prev === 'photo' && mode !== 'photo') {
-      app.postfx.photo.enabled = false;
-      app.events.emit('photo:mode', { on: false });
-    }
-    if (mode === 'free' || mode === 'photo') {
+    if (mode === 'free') {
       if (glide) {
         this.freePos.copy(cam.position);
         this.euler.setFromQuaternion(cam.quaternion, 'YXZ');
@@ -253,13 +167,6 @@ export class CameraRig implements System {
         this.freeYaw = this.euler.y;
       }
       this.freeVel.set(0, 0, 0);
-    }
-    if (mode === 'photo') {
-      this.photo.fov = clamp(cam.fov, PHOTO_FOV.min, PHOTO_FOV.max);
-      this.photo.roll = 0;
-      app.postfx.photo.enabled = true;
-      app.events.emit('photo:mode', { on: true });
-      this.pendingFocus = true;
     }
     if (mode === 'flyover') {
       this.flyover.build(app.anchors);
@@ -269,6 +176,9 @@ export class CameraRig implements System {
     if (mode === 'third') {
       this.snapPivot();
       this.arm = this.armLength;
+      this.rideArm.reset();
+      this.wasMounted = this.player.mounted;
+      this.dismount = 0;
       // start on the crowd-aware arm (no rise from shoulder height through the neighbours' heads)
       this.crowdLift = smoothstep(0.6, 2.0, this.player.crowdDensity);
     }
@@ -295,11 +205,15 @@ export class CameraRig implements System {
   update(ctx: FrameContext): void {
     const app = this.app;
     const input = app.input;
-    for (let i = 0; i < 6; i++) if (input.pressed(DIGITS[i]) || input.pressed(NUMPAD[i])) this.setMode(CAMERA_MODES[i]);
+    for (let i = 0; i < CAMERA_MODES.length; i++) if (input.pressed(DIGITS[i]) || input.pressed(NUMPAD[i])) this.setMode(CAMERA_MODES[i]);
     if (input.pressed('KeyV')) this.toggleView();
     if (this.player.teleports !== this.seenTeleports) {
       this.seenTeleports = this.player.teleports;
       this.snapPivot();
+      // a teleport leaves the Ferris wheel at once: no glide from the gondola across the grounds
+      this.rideArm.reset();
+      this.wasMounted = this.player.mounted;
+      this.dismount = 0;
       if (!this.player.controlsActive) this.setMode('first');
       this.blend.t = this.blend.dur;
     }
@@ -314,11 +228,7 @@ export class CameraRig implements System {
         this.updateThird(ctx, cam);
         break;
       case 'free':
-        this.updateFree(ctx, cam, false);
-        break;
-      case 'photo':
-        this.updateFree(ctx, cam, true);
-        fov = this.photo.fov;
+        this.updateFree(ctx, cam);
         break;
       case 'flyover': {
         this.flyTime += ctx.dt;
@@ -346,7 +256,7 @@ export class CameraRig implements System {
     }
 
     app.postfx.cameraExposure = this.mode === 'showcam' ? SHOWCAM_EXPOSURE : 1;
-    this.hazeScale = this.mode === 'showcam' ? this.pose.haze : this.mode === 'photo' ? clamp(1 - 0.6 * smoothstep(34, 12, this.photo.fov), 0.35, 1) : 1;
+    this.hazeScale = this.mode === 'showcam' ? this.pose.haze : 1;
 
     // glide between nearby modes instead of cutting
     const b = this.blend;
@@ -365,11 +275,6 @@ export class CameraRig implements System {
     if (Math.abs(cam.fov - fov) > 1e-3) {
       cam.fov = fov;
       cam.updateProjectionMatrix();
-    }
-    if (this.pendingFocus && this.mode === 'photo') {
-      this.pendingFocus = false;
-      cam.updateMatrixWorld();
-      this.autoFocus();
     }
     this.updateAvatar(ctx);
   }
@@ -416,9 +321,10 @@ export class CameraRig implements System {
     const armPitch = pitch + (Math.min(pitch, -0.08) - pitch) * lift;
     const rx = Math.cos(yaw),
       rz = -Math.sin(yaw);
-    // follow the head with a little lag (vertical lag softens jumps)
+    // follow the head with a little lag (vertical lag softens jumps); seated in a Ferris wheel gondola
+    // the head is ~0.45 m lower
     const tx = p.x + rx * pl.eyeOffset.x * 0.5,
-      ty = p.y + 1.62 + pl.jumpY * 0.6,
+      ty = p.y + 1.62 - 0.45 * pl.seated + pl.jumpY * 0.6,
       tz = p.z + rz * pl.eyeOffset.x * 0.5;
     this.pivot.x += (tx - this.pivot.x) * damp(16, dt);
     this.pivot.z += (tz - this.pivot.z) * damp(16, dt);
@@ -433,16 +339,45 @@ export class CameraRig implements System {
     const side = 0.34 * (1 - 0.35 * lift),
       up = 0.28 + 1.0 * lift;
     const L = this.armLength * (1 + 0.1 * lift);
-    // desired camera position and spring-arm collision against the 2D colliders
+    // desired camera position and spring-arm collision against the 2D colliders. In / at a Ferris wheel
+    // gondola the ride's own arm keeps the lens clear of the wheel (player/rideArm.ts): the platform
+    // rails would pinch a 2D arm at every height, and rims, spokes, cars and legs need a 3D test.
     const dx = -fx * L + rx * side,
       dz = -fz * L + rz * side;
-    const free = this.armFree(this.pivot.x, this.pivot.z, this.pivot.x + dx, this.pivot.z + dz, this.pivot.y - fy * L + up);
-    const want = Math.max(0.35, L * free - (free < 1 ? 0.25 : 0));
-    this.arm += (want - this.arm) * damp(want < this.arm ? 30 : 3, dt);
-    const k = this.arm / L;
-    const x = this.pivot.x + dx * k;
-    const z = this.pivot.z + dz * k;
-    let y = this.pivot.y + (-fy * L + up) * k;
+    const mounted = pl.mounted;
+    const last = cam.position;
+    if (mounted !== this.wasMounted) {
+      // stepping into the car the lens glides from where it is; stepping out it eases back onto the plain arm
+      if (mounted) this.rideArm.resetFrom(last.x - this.pivot.x, last.y - this.pivot.y, last.z - this.pivot.z);
+      else this.dismount = 0.8;
+      this.wasMounted = mounted;
+    }
+    let x: number, y: number, z: number;
+    if (mounted) {
+      if (ctx.seeked) this.rideArm.reset();
+      const A = Math.max(RIDE_ARM, L);
+      const lens = this.rideArm.solve(dt, ctx.showTime, pl.ride.gondola, this.pivot, -fx * A + rx * side, -fy * A + up, -fz * A + rz * side, p.y, this.rideLens);
+      x = lens.x;
+      y = lens.y;
+      z = lens.z;
+      // leaving the ride continues from about this arm
+      this.arm = clamp(Math.hypot(x - this.pivot.x, z - this.pivot.z), 0.35, L);
+    } else {
+      const free = this.armFree(this.pivot.x, this.pivot.z, this.pivot.x + dx, this.pivot.z + dz, this.pivot.y - fy * L + up);
+      const want = Math.max(0.35, L * free - (free < 1 ? 0.25 : 0));
+      this.arm += (want - this.arm) * damp(want < this.arm ? 30 : 3, dt);
+      const k = this.arm / L;
+      x = this.pivot.x + dx * k;
+      z = this.pivot.z + dz * k;
+      y = this.pivot.y + (-fy * L + up) * k;
+      if (this.dismount > 0) {
+        this.dismount -= dt;
+        const a = damp(7, dt);
+        x = last.x + (x - last.x) * a;
+        y = last.y + (y - last.y) * a;
+        z = last.z + (z - last.z) * a;
+      }
+    }
     const floor = this.floorAt(x, z);
     // over a dense crowd: well above the raised hands (~2.3 m)
     y = Math.max(y, floor + 0.25, floor + (1.62 + 1.25 * lift + pl.jumpY * 0.6) * lift);
@@ -471,6 +406,8 @@ export class CameraRig implements System {
     const onDeck = this.player.onPlatform;
     for (const c of this.app.colliders) {
       if (onDeck && !(c.tag && c.tag.startsWith('deck'))) continue;
+      // the Ferris wheel's low walkway / platform rails never block a lens at head height
+      if (c.tag === 'wheel') continue;
       if (c.kind === 'circle') tMin = Math.min(tMin, segCircle(ax, az, dx, dz, c.x, c.z, c.r + m));
       else tMin = Math.min(tMin, segBox(ax, az, dx, dz, c.minX - m, c.maxX + m, c.minZ - m, c.maxZ + m));
     }
@@ -482,28 +419,16 @@ export class CameraRig implements System {
     return tMin;
   }
 
-  private updateFree(ctx: FrameContext, cam: THREE.PerspectiveCamera, photo: boolean): void {
+  private updateFree(ctx: FrameContext, cam: THREE.PerspectiveCamera): void {
     const input = this.app.input;
     const dt = ctx.dt;
-    const sens = 0.0022 * (photo ? this.photo.fov / 72 : 1);
+    const sens = 0.0022;
     this.freeYaw -= input.look.x * sens;
     this.freePitch = clamp(this.freePitch - input.look.y * sens, -1.55, 1.55);
-    let mx: number, my: number, speed: number;
-    if (photo) {
-      // own key map: Q / E roll here, so they must not strafe (Input maps Q to left for AZERTY)
-      mx = (input.isDown('KeyD') || input.isDown('ArrowRight') ? 1 : 0) - (input.isDown('KeyA') || input.isDown('ArrowLeft') ? 1 : 0) + input.touchMove.x;
-      my = (input.isDown('KeyW') || input.isDown('ArrowUp') ? 1 : 0) - (input.isDown('KeyS') || input.isDown('ArrowDown') ? 1 : 0) + input.touchMove.y;
-      speed = input.run ? 4.5 : 1.2;
-      const roll = (input.isDown('KeyQ') ? 1 : 0) - (input.isDown('KeyE') ? 1 : 0);
-      if (roll) this.setRoll(this.photo.roll + roll * 0.6 * dt);
-      if (input.wheel) this.setFov(this.photo.fov * Math.exp(input.wheel * 0.001));
-      if (input.pressed('KeyF')) this.autoFocus();
-    } else {
-      mx = input.move.x;
-      my = input.move.y;
-      if (input.wheel) this.freeSpeedScale = clamp(this.freeSpeedScale * Math.exp(-input.wheel * 0.0015), 0.1, 6);
-      speed = (input.run ? this.freeFastSpeed : this.freeSpeed) * this.freeSpeedScale;
-    }
+    let mx = input.move.x;
+    let my = input.move.y;
+    if (input.wheel) this.freeSpeedScale = clamp(this.freeSpeedScale * Math.exp(-input.wheel * 0.0015), 0.1, 6);
+    const speed = (input.run ? this.freeFastSpeed : this.freeSpeed) * this.freeSpeedScale;
     const len = Math.hypot(mx, my);
     if (len > 1) {
       mx /= len;
@@ -517,7 +442,7 @@ export class CameraRig implements System {
     const rx = Math.cos(this.freeYaw),
       rz = -Math.sin(this.freeYaw);
     const v = this.freeVel;
-    const a = damp(photo ? 5 : 7, dt);
+    const a = damp(7, dt);
     v.x += ((fx * my + rx * mx) * speed - v.x) * a;
     v.y += ((fy * my + vert) * speed - v.y) * a;
     v.z += ((fz * my + rz * mx) * speed - v.z) * a;
@@ -529,7 +454,7 @@ export class CameraRig implements System {
       if (v.y < 0) v.y = 0;
     }
     cam.position.copy(p);
-    cam.rotation.set(this.freePitch, this.freeYaw, photo ? this.photo.roll : 0, 'YXZ');
+    cam.rotation.set(this.freePitch, this.freeYaw, 0, 'YXZ');
   }
 
   private updateAvatar(ctx: FrameContext): void {
