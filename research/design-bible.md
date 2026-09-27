@@ -817,6 +817,24 @@ low-to-mid (below).
   real; the cues 1564.815 `atmos.sky` and 1565.3 `atmos.glow` (to 1566.3) match it. Our 1566 frame misses the
   whiteout itself (mean [55, 26, 24] against the video's [177, 80, 64]: the U fountain wall and the white burst are
   far dimmer than filmed), not a red sky.
+- **Round 9: the flash bounce on the sky lives in the smoke over the site.** The bounce of the pyro off the smoke was
+  one uniform glow over the whole dome, so from the far drone of v1566.75–1568 (≈ 350 m behind the field, 100 m up)
+  the blazing U lit the entire horizon ([16–19, 6–10, 6–7] against the video's [1–3, 0, 0]). The lit smoke is now an
+  ellipsoid over the grounds (centre 0 / 25 / 30 m, radii 170 m horizontal, 55 m vertical): a sky ray glows by how
+  close it passes through it (exp(−2 (q² − 1)) outside), and the whole dome glows only inside an `atmos.glow smoke`
+  scene (full at smoke 0.2) or when the camera is in or near the cloud (terrace, stage-side drones: v558.25 keeps its
+  pink smoke sky). Similarity: v1566.75 +1.7, v1567.25 +5.4, v1568 +3.5; v1566.25 −3 (the eruption glow cue fades
+  0.3 s before the video's red sky, see the show cue). A plain smoke gate without the volume cost v558.25 −3.3.
+- **Round 9: a built-up bank shades itself, and filters the light that crosses it.** The glow share of the fog
+  colour is divided by 1 + 4 × the smoke in the air: the red veil in front of the set thins inside the 27 s finale
+  bank (v1521 +2.6, v1524.75 +2.2, v1530.5 +3.2, v1533 +3.7, v1515 +1.5) while the 1 s eruption (little smoke in
+  the air yet) keeps its full red. A dyed bank is a colour filter: the flash light that reaches the grounds through
+  it takes the smoke's hue (1 − a + a · hue, a = 1.5 × the smoke in the air): the white U fountains light a pure red
+  field as filmed (v1524–1533 bottom band [49–93, 0–3, 0–2]).
+- **v1511.75 (the dragon head in red smoke, round 9 check):** neither the height fog (density off: ±0) nor the sky
+  veil hides the head; it sits behind the purple-lit pyro smoke band of the roof gerb fan and the red wash of the
+  floods in the haze, filmed from ~100 m (the video's drone is far closer: the head fills a quarter of the frame).
+  A camera pose / pyro smoke / flood matter, not the site smoke.
 - **Ground light per source height (round 8 check):** a flash bucket's centroid mixes low rows and high breaks
   (v1566: stage bucket centred at 24.5 m); weighting each source by its own height changed no moment by more than
   0.3 points, so the centroid share stays.
