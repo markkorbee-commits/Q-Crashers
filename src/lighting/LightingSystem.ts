@@ -227,6 +227,10 @@ const LOWFOG_ENV_K = 0.05;
  *           subset: target left/right, rows (0 = nearest the stage), index (pillars_top order)
  *  hit / chase / blinder / strobe: target (anchor names, group names, left/right/center), groups
  *  flood / festoon / wash zones / curtain / aim: see docs/show-format-ext/lights.md
+ *  round 11 (same doc): the spar lamp row (target `spar_lamps`), blinder attack / release / aim / spread, per-lantern
+ *           colours (`colors`, `rowColors`, `shafts`, `rowShafts`) and pillar mode `strobe`, flood `gate` / `duty` /
+ *           `offset` and the local pool areas `aisle` / `front`, the `storm` and `key` (dragon key) fx, the flat
+ *           fan (`fan` + `aim`), and the calm (reduce flashing) state tracks without the authored stutters
  */
 export class LightingSystem implements System {
   readonly name = 'lights';
@@ -2010,13 +2014,13 @@ function pillarMult(c: LightCue, mode: number, i: number, row: number, rows: num
 }
 
 /**
- * flood `gate` (round 11): lit for the first `duty` share of every gate step on the beat grid (quarter / half beat /
- * beat / 2 beats / bar), 20–30 ms edges. Reduce flashing: a shallow 25 % swing instead of on / off.
+ * flood `gate` (round 11): lit for `duty` of every gate step on the beat grid (quarter / half beat / beat / 2 beats /
+ * bar), from `offset` (share of the step) on, 20–30 ms edges. Reduce flashing: a shallow 25 % swing, not on / off.
  */
 function floodGate(c: LightCue, beat: BeatInfo, rf: boolean): number {
   const spb = 60 / Math.max(40, beat.bpm);
   const stepS = c.gate * spb;
-  const ph = beat.beat / c.gate;
+  const ph = beat.beat / c.gate - c.gateOffset;
   const x = (ph - Math.floor(ph)) * stepS;
   const g = smooth01(x / 0.02) * (1 - smooth01((x - c.duty * stepS) / 0.03));
   return rf ? 0.75 + 0.25 * g : g;

@@ -116,6 +116,60 @@ level scales its lamp and its shaft together.
   floods at 60 % with an attack of at least 0.3 s, and light-bus flashes at 40 %. Round 9: every flash of
   the lights shares **one flash budget** (see "Round 9" below): at most 3 flashes in any second.
 
+## Round 11: spar lamps, per-lantern colours, lantern strobe, flood gate, local pools, storm, dragon key
+Everything is opt-in: without the new params / fx / targets the show renders as before (64 moments unchanged).
+The cue changes that use them are in `$ENDSHOW_DATA/work/r11_lights/cue_patch.json` (with the measured effect).
+
+* **Spar lamp row** (target `spar_lamps`, aliases `spar_lamp`, `wing_lamps`; blinder / strobe cues; explicit only,
+  never lit by `all` / untargeted cues; `left` / `right` filter): the wing-spar heads as lamps staring into the camera,
+  drawn as a glare star (lens sprite) over a soft lens disc, **no beam cone** (a look aimed at the lens drew a white
+  veil over the whole frame). One straight row per wing along the line fitted through its spar heads, over the outer
+  65 % of the span, a lamp every 3.2 m (same row at every quality level). v358–363.9, v374.2–377.4, v397–399.5.
+
+  | blinder param | default | meaning |
+  |---|---|---|
+  | `aim` | `[0, 2, 40]` (the near field) | world point the lamps face; aim at a camera position for the glare star (v358: `[-0.5, 0.2, 2]`) |
+  | `spread` | 6.9° | half angle (deg) within which a camera sees the star; outside it the lamp is a disc |
+
+  Discharge lamps: they cut with a 0.12 s release, no tungsten afterglow. They add a little to the audience light,
+  nothing to the set wash.
+* **Blinder `attack` / `release`** (s, all blinders): rise time (default 0.03; calm at least 0.25) and the decay after
+  `dur` (default the 0.32 s tungsten afterglow that cools to orange; an explicit `release` decays without cooling and
+  the cue lives `3.5 x release` after `dur`). A dip of the booth spot is two `dj_booth` blinders with a gap, the first
+  with `release` 0.1 (v104.75–105.5).
+* **Per-lantern colours** (`pillars`): `colors` (list, per pillar in `pillars_top` order 0 = L1, 1 = R1, 2 = L2 …,
+  cycled), `rowColors` (list, per row, 0 = nearest the stage, cycled), `shafts` / `rowShafts` (the same for the shaft
+  uplight). Subset cues (`index`, `rows`, `left` / `right`) in different colours work as well (latest cue wins per
+  pillar). While the lit lanterns differ in colour the engine publishes `LightEnv.pillarLampColors[i]` /
+  `pillarShaftColors[i]` (empty while they agree) and, until the lantern renderer reads them, draws a glow in each
+  lantern's own colour at its lower glass (`LightingSystem.pillarGlowK` 0.6, 0 = off). v190, v509.4–511.
+* **Pillar mode `strobe`**: the crystals flash on every `every` step of the beat grid (default `halfbeat`; also
+  `quarter`, `beat`, `2beat`, `bar`); calm: never faster than 0.35 s and a shallow swell. `chase` takes `every` too
+  (one row per step). v1223.5–1226, v1267.9–1269.2.
+* **Flood `gate`** (`quarter` | `halfbeat` | `beat` | `2beat` | `bar`), `duty` (lit share, default 0.5), `offset`
+  (share of the step where the lit part starts, default 0): the lit haze follows an LED gate. The 588.668 stage gate
+  (`phase` 0.75, `duty` 0.45) is lit from beat phase 0.25: the flood takes `offset` 0.25, `duty` 0.45. Calm: a 25 %
+  swing instead of on / off.
+* **Flood `area` `aisle` / `front` / `pools`** (also as a list, e.g. `["aisle", "front"]`; never part of `all`): a
+  local light pool on the paving only, no lit air: `aisle` = between the lantern rows (x ±13, z 30–146), `front` = in
+  front of the deck (x ±34, z 1–19), plus a small local flash on the light bus (`poolK` 0.9, `poolFlashK` 0.8).
+* **`lights.storm`** (new fx; `intensity` 0..1.5, `attack` 0.6 s, `fade` 1.2 s, optional `color`): the storm scatter
+  (the lit cloud of the rig and wash light, round 5) at the cue's level whatever `fog.level` says, plus the soft beam
+  shafts; a `color` pulls the cloud 70 % towards it. In the v1230.7–1249 storm `fog.level` already holds the scatter
+  at 0.98, so the cue adds nothing there (measured, not used).
+* **`lights.key`** (new fx, state semantics: latest cue wins, cross-fade over `fade` 0.5): a key light on the dragon
+  sculpture independent of the set wash: `color` (audience left / front), `color2` (right, default `color`),
+  `intensity` 0..2. Published as `LightEnv.dragonKeyColor` / `dragonKeyColor2` (premultiplied) and
+  `dragonKeyIntensity`; the stage's dragon / crown materials have to read them (v944–1010 red / green head,
+  v1043.9). Until they do, the cue has no visible effect.
+* **Look `fan` with `aim`**: a flat fan aimed at a world point: every head aims at `aim`, turned about the vertical by
+  its place in the row x `spread` / 2 (default 36°), elevation kept, `sway` swings it (v834.88: measured on the deck
+  handheld, a white veil at the lens: not used there).
+* **Reduce flashing: authored stutters** (no cue change): with `app.reduceFlashing` the look, wash, zone-wash,
+  pillar and festoon tracks drop state cues shorter than 0.5 s that start within 0.35 s of the previous kept one (the
+  kept one holds through them), bridge gaps under 0.35 s and cross-fade over at least 0.15 s: v160.8–171.4 went from
+  up to 16 colour changes per second (wash, lanterns) to at most 3. `stage.state` stutters are the stage's (contract).
+
 ## Round 9: one flash budget with "Reduce flashing", saturated flood air (no cue change needed)
 * **Shared flash budget** (only with `app.reduceFlashing` on; with the option off nothing changes). Every flash
   onset of the lights (blinder onsets, `lights.hit`, strobe hits, the pulses of strobe bursts, kick strobes on
@@ -290,3 +344,9 @@ smoke, the beams and on the set. What changed:
   `breakup`), `sway`.
 * pillars params `rows`, `index`.
 * `lights.wash` param `fieldShare` (0..1, default 0; round 9).
+* Round 11: targets `spar_lamps` / `spar_lamp` / `wing_lamps` (explicit-only lamp row, blinder / strobe); blinder
+  params `attack`, `release`, `aim`, `spread`; pillars mode `strobe`, params `colors`, `rowColors`, `shafts`,
+  `rowShafts` (string lists), `every` (`quarter` | `halfbeat` | `beat` | `2beat` | `bar`); flood params `gate` (same
+  names), `duty` (0.05..0.95), `offset` (0..1), `area` also `aisle` | `front` | `pools` or a list of areas; new fx
+  `lights.storm` (`intensity`, `attack`, `fade`, `color`) and `lights.key` (`color`, `color2`, `intensity`, `fade`,
+  target `dragon` / `dragon_head`); look `fan` accepts `aim`.

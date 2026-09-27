@@ -117,9 +117,10 @@ export interface LightCue {
   release: number;
   /** event life after dur (s) when >= 0 (overrides the track tail: a blinder with a long `release`) */
   tail: number;
-  /** flood (round 11): gate step in beats (0 = no gate) and the lit share of each step */
+  /** flood (round 11): gate step in beats (0 = no gate), the lit share of each step and where in the step it starts */
   gate: number;
   duty: number;
+  gateOffset: number;
   // flood / zone wash / festoon
   /** flood: AREA_* bitmask; wash: zone mask (AREA_SIDES_L / _R) or 0 = the whole set */
   area: number;
@@ -322,6 +323,7 @@ function parse(c: Cue, show: ShowEngine): LightCue {
     tail: -1,
     gate: c.fx === 'flood' && p.gate !== undefined ? everyBeats(p.gate, 0) : 0,
     duty: Math.min(0.95, Math.max(0.05, num(p.duty, 0.5))),
+    gateOffset: ((num(p.offset, 0) % 1) + 1) % 1,
     area: c.fx === 'flood' || c.fx === 'wash' ? floodArea(c, c.fx) : 0,
     attack: Math.max(0.01, num(p.attack, 0.08)),
     fieldShare: c.fx === 'wash' ? Math.min(1, Math.max(0, num(p.fieldShare, 0))) : 0,
@@ -375,18 +377,25 @@ export class StateTrack {
   /**
    * Round 11, photosensitivity option (App.reduceFlashing): a copy of this track without the authored stutters —
    * a short cue (dur < CALM_STUTTER) that starts less than CALM_GAP after the previous kept cue is dropped and the
-   * kept cue covers it (the colour changes of v160.8–171.4 came 12.5 times a second: at most ~3 per second now),
-   * every kept cue cross-fades over at least CALM_FADE. Built once per compile (allocates).
+   * kept cue covers it (the colour changes of v160.8–171.4 came up to 16 times a second: at most 3 per second now),
+   * gaps shorter than CALM_GAP between two states are bridged, every kept cue cross-fades over at least CALM_FADE.
+   * Built once per compile (allocates).
    */
   calmCopy(): StateTrack {
     const out = new StateTrack(this.touch);
     let last: LightCue | null = null;
     for (const c of this.items) {
-      if (last && c.dur < CALM_STUTTER && c.t0 - last.t0 < CALM_GAP) {
-        // the kept cue holds through the dropped one when they touch (no dark / default gap in between)
-        const end = c.t0 + c.dur;
-        if (end > last.t0 + last.dur && c.t0 <= last.t0 + last.dur + TOUCH_EPS) last.dur = end - last.t0;
-        continue;
+      if (last) {
+        const lastEnd = last.t0 + last.dur;
+        const gap = c.t0 - lastEnd;
+        if (c.dur < CALM_STUTTER && c.t0 - last.t0 < CALM_GAP) {
+          // the kept cue holds through the dropped one (no dark / default blip in between)
+          const end = c.t0 + c.dur;
+          if (end > lastEnd && gap < CALM_GAP) last.dur = end - last.t0;
+          continue;
+        }
+        // a short gap before the next state is bridged too (a 0.02–0.3 s dark blip is a flash)
+        if (gap > 0 && gap < CALM_GAP) last.dur = c.t0 - last.t0;
       }
       last = { ...c, fade: Math.max(c.fade, CALM_FADE) };
       out.push(last);
