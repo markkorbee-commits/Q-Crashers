@@ -1,7 +1,7 @@
 # CLAUDE.md — Defqon.1 2026 · The Endshow Experience
 
 Guidance for Claude sessions working in this repository. The user-facing, step-by-step setup (Dutch) is
-`HANDOFF.md`; its sections "Stand van zaken" and "Open punten" are the current state and the prioritised backlog.
+`HANDOFF.md`; its sections "Stand van zaken" and "Mogelijke vervolgstappen" are the final state (27 Sep 2026) and the optional follow-ups.
 
 ## What this is
 

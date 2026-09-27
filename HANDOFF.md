@@ -319,7 +319,11 @@ echo $CHROME_PATH
 
 ## Stand van zaken
 
-Zo 27 sep 2026, ± 00:40 (CEST), lokaal op de MacBook Pro (M4 Max, GPU-render).
+Zo 27 sep 2026, ± 11:15 (CEST): PROJECT AFGEROND (op verzoek van de gebruiker geen verdere QA-rondes). Lokaal op de
+MacBook Pro (M4 Max, GPU-render). Eindstand gelijkenis (64 momenten): **69,6 % ruw / 53,9 % na ijking** (kleur 70,4,
+licht 83,0, vorm 57,2; `research/video-timeline/data/similarity-mac-final.json`), gestart op de Mac bij 52,1 / 25,6.
+Muzieksync: vaste tempo's 99 % binnen 20 ms van het grid, vrije tempo's 70 % binnen 100 ms van een onset. Mobiel
+draw-call-budget PASS; geen console-fouten.
 
 - Stap 1-9 zijn op de Mac uitgevoerd (video + mp3 met kloppende checksums, cutlijst identiek aan de referentie).
 - Gelijkenis op de Mac-GPU (64 momenten, `--settle 500 --min-frames 30`), per moment in
@@ -338,6 +342,7 @@ Zo 27 sep 2026, ± 00:40 (CEST), lokaal op de MacBook Pro (M4 Max, GPU-render).
   | + perception (Show camera ongewijzigd) + ronde 9 (8 groepen) | 68,5 % | 52,3 % | 69,2 / 81,5 / 56,6 |
   | + ronde 10 (video-match, alle 11 showdelen, exacte frames) | 69,3 % | 53,5 % | 70,3 / 82,2 / 57,1 |
   | + ronde 11 (engine-uitbreidingen + 117 cue-patches) + features | 69,5 % | 53,8 % | 70,5 / 82,6 / 57,3 |
+  | + eindjudges (6 lenzen) + laatste herstelronde (8 groepen) | 69,6 % | 53,9 % | 70,4 / 83,0 / 57,2 |
 
 - Ronde 5 (findings `docs/handoff/findings/r5_*.md`): schermen tonen kasteelprint i.p.v. vlakke panelen; MC met
   gekleurde key + backlight, close-ups houden de haze, troupe-choreografie en -shots 641-740 s herzien; pyro met
@@ -390,6 +395,14 @@ Zo 27 sep 2026, ± 00:40 (CEST), lokaal op de MacBook Pro (M4 Max, GPU-render).
   camera roll/zoomAt/dip naar zwart, donkere drone-lucht) plus 117 cue-patches: 64 momenten +0,3; de 381 geraakte
   momenten 39,5 → 43,3 % na ijking (`research/video-timeline/sync-r11.md`).
 
+- Eindjudges (27 sep ± 09:40; scores: techniek 7,5, UX 7,5, educatie 7, podium 6,5, publiek 5, nauwkeurigheid 5):
+  3 blockers + 38 majors. Laatste herstelronde: witheet vuur in de kern en vonken die uitgaan als de klep sluit;
+  goudchevron 1324-1370 opnieuw gefit (schuine drone, hatch → chevron); MC van voren; dichte crowd vanaf de
+  startspots, barrièrelijn, telefoons/aanstekers, gloeiende lantaarns; lichtbundels van de andere areas uit (festival
+  afgelast); plassen weg; mobiele texMean-bug; ULTRA-keuze op Retina begrensd; spar-strobes op de vleugels; XTC-plateau
+  niet meer belonend, alcohol-contrast, hitteverhaal in de crowd, BAC-teksten; reuzenrad kijkt bij instappen naar het
+  podium, avatar, positielijst; mist op podiumhoogte (deels). Wat bewust open bleef: zie "Mogelijke vervolgstappen".
+
 Eerdere stand (cloud, vóór de overdracht):
 
 - Alle show-content is uit de video herbouwd (per span, met cameravolgorde = de officiële montage, één shot per cut).
@@ -416,9 +429,9 @@ Eerdere stand (cloud, vóór de overdracht):
 - Tools zijn overgezet: datamap via `ENDSHOW_DATA`, browserkeuze via `scripts/lib/browser.mjs` (Chrome + GPU op de
   Mac), workflowscripts met alle paden als argumenten (`tools/workflows/`).
 
-## Nieuwe wensen van de gebruiker (26 sep 2026, avond)
+## Nieuwe wensen van de gebruiker (26 sep 2026, avond) — alle gebouwd en gemerged (27 sep)
 
-Gepland voor ronde 7-8 (na de metriekrondes, met eigen groepen en een controle achteraf):
+Gebouwd in ronde 7-8, elk onafhankelijk gereviewd en hersteld (zie "Stand van zaken"):
 
 - Perception: XTC- en alcoholeffecten duidelijk sterker (analyse loopt), en ketamine als derde optie met
   educatieve risicowaarschuwing in dezelfde stijl als XTC (Trimbos/Jellinek-bronnen, nooit gebruiks-, doserings- of
@@ -434,29 +447,19 @@ Gepland voor ronde 7-8 (na de metriekrondes, met eigen groepen en een controle a
 - Niet nodig (besloten): VR/WebXR, deelbare momenten-menu. Advies over rechten (audio, merken) is genoteerd: de
   artifact blijft privé.
 
-## Open punten (prioriteit)
+## Mogelijke vervolgstappen (niet gepland; project afgerond op 27 sep 2026)
 
-Het uitgewerkte plan met meetpunten en bestanden staat in `docs/handoff/findings/r5_next.md`; kort:
+De meting stagneerde vanaf ronde 9 (+0,6, +1,2, +0,3, +0,1 punt per ronde); verdere nauwkeurigheid vraagt grotere
+ingrepen. Uitgewerkte bevindingen met tijden en bewijs: `docs/handoff/findings/r12_*.md` (eindjudges) en de
+"notFixed"-punten per groep in de commits van de laatste ronde. De belangrijkste:
 
-1. ~~Ronde 4 afronden~~ klaar op de Mac (26 sep): baseline, stage-patch gemerged, Show-camera-exposure 0,5.
-   Punten 2-4 en delen van 5/7 zijn in ronde 5 aangepakt; restpunten en contractverzoeken van ronde 5 staan in
-   `docs/handoff/findings/r6_*.md` (ronde 6).
-2. Schermen: `screens.content` mode `'color'` rendert als vlakke felle panelen achter de MC (348, 361, 369, 447 s);
-   de video toont kasteelkunst/ornamenten — render als getinte kasteel-/ornamenttextuur op gematigd niveau.
-3. Performerverlichting: MC egaal grijs belicht; video: sterk gekleurde key + tegenlicht in dichte haze (bv. 351,
-   409-412 s).
-4. Dansers/troupe-shots 641-740 s: 8 momenten gecontroleerd; fout gekadreerd zijn 660,9 (video: close-up danseres
-   met waaiers op het podium), 669,5 (camera in een danseres) en 723,8 (danseres loopt naar de camera). Aanpak als bij
-   de MC: `subject` uitbreiden naar 'lead' / dansers.
-4b. Determinisme na een seek: 1243 s rendert per run anders (schone beam-storm vs witte haze); vermoedelijk
-   deeltjes/rook die van het vorige moment blijven hangen. Reproduceren en oplossen (r5_next.md §6).
-5. Contractverzoeken podium-walk: lighting rig blinder `T_BOOTH` naar (0, 4.05, -6.35), arch-spot focus via
-   `stageFloorAt` (`src/world/stageWalk.ts`), near-camera fade in de beam-volume shader, CameraRig `floorAt` op
-   trappen, design-bible §5.4/§5.13 maten vault/booth/podium.
-6. Mobiel: draw calls 114-126 vs budget 110 (MainStage crown per materiaal, Bars, grounds); deels in de stage-patch.
-7. Free-tempo sync verbeteren (Vivaldi, Discorecord-intro, bridge, Domitor, outro).
-8. Resterende cue/engine-gaten uit `docs/handoff/findings/r2_show_contract.txt` (lambda 'trees'-laserpreset,
-   hart-vuurwerk boog, flood zonder de set te verlichten, twin white V gerbs @76, towers_top dunne vlamkolommen,
-   grotere vuurwolk 1508,8/1566).
-9. Eindjudges (accuracy/stage/crowd/perception) en artifact opnieuw publiceren (`npm run build:artifact`; publiceren
-   naar dezelfde artifact-URL).
+1. Drakenkop en vleugels herzien (langere snuit, grotere kop, bladvormige vleugels) én tegelijk de close-up-camera's
+   (656, 666,5, 680,5, 847-850 s) opnieuw fitten; los kostte dat −0,2 punt (ronde 11, `HEAD.snout` staat klaar).
+2. Finale-rood (1510-1537 s) en eruptie (1565,75 s): te veel rode bronnen tegelijk (lowfog, flood, wash, atmos,
+   gerb-lightColor) maken het wit van het vuur zalmroze; cue-voorstellen staan in de fire-rapportage van de laatste ronde.
+3. Cue-werk dat de judges vonden: S9 crackle-koepel 536-545 s (timing/vorm), brocade 557,9 s te lang, Domitor-climax
+   1075-1078 s (warm i.p.v. violet, vlammen), veldverlichting bij 535,75 en 865-870 s, laserzee 1128-1175 s.
+4. Camera-look per shot (belichting/kleurcorrectie zoals de film) en echte volumetrische rook: grote ingrepen, hooguit
+   enkele punten.
+5. Klein: pianist-rig (steiger, uitstraling), leadprocessie 724-729 s, lage framerate bij 1510-1514 s op DPR 2,
+   meer rook op podiumhoogte in grondshots, een test-runner/CI-stap voor `IMPORT_IS_UNDEFINED`.
