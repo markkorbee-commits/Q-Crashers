@@ -4,6 +4,7 @@ import type { FrameContext, QualitySettings } from '../../core/types';
 import { Rng } from '../../core/rng';
 import { LANTERN_Y, PILLARS } from '../../world/site';
 import { FieldLight } from './FieldLight';
+import { CALM_UNIFORM, syncFlashCalm } from './flashSafety';
 import { FxLayer, quadGeometry, ribbonGeometry } from './FxLayer';
 import { FxLights } from './FxLights';
 import { PUFF_FRAG, PUFF_VERT } from './puffShader';
@@ -66,6 +67,8 @@ export class FxShared {
       uSiteGlow: { value: new THREE.Color() },
       // 0..1 site smoke of `atmos.glow` (app.env.smoke)
       uSiteSmoke: { value: 0 },
+      // photosensitivity option (flashSafety.ts): 1 = strobing / flickering particles hold their average
+      uCalm: CALM_UNIFORM,
     };
     this.field = new FieldLight(this.uniforms, app.quality.level === 'mobile');
     app.scene.add(this.field.mesh);
@@ -77,6 +80,7 @@ export class FxShared {
     const app = this.app;
     const env = app.env;
     u.uTime.value = ctx.showTime;
+    syncFlashCalm(app);
     app.renderer.getDrawingBufferSize(this.size);
     (u.uHalfRes.value as THREE.Vector2).set(this.size.x * 0.5, this.size.y * 0.5);
     const cam = ctx.camera;

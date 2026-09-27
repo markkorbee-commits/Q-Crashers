@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { CALM_UNIFORM } from '../../fx/core/flashSafety';
 
 /** Emissive element kinds (aLed.z). Keep in sync with the fragment shader below. */
 export const LED_KIND = {
@@ -46,7 +47,7 @@ export const CONTENT_MODE: Record<string, number> = {
  * Output is scene-referred HDR (values > 1 bloom in the post pipeline).
  */
 export function createLedMaterial(): THREE.ShaderMaterial {
-  return new THREE.ShaderMaterial({
+  const mat = new THREE.ShaderMaterial({
     name: 'stage-led',
     fog: true,
     uniforms: THREE.UniformsUtils.merge([
@@ -94,6 +95,11 @@ export function createLedMaterial(): THREE.ShaderMaterial {
     vertexShader: LED_VERT,
     fragmentShader: LED_FRAG,
   });
+  // photosensitivity option (fx/core/flashSafety.ts): the shared uniform object, by reference (the merge
+  // above clones; the overlay material spreads these uniforms, so it shares it too). Calm: beat pulses
+  // swing about half as deep, sparkle / twinkle pixels change at <= 2.5 Hz.
+  mat.uniforms.uCalm = CALM_UNIFORM;
+  return mat;
 }
 
 const LED_VERT = /* glsl */ `
@@ -174,6 +180,7 @@ const LED_FRAG = /* glsl */ `
       uniform vec3 uPortal;
       uniform float uPulse;
       uniform float uStrobe;
+      uniform float uCalm;
       uniform float uContent;
       uniform vec3 uContentCol;
       uniform vec3 uContentColS;
@@ -228,9 +235,9 @@ const LED_FRAG = /* glsl */ `
           c = mix(cB * 0.25, cA * 1.4, band);
         } else if (pat < 2.5) {
           float env = exp(-fract(uBeat) * 5.0);
-          c = cA * (0.15 + 1.1 * env);
+          c = uCalm > 0.5 ? cA * (0.45 + 0.55 * env) : cA * (0.15 + 1.1 * env);
         } else if (pat < 3.5) {
-          float tick = floor(uTime * 11.0);
+          float tick = floor(uTime * (uCalm > 0.5 ? 2.5 : 11.0));
           float r = h21(vec2(pid, tick));
           float r2 = h21(vec2(pid + 17.0, tick - 1.0));
           float on = step(0.86, r) + 0.45 * step(0.9, r2);
@@ -357,7 +364,7 @@ const LED_FRAG = /* glsl */ `
         if (m < 1.5 || m > 8.5) {
           // colour / pulse: the castle print lit in the content colour, recesses in the 2nd colour
           vec2 art = castleArt(p, size, seed);
-          float env = m < 1.5 ? 1.0 : 0.35 + 1.1 * exp(-fract(uBeat) * 5.0);
+          float env = m < 1.5 ? 1.0 : uCalm > 0.5 ? 0.6 + 0.55 * exp(-fract(uBeat) * 5.0) : 0.35 + 1.1 * exp(-fract(uBeat) * 5.0);
           vec3 lit = col * art.x * uArtLevel.x;
           // the print is off-white stone: its brightest faces lean pastel under the coloured light
           lit = mix(lit, vec3(max(lit.r, max(lit.g, lit.b))) * 0.8, 0.28 * smoothstep(0.3, 1.0, art.x));
@@ -494,9 +501,9 @@ const LED_FRAG = /* glsl */ `
             float k = fract(vWP.x / 26.0 - uPhase);
             wp = 0.55 + 0.75 * smoothstep(0.0, 0.1, k) * (1.0 - smoothstep(0.12, 0.45, k));
           } else if (pat > 1.5 && pat < 2.5) {
-            wp = 0.65 + 0.5 * exp(-fract(uBeat) * 4.0);
+            wp = uCalm > 0.5 ? 0.75 + 0.25 * exp(-fract(uBeat) * 4.0) : 0.65 + 0.5 * exp(-fract(uBeat) * 4.0);
           } else if (pat > 2.5 && pat < 3.5) {
-            wp = 0.6 + 0.9 * step(0.82, h21(vec2(rnd * 131.0, floor(uTime * 4.0))));
+            wp = 0.6 + 0.9 * step(0.82, h21(vec2(rnd * 131.0, floor(uTime * (uCalm > 0.5 ? 2.5 : 4.0)))));
           } else if (pat > 3.5 && pat < 4.5) {
             float swap = mod(floor(uBeat / 4.0), 2.0);
             wp = mix(1.15, 0.45, abs(step(0.0, vWP.x) - swap));
@@ -512,9 +519,9 @@ const LED_FRAG = /* glsl */ `
             float k = fract(vWP.x / 26.0 - uPhase);
             le = 0.25 + 1.2 * smoothstep(0.0, 0.08, k) * (1.0 - smoothstep(0.1, 0.35, k));
           } else if (pat > 1.5 && pat < 2.5) {
-            le = 0.2 + 1.1 * exp(-fract(uBeat) * 5.0);
+            le = uCalm > 0.5 ? 0.45 + 0.55 * exp(-fract(uBeat) * 5.0) : 0.2 + 1.1 * exp(-fract(uBeat) * 5.0);
           } else if (pat > 2.5 && pat < 3.5) {
-            le = 0.3 + 1.2 * step(0.8, h21(vec2(rnd * 97.0, floor(uTime * 6.0))));
+            le = 0.3 + 1.2 * step(0.8, h21(vec2(rnd * 97.0, floor(uTime * (uCalm > 0.5 ? 2.5 : 6.0)))));
           }
           col = uLamp * (0.35 + 2.4 * core) * le * pulse;
         } else if (kind < 3.5) {

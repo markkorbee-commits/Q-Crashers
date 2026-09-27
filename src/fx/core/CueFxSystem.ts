@@ -10,6 +10,7 @@ import type { FxLayer } from './FxLayer';
 import type { LightSpec } from './FxLights';
 import { FxShared } from './FxShared';
 import { setFxBudgetLevel } from './budget';
+import { syncFlashCalm } from './flashSafety';
 
 /** Emitters (and light flashes) a single compiled cue expands into. Built once per cue, then cached. */
 export class EmitterSet {
@@ -145,6 +146,9 @@ export abstract class CueFxSystem implements System {
     for (let i = 0; i < layers.length; i++) layers[i].begin();
     const cues = this.app.show.active(this.sys, t, this.cueBuf);
     this.activeCues = cues.length;
+    // photosensitivity option (App.reduceFlashing, set by the UI): strobing flashes hold their average and
+    // bursts swell in softly (flashAt), the flash light is scaled down below
+    const calmOn = syncFlashCalm(this.app);
     this.flashSum = 0;
     this.lightSum = 0;
     this.lightSumD = 0;
@@ -176,7 +180,7 @@ export abstract class CueFxSystem implements System {
       }
       const fl = set.flashes;
       for (let k = 0; k < fl.length; k++) {
-        const I = flashAt(fl[k], t);
+        const I = flashAt(fl[k], t, calmOn);
         if (I > 0.002 && this.flashN < this.flashBuf.length) {
           this.flashBuf[this.flashN] = fl[k];
           this.flashI[this.flashN++] = I;
@@ -186,7 +190,7 @@ export abstract class CueFxSystem implements System {
       const li = set.lights;
       const der = set.derived ? 1 : 0;
       for (let k = 0; k < li.length; k++) {
-        const I = flashAt(li[k], t);
+        const I = flashAt(li[k], t, calmOn);
         if (I > 0.002 && this.lightN < this.lightBuf.length) {
           this.lightBuf[this.lightN] = li[k];
           this.lightD[this.lightN] = der;
@@ -199,8 +203,8 @@ export abstract class CueFxSystem implements System {
     // soft cap: a finale barrage must not blow the lighting bus up linearly
     const cap = this.flashCap;
     const kf = this.flashSum > cap ? (cap * (1 + Math.log(this.flashSum / cap))) / this.flashSum : 1;
-    // photosensitivity option (set by the UI on the App): flash light at ~40 %
-    const calm = (this.app as unknown as { reduceFlashing?: boolean }).reduceFlashing ? 0.4 : 1;
+    // photosensitivity option: flash light at ~40 %
+    const calm = calmOn ? 0.4 : 1;
     for (let k = 0; k < this.flashN; k++) this.app.env.addFlash(this.flashBuf[k].color, this.flashI[k] * kf * calm, this.flashBuf[k].pos);
     this.flashN = 0;
     // derived (flash) lights saturate early: a barrage of glitter shells must not light the ground
@@ -385,21 +389,35 @@ const smooth = (a: number, b: number, x: number) => {
   return t * t * (3 - 2 * t);
 };
 
-/** Analytic light-flash envelope (pure function of show time). */
-export function flashAt(fs: FlashSpec, t: number): number {
+/**
+ * Analytic light-flash envelope (pure function of show time).
+ * `calm` (photosensitivity option): a burst swells in over ~0.12 s and decays over ~0.3 s instead of a
+ * 80 ms spike (the bursts of a salvo merge into one swell instead of flashing one by one), a sustained
+ * flash keeps a gentle shimmer (< 10 % steps) instead of its 24 Hz flicker, and a strobing flash (strobe
+ * shells, 11-14 Hz) holds its average level. About the same light energy either way.
+ */
+export function flashAt(fs: FlashSpec, t: number, calm = false): number {
   if (t < fs.t0 || t > fs.t1) return 0;
   const tau = t - fs.t0;
   let I: number;
   if (fs.kind === 0) {
-    I = fs.peak * (Math.exp(-tau / 0.08) + 0.28 * Math.exp(-tau / Math.max(0.05, fs.decay)));
+    if (calm) I = fs.peak * smooth(0, 0.12, tau) * (0.3 * Math.exp(-tau / 0.3) + 0.28 * Math.exp(-tau / Math.max(0.05, fs.decay)));
+    else I = fs.peak * (Math.exp(-tau / 0.08) + 0.28 * Math.exp(-tau / Math.max(0.05, fs.decay)));
   } else {
     const len = fs.t1 - fs.t0;
     I = fs.peak * smooth(0, 0.08, tau) * (1 - smooth(len - Math.max(0.05, fs.decay), len, tau));
-    I *= 0.82 + 0.18 * ((hash32(Math.floor(t * 24) ^ (fs.pos.x * 7) | 0) >>> 8) / 16777216);
+    const h = (hash32(Math.floor(t * 24) ^ (fs.pos.x * 7) | 0) >>> 8) / 16777216;
+    I *= calm ? 0.91 + 0.08 * (h - 0.5) : 0.82 + 0.18 * h;
   }
   if (fs.strobe > 0) {
-    const ph = t * fs.strobe;
-    I *= ph - Math.floor(ph) > 0.55 ? 1.6 : 0.25;
+    if (calm) I *= STROBE_MEAN;
+    else {
+      const ph = t * fs.strobe;
+      I *= ph - Math.floor(ph) > 0.55 ? 1.6 : 0.25;
+    }
   }
   return I;
 }
+
+/** duty-weighted mean of the strobe modulation (45 % at x1.6, 55 % at x0.25) */
+const STROBE_MEAN = 0.45 * 1.6 + 0.55 * 0.25;

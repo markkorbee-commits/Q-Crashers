@@ -147,10 +147,21 @@ void main() {
     vOpac = r11.y * burn;
   } else if (kind == 3 || kind == 4 || kind == 6) {
     float decay = max(r9.x, 0.01);
-    float g = kind == 3 ? exp(-tau / decay)
-            : kind == 4 ? (0.75 + 0.5 * rnd(key, uint(floor(uTime * 30.0)) + 40u))
-                        : (0.85 + 0.3 * rnd(key, uint(floor(uTime * 12.0)) + 40u));
-    vEmis = r3.rgb * r3.w * g * em * fog * smoothstep(0.0, 0.02, tau) * (1.0 - smoothstep(0.7, 1.0, f)) * nearF * thinGain;
+    float g;
+    float att = 0.02;
+    if (uCalm > 0.5) {
+      // photosensitivity option: a break / muzzle flash swells in and fades slower at ~40 % of its peak
+      // (same light energy), glows and ground pools shimmer at <= 3 Hz by less than 10 %
+      g = kind == 3 ? 0.4 * exp(-tau / (decay * 2.5))
+        : kind == 4 ? (0.96 + 0.08 * rnd(key, uint(floor(uTime * 3.0)) + 40u))
+                    : (0.97 + 0.06 * rnd(key, uint(floor(uTime * 3.0)) + 40u));
+      att = kind == 3 ? 0.1 : 0.02;
+    } else {
+      g = kind == 3 ? exp(-tau / decay)
+        : kind == 4 ? (0.75 + 0.5 * rnd(key, uint(floor(uTime * 30.0)) + 40u))
+                    : (0.85 + 0.3 * rnd(key, uint(floor(uTime * 12.0)) + 40u));
+    }
+    vEmis = r3.rgb * r3.w * g * em * fog * smoothstep(0.0, att, tau) * (1.0 - smoothstep(0.7, 1.0, f)) * nearF * thinGain;
     vPar = vec4(0.0, 0.0, 0.0, float(kind));
   } else {
     // smoke / CO2 / fog: lit by the show's light bus (+ optional self illumination from a burst)

@@ -193,13 +193,25 @@ void main() {
     Pn = starPos(s, tN) + sag(ageN, r10.z);
     if (distance(P, Pn) < 1e-3) Pn = P - starVel(s, tS) * 0.02 - vec3(0.0, 1e-3, 0.0);
 
-    float attack = smoothstep(0.0, max(r11.x, 0.001), tau);
+    // photosensitivity option: burst stars swell in over ~0.12 s instead of popping on (continuous
+    // emitters keep their nozzle bright)
+    float attack = smoothstep(0.0, max(r11.x, uCalm > 0.5 && !cont ? 0.12 : 0.001), tau);
     float lf = tau / lifeEnd;
     float headI = attack * (1.0 - smoothstep(0.8, 1.0, lf));
-    if ((flags & F_FLICKER) != 0) headI *= 0.65 + 0.7 * rnd(key, uint(floor(uTime * 22.0 + rnd(key, 15u) * 50.0)) + 100u);
+    if ((flags & F_FLICKER) != 0) {
+      // calm: a gentle <= 2.5 Hz shimmer (+-12 %) instead of the 22 Hz twinkle
+      if (uCalm > 0.5) headI *= 0.88 + 0.24 * rnd(key, uint(floor(uTime * 2.5 + rnd(key, 15u) * 50.0)) + 100u);
+      else headI *= 0.65 + 0.7 * rnd(key, uint(floor(uTime * 22.0 + rnd(key, 15u) * 50.0)) + 100u);
+    }
     if ((flags & F_STROBE) != 0) {
-      float ph = fract(uTime * r8.z + rnd(key, 13u));
-      headI *= step(0.6, ph) * 2.2;
+      if (uCalm > 0.5) {
+        // calm: the strobe star breathes at <= 2.5 Hz (random phase per star) around its average (0.4 x 2.2)
+        float ph = fract(uTime * min(r8.z, 2.5) + rnd(key, 13u));
+        headI *= 0.88 * (0.7 + 0.3 * cos(6.2831853 * ph));
+      } else {
+        float ph = fract(uTime * r8.z + rnd(key, 13u));
+        headI *= step(0.6, ph) * 2.2;
+      }
     }
     headI += pearl;
     // continuous emitters: soft start / stop of the emission
@@ -298,8 +310,10 @@ void main() {
   if (vGlit > 0.001) {
     float cell = floor(vTS * 36.0);
     uint k = hashu(uint(vKey) * 7919u + uint(int(cell) + 65536));
-    float tw = hf(k ^ hashu(uint(floor(uTime * 16.0 + hf(k) * 4.0))));
-    float g = tw > 0.5 ? 2.2 : 0.1;
+    // calm (photosensitivity option): the glitter twinkles at <= 2.5 Hz with a smaller swing, same mean
+    bool calmG = uCalm > 0.5;
+    float tw = hf(k ^ hashu(uint(floor(uTime * (calmG ? 2.5 : 16.0) + hf(k) * 4.0))));
+    float g = calmG ? (tw > 0.5 ? 1.5 : 0.8) : (tw > 0.5 ? 2.2 : 0.1);
     col *= mix(1.0, g, vGlit);
   }
   gl_FragColor = vec4(max(col, vec3(0.0)), 0.0);

@@ -55,6 +55,24 @@ Engine: `src/fireworks/FireworkSystem.ts`, `src/fireworks/shells.ts`, `src/firew
     crossette lines of v553.5 / v557.0 open as spiky star bursts, not as a row of white moons.
   * New comet param `glow` (below).
 
+* **Round 8: Reduce flashing** (the viewer's photosensitivity option, App.reduceFlashing; no cue change).
+  With it on, no large-area luminance change of 10 % or more repeats faster than 3 Hz (fx/core/flashSafety.ts);
+  with it off every picture is bit-identical to before. The fireworks (and the pyro, which shares the fx
+  engine) then:
+  * hold the average of a **strobe** instead of blinking it: the LightEnv flash of a strobe shell no longer
+    pulses the whole site at 11-14 Hz, and each strobe star breathes gently (at most 2.5 Hz, its own phase)
+    around the strobe's mean level; the 22 Hz star flicker, the 16 Hz glitter twinkle and the 26 Hz flitter
+    blink slow to at most 2.5 Hz with a smaller swing (same mean);
+  * **soften the onset of a break**: stars swell in over 0.12 s, the break flash ball comes in over 0.1 s at
+    40 % of its peak and fades 2.5x slower (same light), and the LightEnv burst swells in over 0.12 s and
+    decays over 0.3 s, so the shells of a salvo or finale merge into one swell of light instead of flashing
+    one by one; flame-type flashes keep a shimmer below 10 % instead of their 24 Hz flicker;
+  * keep the flash light at 40 % and the spatial pyro light at 60 % (as before).
+  Measured (Show camera + a spectator eye at 45 m, 30 fps, windows 486-496 and 1265-1300 incl. the strobe
+  mines of v490-494 and the strobe salvos / finale of v1285-1298): the visible flicker of the sky and the
+  ground (tile luminance steps of 10 % at 11-12 per second) is gone; what remains there comes from the
+  lighting strobes and the camera's stutter edit (lights.md / camera).
+
 ## New params
 
 ### comet, cake and mine: launch positions

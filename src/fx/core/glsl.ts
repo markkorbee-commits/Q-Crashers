@@ -17,6 +17,8 @@ uniform vec2 uHalfRes;
 uniform float uProjScale;
 uniform float uMinPx;
 uniform float uFogDensity;
+// photosensitivity option (flashSafety.ts): 1 = strobes / flicker hold their average, bursts swell in softly
+uniform float uCalm;
 
 // lighting bus (LightEnv) for lit smoke
 uniform vec3 uAmbient;

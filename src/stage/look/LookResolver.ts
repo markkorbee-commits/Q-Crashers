@@ -5,6 +5,7 @@ import type { LightEnv } from '../../core/LightEnv';
 import { resolveColor } from '../../show/colors';
 import type { ResolvedPalette, ShowEngine } from '../../show/ShowEngine';
 import type { Cue, SectionKind } from '../../show/ShowTypes';
+import { calmPulsesPerBeat, flashCalm } from '../../fx/core/flashSafety';
 import { CONTENT_MODE } from '../materials/LedMaterial';
 import type { StageLook, StageLookEx } from '../StageLook';
 
@@ -100,6 +101,8 @@ const newVals = (): StateVals => ({
 const MASKS = ['all', 'center', 'crown', 'wings', 'dragon'] as const;
 /** garland pattern names (stage.state garlandPattern / stage.garlands pattern) */
 const GARLAND_PATTERN: Record<string, number> = { steady: 0, chase: 1, twinkle: 2, strobe: 3 };
+/** mean level of the festoon strobe (lit 40 % of each pulse, dragon/shading.ts) with a little extra glow */
+const GARLAND_STROBE_MEAN = 0.45;
 /** gate rates in pulses per beat + phase offset (stage.gate rate) */
 const GATE_RATE: Record<string, [number, number]> = {
   '32nd': [8, 0],
@@ -194,6 +197,13 @@ export class LookResolver {
   private tA = newTarget();
   private tB = newTarget();
   private static readonly DEFAULT_RPM = 1.2;
+  /**
+   * Photosensitivity option (App.reduceFlashing): the owner may set it before resolve(); the option as
+   * mirrored by the fx engine (flashSafety) applies as well. Calm: LED gates run at most one pulse per
+   * beat (<= 3 Hz) at half depth, a festoon strobe holds its average level, 'pulse' / kick pumping / eye
+   * flashes swing about half as deep and eye flashes swell in softly.
+   */
+  calm = false;
 
   constructor(private show: ShowEngine) {}
 
@@ -537,6 +547,7 @@ export class LookResolver {
     out.windowMode = winMode;
 
     // ---- 4. transients -----------------------------------------------------------------------------
+    const calm = this.calm || flashCalm();
     let pulse = 0;
     out.pulseColor.setRGB(0, 0, 0);
     let gCastle = 1;
@@ -576,7 +587,12 @@ export class LookResolver {
         else if (typeof c.p.rate === 'number' && c.p.rate > 0) rate = c.p.rate;
         if (typeof c.p.phase === 'number') ph += c.p.phase;
         const duty = typeof c.p.duty === 'number' ? clamp(c.p.duty, 0.02, 0.98) : 0.5;
-        const depth = typeof c.p.depth === 'number' ? clamp(c.p.depth, 0, 1) : 1;
+        let depth = typeof c.p.depth === 'number' ? clamp(c.p.depth, 0, 1) : 1;
+        if (calm) {
+          // photosensitivity option: at most CALM_MAX_HZ pulses per second (16ths -> beats), half depth
+          rate = calmPulsesPerBeat(rate, beat.bpm);
+          depth *= 0.5;
+        }
         const x = beat.beat * rate + ph;
         const on = x - Math.floor(x) < duty ? 1 : 0;
         const g = 1 - depth * (1 - on);
@@ -587,23 +603,35 @@ export class LookResolver {
         continue;
       }
       if (c.fx === 'eyes_flash') {
-        out.eyesIntensity += 3 * e;
-        if (c.p.color) out.eyes.lerp(resolveColor(c.p.color, pal, _c2), e);
+        // calm: the eyes swell in over 0.25 s at half the flash level (a red eye flash never snaps on)
+        const ef = calm ? 0.5 * smoothstep(0, 0.25, lt) * (1 - smoothstep(c.dur * 0.4, c.dur, lt)) : e;
+        out.eyesIntensity += 3 * ef;
+        if (c.p.color) out.eyes.lerp(resolveColor(c.p.color, pal, _c2), calm ? ef * 2 : e);
       } else if (c.fx === 'roar') {
         out.mouth = Math.max(out.mouth, e);
         out.jaw = Math.max(out.jaw, 0.6 + 0.4 * e);
         out.eyesIntensity += 1.5 * e;
         out.ledIntensity += 0.5 * e;
       } else if (c.fx === 'pulse') {
-        const k = (beat.hasKick ? beat.kick : Math.exp(-beat.phase * 5)) * smoothstep(0, 0.05, lt) * (1 - smoothstep(c.dur - 0.2, c.dur, lt));
+        let k = (beat.hasKick ? beat.kick : Math.exp(-beat.phase * 5)) * smoothstep(0, 0.05, lt) * (1 - smoothstep(c.dur - 0.2, c.dur, lt));
+        // (beat-locked: <= 2.9 Hz at the show's 100-170 bpm; calm halves the swing)
+        if (calm) k *= 0.5;
         pulse = Math.max(pulse, k);
         resolveColor(c.p.color, pal, _c2, 'accent');
         out.pulseColor.copy(_c2).multiplyScalar(k);
       }
     }
-    // energetic sections pump the LEDs on the kick
-    if (beat.hasKick && (kind === 'drop' || kind === 'climax')) out.ledIntensity *= 0.8 + 0.35 * beat.kick;
+    // energetic sections pump the LEDs on the kick (calm: a swing of < 10 %)
+    if (beat.hasKick && (kind === 'drop' || kind === 'climax')) out.ledIntensity *= calm ? 0.97 + 0.08 * beat.kick : 0.8 + 0.35 * beat.kick;
     out.pulse = pulse;
+    // calm: a festoon strobe (hard on / off on the beat grid) holds its average level instead
+    if (calm && out.garlandPattern === GARLAND_PATTERN.strobe) {
+      out.garlandPattern = GARLAND_PATTERN.steady;
+      out.garland.multiplyScalar(GARLAND_STROBE_MEAN);
+    } else if (calm && out.garlandPattern === GARLAND_PATTERN.chase) {
+      // a chase band passes each bulb rate / 2 times per beat: at most CALM_MAX_HZ
+      out.garlandRate = 2 * calmPulsesPerBeat(out.garlandRate * 0.5, beat.bpm);
+    }
     // gates fold into the region levels (castle / sides / crown / festoons)
     out.gateCastle = gCastle;
     out.gateCrown = gCrown;

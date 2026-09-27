@@ -151,6 +151,7 @@ void main() {
 export const BEAM_FRAG = /* glsl */ `
 uniform float uGain;
 uniform float uTime;
+uniform float uCalm;
 ${HAZE_GLSL}
 varying vec3 vWorld;
 varying vec3 vColor;
@@ -185,7 +186,10 @@ void main() {
   float hz = uGain * hazeDensity(vWorld);
   float ph = hazePhase(c);
   // single scattering (core): forward-peaked phase and 1/sin path length -> flares down the beam
+  // (calm, photosensitivity option: a beam aimed at the viewer gets at most ~3x its side-on level instead of
+  // ~27x, so a fan sweeping across the lens does not flash once per beam)
   float line = hz * ph / max(s, 0.14);
+  if (uCalm > 0.5) line = hz * min(ph, 1.6) / max(s, 0.5);
   // multiple scattering (halo): far less directional
   float haloLine = hz * (0.6 + 0.4 * ph) / max(s, 0.3);
   float core = smearProfile(vX, vM, vSigC);
