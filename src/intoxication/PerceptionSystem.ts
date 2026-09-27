@@ -1330,7 +1330,8 @@ export class PerceptionSystem implements System {
   private pulses(ctx: FrameContext): void {
     const x = this.shownXtc;
     const fx = this.app.postfx;
-    const b = ctx.beat;
+    // the kicks the listener hears (the music reaches them distance / 343 s after the stage)
+    const b = ctx.heardBeat;
     const breath = 0.5 - 0.5 * Math.cos(((b.bar * 0.5) % 1) * Math.PI * 2);
     fx.rhythm.breath = breath;
     fx.rhythm.kick = b.hasKick ? b.kick : 0;

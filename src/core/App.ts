@@ -115,6 +115,7 @@ export class App {
   private lastPerf = 0;
   private startPerf = performance.now();
   private beat: BeatInfo = { bpm: 150, beat: 0, phase: 0, bar: 0, barPhase: 0, kick: 0, hasKick: false, energy: 0 };
+  private heardBeat: BeatInfo = { bpm: 150, beat: 0, phase: 0, bar: 0, barPhase: 0, kick: 0, hasKick: false, energy: 0 };
   private ctx!: FrameContext;
   private running = false;
   /** hooks run after systems update, before render (UI HUD refresh etc.) */
@@ -297,6 +298,7 @@ export class App {
       showPlaying: false,
       seeked: true,
       beat: this.beat,
+      heardBeat: this.heardBeat,
       camera: this.camera,
       playerPos: this.playerPos,
     };
@@ -617,6 +619,7 @@ export class App {
   /** show-derived frame state + every enabled system's update, in registration order */
   private updateSystems(ctx: FrameContext, measure: boolean): void {
     this.show.tempo.beatInfo(ctx.showTime, this.beat);
+    this.show.tempo.beatInfo(ctx.showTime - this.audio.spatial.delay, this.heardBeat);
     this.show.paletteAt(ctx.showTime, this.palette);
     this.env.reset();
     this.env.palettePrimary.copy(this.palette.primary);
