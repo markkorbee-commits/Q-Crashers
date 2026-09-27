@@ -104,7 +104,7 @@ const TARGET_TAGS: Record<string, number> = {
   arch: T_ARCH,
   portal: T_ARCH,
   booth: T_BOOTH,
-  // the wing-spar lamp row (round 11, blinder / strobe target; explicit only)
+  // the wing-spar lamp row (round 11, `lights.blinder` target; explicit only)
   spar_lamps: T_SPARLAMP,
   spar_lamp: T_SPARLAMP,
   wing_lamps: T_SPARLAMP,

@@ -120,11 +120,14 @@ level scales its lamp and its shaft together.
 Everything is opt-in: without the new params / fx / targets the show renders as before (64 moments unchanged).
 The cue changes that use them are in `$ENDSHOW_DATA/work/r11_lights/cue_patch.json` (with the measured effect).
 
-* **Spar lamp row** (target `spar_lamps`, aliases `spar_lamp`, `wing_lamps`; blinder / strobe cues; explicit only,
+* **Spar lamp row** (target `spar_lamps`, aliases `spar_lamp`, `wing_lamps`; `lights.blinder` cues only; explicit only,
   never lit by `all` / untargeted cues; `left` / `right` filter): the wing-spar heads as lamps staring into the camera,
   drawn as a glare star (lens sprite) over a soft lens disc, **no beam cone** (a look aimed at the lens drew a white
   veil over the whole frame). One straight row per wing along the line fitted through its spar heads, over the outer
   65 % of the span, a lamp every 3.2 m (same row at every quality level). v358–363.9, v374.2–377.4, v397–399.5.
+  Measured: with the glare star aimed at the deck camera (v358–361) +0.017 … +0.027 per moment; the off-axis disc rows
+  of v374 / v397 are about neutral (−0.008 … +0.002: our wings sit higher in those frames than the film's). The big
+  gains there (+0.02 … +0.05) come from dropping the truss `audience` looks that stood in for the lamps.
 
   | blinder param | default | meaning |
   |---|---|---|
@@ -349,7 +352,7 @@ smoke, the beams and on the set. What changed:
   `breakup`), `sway`.
 * pillars params `rows`, `index`.
 * `lights.wash` param `fieldShare` (0..1, default 0; round 9).
-* Round 11: targets `spar_lamps` / `spar_lamp` / `wing_lamps` (explicit-only lamp row, blinder / strobe); blinder
+* Round 11: targets `spar_lamps` / `spar_lamp` / `wing_lamps` (explicit-only lamp row, `lights.blinder` only); blinder
   params `attack`, `release`, `aim`, `spread`; pillars mode `strobe`, params `colors`, `rowColors`, `shafts`,
   `rowShafts` (string lists), `every` (`quarter` | `halfbeat` | `beat` | `2beat` | `bar`); flood params `gate` (same
   names), `duty` (0.05..0.95), `offset` (0..1), `area` also `aisle` | `front` | `pools` or a list of areas; new fx
