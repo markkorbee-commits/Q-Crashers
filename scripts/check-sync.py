@@ -16,7 +16,7 @@ Visible hit time (what the eye sees land on the music):
   * fireworks cake with a shell `type` (a break at the top of each comet): cue t + the comet burnout time
     clamp(0.5 + 0.013 * height, 0.6, 1.8) s. Plain cakes, comets, mines, flares and finales: the launch (cue t),
     since their comets / sparks are visible from the ground up.
-  * pyro, strobe, lights, stage, crowd: cue t.
+  * pyro, strobe, lights, stage (pulse, eyes_flash and the round-11 head / dragon `flash`), crowd: cue t.
 Rakes: a repeat with a numeric `every` < 0.4 s (a comet rake, a volley fired as a texture) scores only its FIRST shot;
 the follow-up shots are counted on a separate line and not scored (they are a timed sequence, not musical accents).
 Prints the distribution per region; --list prints the worst hits (cue t, visible t, kind, offset).
@@ -62,7 +62,7 @@ onsets = sorted([o['t'] for o in amap.get('onsets', [])] + [e['t'] for e in amap
 
 def is_hit(c):
     return (c['sys'] in ('pyro', 'fireworks') or (c['sys'] in ('strobe', 'lights') and c['fx'] == 'hit')
-            or (c['sys'] == 'stage' and c['fx'] in ('pulse', 'eyes_flash'))
+            or (c['sys'] == 'stage' and c['fx'] in ('pulse', 'eyes_flash', 'flash'))
             or (c['sys'] == 'crowd' and c['fx'] == 'mood' and (c.get('p') or {}).get('state') == 'jump'))
 
 
