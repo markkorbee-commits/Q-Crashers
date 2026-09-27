@@ -258,7 +258,7 @@ void main() {
     I = r3.w * (1.0 - tt / pd) * (0.6 + 0.8 * hf(pk ^ 11u));
     width = r6.x;
     tS = tp;
-    hot = trueCol ? 0.55 : 1.0;
+    hot = trueCol ? 0.3 : 1.0;
   } else if (shed > 0) {
     // a spark the star dropped at tp: it falls away from the path and flashes after a delay
     uint pk = hashu(key ^ (uint(sub) * 0x2c1b3c6du + 13u));
@@ -362,6 +362,14 @@ void main() {
       // a separate tail colour (r4.w < -0.5) takes over right behind the head
       float ck = r4.w < -0.5 ? smoothstep(0.0, 0.25, cool) : cool * 0.85;
       col = mix(c1, coolTo, clamp(ck + lifeCool * 0.8, 0.0, 1.0));
+      // round 12: the young head of a white / gold star or comet burns white-hot (the camera clips it,
+      // v1511.75, v1530): white stars turn near-neutral, gold ones partly, metal-salt colours not
+      vec3 cn1 = c1 / max(max(c1.r, max(c1.g, c1.b)), 1e-4);
+      float sat1 = 1.0 - min(cn1.r, min(cn1.g, cn1.b));
+      float gold1 = step(cn1.b, cn1.g + 0.02) * step(cn1.g, cn1.r + 0.02) * smoothstep(0.12, 0.3, cn1.g);
+      float whiteK = mix(gold1 * WH_GOLD, WH_WHITE, 1.0 - smoothstep(0.2, 0.4, sat1));
+      float heat = (1.0 - smoothstep(0.0, HEAT_TRAIL, cool)) * (1.0 - smoothstep(0.35, 1.0, lf));
+      col = mix(col, WHITE_HOT * max(c1.r, max(c1.g, c1.b)), whiteK * heat);
     }
     glit = r6.w * smoothstep(0.0, 0.3, sPar);
     hot = (1.0 - behind * 0.8) * (1.0 - sPar) * (0.35 + min(pearl, 4.0) * 0.3);
@@ -378,6 +386,15 @@ void main() {
   // white-hot core: warm for charcoal gold, neutral for white / silver (a warm core on a dense white
   // cluster tone-maps to yellow), tinted for metal-salt colours
   vec3 hotCol = mix(mix(mix(chn, vec3(1.0), 0.5), vec3(1.0, 0.94, 0.82), goldC), mix(chn, vec3(1.0), 0.45), s2);
+  // round 12: HDR white-hot core of white / gold heads (x HOT_K, near-neutral), see glsl.ts
+  // (colour-true crackle, FW_TRUE: the pops keep their authored colour, no white-hot core, v539-545:
+  // the S9 canopy crackles red / pink, not white)
+  float wkS = (flags & FW_TRUE) != 0 && pops > 0 ? 0.0 : 1.0 - s2;
+  // (light-neutral: the core gains what the soft body gives up, so a fan turns whiter, not brighter)
+  float hotAdd = hot * (HOT_K - 1.0) * wkS;
+  hot += hotAdd;
+  float bodyK = 1.0 / (1.0 + hotAdd * CORE_SHARE);
+  hotCol = mix(hotCol, WHITE_HOT, wkS * 0.7);
 
   // sparks die on the ground (no spark ever tunnels through the field)
   I *= smoothstep(-0.3, 0.25, P.y) * thinGain;
@@ -403,7 +420,12 @@ void main() {
   gl_Position = c;
 
   float fog = fogT(depth);
-  vCol = col * I * gain * fog;
+  // round 12: sensor clipping of white / gold stars far brighter than the camera's white (glsl.ts)
+  float cmx2 = max(col.r, max(col.g, col.b));
+  // (only the head clips: a trail keeps its colour; pops and shed sparks are points)
+  float headW = pops > 0 || shed > 0 ? 1.0 : 1.0 - smoothstep(0.0, CLIP_TRAIL, sPar);
+  col = mix(col, WHITE_HOT * cmx2, wkS * headW * smoothstep(CLIP_LO, CLIP_HI, I * gain * cmx2));
+  vCol = col * I * gain * fog * bodyK;
   vHot = hotCol * I * gain * fog * hot;
   vUv = vec2(side, cap);
   vTS = tS;

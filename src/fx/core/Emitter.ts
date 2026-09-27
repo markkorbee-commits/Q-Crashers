@@ -61,6 +61,9 @@ export const R = {
   Z3: 47,
 } as const;
 
+/** s after the valve closes (F.CUT) in which the sparks in flight burn out (keep in sync with SPARK_CUT in glsl.ts) */
+export const SPARK_CUT = 0.3;
+
 /** velocity / position distributions */
 export const DIST = {
   SPHERE: 0, // Fibonacci sphere (shell bursts)
@@ -90,6 +93,8 @@ export const F = {
   RAMP: 4096, // continuous emission fades in over X3 s and out at the end
   SELFLIT: 8192, // puffs: self illumination COL1*INT decays with time constant X0
   ABSCHANGE: 16384, // sparks: every alive particle switches COL1 -> COL2 at absolute show time Z3
+  // (32768 .. 131072 are system-private: pyro F_COLUMN, fireworks FW_CURL / FW_TRUE)
+  CUT: 262144, // sparks (not STROBE): the valve closes at absolute show time HZ, every spark in flight burns out within SPARK_CUT s
 } as const;
 
 /**

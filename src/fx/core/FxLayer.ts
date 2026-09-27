@@ -549,6 +549,21 @@ export function ribbonGeometry(segments: number): THREE.BufferGeometry {
   return g;
 }
 
+/**
+ * Round 12: the ribbon strip of a point-like particle (crackle pops, shed glitter sparks: head and tail
+ * sample coincide, so every inner segment of a full ribbon is a degenerate quad). Only the two round
+ * caps: vertex pairs j = 0 (front cap) and j = 3 (back cap, the shader's uSegments must be 1), 2
+ * triangles instead of (segments + 2) * 2. Same vertex layout as ribbonGeometry (x = sample, y = side).
+ */
+export function pointGeometry(): THREE.BufferGeometry {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array([0, -1, 0, 0, 1, 0, 3, -1, 0, 3, 1, 0]), 3));
+  g.setIndex([0, 2, 1, 1, 2, 3]);
+  g.setDrawRange(0, 6);
+  g.userData.segments = 1;
+  return g;
+}
+
 /** Unit quad (-1..1) for billboards. */
 export function quadGeometry(): THREE.BufferGeometry {
   const g = new THREE.BufferGeometry();

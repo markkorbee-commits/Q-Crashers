@@ -88,6 +88,19 @@ Engine: `src/fireworks/FireworkSystem.ts`, `src/fireworks/shells.ts`, `src/firew
   * The orange X-fans of v853-861.8 already fire from x ±58 with `cross` (two points per side, each fan tilted
     towards the other, so the fans cross). Round-11 variants (narrower crossing, more comets, orange heads, taller)
     all measured 0.9-2.9 points lower on 853.5-861, so that cue stays as it is.
+* Round 12 (final judges, no cue change needed):
+  * White-hot heads: the young head of a white or gold star / comet turns near-white and gets a 3 × HDR core
+    (light-neutral: the soft body gives up what the core gains), and a head far above the camera's white clips to
+    white (the head only; tails keep their colour). Constants and details: `docs/show-format-ext/pyro.md`, "round 12".
+    Metal-salt colours keep their hue, and colour-true crackle (`popColor`) keeps its authored colour with a weaker
+    core (0.3, was 0.55): the S9 canopy (v536-545) crackles in its colour instead of turning white.
+  * Point layer `fw-points`: crackle pops and shed glitter / flitter sparks are points (head and tail coincide), so
+    they are drawn from their own layer with 2 triangles each instead of a full ribbon of (segments + 2) x 2. At the
+    finale they are ~88 % of the star instances: ultra, spot=middle, t=1536 4.03 M -> 2.94 M triangles, t=270
+    3.77 M -> 2.78 M; the judges' > 3 M moments checked at ultra middle (254, 786, 788, 1526-1538, 1566-1570) are
+    2.50-2.94 M; mobile t=268 791 k -> 668 k. The two
+    layers have their own budgets (`budget.ts`: both 12 k on mobile, whose worst case stays below the old shared
+    15 k ribbons). One more draw call (mobile overview 1536: 106 / 110).
 
 ## New params
 

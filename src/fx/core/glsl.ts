@@ -73,6 +73,32 @@ uniform float uLowFogGain;
 #define F_RAMP 4096
 #define F_SELFLIT 8192
 #define F_ABSCHANGE 16384
+#define F_CUT 262144
+// round 12: a fountain whose valve closed (F_CUT, HZ = the show time) is dark within SPARK_CUT s: the
+// sparks in flight burn out instead of raining down for another 1-2 s (v613.75: the gerb ring is gone)
+#define SPARK_CUT 0.3
+
+// round 12: white-hot heads of titanium / charcoal sparks, stars and comets (the camera clips them to
+// white): the near-neutral head colour, the x of their HDR core, and how far a young white / gold
+// head turns to WHITE_HOT (metal-salt colours keep their hue)
+#define WHITE_HOT vec3(1.0, 0.96, 0.9)
+#define HOT_K 3.0
+// light of the core profile relative to the soft body profile of a ribbon (mean exp(-11 r2) / mean exp(-3 r2) - 0.05)
+#define CORE_SHARE 0.34
+#define WH_WHITE 0.9
+#define WH_GOLD 0.6
+// trail age (x the trail length) over which a white-hot head cools back to the spark colour
+#define HEAT_TRAIL 0.5
+// sensor clipping: a white / gold spark whose own HDR level (scene units) passes CLIP_LO .. CLIP_HI records white
+#define CLIP_LO 5.0
+#define CLIP_HI 24.0
+// ... and the trail fraction over which that clipping fades out behind the head
+#define CLIP_TRAIL 0.3
+// ... and the extra brightness of the white-hot core of a hydrocarbon flame puff (puffShader flameRamp)
+#define FLAME_HOT 1.5
+// minimum on-screen radius of a burning puff (x uMinPx) and the light law of a grown one (puffShader)
+#define PUFF_MIN_PX 1.6
+#define PUFF_SUBPX_LAW 1.0
 
 uint hashu(uint x) {
   x ^= x >> 16u;
@@ -219,6 +245,21 @@ vec3 envLight(vec3 p) {
   // bit of smoke like the pyro light field does; so do the beams held by the low fog bank (outside the
   // rig's low knee: a bank lit by a dozen white beams glows white, not grey)
   return L + kneeC(fxLight(p, 1.0) + uFxGlow + uSiteGlow * 1.1 + lowFogLit(p), 2.2, 0.3);
+}
+
+/**
+ * Round 12: sensor clipping of a bright emitter. A white / gold / warm source far brighter than the
+ * camera's white records as white whatever its hue (all three channels clip): past CLIP_LO (scene
+ * units, x k) the colour runs to WHITE_HOT at the same peak. Saturated metal-salt / lit colours
+ * (red, pink, blue ...) keep their hue, as in the spark shaders.
+ */
+vec3 clipWhite(vec3 c, float k) {
+  float m = max(c.r, max(c.g, c.b));
+  vec3 hn = c / max(m, 1e-4);
+  float sat = 1.0 - min(hn.r, min(hn.g, hn.b));
+  float goldC = step(hn.b, hn.g + 0.02) * step(hn.g, hn.r + 0.02) * smoothstep(0.12, 0.3, hn.g);
+  float s2 = sat * sat * (1.0 - goldC);
+  return mix(c, WHITE_HOT * m, (1.0 - s2) * smoothstep(CLIP_LO, CLIP_HI, m * k));
 }
 
 #define CULL() { gl_Position = vec4(0.0, 0.0, 2.0, 1.0); return; }

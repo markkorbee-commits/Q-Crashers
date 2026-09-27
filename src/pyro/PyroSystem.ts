@@ -3,7 +3,7 @@ import type { AnchorName } from '../core/Anchors';
 import type { QualitySettings } from '../core/types';
 import type { Cue } from '../show/ShowTypes';
 import { CueFxSystem, EmitterSet } from '../fx/core/CueFxSystem';
-import { DIST, Emitter, F, PUFF, R, apexTime, speedForHeight } from '../fx/core/Emitter';
+import { DIST, Emitter, F, PUFF, R, SPARK_CUT, apexTime, speedForHeight } from '../fx/core/Emitter';
 import type { FlashSpec } from '../fx/core/Emitter';
 import { bool, fxColor, num, str } from '../fx/core/fxColors';
 import { clusters, densify, patternSteps, stretches, tiltedUp, uCoord, wingFire, wingSurface } from '../fx/core/placement';
@@ -25,6 +25,9 @@ const FIRE = new THREE.Color(1.0, 0.36, 0.08);
 const FIRE_LIGHT = new THREE.Color(1.0, 0.46, 0.14);
 const DEEP_ORANGE = new THREE.Color(1.0, 0.3, 0.06);
 const PALE_GOLD = new THREE.Color(1.0, 0.72, 0.4);
+const WHITE_COOL = new THREE.Color(1.0, 0.86, 0.66);
+/** round 12: linear saturation below which a gold-family colour is a pale warm white (isWarmWhite) */
+const WARM_WHITE_SAT = 0.33;
 
 /**
  * burning wings on the wing surface (wingSurface): grid pitch (m); the flame units of the top-edge
@@ -58,6 +61,17 @@ const ERUPT_GLOW = 0.85;
 const ERUPT_WARM = 0.5;
 const ERUPT_LEN = 60;
 const ERUPT_REACH = 0.75;
+/**
+ * Round 12, white-hot fire (the camera clips the hottest fire to white, see puffShader flameRamp):
+ * extra heat (puff X0) of the bulky eruption's balls (x its bulk m), of the white-hot roots at the
+ * nozzles of a billowing wall, and of the power flames / flame rows (x their intensity)
+ */
+const ERUPT_HEAT = 0.25;
+const ROOT_HEAT = 0.3;
+/** round 12: brightness x of the white-hot dense jet at the foot of a white / gold gerb column */
+const JET_HOT = 2.2;
+/** ... and the life x of that jet on a tall wall (> 14 m): it reaches ~35-40 % up the column */
+const JET_TALL = 2.2;
 /** the bulky flame eruption (billow `width` >= ~2, v1508.4): extra rise (x H) and ball size */
 const BULK_RISE = 0.6;
 const BULK_SIZE = 0.3;
@@ -830,6 +844,8 @@ export class PyroSystem extends CueFxSystem {
           .set(R.Z1, 0.5 / (B * B))
           .set(R.Z2, 0.012)
           .set(R.Z3, PUFF.FLAME)
+          // (round 12: the bulky eruption burns white-hot in its young core: the camera clips it, v1509.25)
+          .set(R.X0, ERUPT_HEAT * m)
           .window(t0, t0 + dur + life * 1.05),
       );
       // the white-hot roots at the nozzles (bright, low, fast)
@@ -857,6 +873,7 @@ export class PyroSystem extends CueFxSystem {
           .set(R.Y3, 0.5)
           .set(R.Z2, 0.05)
           .set(R.Z3, PUFF.FLAME)
+          .set(R.X0, ROOT_HEAT)
           .window(t0, t0 + dur + 0.5),
       );
       if (blowout && u % 2 === 0) {
@@ -864,7 +881,7 @@ export class PyroSystem extends CueFxSystem {
         const vs = speedForHeight(H * 0.9, 1.05);
         const tA = apexTime(vs, 1.05);
         out.add(
-          new Emitter(DIST.CONE, F.COOL | F.FLICKER | F.RAMP)
+          new Emitter(DIST.CONE, F.COOL | F.FLICKER | F.RAMP | F.CUT)
             .on(L_SPARK)
             .origin(pos.x, pos.y + 0.3, pos.z + 0.5)
             .time(t0)
@@ -882,7 +899,9 @@ export class PyroSystem extends CueFxSystem {
             .set(R.Y0, 0.85)
             .set(R.Y3, 0.3)
             .set(R.Z0, 0.02)
-            .window(t0, t0 + dur + tA * 1.8),
+            // (the spark wall is gone with the flames at the cut, v1509.6-1510.0)
+            .set(R.HZ, t0 + dur)
+            .window(t0, t0 + dur + SPARK_CUT),
         );
       }
     }
@@ -1339,17 +1358,22 @@ export class PyroSystem extends CueFxSystem {
       if (ci === 0) firstCol.copy(col);
       const white = isWhiteSpark(col);
       const gold = !white && isGoldish(col);
+      // (round 12: pale warm whites burn white-hot: cooling, nozzle core and jet as white)
+      const warmW = isWarmWhite(col);
       // a pale non-warm tint (#FFD8F0 pink, #E8D8FF lilac): white-hot sparks in a coloured glow
       const pale = white || gold ? 0 : 1 - smooth01(0.12, 0.3, saturation(col));
       // the sparks of this window still in the air switch to the next colour with the column
       const next = ci + 1 < nC ? this.c2.copy(cols[ci + 1]).multiplyScalar(hueKs[ci + 1] / hueKs[ci]).clone() : null;
       // what the sparks cool to: charcoal gold -> deep orange, white (titanium) -> pale gold,
       // metal-salt colours -> a darker version of their own hue
-      const coolTo = white ? PALE_GOLD.clone() : gold ? DEEP_ORANGE.clone() : col.clone().multiplyScalar(0.55);
+      // (round 12: titanium white cools to a pale warm white, not to pale gold: the camera records the
+      // burning white walls white, v1509-1537, v1565)
+      // (a pale warm white still cools like gold: its trails turn orange, v1511.75)
+      const coolTo = white ? WHITE_COOL.clone() : gold ? DEEP_ORANGE.clone() : col.clone().multiplyScalar(0.55);
       // saturated sparks at gold's HDR level would clip to white in the tone mapper
       const hueK = hueKs[ci];
       const inten = intenP * (cold ? 11 : 17) * hueK;
-      const hotMix = white ? 0.6 : gold ? 0.45 : 0.18 + 0.42 * pale;
+      const hotMix = white || warmW ? 0.6 : gold ? 0.45 : 0.18 + 0.42 * pale;
       // white / silver sparks of a shorter tall wall: thin, loose streaks (v1441 from the drone, v1446
       // close up), not dense sheets: fewer sparks, each as bright (not a wall authored brighter than
       // normal: the white pillar fans of v1565.5 stay dense)
@@ -1358,6 +1382,8 @@ export class PyroSystem extends CueFxSystem {
         if (steps[u] < 0) continue;
         const pos = pts[u];
         const t0 = cue.t + steps[u] * stagger + w0;
+        // the unit's valve closes at the end of its whole burn (every colour window)
+        const unitEnd = cue.t + steps[u] * stagger + dur;
         if (ci === 0) maxDelay = Math.max(maxDelay, steps[u] * stagger);
         const side = leanU !== 0 ? smooth01(40, 88, Math.abs(pos.x)) : 0;
         const seed = this.sub(cue, u * 4 + ci * 997);
@@ -1366,7 +1392,9 @@ export class PyroSystem extends CueFxSystem {
         for (let h = 0; h < fan; h++) {
           const a = (fan > 1 ? angle + fanSpread * (h / (fan - 1) - 0.5) : angle) + leanU * side;
           const dh = tiltedUp(pos.x, a, this.v2);
-          const sp = new Emitter(DIST.CONE, F.COOL | F.FLICKER | rampF | (next ? F.ABSCHANGE : 0) | (column ? F_COLUMN : 0));
+          // (round 12, F.CUT: when the unit's valve closes every spark in flight burns out within SPARK_CUT s,
+          // v613.75 / v1537.5: no rain of sparks after the cut)
+          const sp = new Emitter(DIST.CONE, F.COOL | F.FLICKER | F.CUT | rampF | (next ? F.ABSCHANGE : 0) | (column ? F_COLUMN : 0));
           if (next) sp.color2(next, 0).set(R.Z3, t0 + wd);
           else sp.color2(coolTo, -1);
           out.add(
@@ -1388,7 +1416,8 @@ export class PyroSystem extends CueFxSystem {
               .set(R.Y0, 0.85)
               .set(R.Y3, 0.3)
               .set(R.Z0, 0.02)
-              .window(t0, t0 + wd + lifeMax),
+              .set(R.HZ, unitEnd)
+              .window(t0, Math.min(t0 + wd + lifeMax, unitEnd + SPARK_CUT)),
           );
         }
         const d = tiltedUp(pos.x, angle + leanU * side, this.v1);
@@ -1413,6 +1442,10 @@ export class PyroSystem extends CueFxSystem {
         );
         // dense jet in the lower part of the column (the sparks are too close to resolve): white-hot
         // for gold / titanium, the star colour itself for metal-salt fountains
+        // (round 12: a burning white / gold gerb's lower column clips to white in the video, v1509-1537,
+        // v1565: its jet is near-white, JET_HOT x brighter (x sqrt of the cue intensity) and, on a tall
+        // wall, reaches ~40 % up the column)
+        const hotJet = !cold && (white || gold);
         out.add(
           new Emitter(DIST.CONE, F.RAMP)
             .on(L_FIRE)
@@ -1421,10 +1454,11 @@ export class PyroSystem extends CueFxSystem {
             .dirV(d, spread * 0.5)
             .speed(v0 * 0.55, v0 * 0.8)
             .physics(k, -9.81)
-            .color(this.c2.copy(col).lerp(WHITE, hotMix * 0.75), (cold ? 1.6 : 2.6) * (white || gold ? 1 : 1.15))
-            .life(0.22, 0.3)
-            .emit(this.pc(cold ? 14 : 20, 6), wd)
-            .size(cold ? 0.14 : 0.2 + 0.012 * H, 0.1)
+            .color(this.c2.copy(col).lerp(WHITE, hotJet ? (white || warmW ? 0.9 : 0.7) : hotMix * 0.75), (cold ? 1.6 : 2.6) * (white || gold ? 1 : 1.15) * (hotJet ? JET_HOT * Math.min(1.2, Math.sqrt(intenP)) : 1))
+            .life(0.22 * (hotJet && tall ? JET_TALL : 1), 0.3 * (hotJet && tall ? JET_TALL : 1))
+            .emit(this.pc((cold ? 14 : 20) * (hotJet && tall ? 1.5 : 1), 6), wd)
+            // (the white column of a tall wall is its dense core plus the smoke it lights white: ~2-3 m wide)
+            .size(cold ? 0.14 : hotJet && tall ? 0.45 + 0.02 * H : 0.2 + 0.012 * H, hotJet && tall ? 0.025 * H : 0.1)
             .trail(1, 1)
             .seed(seed ^ 6)
             .set(R.X3, 0.15)
@@ -1713,7 +1747,9 @@ export class PyroSystem extends CueFxSystem {
         .speed(8 * size, 20 * size)
         .physics(2.3, 1.2)
         .color(WHITE_SMOKE, 0.6 * (0.6 + 0.4 * k))
-        .color2(this.c2.copy(color).lerp(WHITE, 0.3).multiplyScalar(BLAST_SELF * (0.5 + 0.5 * k)), 0)
+        // (round 12: the biggest mines' cloud burns white-hot, x2 at size 3: the white bloom of v1565.4-1566
+        // is brighter than the red site glow it stands in)
+        .color2(this.c2.copy(color).lerp(WHITE, 0.3).multiplyScalar(BLAST_SELF * (0.5 + 1.5 * k)), 0)
         .litUntil(glowEnd)
         .life(3.5, 5.5)
         .emit(n, 0, 0.22 / n)
@@ -2153,6 +2189,15 @@ function glowTint(c: THREE.Color, out: THREE.Color): THREE.Color {
  * family below 0.22 (#FFF0D8, #FFF2E0). A pale pink / lilac / blue tint of 0.1-0.22 is a colour
  * (round 9: #FFD8F0 was white before, so the pink waves of v1192 / v1198 burnt white).
  */
+/**
+ * Round 12: a pale warm white of the gold family (#FFF0D8, #FFF2E0, #FFF2DC: linear saturation 0.22-0.33,
+ * authored as white walls). isWhiteSpark leaves them gold for the silver-wall rules (thinning, dimmed light
+ * and smoke); their sparks, cooling and jets burn white-hot like titanium (the camera clips them white).
+ */
+function isWarmWhite(c: THREE.Color): boolean {
+  return !isWhiteSpark(c) && isGoldish(c) && saturation(c) < WARM_WHITE_SAT;
+}
+
 function isWhiteSpark(c: THREE.Color): boolean {
   const sat = saturation(c);
   return sat < 0.1 || (sat < 0.22 && isGoldish(c));
@@ -2181,6 +2226,9 @@ function sparkChroma(c: THREE.Color, out: THREE.Color): THREE.Color {
   const mx = Math.max(c.r, c.g, c.b, 1e-4);
   out.setRGB(c.r / mx, c.g / mx, c.b / mx);
   const sat = saturation(out);
+  // (round 12: a pale warm white of the gold family, linear saturation < WARM_WHITE_SAT (#FFF0D8, #FFF2E0,
+  // #FFF2DC: authored as white walls), is not pushed towards gold)
+  if (isGoldish(out) && sat < WARM_WHITE_SAT) return out;
   const kOld = sat < 0.2 ? 1 : 1 + Math.min(0.7, (sat - 0.2) * 2.2);
   const kPale = 1 + 0.25 * smooth01(0.12, 0.3, sat);
   const k = isGoldish(out) ? kOld : kPale + (kOld - kPale) * smooth01(0.4, 0.55, sat);
