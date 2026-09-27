@@ -22,6 +22,8 @@ export const FW_SWIM = 32768;
  * Y1 > 0 = the turn stops after Y1 s (an arc of HZ x Y1 rad: open lobes instead of closed rings)
  */
 export const FW_CURL = 65536;
+/** colour-true crackle (`popColor`): the pops keep the emitter colour instead of flashing white-hot */
+export const FW_TRUE = 131072;
 
 export const STAR_VERT = /* glsl */ `
 ${GLSL_COMMON}
@@ -30,6 +32,7 @@ uniform float uSegments;
 #define FW_SHED ${FW_SHED}
 #define FW_SWIM ${FW_SWIM}
 #define FW_CURL ${FW_CURL}
+#define FW_TRUE ${FW_TRUE}
 
 varying vec3 vCol;
 varying vec3 vHot;
@@ -249,11 +252,13 @@ void main() {
     if (tt < 0.0 || tt > pd) CULL();
     P = starPos(s, tp) + (vec3(hf(pk ^ 5u), hf(pk ^ 6u), hf(pk ^ 9u)) - 0.5) * r9.w;
     Pn = P;
-    col = mix(r3.rgb, vec3(1.0, 0.95, 0.85), 0.55);
+    // colour-true crackle keeps the star colour (a red canopy crackles red); default: white-hot flashes
+    bool trueCol = (flags & FW_TRUE) != 0;
+    col = trueCol ? r3.rgb : mix(r3.rgb, vec3(1.0, 0.95, 0.85), 0.55);
     I = r3.w * (1.0 - tt / pd) * (0.6 + 0.8 * hf(pk ^ 11u));
     width = r6.x;
     tS = tp;
-    hot = 1.0;
+    hot = trueCol ? 0.55 : 1.0;
   } else if (shed > 0) {
     // a spark the star dropped at tp: it falls away from the path and flashes after a delay
     uint pk = hashu(key ^ (uint(sub) * 0x2c1b3c6du + 13u));
