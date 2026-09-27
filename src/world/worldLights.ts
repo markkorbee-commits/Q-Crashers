@@ -38,6 +38,16 @@ export const worldUniforms = {
   uWAmbCol: { value: new THREE.Vector3() },
   /** site-wide coloured glow (atmos.glow), irradiance */
   uWGlowCol: { value: new THREE.Vector3() },
+  /**
+   * the lit smoke over the grounds (EnvironmentSystem.groundsVol, round 12): xyz centre, w = falloff k outside it
+   * (0 = no bound), and 1 / radii. The site glow on the world materials and the glow part of their fog colour
+   * (uWFogGlow) fade with exp(-k (q² - 1)) outside it: the video's drone shots of the finale's red smoke (v1518-1533)
+   * show a red field inside black tree belts and a black landscape
+   */
+  uWSmokeC: { value: new THREE.Vector4(0, 25, 30, 0) },
+  uWSmokeInv: { value: new THREE.Vector3(1 / 170, 1 / 55, 1 / 170) },
+  /** the lit-smoke part of the fog colour (atmos.glow + flash bounce), written by the EnvironmentSystem */
+  uWFogGlow: { value: new THREE.Vector3() },
   uWTime: { value: 0 },
   /** sky radiance for glossy reflections (written by the EnvironmentSystem) */
   uWSkyZen: { value: new THREE.Color(0.004, 0.03, 0.12) },
@@ -282,7 +292,18 @@ uniform vec3 uWFlashCol2;
 uniform vec4 uWAmbPos;
 uniform vec3 uWAmbCol;
 uniform vec3 uWGlowCol;
+uniform vec4 uWSmokeC;
+uniform vec3 uWSmokeInv;
+uniform vec3 uWFogGlow;
 uniform float uWTime;
+// the world materials bound the lit-smoke part of their height fog to the smoke over the site (fog_fragment)
+#define WL_FOG_SITE
+// 1 inside the lit smoke over the grounds, exp(-k (q² - 1)) outside it (world position)
+float wlSite( vec3 p ) {
+  if ( uWSmokeC.w <= 0.0 ) return 1.0;
+  vec3 q = ( p - uWSmokeC.xyz ) * uWSmokeInv;
+  return exp( - uWSmokeC.w * max( dot( q, q ) - 1.0, 0.0 ) );
+}
 uniform vec3 uWSkyZen;
 uniform vec3 uWSkyHor;
 uniform vec3 uWSkyHorNW;
@@ -361,7 +382,9 @@ const APPLY = /* glsl */ `
     vec3 ac = ( viewMatrix * vec4( uWAmbPos.xyz, 1.0 ) ).xyz - geometryPosition;
     vec3 gc = ( viewMatrix * vec4( 0.0, 10.0, 50.0, 1.0 ) ).xyz - geometryPosition;
     float wlAf = 1.0 / ( 1.0 + dot( ac, ac ) * uWAmbPos.w );
-    vec3 wlAmb = uWAmbCol * ( wlAf * wlAf ) + uWGlowCol / ( 1.0 + dot( gc, gc ) * 4e-6 );
+    // the site glow belongs to the smoke over the grounds: bounded by it (the land around stays dark)
+    vec3 wlWP = ( vec4( geometryPosition, 0.0 ) * viewMatrix ).xyz + cameraPosition;
+    vec3 wlAmb = uWAmbCol * ( wlAf * wlAf ) + uWGlowCol * ( wlSite( wlWP ) / ( 1.0 + dot( gc, gc ) * 4e-6 ) );
     reflectedLight.indirectDiffuse += wlAmb * wlHemi * BRDF_Lambert( material.diffuseColor );
   }
 }
@@ -439,11 +462,11 @@ export function installHeightFog(c: HeightFogConfig): void {
     uniform float fogNear;
     uniform float fogFar;
   #endif
-  vec3 worldFogTint( vec3 d ) {
+  vec3 worldFogTint( vec3 d, vec3 fc ) {
     float tw = max( dot( d, ${g(c.sunDir)} ), 0.0 );
     float mo = max( dot( d, ${g(c.moonDir)} ), 0.0 );
     float low = 1.0 - clamp( abs( d.y ) * 3.0, 0.0, 1.0 );
-    return fogColor * ( 1.0 + ${c.twilightGain.toFixed(3)} * tw * tw * tw * low + ${c.moonGain.toFixed(3)} * pow( mo, 24.0 ) );
+    return fc * ( 1.0 + ${c.twilightGain.toFixed(3)} * tw * tw * tw * low + ${c.moonGain.toFixed(3)} * pow( mo, 24.0 ) );
   }
 #endif
 `;
@@ -455,7 +478,13 @@ export function installHeightFog(c: HeightFogConfig): void {
     float fogI = abs( fogT ) > 1e-3 ? ( 1.0 - exp( - fogT ) ) / fogT : 1.0 - 0.5 * fogT;
     float fogTau = fogDensity * exp( - ${c.falloff.toFixed(5)} * ( cameraPosition.y - ${c.base.toFixed(2)} ) ) * fogDist * fogI;
     float fogFactor = 1.0 - exp( - max( fogTau, 0.0 ) );
-    vec3 fogCol = worldFogTint( vFogWorld / max( fogDist, 1e-3 ) );
+    vec3 fogC = fogColor;
+    #ifdef WL_FOG_SITE
+      // world materials: the lit-smoke part of the fog colour only over the grounds (see wlSite); a camera inside
+      // the smoke keeps it on the land around it, fading over ≈ 200 m
+      fogC -= uWFogGlow * ( 1.0 - max( wlSite( cameraPosition + vFogWorld ), wlSite( cameraPosition ) * exp( - fogDist * 0.005 ) ) );
+    #endif
+    vec3 fogCol = worldFogTint( vFogWorld / max( fogDist, 1e-3 ), fogC );
   #else
     float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );
     vec3 fogCol = fogColor;
