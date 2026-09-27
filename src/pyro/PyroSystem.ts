@@ -149,13 +149,16 @@ export class PyroSystem extends CueFxSystem {
       case 'dragon_breath':
         return cue.dur + 8;
       case 'jet':
-        return cue.dur + (bool(p.cloud, false) ? 4 : 2.5);
+        return cue.dur + (bool(p.cloud, false) ? Math.max(4, num(p.life, 2.8, 0.5, 10) + 1.5) : 2.5);
       case 'gerb':
         return cue.dur + 10;
       case 'sparkular':
         return cue.dur + 2.5;
-      case 'waterfall':
-        return cue.dur + 5;
+      case 'waterfall': {
+        // (a taller curtain, `height`, keeps its sparks falling longer; see waterfall())
+        const hf = typeof p.height === 'number' && Number.isFinite(p.height) ? Math.min(60, Math.max(3, p.height)) : 0;
+        return cue.dur + (hf > 0 ? Math.max(5, (hf + 4.36) / 6.54 + 0.5) : 5);
+      }
       case 'burst':
       case 'bengal':
         return cue.dur + 12;
@@ -216,8 +219,8 @@ export class PyroSystem extends CueFxSystem {
    * cut into segments of at most ~40 m; each segment is one line light at height `yOff` whose
    * strength saturates softly with its unit count. Chases light each segment while its units burn.
    */
-  private rowLight(out: EmitterSet, cue: Cue, pts: THREE.Vector3[], steps: number[], stagger: number, dur: number, tail: number, yOff: number, color: THREE.Color, perUnit: number, radius: number, maxLen = 40): void {
-    if (!(perUnit > 0)) return;
+  private rowLight(out: EmitterSet, cue: Cue, pts: THREE.Vector3[], steps: number[], stagger: number, dur: number, tail: number, yOff: number, color: THREE.Color, perUnit: number, radius: number, maxLen = 40, gain = 1): void {
+    if (!(perUnit > 0) || !(gain > 0)) return;
     for (const s of stretches(pts, steps, maxLen)) {
       const a = pts[s[0]];
       const b = pts[s[s.length - 1]];
@@ -242,6 +245,8 @@ export class PyroSystem extends CueFxSystem {
         a: A,
         b: B,
         radius: radius + 0.15 * A.distanceTo(B),
+        // (an authored `light` multiplier acts after the system's soft light cap, see FxLights.add)
+        ...(gain !== 1 ? { gain } : {}),
       });
     }
   }
@@ -316,9 +321,9 @@ export class PyroSystem extends CueFxSystem {
   }
 
   /** point light (fireballs, bursts, flares) */
-  private pointLight(out: EmitterSet, kind: 0 | 1, t0: number, t1: number, decay: number, pos: THREE.Vector3, color: THREE.Color, I: number, radius: number, b?: THREE.Vector3): void {
-    if (!(I > 0)) return;
-    out.lights.push({ kind, t0, t1, decay, strobe: 0, color: color.clone(), peak: I, pos: pos.clone(), a: pos.clone(), b: (b ?? pos).clone(), radius });
+  private pointLight(out: EmitterSet, kind: 0 | 1, t0: number, t1: number, decay: number, pos: THREE.Vector3, color: THREE.Color, I: number, radius: number, b?: THREE.Vector3, gain = 1): void {
+    if (!(I > 0) || !(gain > 0)) return;
+    out.lights.push({ kind, t0, t1, decay, strobe: 0, color: color.clone(), peak: I, pos: pos.clone(), a: pos.clone(), b: (b ?? pos).clone(), radius, ...(gain !== 1 ? { gain } : {}) });
   }
 
   /**
@@ -729,16 +734,20 @@ export class PyroSystem extends CueFxSystem {
       // spatial light: the fire lights its smoke, the haze and the floor in front of it
       const lc = warm ? FIRE_LIGHT : color;
       const per = (wing ? 0.22 : 0.5) * Math.pow(H / 8, 0.8) * inten * (warm ? 1 : 0.8) * Math.sqrt(fan);
-      if (surf) this.wingLight(out, cue, surf, H, dur + maxDelay, lc, inten * (warm ? 1 : 0.8));
+      // `light` (round 11): x the row light (after the soft light cap; its reach x sqrt(light)) and the flash:
+      // the lantern-capital flames light the smoke around the pillars orange (v275.84-289.68)
+      const lightK = num(p.light, 1, 0, 4);
+      const reachK = Math.sqrt(Math.max(1, lightK));
+      if (surf) this.wingLight(out, cue, surf, H, dur + maxDelay, lc, inten * (warm ? 1 : 0.8) * lightK);
       // (a burning wing: short, close lights along its spars, so the glow follows the wing shape
       // instead of one dome over the whole wing)
-      else this.rowLight(out, cue, pts, steps, stagger, dur, 0.3, H * 0.45, lc, per, 0.45 * H + (wing ? 2.5 : 6), wing ? 14 : 40);
+      else this.rowLight(out, cue, pts, steps, stagger, dur, 0.3, H * 0.45, lc, per, typeof p.reach === 'number' ? num(p.reach, 10, 2, 120) : (0.45 * H + (wing ? 2.5 : 6)) * reachK, wing ? 14 : 40, lightK);
       this.rowFlash(out, pts, steps, H * 0.5, {
         kind: 1,
         t0: cue.t,
         t1: cue.t + maxDelay + dur + 0.35,
         color,
-        peak: Math.min(2.2, 0.05 * n * (H / 8) + 0.25) * inten * (warm ? 1 : 0.7),
+        peak: Math.min(2.2, 0.05 * n * (H / 8) + 0.25) * inten * (warm ? 1 : 0.7) * lightK,
         decay: 0.35,
         strobe: 0,
       });
@@ -1127,6 +1136,10 @@ export class PyroSystem extends CueFxSystem {
     const count = Math.round(num(p.count, 1, 1, 12));
     const radius = num(p.radius, 2.5, 0, 20);
     const cloud = bool(p.cloud, false);
+    // `glow` (round 11, 0-4): x the plumes' and the cloud's own glow in `color` (a white rig in bright beams, a dim green
+    // cloud); `life` (s): the cloud's life (default 2.8, from 64 % of it)
+    const glowK = num(p.glow, 1, 0, 4);
+    const cLife = num(p.life, 2.8, 0.5, 10);
     // a ring of jets around every anchor, each leaning a little outward
     const pts: THREE.Vector3[] = [];
     const lean: number[] = [];
@@ -1167,7 +1180,7 @@ export class PyroSystem extends CueFxSystem {
           .speed(v0 * 0.85, v0 * 1.05)
           .physics(k, -3)
           .color(WHITE, 0.5)
-          .color2(this.c2.copy(color).multiplyScalar(0.9), 0)
+          .color2(this.c2.copy(color).multiplyScalar(0.9 * glowK), 0)
           .life(life * 0.7, life)
           .emit(this.pc((34 * life) / Math.sqrt(count), 10), dur)
           .size(0.25, 0.32 * H)
@@ -1195,23 +1208,30 @@ export class PyroSystem extends CueFxSystem {
       }
       const c = mn.clone().add(mx).multiplyScalar(0.5);
       const ext = mx.sub(mn);
+      // `size` (round 11, 0.3-4): x the cloud (its box and its puffs, more puffs for a bigger cloud);
+      // `drift` ([x,y,z] m/s): the cloud blows off this way (v767.25-768.0: the green cloud grows from the
+      // deck centre to ~1/3 of the frame drifting up and right), instead of rising slowly
+      const sK = num(p.size, 1, 0.3, 4);
+      const drift = vec3(p.drift);
+      const dv = drift ? drift.length() : 0;
       // one cloud over the middle of the rig (the plumes meet there), not a thin layer over its width
-      const wx = Math.min(ext.x * 0.45, 3 * H) + H * 0.6;
-      const n = this.pc(34 + 1.5 * Math.min(40, pts.length), 14);
+      const wx = (Math.min(ext.x * 0.45, 3 * H) + H * 0.6) * sK;
+      const n = this.pc((34 + 1.5 * Math.min(40, pts.length)) * Math.min(2.5, Math.sqrt(sK)), 14);
+      const em = new Emitter(DIST.BOX, 0);
+      if (drift && dv > 0.01) em.dir(drift.x / dv, drift.y / dv, drift.z / dv, 0.5).speed(dv * 0.55, dv * 1.2);
+      else em.dir(0.3, 1, 0.05, 0.9).speed(1.5, 4);
       out.add(
-        new Emitter(DIST.BOX, 0)
+        em
           .on(L_SMOKE)
-          .origin(c.x, c.y + H * 0.7, c.z)
-          .axis(wx, H * 0.5, Math.min(ext.z, 2 * H) + H * 0.4)
+          .origin(c.x, c.y + H * 0.7 * Math.min(1, sK), c.z)
+          .axis(wx, H * 0.5 * sK, (Math.min(ext.z, 2 * H) + H * 0.4) * sK)
           .time(cue.t + 0.08)
-          .dir(0.3, 1, 0.05, 0.9)
-          .speed(1.5, 4)
           .physics(1.2, 0.8)
           .color(this.c2.copy(color).lerp(WHITE, 0.35), 0.6)
-          .color2(this.c1.copy(color).multiplyScalar(1.2), 0)
-          .life(1.8, 2.8)
+          .color2(this.c1.copy(color).multiplyScalar(1.2 * glowK), 0)
+          .life(p.life === undefined ? 1.8 : cLife * 0.643, cLife)
           .emit(n, 0, Math.min(dur, 1.2) / n)
-          .size(0.3 * H, 0.6 * H)
+          .size(0.3 * H * sK, 0.6 * H * sK)
           .trail(0.5, 0.3)
           .seed(this.sub(cue, 7777))
           .set(R.X1, 0.3)
@@ -1221,7 +1241,7 @@ export class PyroSystem extends CueFxSystem {
           .set(R.Y3, 0.6)
           .set(R.Z0, 1.3)
           .set(R.Z3, PUFF.CO2)
-          .window(cue.t, cue.t + Math.min(dur, 1.2) + 3.1),
+          .window(cue.t, cue.t + Math.min(dur, 1.2) + (p.life === undefined ? 3.1 : cLife + 0.3)),
       );
     }
   }
@@ -1275,14 +1295,29 @@ export class PyroSystem extends CueFxSystem {
     // a tall U wall (8+ units) fans out: its side-section and arm units lean outward and throw a wider
     // plume (v1193, v1199: the plumes at the ends of the U lean out towards the frame edges); an
     // authored `angle` or `fan` keeps the lean off, an authored `spread` is used as written
-    const leanU = tall && pts.length >= 8 && p.angle === undefined && fan === 1 ? SIDE_LEAN : 0;
+    // (`lean`, round 11: that outward lean authored in degrees, on any wall; the eruption arms of v1565.4-1568.8
+    // lean out further than the 12° default)
+    const leanU = num(p.lean, tall && pts.length >= 8 && p.angle === undefined && fan === 1 ? SIDE_LEAN : 0, -30, 45);
     const sideSpread = p.spread === undefined ? SIDE_SPREAD : 0;
+    // `light` (round 11): x the row light and flash (the reach grows with its square root); `glow`: the lit
+    // burning cloud around the sprays at this strength, there from the ignition (instead of the automatic one)
+    const lightK = num(p.light, 1, 0, 4);
+    const glowA = typeof p.glow === 'number' && Number.isFinite(p.glow) ? Math.min(2, Math.max(0, p.glow)) : -1;
+    // `lightColor` (round 11): the colour of the row light, the flash, the row smoke and the burning cloud (default: the
+    // spark colour): in the red smoke of the finale the gold-white walls light the air red-orange, not gold
+    // (a list gives one colour per `colors` window; an empty entry, or a missing one, keeps that window's spark colour;
+    // the burning cloud, the row smoke and the flash take the first window's)
+    const lightCols = (Array.isArray(p.lightColor) ? p.lightColor : [p.lightColor]).map((s: unknown) => (typeof s === 'string' && s ? saturated(fxColor(s, this.palette, new THREE.Color(), 'gold')) : null));
+    const lightCol = lightCols[0] ?? null;
     const smoke = Math.min(3, typeof p.smoke === 'number' ? p.smoke : bool(p.smoke, false) ? 1 : 0);
     // colour sequence over the burn (`colors` + `changes`), else one colour
     const list = colorSpecs(p.colors);
     const specs: unknown[] = list.length ? list : [p.color];
     const nC = specs.length;
     const changes = numList(p.changes);
+    // `changes` holds the n - 1 switch times; a list of n start times that begins with 0 (the first colour's
+    // start) is read the same way instead of switching to the second colour at once
+    if (nC > 1 && changes.length >= nC && changes[0] <= 0.05) changes.shift();
     const winT: number[] = [0];
     for (let i = 1; i < nC; i++) winT.push(Math.min(dur, Math.max(winT[i - 1] + 0.05, changes[i - 1] ?? (dur * i) / nC)));
     winT.push(dur);
@@ -1324,7 +1359,7 @@ export class PyroSystem extends CueFxSystem {
         const pos = pts[u];
         const t0 = cue.t + steps[u] * stagger + w0;
         if (ci === 0) maxDelay = Math.max(maxDelay, steps[u] * stagger);
-        const side = leanU > 0 ? smooth01(40, 88, Math.abs(pos.x)) : 0;
+        const side = leanU !== 0 ? smooth01(40, 88, Math.abs(pos.x)) : 0;
         const seed = this.sub(cue, u * 4 + ci * 997);
         // continuing colour windows start "hot" (no fade-in ramp): the fountain never stops
         const rampF = ci === 0 ? F.RAMP : 0;
@@ -1434,10 +1469,11 @@ export class PyroSystem extends CueFxSystem {
       // around — the air and the set around the 16-22 m silver walls of v1439-1446 stay pink from the
       // stage light, not lit white; the 30-34 m finale walls keep their full light, see silverDim)
       const per = (cold ? 0.05 : 0.2 * Math.pow(H / 10, 0.6)) * intenP * (white ? 1 - 0.6 * silverDim(H) : gold ? 1 : 0.85);
-      this.rowLight(out, { ...cue, t: cue.t + w0 }, pts, steps, stagger, wd, 0.25, H * 0.4, glowTint(col, this.c1), per, 0.35 * H + 5);
+      this.rowLight(out, { ...cue, t: cue.t + w0 }, pts, steps, stagger, wd, 0.25, H * 0.4, (Array.isArray(p.lightColor) ? lightCols[ci] : lightCol) ?? glowTint(col, this.c1), per, typeof p.reach === 'number' ? num(p.reach, 10, 2, 120) : (0.35 * H + 5) * Math.sqrt(Math.max(1, lightK)), 40, lightK);
     }
     if (n > 0) {
-      glowTint(firstCol, firstCol);
+      if (lightCol) firstCol.copy(lightCol);
+      else glowTint(firstCol, firstCol);
       // a burning gerb wall stands in a dense cloud of its own smoke, lit brightly in the fountain's
       // colour while it burns (v460.5 white wall, v558 pink fans, v600.4 gold-white wall, v1536 white
       // U): the light of the big moments is carried by that cloud
@@ -1450,12 +1486,13 @@ export class PyroSystem extends CueFxSystem {
         // of the stage, not in a white cloud of their own).
         const sI = Math.min(1, Math.max(0, (intenP - 1.5) / 1.5));
         const sL = 0.6 * smooth01(18, 30, H) * smooth01(2.5, 4, dur);
-        const sC = Math.max(sI, sL);
+        // (an authored `glow` replaces both and stands from the ignition on)
+        const sC = glowA >= 0 ? glowA : Math.max(sI, sL);
         // (a trace of cloud, sC < 0.08: the 20-22 m silver walls, is left out: only glowing blobs at the nozzles, v1446)
-        if (sC >= 0.08) this.burnCloud(out, cue, pts, steps, stagger, cue.t, dur, H, firstCol, 4.5 * Math.sqrt(sC) * (hueKs[0] < 1 ? 0.8 : 1), 0.17 * sC, sI >= sL ? 0.12 : 3);
+        if (sC >= 0.08) this.burnCloud(out, cue, pts, steps, stagger, cue.t, dur, H, firstCol, 4.5 * Math.sqrt(sC) * (hueKs[0] < 1 ? 0.8 : 1), 0.17 * Math.min(1.3, sC), glowA >= 0 || sI >= sL ? 0.12 : 3);
         // silver / white (titanium) sparks of a shorter wall light their smoke far less than their
         // glare suggests: thinner, darker smoke, so the colour of the stage light on it reads (v1439.5)
-        const wd = isWhiteSpark(firstCol) ? silverDim(H) : 0;
+        const wd = isWhiteSpark(cols[0]) ? silverDim(H) : 0;
         this.rowSmoke(out, cue, pts, steps, H * 0.35, H, firstCol, 1.4 * (1 - SILVER_SELF * wd) * Math.min(2, Math.max(1, intenP)), 0.14 - SILVER_OPAC * wd, (1 + dur * 0.8) * n, cue.t + 0.3, dur + maxDelay, 6, 9, 0.7, 0.9, 1, cue.t + maxDelay + dur + 0.2);
       }
       this.rowFlash(out, pts, steps, H * 0.5, {
@@ -1463,7 +1500,7 @@ export class PyroSystem extends CueFxSystem {
         t0: cue.t,
         t1: cue.t + maxDelay + dur + 0.3,
         color: firstCol,
-        peak: Math.min(1.6, (cold ? 0.012 : 0.03) * n * Math.sqrt(H / 8) + 0.1),
+        peak: Math.min(1.6, (cold ? 0.012 : 0.03) * n * Math.sqrt(H / 8) + 0.1) * lightK,
         decay: 0.4,
         strobe: 0,
       });
@@ -1478,36 +1515,75 @@ export class PyroSystem extends CueFxSystem {
     const segs: [THREE.Vector3, THREE.Vector3][] = [];
     if (pts.length === 1) segs.push([pts[0].clone().add(new THREE.Vector3(-5, 0, 0)), pts[0].clone().add(new THREE.Vector3(5, 0, 0))]);
     for (let i = 0; i + 1 < pts.length; i++) if (pts[i].distanceTo(pts[i + 1]) < 30) segs.push([pts[i], pts[i + 1]]);
-    const lifeMax = 3.2;
+    // round 11 (all optional, the defaults are the older curtain): `density` (0.2-4) x the sparks (and the
+    // light); `height` (m, default ~16.5): the curtain falls this far (the spark life follows from the drag
+    // fall law below); `columns` (m): discrete falling columns every `columns` m, shot down from their tubes
+    // (v1092.3-1094.5: dense gold columns falling from above the frame), instead of one even sheet
+    const dens = num(p.density, 1, 0.2, 4);
+    const Hf = typeof p.height === 'number' && Number.isFinite(p.height) ? Math.min(60, Math.max(3, p.height)) : 0;
+    const colGap = num(p.columns, 0, 0, 20);
+    // fall distance with drag k 1.5 and gravity: d(t) ~ 6.54 t - 4.36 (1 - exp(-1.5 t)) -> t for d = Hf
+    const lifeMax = Hf > 0 ? Math.max(1, (Hf + 4.36) / 6.54) : 3.2;
+    const life0 = Hf > 0 ? lifeMax * 0.56 : 1.8;
     const cx = new THREE.Vector3();
     segs.forEach(([a, b], i) => {
       const len = a.distanceTo(b);
-      out.add(
-        new Emitter(DIST.LINE, F.COOL | F.FLICKER | F.RAMP)
-          .on(L_SPARK)
-          .originV(a)
-          .time(cue.t)
-          .dir(0, -1, 0.15, 0.6)
-          .speed(0.3, 2.2)
-          .physics(1.5, -9.81)
-          .color(color, 11)
-          .life(1.8, lifeMax)
-          .emit(this.pc(len * 30 * lifeMax, 30), dur)
-          .size(0.045, 0.45)
-          .trail(0.13, 0.5)
-          .axis(b.x - a.x, b.y - a.y, b.z - a.z)
-          .seed(this.sub(cue, i))
-          .set(R.X3, 0.3)
-          .set(R.Y0, 0.8)
-          .set(R.Y3, 0.4)
-          .window(cue.t, cue.t + dur + lifeMax),
-      );
-      this.pointLight(out, 1, cue.t, cue.t + dur + 0.6, 0.6, a.clone().setY(a.y - 3), color, 0.35 + 0.02 * len, 9, b.clone().setY(b.y - 3));
+      const nTot = this.pc(len * 30 * lifeMax * dens, 30);
+      if (colGap > 0) {
+        // one narrow downward spray per tube: dense streaks with dark gaps between them
+        const nCol = Math.max(1, Math.round(len / colGap) + 1);
+        const per = Math.max(8, Math.round(nTot / nCol));
+        for (let j = 0; j < nCol; j++) {
+          const f = nCol > 1 ? j / (nCol - 1) : 0.5;
+          out.add(
+            new Emitter(DIST.CONE, F.COOL | F.FLICKER | F.RAMP)
+              .on(L_SPARK)
+              .origin(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f, a.z + (b.z - a.z) * f)
+              .time(cue.t)
+              .dir(0, -1, 0.04, 0.14)
+              .speed(1.5, 4.5)
+              .physics(1.5, -9.81)
+              .color(color, 11)
+              .life(life0, lifeMax)
+              .emit(per, dur)
+              .size(0.045, 0.45)
+              .trail(0.13, 0.5)
+              .seed(this.sub(cue, i * 64 + j))
+              .set(R.X3, 0.3)
+              .set(R.Y0, 0.8)
+              .set(R.Y3, 0.4)
+              .window(cue.t, cue.t + dur + lifeMax),
+          );
+        }
+      } else
+        out.add(
+          new Emitter(DIST.LINE, F.COOL | F.FLICKER | F.RAMP)
+            .on(L_SPARK)
+            .originV(a)
+            .time(cue.t)
+            .dir(0, -1, 0.15, 0.6)
+            .speed(0.3, 2.2)
+            .physics(1.5, -9.81)
+            .color(color, 11)
+            .life(life0, lifeMax)
+            .emit(nTot, dur)
+            .size(0.045, 0.45)
+            .trail(0.13, 0.5)
+            .axis(b.x - a.x, b.y - a.y, b.z - a.z)
+            .seed(this.sub(cue, i))
+            .set(R.X3, 0.3)
+            .set(R.Y0, 0.8)
+            .set(R.Y3, 0.4)
+            .window(cue.t, cue.t + dur + lifeMax),
+        );
+      // (a taller / denser curtain lights more of the air around it: the light sits at its middle)
+      const drop = Hf > 0 ? Hf * 0.3 : 3;
+      this.pointLight(out, 1, cue.t, cue.t + dur + 0.6, 0.6, a.clone().setY(a.y - drop), color, (0.35 + 0.02 * len) * Math.sqrt(dens), 9 + (Hf > 0 ? 0.25 * Hf : 0), b.clone().setY(b.y - drop));
       cx.add(a).add(b);
     });
     if (segs.length) {
       cx.multiplyScalar(1 / (segs.length * 2));
-      out.flashes.push({ kind: 1, t0: cue.t, t1: cue.t + dur + 0.5, color: color.clone(), peak: Math.min(1.2, 0.08 * segs.length + 0.1), decay: 0.8, pos: cx, strobe: 0 });
+      out.flashes.push({ kind: 1, t0: cue.t, t1: cue.t + dur + 0.5, color: color.clone(), peak: Math.min(1.2, 0.08 * segs.length + 0.1) * Math.sqrt(dens), decay: 0.8, pos: cx, strobe: 0 });
     }
   }
 
@@ -1582,8 +1658,13 @@ export class PyroSystem extends CueFxSystem {
           .window(cue.t, cue.t + 10.5),
       );
     });
+    // `light` (round 11): x the burst's flash and every light it throws (after the soft light cap), the
+    // eruption light of the biggest mines also reaching sqrt(light) x as far (v1565.4-1566.3: the whole site lit)
+    const lightK = num(p.light, 1, 0, 4);
+    // `lightColor` (round 11): the colour of those lights and the flash (default: from the burst colour)
+    const lightCol = typeof p.lightColor === 'string' && p.lightColor ? saturated(fxColor(p.lightColor, this.palette, new THREE.Color(), 'warm')) : null;
     if (pts.length) {
-      this.groupFlash(out, pts, 30, 2, { kind: 0, t0: cue.t, t1: cue.t + 1.2, color, peak: Math.min(3, 1.1 * size + 0.1 * pts.length), decay: 0.25, strobe: 0 });
+      this.groupFlash(out, pts, 30, 2, { kind: 0, t0: cue.t, t1: cue.t + 1.2, color: lightCol ?? color, peak: Math.min(3, 1.1 * size + 0.1 * pts.length) * lightK, decay: 0.25, strobe: 0 });
       // spatial light per group of units (> 30 m apart = separate lights): a burst on both arm ends
       // lights the two ends, not the empty middle of the field between them
       for (const grp of clusters(pts, 30)) {
@@ -1596,8 +1677,8 @@ export class PyroSystem extends CueFxSystem {
           y += q.y;
         }
         mn.y = mx.y = y / grp.length + 2;
-        this.pointLight(out, 0, cue.t, cue.t + 1.2, 0.3, mn, color, Math.min(8, 2.5 * size * Math.sqrt(grp.length)), 10 + 5 * sq, mx);
-        if (size >= BLAST_SIZE) this.blastCloud(out, cue, grp, size, color);
+        this.pointLight(out, 0, cue.t, cue.t + 1.2, 0.3, mn, lightCol ?? color, Math.min(8, 2.5 * size * Math.sqrt(grp.length)), 10 + 5 * sq, mx, lightK);
+        if (size >= BLAST_SIZE) this.blastCloud(out, cue, grp, size, color, lightK, lightCol);
       }
     }
   }
@@ -1609,7 +1690,7 @@ export class PyroSystem extends CueFxSystem {
    * clouds on the deck; v877 the frame full of gold-white smoke), then hanging as smoke lit by the
    * show. Its light is lit smoke (`haze` 1): the haze field fills with the burst colour around it.
    */
-  private blastCloud(out: EmitterSet, cue: Cue, grp: THREE.Vector3[], size: number, color: THREE.Color): void {
+  private blastCloud(out: EmitterSet, cue: Cue, grp: THREE.Vector3[], size: number, color: THREE.Color, lightK = 1, lightCol: THREE.Color | null = null): void {
     const mn = new THREE.Vector3(Infinity, Infinity, Infinity);
     const mx = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
     for (const q of grp) {
@@ -1658,16 +1739,17 @@ export class PyroSystem extends CueFxSystem {
       t1: glowEnd,
       decay: BLAST_GLOW,
       strobe: 0,
-      color: this.c2.copy(color).lerp(WHITE, 0.3).clone(),
+      color: lightCol ? lightCol.clone() : this.c2.copy(color).lerp(WHITE, 0.3).clone(),
       peak: BLAST_LIGHT * size * (0.5 + 0.5 * k),
       pos: c.clone(),
       a,
       b,
       radius: 0.8 * R0 + 4,
       haze: BLAST_HAZE,
+      ...(lightK !== 1 ? { gain: lightK } : {}),
     });
     const e = smooth01(ERUPT_SIZE, 3, size);
-    if (e > 0) this.eruption(out, cue, mn, mx, size, color, e);
+    if (e > 0) this.eruption(out, cue, mn, mx, size, color, e, lightK, lightCol);
   }
 
   /**
@@ -1681,25 +1763,26 @@ export class PyroSystem extends CueFxSystem {
    * FieldLight, the haze, the smoke and the lens glare see it. No extra smoke: the r8 blast cloud over
    * the deck stays the burst's smoke (an extra lit cloud over the field measured the same).
    */
-  private eruption(out: EmitterSet, cue: Cue, mn: THREE.Vector3, mx: THREE.Vector3, size: number, color: THREE.Color, e: number): void {
+  private eruption(out: EmitterSet, cue: Cue, mn: THREE.Vector3, mx: THREE.Vector3, size: number, color: THREE.Color, e: number, lightK = 1, lightCol: THREE.Color | null = null): void {
     const cx = (mn.x + mx.x) * 0.5;
     const z0 = (mn.z + mx.z) * 0.5;
-    const w = mx.x - mn.x + 40;
+    const w = (mx.x - mn.x + 40) * Math.sqrt(Math.max(1, lightK));
     const a = new THREE.Vector3(cx, 12, z0 + 4);
-    const b = new THREE.Vector3(cx, 12, z0 + ERUPT_LEN);
+    const b = new THREE.Vector3(cx, 12, z0 + ERUPT_LEN * Math.sqrt(Math.max(1, lightK)));
     out.lights.push({
       kind: 1,
       t0: cue.t,
       t1: cue.t + Math.max(0.3, cue.dur) + ERUPT_GLOW,
       decay: ERUPT_GLOW * 0.7,
       strobe: 0,
-      color: this.c2.copy(color).lerp(WHITE, 0.3).lerp(FIRE_LIGHT, ERUPT_WARM).clone(),
+      color: lightCol ? lightCol.clone() : this.c2.copy(color).lerp(WHITE, 0.3).lerp(FIRE_LIGHT, ERUPT_WARM).clone(),
       peak: ERUPT_LIGHT * size * e,
       pos: a.clone().add(b).multiplyScalar(0.5),
       a,
       b,
       radius: ERUPT_REACH * w,
       haze: BLAST_HAZE,
+      ...(lightK !== 1 ? { gain: lightK } : {}),
     });
   }
 
@@ -2022,6 +2105,11 @@ function colorSpecs(v: unknown): string[] {
  */
 function silverDim(H: number): number {
   return 1 - smooth01(22, 30, H);
+}
+
+/** the colour scaled so its brightest channel is 1 (a light colour; its strength comes separately) */
+function saturated(c: THREE.Color): THREE.Color {
+  return c.multiplyScalar(1 / Math.max(c.r, c.g, c.b, 1e-4));
 }
 
 function smooth01(a: number, b: number, x: number): number {

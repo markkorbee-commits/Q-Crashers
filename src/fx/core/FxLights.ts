@@ -27,6 +27,12 @@ export interface LightSpec extends FlashSpec {
    * a white gerb wall only lights the smoke right at it. Packed into uFxLB.w (the other fx shaders ignore it).
    */
   haze?: number;
+  /**
+   * Multiplier applied when the light is added, i.e. after the emitting system's soft light cap
+   * (CueFxSystem.lightCap): an authored `light` boost (pyro `light`, round 11) really is that much brighter
+   * instead of being squeezed by the log compression of the cap. Absent = 1 (every other light).
+   */
+  gain?: number;
 }
 
 /** compile-time maximum of lights in the shaders (keep in sync with FX_MAX_LIGHTS in glsl.ts) */
@@ -75,7 +81,9 @@ export class FxLights {
   }
 
   /** add an alive light with its current intensity (already enveloped) */
-  add(s: LightSpec, I: number): void {
+  add(s: LightSpec, I0: number): void {
+    const g = s.gain;
+    const I = typeof g === 'number' && g >= 0 ? I0 * g : I0;
     if (!(I > 0.002)) return;
     let k = this.n;
     if (k >= CAP) {
