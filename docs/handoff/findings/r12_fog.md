@@ -1,0 +1,37 @@
+# Round 12 (final) — fog: judge findings to fix
+Metric: default 64 moments 69.5 % raw / 53.8 % calibrated (research/video-timeline/data/similarity-mac-r12.json), exact-time
+frames, Mac GPU. These findings come from the final independent judges (27 Sep 2026); evidence files are in
+$ENDSHOW_DATA/work/. This is the LAST fix round: fix the majors in order of visible impact; skip what needs a large
+redesign and say so. Several earlier rounds struggled with fog balance: measure every change on the default 64.
+
+## 1. [major] Almost no stage-level smoke in ground and terrace shots (module fog, lens: ENDSHOW RECONSTRUCTION ACCURAC)
+The video's ground and terrace shots are full of smoke: white or tinted smoke rolling off the deck and pillars, beams visible inside it. Ours is clear air with crisp geometry. Examples: v70 (pink/violet smoke around the gerbs), v470 (white smoke plume over the set until v477), v505 (the set mostly veiled in white fog), v608 (yellowish smoke clouds with beams through them), v845 (red/orange smoke over the stage), v210 (green laser waves inside a smoke layer that fills the lower half of the frame; ours: thin laser lines only), v1047 (warm brown haze). The one exception is v880, which is over-fogged: the video shows the wings clearly, ours is a flat red haze wall.
+Evidence: work/compare/qa12_t1b.jpg row 1 (v70 f4 00280); qa12_t3b.jpg rows 3–4 (v470 f4 01880, v505 f4 02020); qa12_t4.jpg row 4 (v608 f4 02432); qa12_t5b.jpg row 5 (v845 f4 03380); qa12_t2b.jpg row 1 (v210 f4 00840); qa12_t6b.jpg row 3 (v1047 f4 04188); qa12_t5c.jpg row 5 (v880 f4 03520)
+Suggested fix: Add persistent low smoke banks at the deck lip, pillar bases and side sections that build up after pyro and CO2 and drift for 10–20 s (FogSystem deck/pillar emitters, density 0.6–1.0 in ground shots). Let the laser and beam volumes scatter in them. Reduce the red lowfog density at v878–881.
+
+## 2. [major] Laser sea (S18) about 40 % too dark, with no pulses (module lasers, lens: ENDSHOW RECONSTRUCTION ACCURAC)
+v1128–1136: the video luma pulses between 22 and 44 as the laser sheet sweeps (peaks at v1128.5, 1130.5–1131.0 and 1134.25–1134.5, reaching 3.6–4.5 % bright pixels). Ours is a smooth, slowly falling 19–26 with no pulses (correlation at 0 lag 0.51). In the video the stage is vivid cyan/green through the sheet; in ours it is dull and ghostly behind a blue plane (v1140), and the ground reads as a blotchy texture rather than light on low fog (v1150/1160). At v1169.5 (similarity 0.40) our camera is too high: the video's horizon sits in the lower half, with the laser plane filling the frame.
+Evidence: work/sim/qa12_timing window 1128–1136 (ours_04512…04544.png); work/compare/qa12_t7a.jpg (v1130/1140/1150/1160, f4 04520/04560/04600/04640); work/sim/qa12_worst_a.jpg row 2 (v1169.5 f4 04678)
+Suggested fix: Animate the laser sheet's intensity or sweep on the beat (±40 %) and raise its peak brightness about 1.6x. Draw the stage in front of the sheet (depth or order) so the set keeps its cyan/green. Lower the v1163 camera shot about 3–5 m and pitch it so the horizon sits at 60–70 % of the frame height.
+
+## 3. [major] First person at the peaks: the crowd and the stage vanish in a uniform pink or red fog (415.6 s, 1520 s) (module fog, lens: Crowd, performers & immersion )
+From spot=crowd (32 m) and spot=front at the two biggest moments, the whole frame is a flat, bright pink or red. At 415.6 the sky is saturated pink; the crowd silhouettes turn pale pink and lose all contrast against the stage; from the front spot nothing but a red wash with a few beams is readable. At 1520 the frame is solid red below the spark fan, and the stage and crowd are not visible at all. The video at these times (v415.75 low pillar shot, v1520.25) keeps a dark sky with the haze glowing around the set, and objects stay separable. For the crowd lens this kills the classic 'dark silhouettes against a blazing stage' image at the drops.
+Evidence: .shots/qa12-crowd-415.png, .shots/qa12-crowd-1520.png, .shots/qa12-front-415.6.png, $ENDSHOW_DATA/work/compare/qa12_crowdfog.jpg (free pose at the crowd spot vs f4/01663, 06081).
+Suggested fix: Cap the lit in-scatter of the haze near the viewer: fade the scatter contribution over the first ~15–25 m from the camera and use a height falloff so the air above ~20 m does not glow. Or clamp the fog's added luminance to ~0.35 of the stage luminance at eye level, in first-person or third-person camera modes only (keep the Show camera tuned to the video). Target: at t=415.6 from spot=crowd the silhouettes stay at least 3x darker than the haze behind them.
+
+## 4. [major] At 720 s the flame and gerb light becomes a uniform orange veil that hides the set; in the video the flames light a crisp dragon (module fog, lens: MAINSTAGE, WORLD, SCALE & LIGH)
+At the 12:00 wing-fire moment, the video shows flame tongues in front of a sharply lit set: a bright silver-white dragon head, readable wing spars, glowing lantern crystals and dark-brown smoke above. Ours spreads the pyro light into a bright uniform orange haze over the whole upper frame. The dragon and wings dissolve into it, and the lanterns are dark. Top band (sky) 0.129 vs video 0.025 (5x); dragon-head region 0.233 vs 0.283. The flames light the air instead of the structure.
+Evidence: qa12_wide2.jpg row 720 s (frame 2880). The same look in free-cam: .shots/qa12-walk-z30.png and .shots/qa12-walk-z10.png at t=700, where the whole sky is saturated red-magenta from the pyro and wash.
+Suggested fix: Lower the flame and gerb source gain in the height-fog and haze colour for the high band (the flames light smoke near them, not the whole sky). Route more of the flame LightEnv energy into set illumination: add the flame colour to the dragon, wing and crystal materials by 1/d² from the active flame heads. Keep the smoke albedo dark brown (#3A2A22, bible §7.5) so smoke above the fire stays dark.
+
+## 5. [major] The side sections lack the blue low-fog glow band that frames the U in the drone shots (module fog, lens: MAINSTAGE, WORLD, SCALE & LIGH)
+In the opening drone shots the side sections and forward arms carry a continuous blue-white band of lit low fog along their base. It is the main visual cue of the U's width at night. Ours shows a dark wall with individual lit towers and windows. Side-section region luminance at 30 s: video 0.0140 / 0.0177 (left / right) vs ours 0.0044 / 0.0047 (3.5x). The wings are close (0.021 vs 0.016), so this is not a global exposure difference.
+Evidence: qa12_wide1.jpg row 30 s (frame 120); the Show camera render .shots/qa12-sc-30.png. The same band is visible in video frames 238 and 6044 (drone montage) and is missing in ours.
+Suggested fix: Add a low, lit fog strip along the side-section fronts (Z −4…+2, Y 0–4 m) and along the arms. Feed it from the side-section uplights' colour (the castle base blue), with the same 1/d falloff as the pillar-base pools, so it stays at about 0.015 luminance at 30 s and follows the stage looks.
+
+## Verify / stop
+Touched moments side by side, then the default 64 (`--out "$ENDSHOW_DATA/work/sim/r12_fog_64"`): never commit a
+change that lowers the 64-moment calibrated score. tsc, no console errors, deterministic, mobile budget PASS.
+
+Files you own: src/fx/FogSystem.ts, src/fx/haze.ts, src/lasers/**, docs/show-format-ext/lasers.md.
+NOT: src/fx/core/** (fire group), src/world/** (world group), everything else.
