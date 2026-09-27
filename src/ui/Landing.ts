@@ -1,6 +1,9 @@
 import { h } from './dom';
 import { emblem } from './icons';
 
+/** what the photosensitivity line on the title says: not asked yet, the stored choice, or a ?calm link */
+export type FlashNote = 'ask' | 'reduced' | 'full' | 'calm';
+
 /**
  * Full-screen title: the empty Holy Grounds at dusk — an original silhouette of the castle and
  * the mechanical dragon's spread wings against a heat-red horizon, rising embers and heat haze.
@@ -11,6 +14,9 @@ export class Landing {
   private label: HTMLElement;
   private pct: HTMLElement;
   readonly enterBtn: HTMLButtonElement;
+  /** the photosensitivity line (a button once the viewer has chosen: it re-opens the choice) */
+  readonly flashBtn: HTMLButtonElement;
+  private flashEl: HTMLElement;
   private embers: Embers;
 
   constructor(parent: HTMLElement, mobile: boolean) {
@@ -18,6 +24,8 @@ export class Landing {
     this.bar = h('div', { class: 'bar' });
     this.label = h('span', null, 'Preparing');
     this.pct = h('span', null, '0%');
+    this.flashBtn = h('button', { class: 'flashing-btn', type: 'button' });
+    this.flashEl = h('div', { class: 'flashing', role: 'note' });
     const canvas = h('canvas', { class: 'embers', 'aria-hidden': 'true' });
     this.el = h(
       'section',
@@ -38,7 +46,7 @@ export class Landing {
         h('h2', null, 'The Endshow Experience'),
         h('p', { class: 'tribute' }, 'The festival that never was. The Endshow that still happened.'),
         h('div', { class: 'disclaimer' }, 'Fan-made tribute. Not affiliated with Q-dance.'),
-        h('div', { class: 'flashing', role: 'note' }, '⚠ Contains flashing lights and strobe effects — you can reduce them after entering.'),
+        this.flashEl,
         h(
           'div',
           { class: 'loader', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-label': 'Loading' },
@@ -56,6 +64,22 @@ export class Landing {
     parent.appendChild(this.el);
     this.embers = new Embers(canvas, mobile ? 46 : 90);
     this.embers.start();
+  }
+
+  /** photosensitivity line: before the first choice it announces the warning that follows ENTER */
+  setFlashNote(state: FlashNote): void {
+    const el = this.flashEl;
+    el.textContent = '';
+    if (state === 'ask') {
+      el.append('⚠ Contains flashing lights, strobes and bright pyrotechnics — you choose reduced or full effects before the show.');
+      return;
+    }
+    const what = state === 'full' ? 'full effects' : 'reduced';
+    el.append(`⚠ Contains flashing lights and strobes · Flashing: ${what}${state === 'calm' ? ' (calm link)' : ''}`);
+    if (state === 'calm') return;
+    this.flashBtn.textContent = 'Change';
+    this.flashBtn.setAttribute('aria-label', `Flashing: ${what}. Change the photosensitivity setting`);
+    el.append(' · ', this.flashBtn);
   }
 
   /**

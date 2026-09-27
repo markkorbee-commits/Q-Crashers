@@ -1,4 +1,5 @@
 import type { App } from '../core/App';
+import { IS_ARTIFACT } from '../core/target';
 import { CAMERA_MODES, type CamMode } from './contracts';
 import { h, setText, toggleClass } from './dom';
 import { fmtTime } from './format';
@@ -20,6 +21,7 @@ export interface HudActions {
   openAudio(trigger: HTMLElement): void;
   openCamera(trigger: HTMLElement): void;
   toggleCinema(): void;
+  toggleCompare(): void;
   toggleFullscreen(): void;
   openHelp(trigger: HTMLElement): void;
   promptTap(): void;
@@ -73,7 +75,7 @@ export class Hud {
     );
 
     // ---- toolbar (top-right)
-    const LABEL: Record<string, string> = { positions: 'Spots', crowd: 'Crowd', perception: 'Perception', quality: 'Quality', cinema: 'Hide UI', fullscreen: 'Full', help: 'Help' };
+    const LABEL: Record<string, string> = { positions: 'Spots', crowd: 'Crowd', perception: 'Perception', compare: 'Compare', quality: 'Quality', cinema: 'Hide UI', fullscreen: 'Full', help: 'Help' };
     const tb = (id: string, ico: string, tip: string, fn: (el: HTMLButtonElement) => void, extra = '') => {
       // the text label is shown next to the icon on wide screens (CSS), the coach marks use data-label
       const b = h('button', { class: `icon-btn ${extra}`, type: 'button', 'aria-label': tip, 'data-tip': tip, 'data-label': LABEL[id], 'data-tip-pos': id === 'help' ? 'left' : undefined, html: `${icon(ico)}<span class="tb-l" aria-hidden="true">${LABEL[id]}</span>` });
@@ -96,6 +98,8 @@ export class Hud {
       tb('positions', 'pin', 'Positions (T)', (b) => a.openPositions(b)),
       tb('crowd', 'crowd', 'Crowd: Tribe or as filmed (G)', (b) => a.openCrowd(b)),
       tb('perception', 'waves', 'Perception (X)', (b) => a.openPerception(b)),
+      // side by side with the official video (the artifact cannot embed YouTube)
+      IS_ARTIFACT ? null : tb('compare', 'compare', 'Compare with the official video (B)', () => a.toggleCompare()),
       tb('quality', 'gauge', 'Graphics quality', (b) => a.openQuality(b)),
       tb('cinema', 'cinema', 'Hide interface (H)', () => a.toggleCinema()),
       fsOk ? tb('fullscreen', 'fullscreen', 'Fullscreen (F)', () => a.toggleFullscreen()) : null,
@@ -214,10 +218,21 @@ export class Hud {
   }
   private lastSpace = -1;
 
+  /** the interface box changed without a window resize (video compare split) */
+  relayout(): void {
+    this.updateNarrow();
+    this.publishSpace();
+  }
+
   /** on very narrow screens and on touch devices the segmented camera control collapses into one button (camera sheet) */
   private updateNarrow() {
-    const narrow = window.innerWidth <= 480 || this.touch;
+    const w = this.showbar.parentElement?.clientWidth || window.innerWidth;
+    // the half-width interface of the video compare has no room for the five camera buttons either
+    const cmp = document.documentElement.classList.contains('vcmp-on');
+    const narrow = w <= (cmp ? 900 : 480) || this.touch;
     this.camBtn.style.display = narrow ? '' : 'none';
+    toggleClass(this.seg, 'cmp-narrow', narrow && cmp);
+    toggleClass(this.toolbar, 'cmp-tight', cmp && w < 640);
   }
 
   paintRange(r: HTMLInputElement): void {

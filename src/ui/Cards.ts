@@ -3,6 +3,7 @@ import { START_CHOICES } from '../player/spots';
 import { cameraRig, crowdSys, player } from './contracts';
 import { h, store } from './dom';
 import { fmtTime } from './format';
+import { IS_ARTIFACT } from '../core/target';
 import { emblem, icon } from './icons';
 import { prefs } from './settings';
 import type { UI } from './UI';
@@ -53,6 +54,7 @@ const KEY_GROUPS: [title: string, rows: Row[]][] = [
       [['T'], 'Positions'],
       [['G'], 'Crowd: the Tribe or as filmed'],
       [['X'], 'Perception'],
+      [['B'], IS_ARTIFACT ? 'Compare with the official video (website only)' : 'Compare side by side with the official video'],
       [['?'], 'Help'],
     ],
   ],
@@ -136,14 +138,35 @@ function switchRow(label: string, checked: boolean, onChange: (on: boolean) => v
 }
 
 /**
- * Photosensitivity + comfort block: the flashing-lights warning with the "Reduce flashing" and
- * "Reduce motion" switches (onboarding, quality panel, help).
+ * Photosensitivity + comfort block (Help, Quality): the flashing-lights warning with a small
+ * "Flashing: Reduced / Full" toggle and the "Reduce motion" switch.
  */
 export function flashingToggle(ui: UI, compact = false): HTMLElement {
-  const flash = switchRow('Reduce flashing', prefs.reduceFlashing, (on) => {
-    ui.setReduceFlashing(on);
-    ui.toast(on ? 'Reduce flashing on — strobes, blinders and flashes are damped' : 'Reduce flashing off', 2200, 'warning');
-  });
+  const seg = h('span', { class: 'fl-seg', role: 'radiogroup', 'aria-label': 'Flashing' });
+  const opt = (reduce: boolean, label: string) => {
+    const b = h('button', { class: 'fl-opt', type: 'button', role: 'radio' }, label);
+    b.addEventListener('click', () => {
+      if (prefs.reduceFlashing === reduce) return;
+      ui.setReduceFlashing(reduce);
+      sync();
+      ui.toast(reduce ? 'Flashing reduced — strobes, blinders and flashes are damped' : 'Flashing: full effects', 2200, 'warning');
+    });
+    seg.appendChild(b);
+    return b;
+  };
+  const reduced = opt(true, 'Reduced');
+  const full = opt(false, 'Full');
+  const sync = () => {
+    for (const [b, on] of [
+      [reduced, prefs.reduceFlashing],
+      [full, !prefs.reduceFlashing],
+    ] as const) {
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-checked', String(on));
+    }
+  };
+  sync();
+  const flash = h('span', { class: 'sw fl-row' }, h('span', { class: 'sw-l' }, 'Flashing'), seg);
   const motion = switchRow('Reduce motion', ui.reduceMotion, (on) => {
     ui.setReduceMotion(on);
     ui.toast(on ? 'Reduce motion on — no head bob, sway, roll or camera shake' : 'Reduce motion off', 2200, 'motion');
@@ -152,9 +175,59 @@ export function flashingToggle(ui: UI, compact = false): HTMLElement {
     'div',
     { class: `safety${compact ? ' compact' : ''}` },
     h('span', { class: 'si', html: icon('warning') }),
-    h('span', { class: 'st' }, h('b', null, 'Contains flashing lights and strobe effects.'), h('small', null, 'Reduce flashing damps strobes, blinders and pyro / firework flashes. Reduce motion removes head bob, sway and camera shake.')),
+    h('span', { class: 'st' }, h('b', null, 'Contains flashing lights, strobes and bright pyrotechnics.'), h('small', null, 'Reduced damps strobes, blinders and pyro / firework flashes. Reduce motion removes head bob, sway and camera shake.')),
     h('span', { class: 'sw-group' }, flash, motion),
   );
+}
+
+/**
+ * Photosensitivity warning, shown once before the show is seen (first ENTER on this device; `?calm`
+ * skips it, `?autostart` never shows it). Two choices plus the reduce-motion switch; the choice is
+ * saved (`dq26.reduceFlashing`). Escape, a click outside and closing all pick the safe choice.
+ * Resolves with true when flashing is reduced.
+ */
+export function openPhotoGate(ui: UI): Promise<boolean> {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (reduce: boolean) => {
+      if (done) return;
+      done = true;
+      ui.setReduceFlashing(reduce);
+      ui.layers.close('photogate', true);
+      resolve(reduce);
+    };
+    const choice = (reduce: boolean, ico: string, title: string, sub: string) => {
+      const b = h('button', { class: `gate-opt ${reduce ? 'safe' : 'full'}`, type: 'button', autofocus: reduce || undefined }, h('span', { class: 'gi', html: icon(ico) }), h('span', { class: 'gt' }, h('b', null, title), h('small', null, sub)));
+      b.addEventListener('click', () => finish(reduce));
+      return b;
+    };
+    const motion = switchRow('Reduce motion', ui.reduceMotion, (on) => ui.setReduceMotion(on));
+    const card = h(
+      'div',
+      { class: 'card glass strong rule-top gate', 'aria-labelledby': 'gate-title', 'aria-describedby': 'gate-desc' },
+      h('div', { class: 'gate-kicker' }, h('span', { html: icon('warning'), style: 'display:contents' }), h('span', { class: 'kicker' }, 'Photosensitivity warning')),
+      h('h3', { id: 'gate-title' }, 'Flashing lights ahead'),
+      h(
+        'p',
+        { id: 'gate-desc', class: 'gate-lead' },
+        'This experience contains ',
+        h('b', null, 'flashing lights, strobe effects and bright pyrotechnics and fireworks'),
+        ' that may trigger seizures in people with photosensitive epilepsy.',
+      ),
+      h('p', { class: 'small muted' }, 'If you, or anyone watching with you, has epilepsy or has had a seizure, choose Reduce flashing. Stop and look away at once if you feel dizzy or disoriented, notice altered vision, or eye or muscle twitching.'),
+      h(
+        'div',
+        { class: 'gate-choices' },
+        choice(true, 'shield', 'Reduce flashing', 'Strobes, blinders and pyro / firework flashes are damped'),
+        choice(false, 'bolt', 'Continue with full effects', 'Every strobe and flash, as in the official video'),
+      ),
+      h('div', { class: 'gate-motion' }, motion, h('small', null, 'No head bob, sway or camera shake')),
+      h('p', { class: 'note', html: `${icon('info')}<span>Remembered on this device. Change it any time under Help (?) or Quality.</span>` }),
+    );
+    // Escape / a click on the scrim close the card: that is the safe choice
+    ui.layers.open('photogate', card, { kind: 'modal', scrimClass: 'gate-scrim', onClose: () => finish(true) });
+    card.setAttribute('role', 'alertdialog');
+  });
 }
 
 /** onboarding chip icons per start choice */
@@ -257,7 +330,6 @@ export function openOnboarding(ui: UI): Promise<'start' | 'explore'> {
       chips,
       blurb,
       h('div', { class: 'actions' }, start, explore),
-      flashingToggle(ui, true),
       legend(ui.touch && ui.root.classList.contains('touch')),
       h('p', { class: 'note', html: `${icon('music')}<span>Audio: ${ui.app.sources.label}${t > 1 ? ` · the show resumes at ${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}` : ''}. Change it any time in the top bar.</span>` }),
     );

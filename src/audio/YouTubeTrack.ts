@@ -28,6 +28,20 @@ function loadApi(): Promise<any> {
 }
 
 /**
+ * Slave mode (the video-compare pane): a muted player the UI drives itself (play / pause / seek to
+ * follow the show clock) instead of a clock source. Errors and state changes are reported through
+ * callbacks, also after the player was ready (embedding blocked, video removed, HTML5 failure).
+ */
+export interface YouTubeSlaveOptions {
+  /** start muted (muted playback may start without a user gesture) */
+  muted?: boolean;
+  /** YT player state changes: -1 unstarted, 0 ended, 1 playing, 2 paused, 3 buffering, 5 cued */
+  onState?: (state: number) => void;
+  /** YT error codes: 2 bad request, 5 HTML5 player, 100 not found / private, 101 / 150 embedding not allowed */
+  onError?: (code: number) => void;
+}
+
+/**
  * Plays the OFFICIAL Endshow video through the YouTube IFrame player (visible picture-in-picture,
  * as YouTube's terms require) and exposes its time as the show clock. No media is copied.
  * The player's getCurrentTime() is coarse, so the ShowClock smooths it.
@@ -40,8 +54,29 @@ export class YouTubeTrack implements AudioTrack {
   private ready = false;
   private _duration = 0;
   private state = -1;
+  /** last YT error code (null = none) */
+  errorCode: number | null = null;
 
-  constructor(private videoId: string, private container: HTMLElement, private offset = 0) {}
+  constructor(private videoId: string, private container: HTMLElement, private offset = 0, private slave: YouTubeSlaveOptions | null = null) {}
+
+  /** YT player state (-1 unstarted, 0 ended, 1 playing, 2 paused, 3 buffering, 5 cued) */
+  get playerState(): number {
+    return this.state;
+  }
+
+  get isReady(): boolean {
+    return this.ready;
+  }
+
+  /** the video's own clock (s), without the offset; 0 before the player is ready */
+  videoTime(): number {
+    return this.ready ? (this.player.getCurrentTime?.() ?? 0) : 0;
+  }
+
+  /** seek on the video's own clock (no offset) */
+  seekVideo(t: number): void {
+    if (this.ready) this.player.seekTo(Math.max(0, t), true);
+  }
 
   get duration() {
     return this._duration ? this._duration - this.offset : 0;
@@ -65,7 +100,15 @@ export class YouTubeTrack implements AudioTrack {
         videoId: this.videoId,
         width: '100%',
         height: '100%',
-        playerVars: { playsinline: 1, rel: 0, modestbranding: 1, controls: 0, disablekb: 1 },
+        playerVars: {
+          playsinline: 1,
+          rel: 0,
+          modestbranding: 1,
+          controls: 0,
+          disablekb: 1,
+          ...(this.slave?.muted ? { mute: 1 } : {}),
+          ...(this.slave && /^https?:/.test(location.origin) ? { origin: location.origin } : {}),
+        },
         events: {
           onReady: () => {
             clearTimeout(timer);
@@ -76,9 +119,13 @@ export class YouTubeTrack implements AudioTrack {
           onStateChange: (e: any) => {
             this.state = e.data;
             if (!this._duration) this._duration = this.player.getDuration?.() ?? 0;
+            this.slave?.onState?.(e.data);
           },
           onError: (e: any) => {
             clearTimeout(timer);
+            const code = typeof e?.data === 'number' ? e.data : -1;
+            this.errorCode = code;
+            this.slave?.onError?.(code);
             reject(new Error(`YouTube player error ${e?.data}`));
           },
         },

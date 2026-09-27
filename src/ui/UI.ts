@@ -6,18 +6,19 @@ import type { FrameContext, Interactable, NamedSpot, QualityLevel } from '../cor
 import { debugState } from '../debug/debugState';
 import { AudioFlow } from './AudioFlow';
 import { BarMenu } from './BarMenu';
-import { openEnded, openHelp, openOnboarding } from './Cards';
+import { VideoCompare } from './Compare';
+import { openEnded, openHelp, openOnboarding, openPhotoGate } from './Cards';
 import { CAMERA_MODES, cameraRig, player, tryCall, type CameraLike, type CamMode } from './contracts';
 import { h, isTypingTarget, store } from './dom';
 import { installGrain } from './grain';
 import { Hud } from './Hud';
 import { icon } from './icons';
-import { Landing } from './Landing';
+import { Landing, type FlashNote } from './Landing';
 import { Layers } from './Layers';
 import { openAudioMenu, openCameraSheet, openCrowd, openMoments, openPositions, openQuality } from './menus';
 import { PerceptionUI } from './PerceptionUI';
 import { PiP } from './PiP';
-import { prefs, savePref } from './settings';
+import { calmForced, flashingAnswered, prefs, savePref } from './settings';
 import { Toasts } from './Toasts';
 
 const LOCK_MODES = new Set(['first', 'third', 'free']);
@@ -40,6 +41,8 @@ export class UI {
   readonly audio: AudioFlow;
   readonly perc: PerceptionUI;
   readonly barMenu: BarMenu;
+  /** side-by-side compare with the official video (B) */
+  readonly compare: VideoCompare;
   readonly touch: boolean;
   readonly autostart: boolean;
   entered = false;
@@ -104,12 +107,15 @@ export class UI {
     if (!this.autostart) {
       this.landing = new Landing(this.root, app.device.mobile);
       this.landing.enterBtn.addEventListener('click', () => void this.enter());
+      this.landing.setFlashNote(this.flashNote());
+      this.landing.flashBtn.addEventListener('click', () => void this.changeFlashing());
       // keyboard belongs to the landing (Space/Enter activate the button, no walking behind it)
       app.input.uiCapture = true;
     }
     this.layers = new Layers(this.root);
     this.layers.onChange = (open) => {
-      app.input.uiCapture = open;
+      // the landing keeps the keyboard until ENTER (a card opened over it must not release it)
+      app.input.uiCapture = open || this.landing !== null;
       if (open) app.input.exitPointerLock();
       this.poke();
     };
@@ -119,6 +125,7 @@ export class UI {
     this.pip = new PiP(this.root, this.root.classList.contains('touch'));
     this.barMenu = new BarMenu(this);
     this.audio = new AudioFlow(this);
+    this.compare = new VideoCompare(this);
     this.cinemaExit = h('button', { class: 'btn cinema-exit glass strong', type: 'button', html: `${icon('eye')}<span>Show interface</span>` });
     this.cinemaExit.addEventListener('click', () => this.toggleCinema(false));
     this.root.appendChild(this.cinemaExit);
@@ -220,6 +227,7 @@ export class UI {
     if (this.autostart) {
       this.entered = true;
       this.root.classList.remove('pre');
+      if (app.params.has('compare')) this.compare.open();
       if (app.params.has('play')) void this.play();
       return;
     }
@@ -232,6 +240,8 @@ export class UI {
     const btn = this.landing?.enterBtn;
     if (btn) btn.disabled = true;
     this.app.audio.ensure();
+    // photosensitivity warning before any of the show is seen (once per device; ?calm skips it)
+    if (!flashingAnswered() && !calmForced) await openPhotoGate(this);
     this.landing?.hide();
     this.landing = null;
     this.app.input.uiCapture = this.layers.anyOpen;
@@ -252,6 +262,23 @@ export class UI {
     // keep the show bar up for a while so first-time viewers see where the controls are
     this.poke(7500);
     this.coach();
+    if (this.app.params.has('compare')) this.compare.open();
+  }
+
+  /** the landing's photosensitivity line */
+  private flashNote(): FlashNote {
+    if (calmForced) return 'calm';
+    if (!flashingAnswered()) return 'ask';
+    return prefs.reduceFlashing ? 'reduced' : 'full';
+  }
+
+  /** "Change" on the landing: the warning card again, without entering */
+  private async changeFlashing(): Promise<void> {
+    if (this.layers.isOpen('photogate')) return;
+    await openPhotoGate(this);
+    this.landing?.setFlashNote(this.flashNote());
+    const btn = this.landing?.enterBtn;
+    if (btn && !btn.disabled) btn.focus({ preventScroll: true });
   }
 
   /** one-time labels under the toolbar icons (icons alone do not say 'Perception' or 'Quality') */
@@ -312,6 +339,7 @@ export class UI {
       openAudio: (t: HTMLElement) => this.togglePanel('audio', () => openAudioMenu(this, t)),
       openCamera: (t: HTMLElement) => this.togglePanel('camera', () => openCameraSheet(this, t)),
       toggleCinema: () => this.toggleCinema(),
+      toggleCompare: () => this.compare.toggle(),
       toggleFullscreen: () => this.toggleFullscreen(),
       openHelp: (t: HTMLElement) => openHelp(this, t),
       promptTap: () => this.promptTap(),
@@ -433,6 +461,7 @@ export class UI {
   private onCameraMode(mode: string, initial = false) {
     this.camEvents++;
     this.hud.setCameraMode(mode);
+    this.compare?.onCameraMode(mode);
     if (!initial && mode !== this.lastCamMode && !this.layers.modalOpen) {
       const m = CAMERA_MODES.find((x) => x.id === mode);
       if (m) this.toast(`${m.label} — ${m.hint}`, 1800, m.icon);
@@ -632,8 +661,10 @@ export class UI {
    */
   private doubleTapSkip(x: number, ts: number): void {
     if (!this.entered || this.layers.anyOpen || !this.root.classList.contains('touch')) return;
-    const w = window.innerWidth;
-    const side = x < w / 3 ? -1 : x > (2 * w) / 3 ? 1 : 0;
+    // thirds of the picture (the canvas is only part of the window in the video compare)
+    const r = this.app.canvas.getBoundingClientRect();
+    const u = (x - r.left) / Math.max(1, r.width);
+    const side = u < 1 / 3 ? -1 : u > 2 / 3 ? 1 : 0;
     // event timestamps: a slow frame between the two taps must not break the double tap
     const now = ts || performance.now();
     const lt = this.lastTap;
@@ -724,6 +755,9 @@ export class UI {
       case 'KeyH':
         this.toggleCinema();
         break;
+      case 'KeyB':
+        this.compare.toggle();
+        break;
       case 'KeyM':
         this.toggleMute();
         break;
@@ -764,6 +798,7 @@ export class UI {
     if (!this.app.clock) return;
     this.hud.update(ctx.showTime, ctx.showPlaying);
     this.perc.update(ctx.dt);
+    this.compare.frame(ctx);
     this.handlePendingKey();
     this.updatePrompt();
 

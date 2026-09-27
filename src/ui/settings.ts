@@ -32,13 +32,36 @@ const reducedMotion = (() => {
 
 const rf = store.get('dq26.reduceFlashing');
 
+/**
+ * `?calm` / `?reduceflashing` force "Reduce flashing" on for this visit (a link a photosensitive viewer can
+ * share or bookmark). Kept in memory only: the stored choice is untouched, and a later switch in Help or
+ * Quality still saves as usual. `?reduceflashing=0` (or false / off) does not force anything.
+ */
+export const calmForced = (() => {
+  try {
+    const q = new URLSearchParams(location.search);
+    const v = q.has('calm') ? q.get('calm') : q.has('reduceflashing') ? q.get('reduceflashing') : null;
+    return v !== null && !/^(0|false|off|no)$/i.test(v);
+  } catch {
+    return false;
+  }
+})();
+
+/**
+ * Has the viewer answered the photosensitivity warning (either way) on this device? The OS
+ * reduced-motion default does not count as an answer.
+ */
+export function flashingAnswered(): boolean {
+  return store.get('dq26.reduceFlashing') !== null;
+}
+
 export const prefs: Prefs = {
   lookSensitivity: num('dq26.lookSensitivity', 1, 0.3, 2.5),
   invertY: store.get('dq26.invertY') === '1',
   fov: num('dq26.fov', 0, 0, 100),
   touchLook: num('dq26.touchLook', 1, 0.4, 2.5),
-  // default ON for people who asked their OS for reduced motion
-  reduceFlashing: rf === null ? reducedMotion : rf === '1',
+  // default ON for people who asked their OS for reduced motion; a ?calm link forces it on
+  reduceFlashing: calmForced || (rf === null ? reducedMotion : rf === '1'),
 };
 
 export function savePref<K extends keyof Prefs>(key: K, value: Prefs[K]): void {

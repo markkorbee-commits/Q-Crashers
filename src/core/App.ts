@@ -185,6 +185,12 @@ export class App {
     this.postfx = new PostFX(this.renderer, this.quality);
     if (this.params.has('nopost')) this.postfx.enabled = false;
     window.addEventListener('resize', () => this.resize());
+    // the canvas box can also change without a window resize (the video-compare split): follow it.
+    // Applied at the start of the next frame, so the drawing buffer never clears after this frame's render.
+    if (typeof ResizeObserver !== 'undefined')
+      new ResizeObserver(() => {
+        if (canvas.clientWidth !== this.boxW || canvas.clientHeight !== this.boxH) this.boxDirty = true;
+      }).observe(canvas);
     this.resize();
   }
 
@@ -503,20 +509,31 @@ export class App {
     storageSet(AUTO_HINT_KEY, next === this.autoLevel ? null : JSON.stringify({ gpu: this.device.gpu, level: next }));
   }
 
+  /** canvas CSS box the last resize() applied (ResizeObserver compares against it) */
+  private boxW = 0;
+  private boxH = 0;
+  private boxDirty = false;
+
   /**
-   * Size the canvas and the post chain to the window. The drawing buffer follows the preset (device
+   * Size the drawing buffer and the post chain to the canvas's CSS box: the whole window, or its part
+   * of the video-compare split (the canvas box is owned by CSS; the window size is only a fallback
+   * while the canvas has no layout box). The drawing buffer follows the preset (device
    * pixel ratio cap x renderScale); the governor's dynamic resolution is applied inside PostFX
    * (setRenderScale: the scene renders into part of the full-size targets, nothing is reallocated).
    * Only without the offscreen post chain does the governor scale the canvas itself.
    */
   resize(): void {
-    const w = window.innerWidth;
-    const h = window.innerHeight;
+    const c = this.renderer.domElement;
+    this.boxW = c.clientWidth;
+    this.boxH = c.clientHeight;
+    this.boxDirty = false;
+    const w = this.boxW || window.innerWidth;
+    const h = this.boxH || window.innerHeight;
     this.lastScale = this.governor.scale;
     const offscreen = this.offscreenScene;
     const pr = Math.min(window.devicePixelRatio || 1, this.quality.maxPixelRatio) * this.quality.renderScale * (offscreen ? 1 : this.governor.scale);
     this.renderer.setPixelRatio(pr);
-    this.renderer.setSize(w, h, true);
+    this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.postfx.setSize(Math.floor(w * pr), Math.floor(h * pr));
@@ -551,6 +568,7 @@ export class App {
 
   /** One frame. Public so tests can drive frames deterministically. */
   step(now: number): void {
+    if (this.boxDirty) this.resize();
     if (!this.ready) {
       this.lastPerf = now;
       return;
