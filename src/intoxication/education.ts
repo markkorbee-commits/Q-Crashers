@@ -265,8 +265,12 @@ export const RISK_MESSAGES = {
   drivingLimit: 'Above 0.5‰: over the Dutch legal driving limit.',
   alcoholDanger: 'Danger: risk of alcohol poisoning. Never leave a very drunk person alone; call 112 if they cannot be woken.',
   alcoholHeat: 'Alcohol + heat dehydrates: headache and dizziness come sooner. Alternate with free water.',
+  /** live tier lines (0.8 / 1.2 / 1.6‰): what the level means at a festival, shown above the driving limit */
+  alcoholTier08: 'Glare lingers and balance drops: watch your step on stairs, banks and cables.',
+  alcoholTier12: 'Falls and losing your friends in the crowd: stay together and alternate with free water.',
+  alcoholTier16: 'Memory gaps and vomiting: never walk off alone — a friend keeps an eye on you.',
   codeRed: 'Code red heat (36.8 °C): everyone risks dehydration and heat stroke — the reason Defqon.1 2026 was cancelled.',
-  resting: 'Resting out of the crowd: your temperature and heart rate are coming down.',
+  resting: 'Resting: your temperature and heart rate are coming down — out of the crowd and with sips of water it goes faster.',
   cooling: 'Cooling down at the water point: temperature is coming down.',
   treated: 'First aid heat post: the team is cooling you down. They help without judgement.',
   help: 'First aid posts and staff help without judgement.',

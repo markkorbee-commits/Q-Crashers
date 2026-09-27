@@ -25,6 +25,8 @@ const BAC_MAX = 3;
 /** seconds continuously at >= 2.0‰ before the "You need to sit down" modal opens (the preview shows the view first) */
 const AID_DELAY_S = 6;
 const list = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+/** levels offered by the panel's preview chips (tier starts) */
+const PREVIEW_LEVELS = [0.5, 0.8, 1.2, 1.6, 2.0] as const;
 
 /**
  * State names per tier (what the player IS, not the threshold number); the range comes from the
@@ -153,7 +155,7 @@ export class PerceptionUI {
   /** seconds the body monitor stays after the XTC timeline ended (cool-down) */
   private recoverLeft = 0;
   /** live elements of the open panel (refreshed at 4 Hz) */
-  private panelBac: { big: HTMLElement; tier: HTMLElement; fill: HTMLElement; fx: HTMLElement; tierLabel: string } | null = null;
+  private panelBac: { big: HTMLElement; tier: HTMLElement; fill: HTMLElement; fx: HTMLElement; tierLabel: string; preview: HTMLElement } | null = null;
 
   constructor(private ui: UI, parent: HTMLElement) {
     this.bacBig = h('span', { class: 'big' }, '0.00');
@@ -509,13 +511,14 @@ export class PerceptionUI {
     const fx = h('ul', { class: 'fx' });
     for (const e of t.effects) fx.appendChild(h('li', null, e));
     if (!t.effects.length) fx.appendChild(h('li', null, 'No alcohol in your blood: clear senses. Order a drink at a bar to see how each level changes perception.'));
-    // tier preview: a secondary selector, not a "drink more" button
+    // tier preview: a secondary selector, not a "drink more" button. The chip of the current tier is lit (it
+    // follows the live level, like the tier name next to it)
     const preview = h('div', { class: 'seg-pick', role: 'group', 'aria-label': 'Preview a blood-alcohol level' });
-    for (const v of [0.5, 0.8, 1.2, 1.6, 2.0]) {
-      const b = h('button', { type: 'button', class: Math.abs(bac - v) < 0.05 ? 'on' : '' }, `${v.toFixed(1)}‰`);
+    for (const v of PREVIEW_LEVELS) {
+      const b = h('button', { type: 'button', class: t.bac === v ? 'on' : '', 'data-v': String(v) }, `${v.toFixed(1)}‰`);
       b.addEventListener('click', () => {
         this.previewBac(v);
-        preview.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+        this.markPreview(preview, v);
       });
       preview.appendChild(b);
     }
@@ -543,7 +546,12 @@ export class PerceptionUI {
       const spans = host.querySelectorAll('.note span');
       spans[spans.length - 1].textContent = TIME_NOTE;
     }
-    this.panelBac = { big, tier, fill: m.fill, fx, tierLabel: t.label };
+    this.panelBac = { big, tier, fill: m.fill, fx, tierLabel: t.label, preview };
+  }
+
+  /** light the preview chip of the tier that starts at `tierBac` (none below the first chip) */
+  private markPreview(host: HTMLElement, tierBac: number): void {
+    host.querySelectorAll<HTMLElement>('button').forEach((x) => toggleClass(x, 'on', Number(x.dataset.v) === tierBac));
   }
 
   private compareDetail(host: HTMLElement) {
@@ -795,14 +803,18 @@ export class PerceptionUI {
     toggleClass(this.ui.root, 'has-status', show);
 
     // outcomes: once per episode, re-armed when the value falls back. The 2.0‰ modal waits until the
-    // level has held for a few seconds, so the 2.0‰ preview first shows the view (it still always opens)
+    // level has held for a few seconds, so the 2.0‰ preview first shows the view (it still always opens).
+    // A card of the perception system itself (collapse at 40 °C, sit-down, K-hole, epilogue) supersedes
+    // these modals: the modal closes and none opens while that card is up, so cards never stack
+    const sysCard = (p?.outcome ?? 'none') !== 'none';
+    if (sysCard && this.ui.layers.isOpen('outcome')) this.ui.layers.close('outcome');
     this.highBacFor = bac >= 2.0 ? this.highBacFor + 0.25 : 0;
-    if (this.highBacFor >= AID_DELAY_S && !this.aidShown && this.ui.entered) {
+    if (this.highBacFor >= AID_DELAY_S && !this.aidShown && this.ui.entered && !sysCard) {
       this.aidShown = true;
       this.openOutcome('alcohol');
     } else if (bac < 1.6) this.aidShown = false;
     if (typeof temp === 'number') {
-      if (temp >= 39.5 && !this.heatShown && this.ui.entered) {
+      if (temp >= 39.5 && !this.heatShown && this.ui.entered && !sysCard) {
         this.heatShown = true;
         this.openOutcome('heat');
       } else if (temp < 38.8) this.heatShown = false;
@@ -891,9 +903,11 @@ export class PerceptionUI {
     const heatRisk = typeof temp === 'number' && temp >= 38.5;
     toggleClass(this.status, 'danger', danger || bac >= 2.0);
 
-    // actions: rest while the body is under strain, first aid when in danger
+    // actions: rest while the body is under strain, first aid when in danger. `resting` is the player's own
+    // choice (an automatic rest shows in the activity line only); at the first-aid post the team decides
     const resting = !!p?.resting;
-    const restVisible = showX || heatRisk || resting || ketOn;
+    const aided = p?.activityLabel === 'First aid';
+    const restVisible = !aided && (showX || heatRisk || resting || ketOn);
     this.restBtn.style.display = restVisible ? '' : 'none';
     toggleClass(this.restBtn, 'on', resting);
     // in the K-hole the body does not respond: no "stand up" that silently does nothing
@@ -924,6 +938,7 @@ export class PerceptionUI {
         pb.tier.textContent = tierName(t);
         pb.fx.innerHTML = '';
         for (const e of t.effects) pb.fx.appendChild(h('li', null, e));
+        this.markPreview(pb.preview, t.bac);
       }
       pb.fill.style.transform = `scaleX(${Math.min(1, bac / BAC_MAX).toFixed(3)})`;
     }

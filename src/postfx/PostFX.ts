@@ -631,7 +631,8 @@ export class PostFX {
     const bright = base.textures[1];
 
     // 3. scene blur chain (only when something needs it)
-    const needBlur = p.blur > 0.001 || p.tunnel > 0.001 || p.glow > 0.001;
+    // (the contrast stage reads the wide surround, tD3)
+    const needBlur = p.blur > 0.001 || p.tunnel > 0.001 || p.glow > 0.001 || Math.abs(p.contrast - 1) > 0.001;
     if (needBlur && this.d2 && this.d3) {
       this.down(d1, 0, this.d2);
       this.down(this.d2.texture, 1, this.d3);
