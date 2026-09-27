@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Builds the sandboxed claude.ai artifact variant into dist-artifact/:
- *  - VITE_TARGET=artifact (no YouTube iframe source, photo preview instead of downloads)
+ *  - VITE_TARGET=artifact (no YouTube iframe source)
  *  - index.html rewritten to the artifact page contract: no <html>/<head>/<body> wrappers,
  *    <title> first, stylesheets inlined, module scripts kept as same-origin files.
  * Prints the file map to publish (published path -> local path).

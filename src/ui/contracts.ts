@@ -6,7 +6,7 @@
 import type { App } from '../core/App';
 import type { NamedSpot, System } from '../core/types';
 
-export type CamMode = 'first' | 'third' | 'free' | 'flyover' | 'showcam' | 'photo';
+export type CamMode = 'first' | 'third' | 'free' | 'flyover' | 'showcam';
 
 export const CAMERA_MODES: { id: CamMode; label: string; short: string; icon: string; key: string; hint: string }[] = [
   { id: 'first', label: 'First person', short: '1st', icon: 'eye', key: '1', hint: 'Walk the grounds through your own eyes' },
@@ -14,7 +14,6 @@ export const CAMERA_MODES: { id: CamMode; label: string; short: string; icon: st
   { id: 'free', label: 'Free camera', short: 'Free', icon: 'drone', key: '3', hint: 'Fly anywhere (Space / C for up and down)' },
   { id: 'flyover', label: 'Cinematic fly-over', short: 'Fly', icon: 'orbit', key: '4', hint: 'Automated sweeping drone shots' },
   { id: 'showcam', label: 'Show camera', short: 'Show', icon: 'film', key: '5', hint: 'Directed shots following the show' },
-  { id: 'photo', label: 'Photo mode', short: 'Photo', icon: 'camera', key: '6', hint: 'Frame and capture a picture' },
 ];
 
 export interface RiskLike {
@@ -68,7 +67,7 @@ export interface PerceptionLike extends System {
   /** effect strength: 'strong' (exaggerated, default) or 'realistic' */
   strength?: string;
   setStrength?(s: 'strong' | 'realistic', remember?: boolean): void;
-  /** false while the view is not the player's own (Show camera, fly-over, free, photo): effects paused */
+  /** false while the view is not the player's own (Show camera, fly-over, free): effects paused */
   viewActive?: boolean;
   /** outcome card currently shown: 'none' | 'sitdown' | 'collapse' | 'epilogue' | 'khole' | 'ketEpilogue' */
   outcome?: string;
@@ -80,12 +79,6 @@ export interface CameraLike extends System {
   fovSetting?: number;
   setBaseFov?(deg: number): void;
   setMode?(mode: CamMode): void;
-  setFov?(deg: number): void;
-  setRoll?(deg: number): void;
-  setFocus?(metres: number): void;
-  autoFocus?(): number | void;
-  setAperture?(v: number): void;
-  setExposure?(v: number): void;
 }
 
 export interface PlayerLike extends System {

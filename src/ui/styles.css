@@ -854,14 +854,12 @@ input[type='range']::-moz-range-thumb {
   opacity: 0;
   visibility: hidden;
 }
-#ui.cinema .hud-el,
-#ui.photo .hud-el:not(.keep-photo) {
+#ui.cinema .hud-el {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
 }
-#ui.cinema .hud-el *,
-#ui.photo .hud-el:not(.keep-photo) * {
+#ui.cinema .hud-el * {
   pointer-events: none !important;
 }
 
@@ -1997,116 +1995,6 @@ ul.fx li::before {
   color: var(--red-hot);
 }
 
-/* photo panel */
-.photo-panel {
-  position: absolute;
-  top: calc(12px + var(--sa-t));
-  right: calc(12px + var(--sa-r));
-  width: 280px;
-  padding: 16px;
-  display: none;
-  max-height: calc(100% - 24px);
-  overflow: auto;
-}
-#ui.photo .photo-panel {
-  display: block;
-  animation: rise-in 0.3s var(--ease);
-}
-#ui.cinema .photo-panel {
-  display: none;
-}
-.photo-panel .ctl {
-  margin-top: 10px;
-}
-.photo-panel .ctl label {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 11.5px;
-  color: var(--muted);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-.photo-panel .ctl label span.v {
-  font: 500 11.5px/1 var(--font-mono);
-  color: var(--paper);
-  text-transform: none;
-}
-.photo-panel .ctl label .ico {
-  width: 15px;
-  height: 15px;
-  display: inline-block;
-  vertical-align: -3px;
-  margin-right: 6px;
-}
-.photo-panel .actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 14px;
-  flex-wrap: wrap;
-}
-.photo-panel .actions .btn {
-  flex: 1;
-}
-.photo-frame {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  display: none;
-}
-#ui.photo .photo-frame {
-  display: block;
-}
-#ui.cinema .photo-frame {
-  display: none;
-}
-.photo-frame i {
-  position: absolute;
-  background: rgba(243, 237, 228, 0.16);
-}
-.photo-frame i:nth-child(1) {
-  left: 33.33%;
-  top: 0;
-  bottom: 0;
-  width: 1px;
-}
-.photo-frame i:nth-child(2) {
-  left: 66.66%;
-  top: 0;
-  bottom: 0;
-  width: 1px;
-}
-.photo-frame i:nth-child(3) {
-  top: 33.33%;
-  left: 0;
-  right: 0;
-  height: 1px;
-}
-.photo-frame i:nth-child(4) {
-  top: 66.66%;
-  left: 0;
-  right: 0;
-  height: 1px;
-}
-.flash {
-  position: absolute;
-  inset: 0;
-  background: #fff;
-  opacity: 0;
-  pointer-events: none;
-}
-.flash.go {
-  animation: flash 0.5s ease-out;
-}
-@keyframes flash {
-  0% {
-    opacity: 0.75;
-  }
-  100% {
-    opacity: 0;
-  }
-}
-
 /* picture-in-picture (official broadcast) */
 .pip {
   position: absolute;
@@ -2582,7 +2470,7 @@ ul.fx li::before {
 }
 
 /* =====================================================================================
-   ROUND-1 UX FIXES: layers hide the HUD, touch layout, safety, perception, photo (touch)
+   ROUND-1 UX FIXES: layers hide the HUD, touch layout, safety, perception
    ===================================================================================== */
 
 /* ---------- open layers: the HUD steps back (no ghost text through cards and sheets) ---------- */
@@ -3231,103 +3119,6 @@ ul.fx.links a {
   color: var(--warn);
 }
 
-/* ---------- photo mode on touch: slim strip at the top, one slider, big shutter ---------- */
-.photo-panel .ph-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.photo-panel .ph-head .kicker {
-  flex: 1;
-}
-.ph-chips {
-  display: flex;
-  gap: 6px;
-  overflow-x: auto;
-  margin-top: 8px;
-  scrollbar-width: none;
-}
-.ph-chips .chip {
-  min-height: 36px;
-  padding: 0 11px 0 9px;
-  font-size: 11px;
-  flex: none;
-}
-.photo-panel.touch {
-  top: calc(8px + var(--sa-t));
-  left: calc(8px + var(--sa-l));
-  right: calc(88px + var(--sa-r));
-  width: auto;
-  max-width: 560px;
-  padding: 10px 12px;
-  max-height: none;
-  overflow: visible;
-}
-.photo-panel.touch .ph-head .btn {
-  min-height: 34px;
-}
-.photo-panel.touch .ph-help {
-  font-size: 11px;
-}
-.photo-panel.touch .ctl {
-  display: none;
-  margin-top: 6px;
-}
-.photo-panel.touch .ctl.active {
-  display: block;
-}
-.photo-panel.touch .ph-capture {
-  display: none;
-}
-.photo-panel.touch .ph-actions {
-  margin-top: 6px;
-}
-.photo-panel.touch.folded .ph-help,
-.photo-panel.touch.folded .ph-chips,
-.photo-panel.touch.folded .ctl,
-.photo-panel.touch.folded .ph-actions {
-  display: none !important;
-}
-.photo-panel.touch.folded {
-  right: auto;
-}
-.shutter {
-  position: absolute;
-  right: calc(16px + var(--sa-r));
-  top: 50%;
-  transform: translateY(-50%);
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  border: 3px solid rgba(255, 255, 255, 0.92);
-  background: radial-gradient(circle, #ff2a12 0 52%, rgba(20, 4, 4, 0.55) 54%);
-  color: #fff;
-  display: none;
-  place-items: center;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
-  cursor: pointer;
-  z-index: 12;
-}
-.shutter .ico {
-  width: 24px;
-  height: 24px;
-}
-.shutter:active {
-  transform: translateY(-50%) scale(0.93);
-}
-#ui.touch.photo .shutter {
-  display: grid;
-}
-#ui.cinema .shutter,
-#ui.modal-open .shutter {
-  display: none !important;
-}
-@media (max-height: 500px) {
-  .photo-panel:not(.touch) {
-    max-height: calc(100% - 16px);
-  }
-}
-
 /* ---------- timeline: narrow bars get thin ticks, close moments merge ---------- */
 .tl.narrow .moment {
   width: 2px;
@@ -3739,65 +3530,6 @@ ul.fx.links a {
   text-overflow: ellipsis;
 }
 
-/* ---------- touch photo mode: one compact strip (chips + the active slider) ---------- */
-.photo-panel.touch {
-  padding: 8px 10px 8px;
-}
-.photo-panel.touch .ph-head {
-  gap: 6px;
-}
-.photo-panel.touch .ph-head .kicker {
-  flex: none;
-  font-size: 10px;
-  letter-spacing: 0.18em;
-}
-.photo-panel.touch .ph-head .ph-chips {
-  flex: 1;
-  min-width: 0;
-  margin-top: 0;
-}
-.photo-panel.touch .ph-help {
-  display: none;
-}
-.photo-panel.touch .ctl.active {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 12px;
-  margin-top: 6px;
-}
-.photo-panel.touch .ctl label {
-  margin: 0;
-  gap: 8px;
-  min-width: 118px;
-}
-.photo-panel.touch .ph-actions {
-  display: none;
-}
-.photo-panel.touch.folded .ph-head .ph-chips {
-  display: none !important;
-}
-/* photo size selector (desktop photo panel) */
-.ph-res-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-top: 12px;
-}
-.ph-res-row .ctl-l {
-  font-size: 11.5px;
-  color: var(--muted);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-.ph-res-row .seg {
-  margin-left: 0;
-}
-.ph-res-row .seg button {
-  height: 28px;
-  padding: 0 11px;
-}
 /* perception: heat & body section, air line in the status widget */
 .heat-panel {
   margin-top: 12px;
@@ -3813,30 +3545,6 @@ ul.fx.links a {
   font: 500 10.5px/1.35 var(--font-ui);
   letter-spacing: 0.03em;
   color: var(--muted);
-}
-/* photo mode: time transport */
-.ph-time {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  margin-top: 10px;
-  padding-top: 8px;
-  border-top: 1px solid var(--line);
-}
-.ph-time .icon-btn {
-  width: 34px;
-  height: 34px;
-}
-.ph-time .ph-t {
-  margin-left: auto;
-  font: 500 12px/1 var(--font-mono);
-  color: var(--paper);
-}
-.photo-panel.touch .ph-time {
-  display: none;
-}
-.photo-panel.touch.show-time .ph-time {
-  display: flex;
 }
 /* narrow panels (Graphics): the two comfort switches sit under the warning text */
 .panel .safety .st {
@@ -3869,17 +3577,6 @@ ul.fx.links a {
   .onboarding .lead br {
     display: none;
   }
-}
-/* touch photo mode: toasts at the bottom (the strip and its slider stay visible), chips hint at more */
-#ui.touch.photo .toasts {
-  top: auto;
-  bottom: calc(14px + var(--sa-b));
-  flex-direction: column-reverse;
-}
-.photo-panel.touch .ph-chips {
-  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
-  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
-  padding-right: 22px;
 }
 /* Moments sheet: the transport row stays reachable while the list scrolls to the current moment */
 .mom-transport {

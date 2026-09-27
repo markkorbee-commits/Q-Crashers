@@ -391,7 +391,3 @@
     bottom: calc(var(--sab) + 178px);
   }
 }
-/* photo mode: the shutter sits on the right edge, keep the fly buttons below it */
-#ui.photo ~ .tc .tc-back {
-  display: none;
-}

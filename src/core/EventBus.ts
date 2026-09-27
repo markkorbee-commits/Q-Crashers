@@ -14,7 +14,6 @@ export interface AppEvents {
   'bar:close': Record<string, never>;
   'toast': { text: string; ms?: number };
   'perception:changed': { mode: string };
-  'photo:mode': { on: boolean };
   'crowd:populated': { on: boolean; count: number };
   /**
    * `progress` = bar position now. Optional: the step that just started is expected to end at

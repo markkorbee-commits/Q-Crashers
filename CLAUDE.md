@@ -76,7 +76,7 @@ node scripts/budget-check.mjs --base http://localhost:5173/   # mobile draw-call
 npm run build:artifact                       # claude.ai artifact variant in dist-artifact/
 ```
 
-URL params: `autostart`, `t=<s>`, `play`, `quality=ultra|high|medium|mobile`, `nogovernor`, `camera=first|third|free|flyover|showcam|photo`,
+URL params: `autostart`, `t=<s>`, `play`, `quality=ultra|high|medium|mobile`, `nogovernor`, `camera=first|third|free|flyover|showcam`,
 `cam=x,y,z,yaw,pitch`, `spot=<id>` (front, crowd, middle, foh, dj, dancers, bar_west, ...), `mode=filmed`, `off=<systems>`,
 `nopost`, `debug`, `daylight` (dev), `analyze=0`. In the page: `window.__app` (`__app.clock.seek(t)`,
 `__app.get('camera').setFreePose(x,y,z,yaw,pitch,fov)`, `__app.postfx.exposure`).

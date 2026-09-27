@@ -19,7 +19,6 @@ export interface HudActions {
   openCrowd(trigger: HTMLElement): void;
   openAudio(trigger: HTMLElement): void;
   openCamera(trigger: HTMLElement): void;
-  togglePhoto(): void;
   toggleCinema(): void;
   toggleFullscreen(): void;
   openHelp(trigger: HTMLElement): void;
@@ -74,7 +73,7 @@ export class Hud {
     );
 
     // ---- toolbar (top-right)
-    const LABEL: Record<string, string> = { positions: 'Spots', crowd: 'Crowd', perception: 'Perception', photo: 'Photo', quality: 'Quality', cinema: 'Hide UI', fullscreen: 'Full', help: 'Help' };
+    const LABEL: Record<string, string> = { positions: 'Spots', crowd: 'Crowd', perception: 'Perception', quality: 'Quality', cinema: 'Hide UI', fullscreen: 'Full', help: 'Help' };
     const tb = (id: string, ico: string, tip: string, fn: (el: HTMLButtonElement) => void, extra = '') => {
       // the text label is shown next to the icon on wide screens (CSS), the coach marks use data-label
       const b = h('button', { class: `icon-btn ${extra}`, type: 'button', 'aria-label': tip, 'data-tip': tip, 'data-label': LABEL[id], 'data-tip-pos': id === 'help' ? 'left' : undefined, html: `${icon(ico)}<span class="tb-l" aria-hidden="true">${LABEL[id]}</span>` });
@@ -97,7 +96,6 @@ export class Hud {
       tb('positions', 'pin', 'Positions (T)', (b) => a.openPositions(b)),
       tb('crowd', 'crowd', 'Crowd: Tribe or as filmed (G)', (b) => a.openCrowd(b)),
       tb('perception', 'waves', 'Perception (X)', (b) => a.openPerception(b)),
-      tb('photo', 'camera', 'Photo mode (O)', () => a.togglePhoto()),
       tb('quality', 'gauge', 'Graphics quality', (b) => a.openQuality(b)),
       tb('cinema', 'cinema', 'Hide interface (H)', () => a.toggleCinema()),
       fsOk ? tb('fullscreen', 'fullscreen', 'Fullscreen (F)', () => a.toggleFullscreen()) : null,
@@ -258,7 +256,6 @@ export class Hud {
     }
     const m = CAMERA_MODES.find((x) => x.id === mode);
     if (m) this.camBtn.innerHTML = icon(m.icon);
-    toggleClass(this.btn.photo, 'on', mode === 'photo');
   }
 
   setToggle(id: string, on: boolean): void {

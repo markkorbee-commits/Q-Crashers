@@ -47,23 +47,13 @@ const KEY_GROUPS: [title: string, rows: Row[]][] = [
   [
     'Views & panels',
     [
-      [['1', '–', '6'], 'Camera views'],
+      [['1', '–', '5'], 'Camera views'],
       [['<wheel>'], 'Third person: zoom · free camera: speed'],
       [['Space', 'C'], 'Free camera: up / down'],
       [['T'], 'Positions'],
       [['G'], 'Crowd: the Tribe or as filmed'],
       [['X'], 'Perception'],
       [['?'], 'Help'],
-    ],
-  ],
-  [
-    'Photo mode',
-    [
-      [['O'], 'Photo mode on / off'],
-      [['F'], 'Autofocus'],
-      [['Q', 'E'], 'Roll the camera'],
-      [['<wheel>'], 'Zoom (field of view)'],
-      [['Esc'], 'Free the mouse to adjust the settings'],
     ],
   ],
 ];
@@ -77,11 +67,11 @@ const KEY_SHORT: Row[] = [
   [['Esc'], 'Free the mouse'],
   [['K'], 'Play / pause'],
   [['J', 'L'], '−10 s / +10 s'],
-  [['1', '–', '6'], 'Camera views'],
+  [['1', '–', '5'], 'Camera views'],
   [['T'], 'Positions'],
   [['G'], 'Crowd: Tribe / as filmed'],
   [['X'], 'Perception'],
-  [['O'], 'Photo mode'],
+  [['V'], 'First / third person'],
   [['H'], 'Hide the interface'],
   [['M'], 'Mute'],
   [['?'], 'All controls'],

@@ -45,7 +45,7 @@ const store = {
  *  - dynamic virtual joystick on the left half (appears under the thumb; push past the ring = run)
  *  - swipe-look on the right half (and with a second finger anywhere)
  *  - buttons: jump, run toggle, first/third view, interact (only while a prompt is active),
- *    up / down in the free & photo cameras, "my view" to return from any camera
+ *    up / down in the free camera, "my view" to return from any camera
  *  - dismissible advice to rotate to landscape (portrait keeps working)
  * Multi-touch safe (tracked per pointerId), honours safe-area insets, writes into app.input.
  */
@@ -228,7 +228,7 @@ export class TouchControls {
     b.addEventListener('pointerleave', up);
   }
 
-  /** hold button for vertical flight (free / photo cameras) */
+  /** hold button for vertical flight (free camera) */
   private hold(b: HTMLElement, dir: number): void {
     let id: number | null = null;
     b.addEventListener('pointerdown', (e) => {
@@ -250,7 +250,7 @@ export class TouchControls {
   }
 
   private setGroup(mode: CameraMode): void {
-    const g: Group = mode === 'first' || mode === 'third' ? 'walk' : mode === 'free' || mode === 'photo' ? 'fly' : 'watch';
+    const g: Group = mode === 'first' || mode === 'third' ? 'walk' : mode === 'free' ? 'fly' : 'watch';
     this.viewBtn.textContent = mode === 'third' ? '1ST' : '3RD';
     if (g === this.group) return;
     this.group = g;

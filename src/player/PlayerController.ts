@@ -153,7 +153,7 @@ export class PlayerController implements System {
   readonly velocity = new THREE.Vector3();
   /** vertical offset of the body from jumping (m, >= 0) */
   jumpY = 0;
-  /** when false, the body ignores input (free / flyover / show / photo cameras) */
+  /** when false, the body ignores input (free / flyover / show cameras) */
   controlsActive = true;
   walkSpeed = 1.4;
   runSpeed = 3.4;

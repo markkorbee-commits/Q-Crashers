@@ -78,18 +78,6 @@ export function isTypingTarget(t: EventTarget | null): boolean {
   return false;
 }
 
-/** Download a blob with a file name. */
-export function downloadBlob(blob: Blob, name: string): void {
-  const url = URL.createObjectURL(blob);
-  const a = h('a', { href: url, download: name, style: 'display:none' });
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(() => {
-    a.remove();
-    URL.revokeObjectURL(url);
-  }, 1500);
-}
-
 /** Make an element draggable by a handle, constrained to the viewport. Returns a dispose fn. */
 export function makeDraggable(el: HTMLElement, handle: HTMLElement, onMove?: () => void, onEnd?: () => void): () => void {
   let sx = 0,
