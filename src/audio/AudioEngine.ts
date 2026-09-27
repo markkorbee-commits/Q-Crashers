@@ -1,7 +1,32 @@
+/** speed of sound (m/s): the music reaches a listener d m from the PA d / 343 s after it left the stage */
+export const SPEED_OF_SOUND = 343;
+/** DelayNode buffer of the distance delay (s) and the longest delay used (1.45 s ≈ 500 m) */
+const DELAY_BUFFER = 1.5;
+const MAX_MUSIC_DELAY = 1.45;
+/** delay cut: gate fade out, delay jump in silence, fade back in (s) */
+const CUT_OUT = 0.04;
+const CUT_IN = 0.1;
+/** fastest delay slew while moving (s/s = pitch shift): 5 % ≈ 17 m/s, above that the lag builds up */
+const MAX_DELAY_RATE = 0.05;
+/** a change of the target this large within one update is a jump (s ≈ 27 m), not motion */
+const JUMP_STEP = 0.08;
+/** accumulated lag behind the target that is cut even while still moving (s) */
+const MAX_LAG = 0.5;
+/** once the listener has (nearly) stopped (target rate below this, s/s ≈ 5 m/s), a lag above SETTLE_LAG is cut */
+const SETTLED_RATE = 0.015;
+const SETTLE_LAG = 0.04;
+/**
+ * each slew step is a linear ramp ending this far ahead (s), longer than the 15 Hz update interval, so
+ * a new ramp always starts where the running one ends (in the future). An automation event starting at
+ * `currentTime` would begin in the past on the audio thread and step the delay by a few samples: a click.
+ */
+const SLEW_AHEAD = 0.1;
+
 /**
  * Web Audio graph (one AudioContext for the whole app):
  *
- *   music source -> musicIn -> perception lowpass -> perception low / high shelf -> wobble delay
+ *   music source -> musicIn -> distance delay (d / 343 s) -> delay gate -> perception lowpass
+ *        -> perception low / high shelf -> wobble delay
  *        -> distance air-absorption lowpass -> rear high-shelf -> stereo width (M/S) -> direction pan
  *        -> distance gain -> musicGain -> master
  *   wobble delay -> perception echo send (two cross-fed delays, off by default) -> stereo width (M/S)
@@ -10,6 +35,11 @@
  *   ambience (AmbienceSystem) -> ambienceIn -> perception lowpass -> ambienceGain -> master
  *   sfx -> sfxGain -> master
  *   master -> safety limiter -> destination
+ *
+ * The distance delay (setMusicDelay) makes the music arrive later the further the listener stands from
+ * the PA while the picture stays at the stage (light is instant): it is NOT part of outputDelay(), so
+ * the ShowClock keeps following the emitted sound. Crowd vocals and cheers add the same lag
+ * (AmbienceSystem: the Tribe around you reacts to what it hears).
  *
  * The AudioContext is created lazily on the first user gesture (autoplay policies).
  * All parameter changes are smoothed (setTargetAtTime) so callers may update them every frame.
@@ -41,11 +71,27 @@ export class AudioEngine {
   private percHighShelf!: BiquadFilterNode;
   private echoSend!: GainNode;
   private heartGain!: GainNode;
+  private distDelay!: DelayNode;
+  /** mutes the delay line's output while its delay jumps (teleport, mode switch, seek) */
+  private delayGate!: GainNode;
+  /** audio-clock time the current delay cut is over (the delay is not slewed before) */
+  private cutUntil = 0;
+  /** audio-clock time the last scheduled delay automation (slew ramp or cut jump) ends */
+  private slewEnd = 0;
+  /** gate schedule of the running cut: fade out from `v0` at `start` to 0 at `closed`, fade in from `open` */
+  private readonly cut = { start: 0, v0: 1, closed: 0, open: 0 };
+  /** delay target of the last update and how fast it moves (s/s, smoothed) */
+  private readonly delayTrack = { target: 0, rate: 0 };
+  /** counts delay cuts: AmbienceSystem re-times the crowd vocals scheduled with the old delay */
+  delayCuts = 0;
   private volume = 0.85;
   private muted = false;
   private readyCbs: ((ctx: AudioContext) => void)[] = [];
-  /** last applied spatial values (for stats / avoiding redundant automation) */
-  readonly spatial = { distance: 40, gainDb: 0, cutoff: 20000, pan: 0, rear: 0, width: 1 };
+  /**
+   * last applied spatial values (for stats / avoiding redundant automation); `delay` = the distance
+   * delay of the music (s) the listener hears now (crowd one-shots add it too)
+   */
+  readonly spatial = { distance: 40, gainDb: 0, cutoff: 20000, pan: 0, rear: 0, width: 1, delay: 0 };
   /**
    * perception mix (PerceptionSystem, T5d): stereo width multiplier, level (dB), low / high shelf (dB),
    * echo send 0..1 and the share of the distance level drop that is kept (1 = all of it). Identity = 1, 0, 0, 0, 0, 1.
@@ -121,7 +167,14 @@ export class AudioEngine {
     this.percHighShelf.type = 'highshelf';
     this.percHighShelf.frequency.value = 5000;
     this.percHighShelf.gain.value = 0;
-    this.musicIn.connect(this.lowpass).connect(this.percLowShelf).connect(this.percHighShelf).connect(this.wobbleDelay).connect(this.distLowpass).connect(this.rearShelf).connect(split);
+    // distance delay first, so the dry music and the perception echo (tapped after the wobble delay)
+    // arrive together; the gate sits AFTER the delay line: only its output can hide a delay jump
+    this.distDelay = ctx.createDelay(DELAY_BUFFER);
+    this.distDelay.delayTime.value = 0;
+    this.delayGate = ctx.createGain();
+    this.delayGate.gain.value = 1;
+    this.musicIn.connect(this.distDelay).connect(this.delayGate);
+    this.delayGate.connect(this.lowpass).connect(this.percLowShelf).connect(this.percHighShelf).connect(this.wobbleDelay).connect(this.distLowpass).connect(this.rearShelf).connect(split);
     merge.connect(this.dirPan).connect(this.distGain).connect(this.musicGain).connect(this.master);
 
     // perception echo (ketamine: sound far away, a wide echo): send gain 0 = off
@@ -204,7 +257,8 @@ export class AudioEngine {
   /**
    * Seconds between a sample entering `musicIn` and reaching the listener: master limiter
    * look-ahead + base latency + output latency (can be 150+ ms on Bluetooth headphones).
-   * Media tracks subtract it so visuals match what is HEARD.
+   * Media tracks subtract it so visuals match what is HEARD. The distance delay (setMusicDelay) is
+   * deliberately NOT included: the show clock stays at the stage (light instant, sound lags).
    */
   outputDelay(): number {
     const ctx = this.ctx;
@@ -374,5 +428,101 @@ export class AudioEngine {
     const now = this.ctx.currentTime;
     this.dirPan.pan.setTargetAtTime(p, now, 0.12);
     this.rearShelf.gain.setTargetAtTime(-5 * r, now, 0.2);
+  }
+
+  /**
+   * Distance delay of the music: `seconds` = listener distance / 343 (0 for the Show camera and the
+   * fly-over: the film's sound is synced to its picture), `dt` = time since the previous call.
+   * Walking or flying slews the delay (the tiny pitch shift is the physical Doppler shift, capped at 5 %
+   * ≈ 17 m/s; faster flights build up a lag). A jump of the target (teleport, spot), `cut` (camera mode
+   * switch), a lag above 0.5 s, or a lag left over after a fast flight once the listener slows down are
+   * hidden in a short gate dip instead: fade out 40 ms, set the delay in silence, fade in 100 ms.
+   */
+  setMusicDelay(seconds: number, dt: number, cut = false): void {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const s = this.spatial;
+    const tr = this.delayTrack;
+    const target = Math.max(0, Math.min(MAX_MUSIC_DELAY, Number.isFinite(seconds) ? seconds : 0));
+    const step = Math.abs(target - tr.target);
+    const h = Math.max(1e-3, dt);
+    tr.rate += (step / h - tr.rate) * (1 - Math.exp(-h / 0.25));
+    tr.target = target;
+    const gap = target - s.delay;
+    const lag = Math.abs(gap);
+    if (lag < 1e-4) return;
+    if ((cut && lag > 0.003) || step > JUMP_STEP || lag > MAX_LAG || (tr.rate < SETTLED_RATE && lag > SETTLE_LAG)) {
+      this.cutDelay(target, now, 0);
+      return;
+    }
+    // a dip is running: it already set the delay; walking on is slewed after it
+    if (now < this.cutUntil) return;
+    const max = MAX_DELAY_RATE * h;
+    const d = this.distDelay.delayTime;
+    // after a pause in the automation a ramp would start at the last event (maybe seconds ago) and
+    // jump: anchor it just ahead of the audio thread at the value the delay rests at
+    if (this.slewEnd < now + 0.01) d.setValueAtTime(s.delay, now + 0.02);
+    s.delay += Math.max(-max, Math.min(max, gap));
+    this.slewEnd = now + SLEW_AHEAD;
+    d.linearRampToValueAtTime(s.delay, this.slewEnd);
+  }
+
+  /**
+   * The music source jumped (seek, track swap, restart): what is still travelling through the delay
+   * line belongs to the old position. The gate mutes it until the new sound comes out of the line
+   * (`lead` = seconds until the new audio enters musicIn). Without a distance delay there is nothing in
+   * flight and nothing changes (Show camera, fly-over).
+   */
+  musicJump(lead = 0.05): void {
+    if (!this.ctx) return;
+    const lag = this.spatial.delay;
+    if (lag < CUT_OUT) return;
+    this.cutDelay(lag, this.ctx.currentTime, lag + Math.max(0, lead));
+  }
+
+  /** gate dip: fade out, jump the delay while silent, stay closed for `hold` s, fade back in */
+  private cutDelay(target: number, now: number, hold: number): void {
+    const g = this.delayGate.gain;
+    const v0 = this.gateAt(now);
+    // anchor the fade out at the gate's current value. Mid-dip cancelAndHoldAtTime freezes the running
+    // ramp atomically; with no dip running it must NOT be used: after the last event Chrome inserts no
+    // anchor, so the new ramp would start at the previous event (seconds ago) and step the gate down
+    if (now < this.cutUntil && typeof g.cancelAndHoldAtTime === 'function') g.cancelAndHoldAtTime(now);
+    else {
+      g.cancelScheduledValues(now);
+      g.setValueAtTime(v0, now);
+    }
+    g.linearRampToValueAtTime(0, now + CUT_OUT);
+    const t1 = now + CUT_OUT + 0.005;
+    // freeze a running slew ramp where it is (cancelling it would snap the delay back while still
+    // audible), then jump in silence
+    const d = this.distDelay.delayTime;
+    if (typeof d.cancelAndHoldAtTime === 'function') d.cancelAndHoldAtTime(now);
+    else {
+      const v = d.value;
+      d.cancelScheduledValues(now);
+      d.setValueAtTime(v, now);
+    }
+    d.setValueAtTime(target, t1);
+    this.slewEnd = t1;
+    g.setValueAtTime(0, t1 + hold);
+    g.linearRampToValueAtTime(1, t1 + hold + CUT_IN);
+    const c = this.cut;
+    c.start = now;
+    c.v0 = v0;
+    c.closed = now + CUT_OUT;
+    c.open = t1 + hold;
+    this.cutUntil = t1 + hold + CUT_IN;
+    this.spatial.delay = target;
+    this.delayCuts++;
+  }
+
+  /** gate value the scheduled dip gives at audio time `t` (1 outside a dip) */
+  private gateAt(t: number): number {
+    const c = this.cut;
+    if (t >= this.cutUntil) return 1;
+    if (t < c.closed) return c.v0 * Math.max(0, Math.min(1, (c.closed - t) / CUT_OUT));
+    if (t < c.open) return 0;
+    return Math.max(0, Math.min(1, (t - c.open) / CUT_IN));
   }
 }

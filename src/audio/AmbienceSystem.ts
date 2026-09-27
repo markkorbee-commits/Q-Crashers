@@ -4,6 +4,7 @@ import { clamp, Rng, smoothstep } from '../core/rng';
 import type { FrameContext, QualitySettings, System } from '../core/types';
 import type { Cue, Section, SectionKind } from '../show/ShowTypes';
 import { CHANT_LEAD, renderCrowdBank, type CrowdBank } from './ambience/CrowdBank';
+import { SPEED_OF_SOUND } from './AudioEngine';
 
 /** centre of the main PA (music distance / direction reference) */
 const STAGE_PA = new THREE.Vector3(0, 14, -4);
@@ -101,7 +102,9 @@ class LoopLayer {
  *  - level / stereo width / direction from the listener position: loud and enveloping inside the
  *    dense crowd, quieter at the bars and the back, very quiet high up in free / fly-over cameras
  *  - warm night wind, generator hum near FOH / bars
- *  - drives AudioEngine.setMusicDistance / setMusicDirection (air absorption, level, image)
+ *  - drives AudioEngine.setMusicDistance / setMusicDirection (air absorption, level, image) and
+ *    setMusicDelay (the music arrives distance / 343 s late in the player's own camera modes; the Show
+ *    camera and the fly-over hear it undelayed like the film); crowd vocals and cheers follow that delay
  * Cue triggering is seek-safe: only cues whose start lies within the last 0.25 s of show time
  * fire, and only while playing (a seek never replays a burst of past cheers).
  */
@@ -159,6 +162,12 @@ export class AmbienceSystem implements System {
   private readonly activeVocals: { src: AudioBufferSourceNode; gain: GainNode }[] = [];
   private vocalsFired = 0;
   private crowdMode: { mode?: unknown } | null | undefined = undefined;
+  private player: { teleports?: unknown } | null | undefined = undefined;
+  /** camera mode / player teleport count of the previous mix: a change cuts the music delay */
+  private delayMode = '';
+  private delayTeleports = 0;
+  /** AudioEngine.delayCuts already handled by the vocal scheduler */
+  private seenCuts = 0;
   /** current values (stats / debug) */
   private readonly st = { density: 0, crowd: 0, width: 0, musicDist: 0, height: 0, excitement: 0, mode: 'first' };
 
@@ -192,10 +201,13 @@ export class AmbienceSystem implements System {
     const a = this.app?.audio;
     if (!a?.ctx || !this.out) return;
     this.out.gain.setTargetAtTime(on ? 1 : 0, a.ctx.currentTime, 0.3);
+    // switching back on: the first mix cuts to the listener's delay instead of slewing there
+    this.delayMode = '';
     if (!on) {
       this.stopVocals();
       a.setMusicDistance(40);
       a.setMusicDirection(0, 0);
+      a.setMusicDelay(0, 0, true);
       for (const l of [this.bedA, this.bedB, this.roar, this.applause, this.wind]) l.set(0, 10);
     }
   }
@@ -210,6 +222,7 @@ export class AmbienceSystem implements System {
       width: s.width.toFixed(2),
       musicDist: s.musicDist.toFixed(0),
       musicDb: this.app?.audio.spatial.gainDb.toFixed(1) ?? '0',
+      musicDelay: this.app?.audio.spatial.delay.toFixed(3) ?? '0',
       excitement: s.excitement.toFixed(2),
       fired: this.fired,
       grains: this.activeGrains,
@@ -469,6 +482,15 @@ export class AmbienceSystem implements System {
       this.buildVocals();
       this.vocalCursor = firstVocalAfter(this.vocalEvents, t);
     }
+    const audio = this.app.audio;
+    const lag = audio.spatial.delay;
+    if (audio.delayCuts !== this.seenCuts) {
+      // the music delay jumped (teleport, camera mode switch): what was scheduled with the old delay
+      // is off the beat now; re-time it (playVocal's lateness check drops what is over)
+      this.seenCuts = audio.delayCuts;
+      if (this.activeVocals.length) this.stopVocals();
+      this.vocalCursor = firstVocalAfter(this.vocalEvents, t - lag - VOCAL_LATE);
+    }
     // (a slow frame is not a jump: events it skipped over are dropped by playVocal's lateness check)
     const jumped = ctx.seeked || ctx.showDt < -1e-4 || ctx.showDt > 2;
     if (jumped || !ctx.showPlaying) {
@@ -478,14 +500,17 @@ export class AmbienceSystem implements System {
       return;
     }
     const ev = this.vocalEvents;
-    while (this.vocalCursor < ev.length && ev[this.vocalCursor].t <= t + VOCAL_LOOKAHEAD) {
+    while (this.vocalCursor < ev.length && ev[this.vocalCursor].t + lag <= t + VOCAL_LOOKAHEAD) {
       const i = this.vocalCursor++;
-      this.playVocal(ev[i], i, t);
+      this.playVocal(ev[i], i, t, lag);
     }
   }
 
-  /** schedule one vocal on the audio clock so that its downbeat is HEARD at the event's show time */
-  private playVocal(e: VocalEvent, index: number, showTime: number): void {
+  /**
+   * schedule one vocal on the audio clock so that its downbeat is HEARD with the music: at the event's
+   * show time plus `lag`, the distance delay of the music (the Tribe around you sings with what it hears)
+   */
+  private playVocal(e: VocalEvent, index: number, showTime: number, lag: number): void {
     const actx = this.ctx;
     if (!actx || !this.enabled || this.activeVocals.length >= MAX_VOCALS || !this.tribe()) return;
     const bank = this.bank;
@@ -493,7 +518,7 @@ export class AmbienceSystem implements System {
     if (!list?.length) return;
     const buf = list[index % list.length];
     const now = actx.currentTime;
-    let when = now + (e.t - showTime) - this.app.audio.outputDelay() - CHANT_LEAD;
+    let when = now + (e.t - showTime) + lag - this.app.audio.outputDelay() - CHANT_LEAD;
     let offset = 0;
     if (when < now) {
       offset = now - when;
@@ -542,11 +567,15 @@ export class AmbienceSystem implements System {
 
   // ------------------------------------------------------------------ one-shots
 
-  /** big crowd reaction + `whistles` whistles scattered over the next seconds */
+  /**
+   * big crowd reaction + `whistles` whistles scattered over the next seconds; the crowd around the
+   * listener reacts to the drop it hears, so it comes the music's distance delay later
+   */
   private cheer(intensity: number, whistles: number): void {
     const actx = this.ctx;
     const cheers = this.bank.cheers;
     if (!actx || !cheers?.length || !this.enabled) return;
+    const lag = this.app.audio.spatial.delay;
     this.fired++;
     if (this.activeCheers < 3) {
       const src = actx.createBufferSource();
@@ -555,14 +584,14 @@ export class AmbienceSystem implements System {
       const g = actx.createGain();
       g.gain.value = clamp(intensity, 0, 1.2) * 1.05;
       src.connect(g).connect(this.cheerBus);
-      src.start(actx.currentTime + this.rng.range(0.03, 0.12));
+      src.start(actx.currentTime + lag + this.rng.range(0.03, 0.12));
       this.activeCheers++;
       src.onended = () => {
         this.activeCheers--;
         g.disconnect();
       };
     }
-    for (let i = 0; i < whistles; i++) this.whistle(0.3 + 0.4 * intensity, this.rng.range(0.2, 2.5));
+    for (let i = 0; i < whistles; i++) this.whistle(0.3 + 0.4 * intensity, lag + this.rng.range(0.2, 2.5));
   }
 
   private whistle(level: number, delay = 0): void {
@@ -723,7 +752,8 @@ export class AmbienceSystem implements System {
     const hl = Math.hypot(hs.x, hs.z) || 1;
     this.humPan.pan.setTargetAtTime(clamp(((hs.x / hl) * rx + (hs.z / hl) * rz) * 0.8, -1, 1), now, 0.3);
 
-    // --- music distance / direction
+    // --- music distance / direction / delay
+    let lag = 0;
     if (cinematic) {
       audio.setMusicDistance(45);
       audio.setMusicDirection(0, 0);
@@ -740,7 +770,18 @@ export class AmbienceSystem implements System {
       const spread = smoothstep(12, 45, horiz);
       audio.setMusicDirection((sx * rx + sz * rz) * spread, Math.max(0, -(sx * fx + sz * fz)) * spread);
       s.musicDist = dist;
+      // 3D distance (a gondola of the Ferris wheel, a free camera high up): d / 343 s
+      lag = dist / SPEED_OF_SOUND;
     }
+    // only a source routed through Web Audio can be delayed (the YouTube embed plays outside it)
+    const src = app.clock.track.kind;
+    if (src !== 'file' && src !== 'synth') lag = 0;
+    // a camera mode switch or a teleport jumps the delay in a short dip instead of a pitch sweep
+    const tp = this.playerTeleports();
+    const cut = mode !== this.delayMode || tp !== this.delayTeleports;
+    this.delayMode = mode;
+    this.delayTeleports = tp;
+    audio.setMusicDelay(lag, dt, cut);
 
     // --- close chatter grains (quiet moments inside the crowd)
     if (this.bank.murmur && d > 0.25 && h < 6 && quiet && tt >= this.nextGrain) {
@@ -750,6 +791,13 @@ export class AmbienceSystem implements System {
     }
     // --- spontaneous whistles when the crowd is hyped
     if (playing && excitement > 0.55 && this.bank.whistles && this.rng.next() < dt * 0.22 * excitement * (0.3 + 0.7 * d)) this.whistle(0.35 + 0.3 * excitement);
+  }
+
+  /** PlayerController.teleports (incremented on every teleport), 0 when not available */
+  private playerTeleports(): number {
+    if (this.player === undefined) this.player = (this.app.get('player') as unknown as { teleports?: unknown } | undefined) ?? null;
+    const n = this.player?.teleports;
+    return typeof n === 'number' ? n : 0;
   }
 
   // ------------------------------------------------------------------ world model

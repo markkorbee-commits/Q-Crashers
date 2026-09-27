@@ -166,6 +166,8 @@ export class MediaFileTrack implements AudioTrack {
   }
 
   seek(t: number): void {
+    // the distance delay still carries the sound of the old position: the engine mutes it
+    if (this.node) this.engine.musicJump();
     const a = t + this.offset;
     const dur = this.el.duration;
     const inside = a >= 0 && (!Number.isFinite(dur) || a < dur - 0.05);
