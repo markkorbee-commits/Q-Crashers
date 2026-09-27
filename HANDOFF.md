@@ -335,6 +335,7 @@ Zo 27 sep 2026, ± 00:40 (CEST), lokaal op de MacBook Pro (M4 Max, GPU-render).
   | meetinstrument gecorrigeerd: exacte frametijden + seeds los van de bestandspositie (zelfde code) | 64,7 % | 46,5 % | 63,7 / 79,4 / 53,8 |
   | + ronde 7 (8 groepen: show, camera, pyro, fx, lighting, lasers, env, stage) | 67,1 % | 50,2 % | 67,9 / 80,5 / 54,8 |
   | + ronde 8 deel 1 (show, camera, pyro, lighting, env, stage, flash) | 68,1 % | 51,7 % | 68,8 / 81,0 / 56,3 |
+  | + perception (Show camera ongewijzigd) + ronde 9 (8 groepen) | 68,5 % | 52,3 % | 69,2 / 81,5 / 56,6 |
 
 - Ronde 5 (findings `docs/handoff/findings/r5_*.md`): schermen tonen kasteelprint i.p.v. vlakke panelen; MC met
   gekleurde key + backlight, close-ups houden de haze, troupe-choreografie en -shots 641-740 s herzien; pyro met
@@ -361,6 +362,15 @@ Zo 27 sep 2026, ± 00:40 (CEST), lokaal op de MacBook Pro (M4 Max, GPU-render).
   veldflood 1192/1198, witte rookbank 797, blackout 803, brandende vleugels op het vleugeloppervlak, zwart blok uit
   het DJ-portaal, blinders als gloed, lantaarnpilaren donker, rookhoogtemist per cue, kasteelbasis 509, "minder
   flitsen" nu ook voor vuurwerk-strobe, sterren, kroon-strobe, LED-pulsen en lasers (`src/fx/core/flashSafety.ts`).
+
+- Perception (ronde 7, gemerged 27 sep ± 03:05): standaard "Overdreven" (alcohol/XTC duidelijk sterker, "Realistisch"
+  = oude look), ketamine als derde simulatie met voorlichting (Trimbos/Jellinek/NIDA, geen dosering/gebruik), gate
+  zodat Show camera/flyover/free nooit perceptie-effecten krijgen; onafhankelijk gereviewd (educatie/veiligheid +
+  beeld) en hersteld. Dev-previews: `?bac=1.2`, `?xtc=90`, `?ket=100`, `?pstrength=realistic` (alleen met `debug`
+  in een productiebuild).
+- Ronde 9 (findings `r9_*.md`, 27 sep ± 04:25): +0,6 punt (onder de stopdrempel van 1,0): lantaarn-kleurenchase 508,
+  oranje lucht 713, één gerbwaaier achter de kop 1510, statief-posefit terras (0,5; 7; 168,9), lasers langs de U-voorkant
+  (front_line / ramparts), laaghangende mist verlicht door de beams en met release, witte vensterbalken.
 
 Eerdere stand (cloud, vóór de overdracht):
 
