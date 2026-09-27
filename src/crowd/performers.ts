@@ -259,6 +259,12 @@ const MC_PATH = new Path([
   { t: 502.2, x: 2.0, z: -5.7 },
 ]);
 const MC_T0 = 332;
+/** the MC's mic arm (right: shoulder flex, abduction, elbow, wrist in degrees), see the mic in geometry.ts */
+const MIC_ARM: readonly number[] = [38, -24, 130, 0];
+/** authored MC time: the arm raise before the anthem drop (v409–412.3) and the first drop (v415.4) */
+const MC_RAISE0 = 409.2;
+const MC_RAISE1 = 412.3;
+const MC_DROPS = 415.3;
 
 /**
  * The MC's facing (yaw) at show time t / authored time tm with his path state `pp` (MC_PATH.at(tm)): he faces
@@ -346,6 +352,49 @@ const PYR_SLOTS: readonly (readonly [number, number, number, number])[] = (() =>
   return s;
 })();
 
+/**
+ * Lantern phrases of the bearers between the formations (authored 2026 show time; the official video
+ * 05.md / sheets v646–720): the lanterns hang from the fists (shader: plumb below the hand) and are carried
+ * at the chest most of the time, not held up. Each phrase is a pair of arm poses (shoulder flex, abduction,
+ * elbow, wrist in degrees; the reference body's fist lands at the noted height) and cross-fades into the
+ * next over 0.5 s.
+ *  - RITUAL  (entry → 668): lanterns cradled at the chest facing the lead, one raised to the head in a canon
+ *            passing round the horseshoe (every 3.75 s, ~1.3 s up);
+ *  - DANCE   (668 → 690.6, 716 →): lanterns at the shoulders, swung side to side on the beat, the canon raise;
+ *  - CRADLE  (v690.6–693.8): the line holds both lanterns together in front of the chest (fists ~1.3 m);
+ *  - SPREAD  (v693.9–696.5): arms out to the sides, lanterns at shoulder height;
+ *  - HIGH    (v696.6–702.5): lanterns at head height on bent arms, left / right alternating every 2 beats;
+ *  - LOW     (v702.6–706.6): lanterns at the waist, swinging.
+ * The contortion, the kneel before the burning wings and the leap keep their own poses (evalOne).
+ */
+const PHRASE = { RITUAL: 0, DANCE: 1, CRADLE: 2, SPREAD: 3, HIGH: 4, LOW: 5 } as const;
+const PHRASES: readonly (readonly [number, number])[] = [
+  [0, PHRASE.RITUAL],
+  [668.2, PHRASE.DANCE],
+  [690.6, PHRASE.CRADLE],
+  [693.9, PHRASE.SPREAD],
+  [696.6, PHRASE.HIGH],
+  [702.6, PHRASE.LOW],
+  [716.0, PHRASE.DANCE],
+];
+/** lantern at the chest (fist ~1.3 m, 0.35 m in front), at the head (fist ~1.75 m), at the waist (fist ~1.0 m) */
+const ARM_CHEST: readonly number[] = [18, -10, 102, 0];
+const ARM_HEAD: readonly number[] = [92, 18, 86, 0];
+const ARM_SHOULDER: readonly number[] = [40, 20, 90, 0];
+const ARM_WAIST: readonly number[] = [4, 8, 58, 0];
+const ARM_SIDE: readonly number[] = [18, 82, 12, 0];
+
+function putArm(out: Float32Array, o: number, src: readonly number[]): void {
+  out[o] = src[0];
+  out[o + 1] = src[1];
+  out[o + 2] = src[2];
+  out[o + 3] = src[3];
+}
+
+function mixArm4(out: Float32Array, o: number, src: readonly number[], m: number): void {
+  for (let j = 0; j < 4; j++) out[o + j] += (src[j] - out[o + j]) * m;
+}
+
 interface TroupePhase {
   /** horseshoe angle (rad) */
   th: number;
@@ -421,6 +470,9 @@ export class Performers {
   private fp = { x: 0, z: 0, lift: 0 };
   private fq = { x: 0, z: 0, lift: 0 };
   private ph: TroupePhase = { th: 0, cont: 0, col: 0, pyr: 0, faceYaw: 0, gone: false };
+  /** scratch arm poses of two lantern phrases (cross-fade) */
+  private armA = new Float32Array(9);
+  private armB = new Float32Array(9);
   /** scratch pose / frame for subjectAt (never uploaded) */
   private sPose = newPose();
   private sFr: PerfFrame = { visible: false, x: 0, y: 0, z: 0, yaw: 0, glow: 0 };
@@ -435,9 +487,11 @@ export class Performers {
       const m = /(\d+)$/.exec(name);
       this.perfs.push({ name, k: m ? Number(m[1]) : 0, mode, look: l, height, build, seed: hash32(this.perfs.length * 977 + 31) & 0xffffff });
     };
+    // the MC (v348–502): dark navy short-sleeved shirt and a black cap with a white brim (both in the shader), black shorts,
+    // white sneakers, the mic in his right hand
     add('mc', 'both', (l) => {
-      l.skin = 4; l.hairColor = 0; l.headwear = HEAD.CAP; l.capColor = 0; l.top = TOP.CHARCOAL; l.bottom = BOTTOM.BLACK;
-      l.shoe = 0; l.socks = true; l.props = PROP.MIC; l.wristband = true;
+      l.skin = 4; l.hairColor = 0; l.headwear = HEAD.CAP; l.capColor = 0; l.top = TOP.MIDNIGHT; l.bottom = BOTTOM.BLACK;
+      l.shoe = 0; l.socks = false; l.props = PROP.MIC; l.wristband = true; l.beard = true;
     }, 1.8, 1.12);
     for (let i = 0; i < DANCERS; i++) {
       add(`dancer${i}`, 'both', (l) => {
@@ -614,17 +668,20 @@ export class Performers {
       // white follow spot from the FOH tower while he performs
       f.glow = -0.9 * smoothstep(MC_T0 + 4, MC_T0 + 7, tm) * (1 - smoothstep(501.4, 502.1, tm));
       walk(p, pp.dist / 1.45, moving);
-      // mic at the mouth (left hand)
-      setArm(p.armL, 58, -14, 142, 10);
-      // right arm: hype gestures — up on drops, pointing / waving to the crowd otherwise
-      let drop = false;
-      for (let h = 0; h < T.hype.length && !drop; h++) drop = inWin(t, T.hype[h]);
+      // mic at the mouth in the right hand, the whole time (v348–500): fist under the chin, elbow in front of
+      // the chest, the ball just in front of the lips (the mic geometry is authored for exactly this pose)
+      setArm(p.armR, MIC_ARM[0], MIC_ARM[1], MIC_ARM[2], MIC_ARM[3]);
+      p.head[1] -= 0.08;
+      // left arm: overhead only on the build-up raise (v409–412.3) and in the drops from v415.4; otherwise
+      // he points / gives a thumbs-up to the crowd at chest to shoulder height, the forearm towards them
+      let drop = tm > MC_RAISE0 && tm < MC_RAISE1;
+      for (let h = 0; h < T.hype.length && !drop; h++) drop = inWin(t, T.hype[h]) && tm >= MC_DROPS;
       const point = 0.5 + 0.5 * Math.sin(t * 0.9 + 1.3);
-      setArm(p.armR, 12 - 20 * moving * Math.sin((pp.dist / 1.45) * Math.PI * 2), 10, 20, 0);
+      setArm(p.armL, 12 - 20 * moving * Math.sin((pp.dist / 1.45) * Math.PI * 2), 10, 20, 0);
       if (drop) {
-        setArm(p.armR, 150 + 18 * kick, 22, 25 - 10 * kick, 0);
+        setArm(p.armL, 150 + 18 * kick, 22, 25 - 10 * kick, 0);
         p.off[1] += 0.12 * Math.max(0, Math.sin(Math.PI * bp)) * (1 - moving);
-      } else if (moving < 0.4) mixArm(p.armR, 95 + 40 * point, 30, 25, 0, 0.8);
+      } else if (moving < 0.4) mixArm(p.armL, 72 + 22 * point, 16 + 8 * Math.sin(t * 0.5), 24 + 14 * (1 - point), -10, 0.85);
       if (!drop) dropLegs(p, 0.04 * (0.5 + 0.5 * Math.cos(bp * Math.PI * 2)) * (1 - moving));
       p.head[0] -= 0.1;
       return;
@@ -664,11 +721,8 @@ export class Performers {
         this.formationPose(p, k, ph, moving);
         return;
       }
-      // lantern waves passing around the ring (canon)
-      const wave = 0.5 + 0.5 * Math.sin((tt / 3.75) * Math.PI * 2 - th * 2);
-      setArm(p.armR, 25 + 135 * wave, 18, 25, -20);
-      setArm(p.armL, 25 + 135 * (1 - wave), 18, 25, -20);
-      p.spine[0] += (18 - 26 * wave) * D;
+      // the lantern phrases (chest / shoulders / head / waist, the canon raise), cross-faded
+      this.lanternArms(p, k, tt, th, beat);
       if (ph.cont > 0.02) {
         // the contortion (v658–666): kneeling close around the pedestal, lanterns reaching up to her
         dropLegs(p, 0.52 * ph.cont * (1 - moving));
@@ -949,9 +1003,10 @@ export class Performers {
     if (name.startsWith('security')) {
       const k = pf.k;
       f.visible = true;
+      // in the photo pit, a step behind the barrier (Z 3), facing the crowd
       f.x = -40 + (80 * k) / (SECURITY - 1);
-      f.z = 4.3;
-      f.y = 0;
+      f.z = 1.9;
+      f.y = this.heightAt(f.x, f.z);
       f.yaw = 0.1 * Math.sin(t * 0.13 + k);
       if (k % 2 === 0) {
         setArm(p.armL, 28, -14, 112, 0);
@@ -1036,6 +1091,81 @@ export class Performers {
     ph.faceYaw = face;
     ph.gone = out > 0.97;
     return ph;
+  }
+
+  /** bearer k's arms in the lantern phrase at authored time tt (see PHRASES), blended over 0.5 s into the next */
+  private lanternArms(p: CPose, k: number, tt: number, th: number, beat: number): void {
+    let i = 0;
+    while (i < PHRASES.length - 1 && tt >= PHRASES[i + 1][0]) i++;
+    const w = i > 0 ? smoothstep(PHRASES[i][0], PHRASES[i][0] + 0.5, tt) : 1;
+    const a = this.armA;
+    const b = this.armB;
+    if (w < 1) {
+      this.phraseArms(PHRASES[i - 1][1], k, tt, th, beat, a);
+      this.phraseArms(PHRASES[i][1], k, tt, th, beat, b);
+      for (let j = 0; j < 9; j++) a[j] += (b[j] - a[j]) * w;
+    } else this.phraseArms(PHRASES[i][1], k, tt, th, beat, a);
+    setArm(p.armL, a[0], a[1], a[2], a[3]);
+    setArm(p.armR, a[4], a[5], a[6], a[7]);
+    p.spine[0] += a[8] * D;
+  }
+
+  /** one phrase's arm pose: out[0..3] left arm, [4..7] right arm (degrees), [8] spine lean (degrees) */
+  private phraseArms(id: number, k: number, tt: number, th: number, beat: number, out: Float32Array): void {
+    // the canon: one lantern raised to the head, passing round the horseshoe (~1.3 s of every 3.75 s)
+    const cyc = (((tt / 3.75 - th / Math.PI) % 1) + 1) % 1;
+    const raise = smoothstep(0, 0.12, cyc) * (1 - smoothstep(0.3, 0.42, cyc));
+    const ro = k % 2 === 0 ? 4 : 0;
+    const sw = Math.sin(beat * Math.PI + k * 0.7);
+    out[8] = 0;
+    if (id === PHRASE.RITUAL) {
+      putArm(out, 0, ARM_CHEST);
+      putArm(out, 4, ARM_CHEST);
+      out[1] += 6 * sw;
+      out[5] -= 6 * sw;
+      mixArm4(out, ro, ARM_HEAD, raise);
+      out[8] = 8;
+    } else if (id === PHRASE.DANCE) {
+      putArm(out, 0, ARM_SHOULDER);
+      putArm(out, 4, ARM_SHOULDER);
+      // swung side to side on the beat (one lantern out, the other across)
+      out[1] += 22 * sw;
+      out[5] -= 22 * sw;
+      out[0] += 10 * sw;
+      out[4] -= 10 * sw;
+      mixArm4(out, ro, ARM_HEAD, raise);
+    } else if (id === PHRASE.CRADLE) {
+      putArm(out, 0, ARM_CHEST);
+      putArm(out, 4, ARM_CHEST);
+      out[0] += 4 + 3 * sw;
+      out[4] += 4 + 3 * sw;
+      out[8] = 10;
+    } else if (id === PHRASE.SPREAD) {
+      putArm(out, 0, ARM_SIDE);
+      putArm(out, 4, ARM_SIDE);
+      out[0] += 6 * sw;
+      out[4] -= 6 * sw;
+    } else if (id === PHRASE.HIGH) {
+      putArm(out, 0, ARM_HEAD);
+      putArm(out, 4, ARM_SHOULDER);
+      // left / right lantern high, alternating every 2 beats
+      const alt = 0.5 + 0.5 * Math.sin((beat / 2) * Math.PI + k);
+      for (let j = 0; j < 4; j++) {
+        const l = out[j];
+        const r = out[4 + j];
+        out[j] = l + (r - l) * alt;
+        out[4 + j] = r + (l - r) * alt;
+      }
+      out[8] = -6;
+    } else {
+      putArm(out, 0, ARM_WAIST);
+      putArm(out, 4, ARM_WAIST);
+      out[1] += 16 * sw;
+      out[5] -= 16 * sw;
+      out[0] += 14 * Math.max(0, sw);
+      out[4] += 14 * Math.max(0, -sw);
+      out[8] = 12;
+    }
   }
 
   /** arms / legs of bearer k in the procession or the pyramid */

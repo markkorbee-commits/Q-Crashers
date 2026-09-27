@@ -202,6 +202,41 @@ Suggested cues from the official video (see contractRequests of the core round-2
   `intensity`, `spread`), `flashSpread`, `glowColor` and `smoke`. `flashColor` / `flashPos` /
   `flashIntensity` are unchanged (all sources).
 
+## Crowd and performers (round 12, engine behaviour, no cue change needed)
+
+Group `src/crowd`. Everything stays a pure function of show time.
+
+* Mood cues and the overlay channels: a `crowd.mood` preset still sets every motion share (a sway cue calms a
+  jumping crowd), but the overlay shares (phones / flashlights, lighters, looking up) only when the preset names
+  them (the lighters and sit presets). Until round 11 every mood cue drove phones and lighters to 0 and wiped out the
+  built-in Tribe timeline (design-bible §9.4: Winter 35 % phones, In The Cold 35 %): phones were up in 248 of 1581 s
+  (mean share 0.044), now in every second (mean 0.24; lighters 238 s).
+* Phones also follow the sky: at least 10 % of the Tribe films at any time (not while it sits for the piano), 35 %
+  while fireworks burst: from 1.8 s before a fireworks cue's launch to 6 s after its end, faded in over 1.2 s and
+  out over 2.5 s (the cue itself lasts only the launch window).
+* Start views (Tribe mode): each start choice and the dragon view keep a 1.1 m ring, a ±32° lane to 2.6 m (to the
+  barrier for the front spot), 80 % of the people to 4.2 m, the shorter people (heads under the 1.68 m eye line) in
+  the forward view to 9 m, and pit-like priority within 18 m when a preset thins the crowd. The piano riser's own
+  viewpoint keeps a narrow lane to the riser only (its 6 m cone used to empty the view from the middle of the field).
+  Measured at 45,000 people, forward ±60°: 'crowd' 3.3–4.0 p/m² from 3 m (was 0 to 6 m), 'middle' 2.0–2.2 p/m²
+  at 4–9 m (was 0.5 at 6–9 m).
+* Barrier: the crowd's front edge is the built barrier (stage/layout.ts `L.barrierZ` / `L.barrierX`): the front
+  row stands on the footplate from Z 3.45 across |X| ≤ 90.5, nobody in the photo pit or in the arms' service lane
+  (X ±90 to the rampart, Z 2.5–60). The pit security (Tribe mode) stands inside the pit at Z 1.9.
+* Near-lens fade: the crowd dissolves only inside 0.5–0.74 m of the lens and the player / low-camera push keeps
+  everyone at ≥ 0.8 / 0.75 m, so the ring of bodies around the viewer is solid (no screen-door stipple); the
+  performers keep the 0.9–1.3 m band.
+* The MC (v348–502) holds the mic at his mouth in his right hand the whole time (the mic is authored for that arm
+  pose); his left arm goes overhead only on the raise v409.2–412.3 and in the jump-mood windows from v415.3, and
+  otherwise points / thumbs up at the crowd at chest to shoulder height. Wardrobe: dark navy shirt, black cap with a
+  white brim, black shorts, white sneakers. His framing in the close-ups is the camera's (`camera.shot` `fov`).
+* The fire troupe's lanterns (v646–740): flat square panels (0.19 × 0.2 m) hanging plumb from the fist on a bail,
+  a warm-white HDR core fading to orange at a thin dark frame (above the bloom threshold), each lighting its bearer's
+  hands, forearms and face (warm key, 1 / (1 + 10 d²)). Between the formations the bearers carry them in phrases: at
+  the chest with a raise passing round the horseshoe (entry–668), swung at the shoulders (668–690.6, 716–),
+  cradled together at the chest (690.6), arms spread (693.9), at head height alternating (696.6), at the waist
+  (702.6); the contortion, the kneel, the leap, the procession and the pyramid keep their poses.
+
 ## Validator
 
 * Reads every `docs/show-format-ext/*.md`: `## <system>` tables in the show-format.md format extend

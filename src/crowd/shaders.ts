@@ -9,8 +9,24 @@
  * rises the crowd joins in progressively and every pose blends smoothly (no popping).
  */
 
+import { LANTERN } from './constants';
+
 /** strength of the arch-crown downlights on the performers in the portal (x LightEnv.archSpotIntensity 0..1.5) */
 const ARCH_KEY = 1.4;
+/** each bearer's lanterns lighting their own hands, face and costume (warm key, added after the tone cap) */
+const LANTERN_KEY = 1.0;
+
+const f3 = (x: number) => x.toFixed(4);
+/** the hand lantern's dimensions (constants.ts LANTERN) for the vertex and fragment programs */
+const LANTERN_DEFS = /* glsl */ `
+#define LAN_AX ${f3(LANTERN.ax)}
+#define LAN_AY ${f3(LANTERN.ay)}
+#define LAN_AZ ${f3(LANTERN.az)}
+#define LAN_DROP ${f3(LANTERN.drop)}
+#define LAN_W ${f3(LANTERN.w)}
+#define LAN_H ${f3(LANTERN.h)}
+#define LAN_D ${f3(LANTERN.d)}
+`;
 
 export const COMMON = /* glsl */ `
 #define PI 3.14159265
@@ -213,19 +229,43 @@ vec3 toWorld(Person P, Pose Q, vec3 lp) {
 
 /**
  * Near-lens fade (1 visible … 0 gone): a person whose body axis (feet to raised hands, ~2.2 m) passes
- * within ~1.2 m of the lens and who is in front of the camera dissolves (gone inside 0.9 m, a short
- * dithered band to 1.3 m so few bodies show the screen-door at once), so walking through the Tribe,
- * a low show camera or a teleport never fills the frame with a head. CrowdSystem routes everyone
- * within ~2.4 m of the camera to the dithered 'crowd-fade' draw, which evaluates this per instance.
+ * within r1 m of the lens and who is in front of the camera dissolves (gone inside r0), so walking
+ * through the Tribe, a low show camera or a teleport never fills the frame with a head. The crowd uses
+ * a tight band (CROWD_FADE: gone inside 0.5 m, whole from 0.74 m) that the player / camera push keeps
+ * everyone out of (nearest bodies ≥ 0.8 m / 0.75 m), so the packed rows around the viewer are never a
+ * stippled ghost; the performers keep the wider 0.9–1.3 m band. CrowdSystem routes everyone within
+ * ~2.4 m of the camera to the dithered 'crowd-fade' draw, which evaluates this per instance.
  */
-float lensFade(vec3 feet, float h) {
+${LANTERN_DEFS}
+#define CROWD_FADE vec2(0.5, 0.74)
+#define PERF_FADE vec2(0.9, 1.3)
+float lensFade(vec3 feet, float h, vec2 band) {
   float top = feet.y + 2.2 * h / 1.75;
   vec3 cp = vec3(feet.x, clamp(cameraPosition.y, feet.y, top), feet.z);
   float da = distance(cameraPosition, cp);
-  if (da > 1.35) return 1.0;
+  if (da > band.y + 0.05) return 1.0;
   vec3 vc = (viewMatrix * vec4(cp, 1.0)).xyz;
   float inView = smoothstep(-0.25, 0.3, -vc.z / max(length(vc), 1e-3));
-  return mix(1.0, smoothstep(0.9, 1.3, da), inView);
+  return mix(1.0, smoothstep(band.x, band.y, da), inView);
+}
+
+/** the fist a hand lantern hangs from, posed (person-local, unscaled) */
+vec3 lanternAnchor(bool left, Pose Q) {
+  vec3 nn = vec3(0.0, 1.0, 0.0);
+  return skinPt(left ? B_HAND_L : B_HAND_R, vec3(LAN_AX * (left ? 1.0 : -1.0), LAN_AY, LAN_AZ), nn, Q);
+}
+
+/**
+ * A rest-pose lantern point, hanging plumb below the posed fist whatever the arm does (a lantern on its
+ * bail), facing where the body faces and swinging / turning a little on its bail (show time: seek-safe).
+ */
+vec3 lanternPt(bool left, vec3 p, inout vec3 n, Pose Q, float seed) {
+  vec3 A = vec3(LAN_AX * (left ? 1.0 : -1.0), LAN_AY, LAN_AZ);
+  float ph = hh(seed, left ? 41.0 : 42.0) * TAU;
+  float t = uClock.x;
+  mat3 R = rY(Q.rootR.y + Q.spine.y + 0.12 * sin(0.7 * t + ph)) * rX(0.14 * sin(1.9 * t + ph)) * rZ(0.1 * sin(1.3 * t + 1.3 * ph));
+  n = R * n;
+  return lanternAnchor(left, Q) + R * (p - A);
 }
 `;
 
@@ -465,17 +505,20 @@ Pose personPose(Person P) {
     wCh = 0.0; wPh = 0.0; wId = 1.0;
   }
 
-  // make room for the player (a packed-crowd bubble: nearest bodies ~0.7 m away, not a clearing); a few glance
+  // make room for the player (a packed-crowd bubble, not a clearing): everyone within 1.6 m is eased out
+  // to 0.8–1.6 m (monotonic, no crossing), i.e. just outside the near-lens fade band (CROWD_FADE, whole
+  // from 0.74 m): the nearest ring is solid bodies, never a stippled ghost; a few glance at the viewer
   vec2 dpl = P.pos.xz + Q.push - uPlayer.xz;
   float rpl = length(dpl);
-  if (uPlayer.w > 0.5 && rpl < 1.4) {
-    float rn = rpl + (1.4 - rpl) * (1.4 - rpl) * 0.35;
+  if (uPlayer.w > 0.5 && rpl < 1.6) {
+    float rn = rpl + (1.6 - rpl) * (1.6 - rpl) * 0.3125;
     Q.push += (rpl > 1e-3 ? dpl / rpl : vec2(1.0, 0.0)) * (rn - rpl);
   }
+  // a low free / drone camera: the same bubble (≥ 0.75 m) around the lens
   vec2 dcm = P.pos.xz + Q.push - uCamPush.xy;
   float rcm = length(dcm);
-  if (uCamPush.w > 0.01 && rcm < 1.0) {
-    float rn = rcm + (1.0 - rcm) * (1.0 - rcm) * 0.5;
+  if (uCamPush.w > 0.01 && rcm < 1.5) {
+    float rn = rcm + (1.5 - rcm) * (1.5 - rcm) * 0.3333;
     Q.push += (rcm > 1e-3 ? dcm / rcm : vec2(1.0, 0.0)) * (rn - rcm) * uCamPush.w;
   }
   if (uPlayer.w > 0.5 && rpl < 2.2 && hh(sd, 33.0) < 0.22) {
@@ -549,12 +592,16 @@ vec3 albedoOf(int bone, int slot, vec3 lp, ivec4 L) {
   vec3 top = shirtless ? skin : uPal[16 + (L.y & 15)] * 0.78;
   vec3 bot = uPal[32 + ((L.y >> 9) & 7)] * 0.85;
   if (costume) { top = uPal[56 + ((L.y >> 15) & 3)] * 0.8; bot = top; }
+  // the MC (the mic owner): a dark navy shirt (v411, v440, v500)
+  if (((L.z >> 8) & 4) != 0) top = vec3(0.02, 0.028, 0.065);
   int print = (L.y >> 4) & 7;
+  // (the MC — the mic owner — wears a black cap with a white brim, v411 / v500)
+  if (slot == S_CAP && ((L.z >> 8) & 4) != 0 && lp.z > 0.105 && lp.y < 1.692) return vec3(0.78);
   if (slot == S_CAP || slot == S_HAT) return uPal[40 + ((L.x >> 12) & 7)] * (lp.y > 1.676 && lp.y < 1.69 && slot == S_HAT ? 0.7 : 0.9);
   if (slot == S_HAIR || slot == S_PONY || slot == S_HAIRCAP) return uPal[8 + ((L.x >> 3) & 7)];
   if (slot == S_BANDANA) return mix(uPal[60], uPal[63], step(0.5, fract(lp.x * 40.0 + lp.y * 25.0)) * 0.7);
   if (slot == S_LANTERN_L || slot == S_LANTERN_R) return vec3(0.9, 0.8, 0.6);
-  if (slot == S_MIC) return vec3(0.02);
+  if (slot == S_MIC) return lp.x > -0.07 ? vec3(0.07) : vec3(0.02); // grille, black handle
   if (slot == S_CAMERA || slot == S_CTRL) return vec3(0.025);
   vec3 c = skin;
   if (bone == B_HEAD) {
@@ -812,9 +859,8 @@ ${
   // iAttr.w > 0: lantern bearer (glow), < 0: performer in a follow spot / key light (level)
   vGlow = max(iAttr.w, 0.0);
   vKey = max(-iAttr.w, 0.0);
-  vec3 nn = vec3(0.0, 1.0, 0.0);
-  vLanL = toWorld(P, Q, skinPt(B_HAND_L, vec3(0.215, 0.59, 0.03), nn, Q));
-  vLanR = toWorld(P, Q, skinPt(B_HAND_R, vec3(-0.215, 0.59, 0.03), nn, Q));
+  vLanL = toWorld(P, Q, lanternAnchor(true, Q) - vec3(0.0, LAN_DROP, 0.0));
+  vLanR = toWorld(P, Q, lanternAnchor(false, Q) - vec3(0.0, LAN_DROP, 0.0));
   int props = (P.look.z >> 8) & 31;
   vLanOn = vec2((props & 1) != 0 ? 1.0 : 0.0, (props & 2) != 0 ? 1.0 : 0.0) * vGlow;`
     : `  Person P = fetchPerson(aIdx);
@@ -826,14 +872,14 @@ ${
   vec3 n = normal;
   if (!slotVisible(slot, P.look)) p = vec3(0.0, 1.2, 0.0);
   if (slot == S_CAP && ((P.look.x >> 9) & 7) == 2) { p.z = 0.024 - p.z; n.z = -n.z; }
-  vec3 lp = skinPt(bone, p, n, Q);
+  vec3 lp = ${performer ? '(slot == S_LANTERN_L || slot == S_LANTERN_R) ? lanternPt(slot == S_LANTERN_L, p, n, Q, P.seed) : ' : ''}skinPt(bone, p, n, Q);
   vec3 wp = toWorld(P, Q, lp);
   vec3 wn = normalize(rY(P.yaw + Q.walkYaw) * n);
   vec4 mvPosition = viewMatrix * vec4(wp, 1.0);
   gl_Position = projectionMatrix * mvPosition;
 ${
   lens
-    ? `  vFade = P.h > 0.01 ? lensFade(P.pos + vec3(Q.push.x, 0.0, Q.push.y), P.h) : 1.0;
+    ? `  vFade = P.h > 0.01 ? lensFade(P.pos + vec3(Q.push.x, 0.0, Q.push.y), P.h, ${performer ? 'PERF_FADE' : 'CROWD_FADE'}) : 1.0;
   // fully dissolved: collapse the instance outside the clip volume (no raster work at all)
   if (vFade < 0.002) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);`
     : ''
@@ -897,15 +943,20 @@ ${
   performer
     ? `  float flick = 0.82 + 0.1 * sin(uClock.x * 23.0 + vW.x * 7.0) + 0.08 * sin(uClock.x * 37.0 + vW.z * 3.0); // show time: seek-safe
   if (vSlot == S_LANTERN_L || vSlot == S_LANTERN_R) {
-    // small square lantern: blackened frame, warm glass panes around a flickering flame
-    float sx = vSlot == S_LANTERN_L ? 1.0 : -1.0;
-    vec3 q = vLocal - vec3(0.215 * sx, 0.59, 0.03);
-    float ax = abs(q.x), az = abs(q.z);
-    float u = ax > az ? az : ax;
-    alb = vec3(0.03, 0.026, 0.024);
-    if (max(ax, az) > 0.05 && abs(q.y) < 0.053 && u < 0.043) {
-      float core = exp(-u * u / 0.0009 - (q.y + 0.012) * (q.y + 0.012) / 0.0014);
-      emit = vec3(1.0, 0.64, 0.28) * (0.6 + 2.0 * core) * flick * vGlow;
+    // flat square panel lantern (the film's lanterns are the brightest things in frame): a warm-white
+    // glowing body — pillow-like, hottest in the middle, orange towards a thin dark frame — well above
+    // the bloom threshold; cap / base plates and the bail stay dark metal
+    vec3 q = vLocal - vec3(LAN_AX * (vSlot == S_LANTERN_L ? 1.0 : -1.0), LAN_AY - LAN_DROP, LAN_AZ);
+    vec3 a = abs(q) / (vec3(LAN_W, LAN_H, LAN_D) * 0.5);
+    alb = vec3(0.035, 0.03, 0.028);
+    if (a.y < 0.995 && max(a.x, a.z) > 0.97) {
+      // broad faces front / back; the narrow sides glow dimmer (a flat panel, not a glowing cube)
+      bool broad = a.z > a.x;
+      vec2 f = broad ? a.xy : a.zy;
+      float r = max(f.x, f.y);
+      float core = 1.0 - 0.5 * dot(f, f);
+      vec3 c = mix(vec3(1.0, 0.72, 0.34), vec3(1.0, 0.36, 0.07), smoothstep(0.1, 0.9, r));
+      emit = c * (2.5 + 9.0 * core * core * core) * (broad ? 1.0 : 0.3) * flick * (1.0 - smoothstep(0.9, 0.94, r)) * vGlow;
     }
   }`
     : ''
@@ -921,12 +972,15 @@ ${
 ${
   performer
     ? `  light += uLantern.rgb * uLantern.a * (0.55 + 0.45 * max(N.y, 0.0));
-  // each bearer's own lanterns light their hands, face and costume (flickering warm point lights)
-  if (vLanOn.x + vLanOn.y > 0.0) {
-    vec3 d1 = vLanL - vW; float l1 = max(length(d1), 0.05);
-    vec3 d2 = vLanR - vW; float l2 = max(length(d2), 0.05);
-    float pl = vLanOn.x * max(dot(N, d1 / l1), 0.0) / (0.05 + l1 * l1) + vLanOn.y * max(dot(N, d2 / l2), 0.0) / (0.05 + l2 * l2);
-    light += vec3(1.0, 0.55, 0.22) * flick * pl * 0.14;
+  // each bearer's own lanterns light their hands, face and costume from below / in front (flickering warm
+  // point lights, 1 / (1 + 10 d²): hands, forearms, the face above them); added after the tone cap so the glow on the faces reads as in the film
+  vec3 lanKey = vec3(0.0);
+  if (vLanOn.x + vLanOn.y > 0.0 && vSlot != S_LANTERN_L && vSlot != S_LANTERN_R) {
+    vec3 d1 = vLanL - vW; float l1 = max(length(d1), 0.08);
+    vec3 d2 = vLanR - vW; float l2 = max(length(d2), 0.08);
+    float pl = vLanOn.x * (0.15 + 0.85 * max(dot(N, d1 / l1), 0.0)) / (1.0 + 10.0 * l1 * l1)
+      + vLanOn.y * (0.15 + 0.85 * max(dot(N, d2 / l2), 0.0)) / (1.0 + 10.0 * l2 * l2);
+    lanKey = vec3(1.0, 0.6, 0.28) * flick * pl * ${LANTERN_KEY.toFixed(2)};
   }
   vec3 Lt = vec3(0.12, 1.95, 58.75) - vW;
   float dt = length(Lt);
@@ -976,7 +1030,7 @@ ${
   float sheen = pow(max(dot(N, Hs), 0.0), 24.0) * spec * 0.35 + (isHair ? pow(max(dot(N, Hs), 0.0), 10.0) * 0.12 : 0.0);
   vec3 col = alb * light + rimLight(vW, N, V) * (0.4 + 0.6 * smoothstep(0.9, 1.6, vLocal.y)) * (1.0 + spec * 0.5) + (uStageCol + uRimCol * 0.5) * sheen;
   col += vec3(0.85, 0.9, 1.0) * col0rim * pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 2.5);
-  col = crowdTone(col, uLumCap${performer ? ' * 2.6' : ''}) + emit${performer ? ' + backRim' : ''};
+  col = crowdTone(col, uLumCap${performer ? ' * 2.6' : ''}) + emit${performer ? ' + backRim + alb * lanKey' : ''};
   gl_FragColor = vec4(col, 1.0);
   #include <fog_fragment>
   #include <colorspace_fragment>
@@ -986,6 +1040,7 @@ ${
 
 /** ALBEDO needs the vnoise/hash helpers + look defines on the fragment side as well */
 const ALBEDO_HEADER = /* glsl */ `
+${LANTERN_DEFS}
 #define PI 3.14159265
 #define TAU 6.28318531
 #define B_PELVIS 0
@@ -1172,7 +1227,7 @@ void main() {
   vec4 mvPosition = viewMatrix * vec4(wp, 1.0);
   gl_Position = projectionMatrix * mvPosition;
   // the carrier dissolved at the lens (see lensFade): the pole and the cloth go with them
-  if (lensFade(P.pos + vec3(Q.push.x, 0.0, Q.push.y), P.h) < 0.5) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+  if (lensFade(P.pos + vec3(Q.push.x, 0.0, Q.push.y), P.h, CROWD_FADE) < 0.5) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
   #include <fog_vertex>
 }
 `;
@@ -1263,7 +1318,7 @@ void main() {
   }
   float vis = on * step(0.002, dot(col, vec3(1.0)));
   // no phone floating in front of the lens once its owner has dissolved there
-  if (dist < 2.6) vis *= step(0.5, lensFade(P.pos + vec3(Q.push.x, 0.0, Q.push.y), P.h));
+  if (dist < 2.6) vis *= step(0.5, lensFade(P.pos + vec3(Q.push.x, 0.0, Q.push.y), P.h, CROWD_FADE));
   // never smaller than ~0.6 px; energy conserving (tiny, dim dots far away, no bright cards)
   float px = dist * uPixel;
   vec2 size = max(hs, vec2(px * 0.6));

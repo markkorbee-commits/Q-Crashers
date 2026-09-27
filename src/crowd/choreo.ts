@@ -174,11 +174,28 @@ const TARGETS: Float32Array[] = TIMELINE.map((k) => {
   return a;
 });
 const PRESET_ARR: Record<string, Float32Array> = {};
+/**
+ * Which channels a mood preset drives (1) or leaves to the built-in timeline (0). A preset sets every
+ * motion channel (a 'sway' cue calms a jumping crowd), but the overlay channels — phones / flashlights,
+ * lighters and looking up — only when it names them: the timeline's "phones up" (Winter, the anthem,
+ * In The Cold) survives a 'jump' / 'sway' / 'hug' cue on top of it.
+ */
+const OVERLAY: number[] = [M.PHONES, M.LIGHTERS, M.LOOKUP];
+const PRESET_MASK: Record<string, Uint8Array> = {};
 for (const [name, m] of Object.entries(PRESETS)) {
   const a = new Float32Array(MOOD_CHANNELS);
   fill(a, m);
   PRESET_ARR[name] = a;
+  const mask = new Uint8Array(MOOD_CHANNELS).fill(1);
+  for (const k of KEYS) if (OVERLAY.includes(M[k]) && m[k] === undefined) mask[M[k]] = 0;
+  PRESET_MASK[name] = mask;
 }
+/** share of the Tribe filming at any time, and while fireworks burst over the field (design-bible §9.4) */
+const PHONES_FLOOR = 0.1;
+const PHONES_FIREWORKS = 0.35;
+/** a firework cue (launch at c.t) keeps phones up from just before its launch until its shells have faded */
+const FW_LEAD = 0.6;
+const FW_TAIL = 6;
 
 const smooth = (x: number) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
 
@@ -195,6 +212,39 @@ export class Choreo {
   /** latest active 'mood' cue state (for stats) */
   cueState = '-';
   private cueTmp: Cue[] = [];
+  /** the show's firework cues (sorted by launch time), re-read when the show file changes */
+  private fw: readonly Cue[] = [];
+  private fwFile: unknown = null;
+  private fwMaxDur = 0;
+
+  /** 0..1: fireworks in the sky at t (smooth, a pure function of t: rises before a launch, fades after the last shells) */
+  fireworks(t: number, show: ShowEngine | null): number {
+    if (!show || !show.file) return 0;
+    if (show.file !== this.fwFile) {
+      this.fwFile = show.file;
+      this.fw = show.all('fireworks');
+      this.fwMaxDur = 0;
+      for (let i = 0; i < this.fw.length; i++) this.fwMaxDur = Math.max(this.fwMaxDur, this.fw[i].dur);
+    }
+    const arr = this.fw;
+    // first cue that can still reach t: launch after t − (longest cue + tail + fade)
+    const t0 = t - this.fwMaxDur - FW_TAIL - 2.5;
+    let lo = 0;
+    let hi = arr.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (arr[mid].t < t0) lo = mid + 1;
+      else hi = mid;
+    }
+    let env = 0;
+    for (let i = lo; i < arr.length; i++) {
+      const c = arr[i];
+      if (c.t > t + FW_LEAD + 1.2) break;
+      const e = smooth((t - c.t + FW_LEAD + 1.2) / 1.2) * smooth((c.t + c.dur + FW_TAIL + 2.5 - t) / 2.5);
+      if (e > env) env = e;
+    }
+    return env;
+  }
 
   evaluate(t: number, beat: BeatInfo, section: Section | null, show: ShowEngine | null): void {
     const out = this.mood;
@@ -246,8 +296,10 @@ export class Choreo {
         if (c.fx === 'mood') {
           const preset = PRESET_ARR[String(c.p.state ?? '')];
           if (!preset) continue;
+          const mask = PRESET_MASK[String(c.p.state)];
           this.cueState = String(c.p.state);
           for (let k = 0; k < MOOD_CHANNELS; k++) {
+            if (mask[k] === 0) continue;
             const target = k === M.INTENS ? preset[k] * (0.7 + 0.3 * inten) : k === M.FLAGS ? Math.max(out[k], preset[k]) : preset[k] * inten;
             out[k] += (target - out[k]) * w;
           }
@@ -262,7 +314,12 @@ export class Choreo {
       // fireworks in the sky → heads go up
       const fw = show.active('fireworks', t, this.cueTmp).length;
       if (fw > 0) out[M.LOOKUP] = Math.max(out[M.LOOKUP], Math.min(0.7, 0.2 + fw * 0.08));
+      // … and the phones come out to film them (35 %), faded in / out with the bursts
+      const fe = this.fireworks(t, show);
+      if (fe > 0) out[M.PHONES] = Math.max(out[M.PHONES], PHONES_FIREWORKS * fe);
     }
+    // somebody is always filming (~10 %), except while the Tribe sits for the piano (its own share)
+    out[M.PHONES] = Math.max(out[M.PHONES], PHONES_FLOOR * (1 - Math.min(1, out[M.SIT] * 1.5)));
     out[M.CHEER] = ch;
     this.cheer = ch;
   }
