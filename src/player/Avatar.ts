@@ -7,6 +7,7 @@ import { approachAngle, damp, wrapAngle } from './motion';
 import type { PlayerController } from './PlayerController';
 
 const TAU = Math.PI * 2;
+const WHITE = new THREE.Color(1, 1, 1);
 
 /** Surface look of a body part: sRGB colour, roughness, printed (uses the T-shirt texture). */
 interface Look {
@@ -64,7 +65,15 @@ export class Avatar {
   private mesh!: THREE.SkinnedMesh;
   private parts: { geo: THREE.BufferGeometry; bone: THREE.Bone; look: Look }[] = [];
   private walkEnv = 0;
-  private rim = { uRimColor: { value: new THREE.Color() }, uRimDir: { value: new THREE.Vector3(0, 0, -1) }, uSelf: { value: new THREE.Color(0, 0, 0) } };
+  private rim = {
+    uRimColor: { value: new THREE.Color() },
+    uRimDir: { value: new THREE.Vector3(0, 0, -1) },
+    uSelf: { value: new THREE.Color(0, 0, 0) },
+    uFill: { value: new THREE.Color(0, 0, 0) },
+  };
+  /** 0..1 third-person "this is you" strength (setSelfHighlight); the colours follow the stage light */
+  private selfK = 0;
+  private tint = new THREE.Color();
   private texture!: THREE.CanvasTexture;
   private tmp = new THREE.Vector3();
 
@@ -268,8 +277,9 @@ export class Avatar {
       shader.uniforms.uRimColor = this.rim.uRimColor;
       shader.uniforms.uRimDir = this.rim.uRimDir;
       shader.uniforms.uSelf = this.rim.uSelf;
+      shader.uniforms.uFill = this.rim.uFill;
       shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', '#include <common>\nuniform vec3 uRimColor;\nuniform vec3 uRimDir;\nuniform vec3 uSelf;')
+        .replace('#include <common>', '#include <common>\nuniform vec3 uRimColor;\nuniform vec3 uRimDir;\nuniform vec3 uSelf;\nuniform vec3 uFill;')
         .replace(
           '#include <roughnessmap_fragment>',
           '#include <roughnessmap_fragment>\n#ifdef USE_COLOR_ALPHA\n  roughnessFactor = vColor.a; // per-part roughness\n#endif',
@@ -284,8 +294,12 @@ export class Avatar {
             float toward = dot(rN, uRimDir);
             float fres = pow(1.0 - nv, 3.0);
             totalEmissiveRadiance += uRimColor * (fres * clamp(toward * 0.7 + 0.45, 0.0, 1.0) * 1.3 + max(toward, 0.0) * 0.1);
-            // third person: a soft even outline so "you" read at a glance among thousands
-            totalEmissiveRadiance += uSelf * pow(1.0 - nv, 1.8);
+            // third person: a faint light from the camera side lets the outfit read (skin, black tee,
+            // cap, white socks) where the crowd around is a silhouette, and a THIN outline tinted with
+            // the stage light marks "you" among thousands (a wide pow(…, 1.8) term covered the whole
+            // thin-limbed body and read as a glowing grey mannequin)
+            totalEmissiveRadiance += diffuseColor.rgb * uFill * (0.3 + 0.7 * nv);
+            totalEmissiveRadiance += uSelf * pow(1.0 - nv, 5.0);
           }`,
         );
     };
@@ -399,7 +413,7 @@ export class Avatar {
 
   /** 0..1 strength of the neutral "this is you" outline (third-person view) */
   setSelfHighlight(k: number): void {
-    this.rim.uSelf.value.setRGB(0.8, 0.86, 0.95).multiplyScalar(clamp(k, 0, 1));
+    this.selfK = clamp(k, 0, 1);
   }
 
   /** stage-facing rim light from the show's light environment (view-space direction) */
@@ -415,6 +429,15 @@ export class Avatar {
     const d = this.tmp.copy(stageFocus).sub(this.root.position).normalize();
     d.transformDirection(camera.matrixWorldInverse);
     this.rim.uRimDir.value.copy(d);
+    // "this is you": outline + camera-side fill take the hue of the stage light (never a cold white halo)
+    const k2 = this.selfK;
+    const tint = this.tint.copy(env.stageColor);
+    const tm = Math.max(tint.r, tint.g, tint.b);
+    if (tm > 0.02) tint.multiplyScalar(1 / tm);
+    else tint.setRGB(1, 1, 1);
+    tint.lerp(WHITE, 0.45);
+    this.rim.uSelf.value.copy(tint).multiplyScalar(0.26 * k2);
+    this.rim.uFill.value.copy(tint).lerp(WHITE, 0.5).multiplyScalar(0.1 * k2);
   }
 
   /** pose the body from the player state and the music */
