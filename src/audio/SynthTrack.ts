@@ -104,6 +104,8 @@ export class SynthTrack implements AudioTrack {
     this.pausedAt = this.getTime();
     this._playing = false;
     this.engine?.killSession();
+    // the session fades out over 25 ms; what is still in the distance delay is faded out by the gate
+    this.audio.musicJump(0.03);
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     this.attach(false);
@@ -133,8 +135,12 @@ export class SynthTrack implements AudioTrack {
 
   seek(t: number): void {
     const tt = Math.max(0, Math.min(this.duration, t));
-    if (this._playing && this.engine) this.startAt(tt);
-    else this.pausedAt = tt;
+    if (this._playing && this.engine) {
+      // the new session starts START_DELAY from now (the old one fades out there); what is still in
+      // the distance delay belongs to the old position
+      this.audio.musicJump(START_DELAY + 0.03);
+      this.startAt(tt);
+    } else this.pausedAt = tt;
   }
 
   /** show time of the audio being HEARD right now */

@@ -253,11 +253,13 @@ Pose personPose(Person P) {
   Q.shoW = P.build * (female ? 0.9 : 1.0);
   Q.hipW = mix(1.0, P.build, 0.5) * (female ? 1.08 : 1.0);
 
-  // personal beat: sound delay (delay towers keep it < 0.15 s), coherent 10 m clusters
+  // personal beat: each person moves to the kick they HEAR, distance / 343 s after the stage (delay towers
+  // are time-aligned to the main PA wavefront, so d / 343 holds; the listener hears the music with the same
+  // delay), plus a short reaction spread; coherent 10 m clusters
   float bpm = max(uBeat.y, 60.0);
   float bps = bpm / 60.0;
   float dist = length(P.pos.xz - vec2(0.0, -6.0));
-  float delay = min(0.15, dist / 343.0 * 0.55) + 0.03 * hh(sd, 11.0);
+  float delay = dist / 343.0 + 0.03 * hh(sd, 11.0);
   float jit = (vnoise(P.pos.xz * 0.11) - 0.5) * 0.12;
   float b = uBeat.x - delay * bps - jit;
   float bp = fract(b);

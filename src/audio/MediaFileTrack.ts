@@ -157,6 +157,9 @@ export class MediaFileTrack implements AudioTrack {
   }
 
   pause(): void {
+    // the music still in the distance delay would play on under a frozen picture: the engine fades it
+    // out (the element stops within a few ms) and reopens once the line has drained
+    if (this.node && !this.el.paused) this.engine.musicJump(0.02);
     if (this.virtual) {
       this.virtual.base = this.virtualTime();
       this.virtual.perf = performance.now();
@@ -166,6 +169,10 @@ export class MediaFileTrack implements AudioTrack {
   }
 
   seek(t: number): void {
+    // the distance delay still carries the sound of the old position: the engine mutes it. A playing
+    // mp3 element stops delivering the old position within ~5 ms of the seek (new audio follows after
+    // 0-60 ms, measured in Chrome), so the default 50 ms lead leaves a wide margin
+    if (this.node) this.engine.musicJump();
     const a = t + this.offset;
     const dur = this.el.duration;
     const inside = a >= 0 && (!Number.isFinite(dur) || a < dur - 0.05);

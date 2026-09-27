@@ -288,8 +288,8 @@ export class CameraRig implements System {
     const rx = Math.cos(yaw),
       rz = -Math.sin(yaw);
     let y = p.y + PlayerController.EYE_HEIGHT + pl.jumpY + o.y;
-    // felt bass: a sub-perceptual body jolt on the kick close to the stacks (max ~2 mm)
-    const beat = ctx.beat;
+    // felt bass: a sub-perceptual body jolt on the kick close to the stacks (max ~2 mm), felt with the sound
+    const beat = ctx.heardBeat;
     if (this.bassShake && !pl.reduceMotion && beat.hasKick && ctx.showPlaying) {
       const d = Math.hypot(p.x * 0.6, Math.max(0, p.z));
       const a = (1 - smoothstep(8, 40, d)) * beat.kick * beat.kick * (0.4 + 0.6 * beat.energy);

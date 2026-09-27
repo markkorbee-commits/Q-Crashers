@@ -455,8 +455,8 @@ export class Avatar {
     const wHipsY = -lerp(0.02, 0.04, runK) * Math.cos(2 * th);
     const wLean = -(0.04 + 0.14 * runK);
 
-    // idle: hardstyle bounce on the kick, fist pumps / hands up at high energy
-    const b = ctx.beat;
+    // idle: hardstyle bounce on the kick HEARD at the avatar, fist pumps / hands up at high energy
+    const b = ctx.heardBeat;
     let bounce = 0,
       pump = 0,
       handsUp = 0,

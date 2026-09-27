@@ -97,6 +97,12 @@ export interface FrameContext {
   /** true on the frame right after a seek/restart (systems with caches must rebuild) */
   seeked: boolean;
   beat: BeatInfo;
+  /**
+   * the beat as the listener HEARS it: `beat` at show time minus the music's distance delay
+   * (AudioEngine.spatial.delay; equal to `beat` in the Show camera, the fly-over and with YouTube audio).
+   * For effects that stand for the listener's reaction to the music (body bounce, felt bass, XTC pulses)
+   */
+  heardBeat: BeatInfo;
   camera: THREE.PerspectiveCamera;
   /** position of the player's body (feet) */
   playerPos: THREE.Vector3;
