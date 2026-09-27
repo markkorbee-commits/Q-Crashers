@@ -252,6 +252,69 @@ Measured with `scripts/similarity.mjs` (Show camera, Mac GPU, `--settle 500 --mi
   distance-dependent law can separate them: in the video the wall is brightest in the first second of
   its burn and thinner after. Use `column` on narrow jets seen from far (the pillar fans, see `fan`).
 
+## Round 11 — opt-in params (no default changes)
+
+Round 11 is an engine round: every new param below is optional and a cue without it renders exactly as
+before (the 64 default moments are unchanged). The cue edits that use them, with their measured effect, are in
+the pyro group's cue patch (`$ENDSHOW_DATA/work/r11_pyro/cue_patch.json`), applied by the show agent.
+
+* **`light` / `lightColor` / `reach` (gerb, sparkular, flame, firewall; burst: `light`, `lightColor`).** `light`
+  (0–4) multiplies the effect's spatial light and its LightEnv flash; the light's reach grows with √`light`. The
+  multiplier acts AFTER the system's soft light cap (`LightSpec.gain`, applied in `FxLights.add`), so `light: 2`
+  really is twice as bright instead of being squeezed by the log compression of `CueFxSystem.lightCap`.
+  `lightColor` (gerb, burst) is the colour of that light, the flash, the row smoke's self-light and the burning
+  cloud (default: from the spark / burst colour); on a gerb it may be a list aligned with `colors` (one light
+  colour per colour window, `""` = that window's spark colour; the cloud, the smoke and the flash take the first
+  entry). `reach` (m, flame / gerb) overrides the light's reach.
+  Why the colour: in the red smoke of the finale (v1510–1537) the gold-white walls light the air and the field
+  red-orange (video field G, B ≈ 0); a gold light raises G and B everywhere (sky, field, haze) and lowers the
+  colour score even where the brightness is right.
+* **`glow` (gerb).** 0–2: the lit burning cloud around the sprays at this strength, there from the ignition
+  (instead of the automatic `intensity` > 1.5 / long-tall-burn cloud).
+* **`lean` (gerb).** Degrees of outward lean of the side-section and arm units (full from |x| 88 m, none inside
+  |x| 40 m). Default: the round-9 12° on a tall U wall without `angle` / `fan`, else 0. An authored `lean`
+  applies to any wall, also with an `angle`.
+* **`changes` (gerb / sparkular)**: see the table below; a leading 0 is now tolerated.
+* **Waterfall `density`, `height`, `columns`.** `density` (0.2–4) × the sparks and √× the light;
+  `height` (m, 3–60): the curtain falls that far (the spark life follows the drag fall law
+  d(t) ≈ 6.54 t − 4.36 (1 − e^(−1.5 t)); default ≈ 16.5 m as before); `columns` (m): discrete downward sprays every
+  `columns` m (a row of waterfall tubes: dense streaks with dark gaps, v1092.3–1094.5) instead of one even sheet.
+  Use `offset` to hang the curtain higher.
+* **Jet `size`, `drift`, `glow`, `life`.** For `cloud: true`: `size` (0.3–4) × the cloud (box, puffs, a few more
+  puffs), `drift` (`[x,y,z]` m/s) blows the cloud off that way (v767.25–768.0: up and right), `life` (s, default
+  2.8) its life. `glow` (0–4, all jets) × the plumes' and the cloud's own glow in `color`. The piano rig's
+  start height needs no new param: `offset: [0, dy, 0]` (every fx) lifts the jets onto the tower top.
+
+Measured with the cue patch applied in the page (`scripts/similarity.mjs --eval`, Show camera unless noted, Mac
+GPU, `--settle 500 --min-frames 30`, pre-roll on; mean raw score of the listed moments, before → after):
+
+* **The last eruption (1565.3).** `burst` on `mines` `light: 3.5, lightColor: "#FF2008"` + the U wall
+  `lean: 24, light: 2, lightColor: "#FF3010", glow: 0.6`: 1565.5–1568 (8 moments) 51.4 → 55.3 % (1566.25 0.427 →
+  0.573, 1567 0.642 → 0.709, 1568 0.652 → 0.713; 1565.5 0.413 → 0.342, where the filmed centre is white-hot).
+  The same light in the burst's own warm white loses (49.8 %): the filmed frame is saturated red to its corners
+  (≈ 120 / 7 / 3), and a white-orange light raises G and B on the haze and the field. `pattern: "all"` on the wall
+  (50.3 %) and the three-armed pillar fans (`fan: 3`, rows 2–3: 51.2 %) did not help.
+* **The roof fan (1510.434).** `column: true, intensity: 2.2, height: 40, angle: 36, spread: 34, light: 1.5,
+  lightColor: "#FF2A08"`: 1511.75–1514.5 56.7 → 59.7 % (1513.5 +5.6, 1514.5 +5.2, 1511.75 of the 64 +0.3).
+* **Arm cakes and U wall from the fitted drone poses** (1515.284: (0.9, 92.8, 232.8), 24° down, vfov 53;
+  1520.964 → 1534.964: (1.3, 101, 231) 27° → (1.1, 90, 234) 20° → (4.9, 71, 265) 11°): see the patch; bigger,
+  brighter (`column`, `intensity` 2–2.4, 40–42 m, `fan: 3` cakes leaning out 14°, the wall `lean: 26`) and lit
+  red. A gold light (`light` without `lightColor`) lost 5 points there (45.7 %): it lifts G and B over the red
+  site. At the CURRENT, closer Show camera the bigger arm cakes and U wall lose (48.3–50.5 % vs 51.8 %), so
+  that part of the patch goes only with the fitted camera.
+* **Waterfall 1091.765.** `columns: 2.5` (the filmed tube columns): 1092.5–1094 46.9 → 47.1 %, neutral. A
+  taller / denser curtain (`height` 24–30, `density` 1.5–2.5, `offset` up) lost 2–19 points from the current
+  camera at (−46, 3, 8): the curtain hangs behind the castle battlements there, and its extra light lifts the
+  beige haze where the video is dark after v1093.3.
+* **Green CO2 cloud 766.984.** `dur: 0.3, size: 2.5, drift: [35, 50, 0], glow: 0.35, life: 0.9`: 767.25–768
+  79.0 → 78.8 % (767.5 0.718 → 0.758, 767.75 0.813 → 0.779): neutral; the filmed cloud is dim olive (≈ 36 / 56 / 6),
+  our cloud at `glow` 1 is 3× too bright and a large one lingers where the video's has blown away.
+* **Piano CO2 932.385.** `glow: 2.5`: 932.5–936 42.4 → 43.8 %. Lifting the rig onto a 5 m tower (`offset:
+  [0, 2.5–4, 0]`) lost 8–10 points in the current telephoto (the plumes leave the frame at the top).
+* **Capital flames (275.8–289.7).** Flame `light` 2–3 (with or without `reach` 30, with or without the
+  authored orange glows / floods) lost 1–12 points on 275.9–289.8: the terrace-ground frames 275.9 / 277.5 gain
+  (+4 to +10) but the telephoto frames lose; the show's authored glows and floods stay the better model.
+
 ## pyro — new params
 
 | fx | param | meaning |
@@ -264,10 +327,17 @@ Measured with `scripts/similarity.mjs` (Show camera, Mac GPU, `--settle 500 --mi
 | flame / firewall | `fan`, `fanSpread` | heads per unit (1–7) spread over `fanSpread` degrees (default 50) around `angle`, for V or fan flame units. `fan: 2, fanSpread: 56, angle: 0` is the V on the wings. |
 | flame / firewall | `billow` | see "Engine behaviour" |
 | flame / firewall | `blowout` | `true` (with billow): the finale version. Adds a white-gold spark wall between the columns, a row of fireballs at the cut and a larger flash. |
-| gerb / sparkular | `colors`, `changes` | a colour sequence over the burn, e.g. `["#FFE0A0","#FF30C0","#FF7020"]`, with switch times in seconds relative to the cue (default: evenly spaced). The whole column turns at once: sparks already in flight change colour too. |
+| gerb / sparkular | `colors`, `changes` | a colour sequence over the burn, e.g. `"colors": ["#FFE0A0","#FF30C0","#FF7020"], "changes": [1.355, 2.323]`: `changes` holds the n − 1 SWITCH times in seconds relative to the cue (the first colour starts at 0 and is not listed; default: evenly spaced). Round 11: a list of n START times that begins with 0 (`[0, 1.355, 2.323]`) is read the same way (the leading 0 is dropped) instead of switching to the second colour at once. The whole column turns at once: sparks already in flight change colour too. |
 | gerb | `smoke` | 0..3: a self-lit smoke column per unit (the obelisk capitals) |
 | gerb | `fan`, `fanSpread` | (round 9) heads per unit (1–7) spread over `fanSpread` degrees (default 70) around `angle`, the heads sharing the unit's sparks (÷ √fan): multi-armed gerb fans such as the three-armed white trees on the lantern pillars (v1565.5–1566.9: `fan: 3, fanSpread: 70, angle: 0, spread: 4`). With `column: true` they stay bright lines from a far drone. A `fan` wall does not get the round-9 outward lean. |
 | gerb | `column` | `true` (round 7): a dense column that keeps its full light when its sparks are thinner than a pixel. Sparks under a pixel are normally drawn at (w / w_min)^1.5 of their light (a lone spark fades out at a distance); the sparks of a `column` gerb use the energy-conserving (w / w_min)^1, so a wall seen from a far drone reads as bright columns (the white wall of v1565.3–1568.8 from ~400 m; metric-neutral there while the red site glow still covers that frame). Close up nothing changes. Use it only where the video shows bright columns from far away: on every wall it over-brightens the distant walls of v1190 / v1300 (measured −17 / −7 points). |
+| gerb / sparkular | `light`, `lightColor`, `reach` | (round 11) × the row light and flash (after the soft light cap), the colour of the light / flash / row smoke / burning cloud (a colour, or a list per `colors` window), the light's reach in m. See "Round 11". |
+| gerb | `glow` | (round 11) 0–2: the lit burning cloud around the sprays at this strength from the ignition on |
+| gerb | `lean` | (round 11) degrees of outward lean of the side-section and arm units (default 12 on a tall U wall without `angle` / `fan`) |
+| flame / firewall | `light`, `reach` | (round 11) × the row light and flash (after the soft light cap), the light's reach in m |
+| burst | `light`, `lightColor` | (round 11) × the burst's flash and lights (the eruption light of `size` ≥ 2.6 also reaching √`light` × as far) and their colour |
+| waterfall | `density`, `height`, `columns` | (round 11) × the sparks; the fall height in m; discrete tube columns every `columns` m |
+| jet | `size`, `drift`, `life`, `glow` | (round 11) for `cloud: true`: × the cloud, its drift `[x,y,z]` m/s, its life in s; `glow` × the own glow of plumes and cloud |
 | jet | `count`, `radius` | several jets around each anchor (the piano tower rig), leaning slightly outward |
 | jet | `cloud` | `true`: the plumes merge into one big CO2 cloud over the middle of the rig. It glows in `color` for about 2 s (the green cloud at v767.25). |
 | burst | `type: "bengal"` | Bengal flare for any `dur` (also under 2 s: flares that hover 1.2–1.6 s). `dur` ≥ 2 without a type still means Bengal. |
