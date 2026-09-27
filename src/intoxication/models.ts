@@ -136,6 +136,8 @@ export interface XtcGains {
   sat: number;
   warmth: number;
   exp: number;
+  /** midtone lift (dilated pupils: darker parts open up, lit areas protected), PerceptionParams.lift */
+  lift: number;
   expDazzle: number;
   ls: number;
   bloom: number;
@@ -160,6 +162,11 @@ export interface XtcGains {
   sway: number;
   nSat: number;
   nExp: number;
+  /**
+   * 0..1 how far a nausea crest suppresses the warm, glowing crest look (warmth and glow x (1 - n), exposure
+   * and lift x (1 - 0.7 n)); 0 = the round-6 behaviour
+   */
+  nDamp: number;
   nTint: number;
   nWobble: number;
   nBlur: number;
@@ -170,6 +177,8 @@ export interface XtcGains {
   dSat: number;
   dContrast: number;
   dExp: number;
+  /** comedown tunnel (tired, narrowed view) */
+  dTunnel: number;
   dWarmth: number;
   dSpeed: number;
   dLag: number;
@@ -191,6 +200,7 @@ export const XTC_GAINS: Record<PerceptionStrength, XtcGains> = {
     sat: 0.12,
     warmth: 0,
     exp: 0.06,
+    lift: 0,
     expDazzle: 0.22,
     ls: 0.42,
     bloom: 0.35,
@@ -213,6 +223,7 @@ export const XTC_GAINS: Record<PerceptionStrength, XtcGains> = {
     sway: 0.08,
     nSat: 0.4,
     nExp: 0.1,
+    nDamp: 0,
     nTint: 0,
     nWobble: 0.4,
     nBlur: 0.08,
@@ -223,6 +234,7 @@ export const XTC_GAINS: Record<PerceptionStrength, XtcGains> = {
     dSat: 0.3,
     dContrast: 0.08,
     dExp: 0.1,
+    dTunnel: 0,
     dWarmth: 0,
     dSpeed: 0.15,
     dLag: 0.06,
@@ -238,12 +250,17 @@ export const XTC_GAINS: Record<PerceptionStrength, XtcGains> = {
   },
   strong: {
     sat: 0.4,
-    warmth: 0.6,
-    exp: 0.2,
+    // 0.6 -> 0.85: at 0.6 the warm cast hardly showed in the blue-white fog at the front (B/R 1.33 -> 1.28)
+    warmth: 0.85,
+    // round-7 review: a flat x1.2 turned the lit fog at the front milky; most of the lift moved into the
+    // highlight-protected midtone lift (the dark crowd scene gets about the same, a bright scene far less)
+    exp: 0.05,
+    lift: 0.15,
     expDazzle: 0.4,
     ls: 0.7,
     bloom: 0.9,
-    star: 0.7,
+    // streak energy ~20 % (0.7 lifted the lit fog field)
+    star: 0.55,
     veilBase: 0.1,
     veilDazzle: 0.9,
     glow: 0.35,
@@ -262,6 +279,7 @@ export const XTC_GAINS: Record<PerceptionStrength, XtcGains> = {
     sway: 0.15,
     nSat: 0.6,
     nExp: 0.1,
+    nDamp: 1,
     nTint: 1,
     nWobble: 0.7,
     nBlur: 0.15,
@@ -270,8 +288,9 @@ export const XTC_GAINS: Record<PerceptionStrength, XtcGains> = {
     nMuffle: 0.3,
     nAudioWobble: 0.5,
     dSat: 0.55,
-    dContrast: 0.18,
+    dContrast: 0.25,
     dExp: 0.2,
+    dTunnel: 0.15,
     dWarmth: 0.5,
     dSpeed: 0.25,
     dLag: 0.1,
@@ -313,6 +332,12 @@ export interface PercTune {
   /** star-glare tap stride factor, desktop / mobile */
   starStride: number;
   starStrideM: number;
+  /** body veil: spatial / flat weights, luma-gate width (0 = off) */
+  veilSpatial: number;
+  veilFlat: number;
+  veilGate: number;
+  /** bloom threshold drop at lightSensitivity 1 */
+  lsThreshold: number;
 }
 
 export const PERC_TUNE: Record<PerceptionStrength, PercTune> = {
@@ -337,6 +362,10 @@ export const PERC_TUNE: Record<PerceptionStrength, PercTune> = {
     afterAdd: 0.16,
     starStride: 1,
     starStrideM: 1,
+    veilSpatial: 0.75,
+    veilFlat: 0.25,
+    veilGate: 0,
+    lsThreshold: 0.72,
   },
   strong: {
     swim: 0.0075,
@@ -361,6 +390,14 @@ export const PERC_TUNE: Record<PerceptionStrength, PercTune> = {
     // glare stride 1.25 -> 1.8 desktop, 1.6 -> 2.2 mobile: streaks about 45 % longer
     starStride: 1.44,
     starStrideM: 1.375,
+    // the veil lights up what is lit: no flat frame-wide share, and it fades out below ~0.08 exposed luma so
+    // dark silhouettes in front of the lights stay dark (round-7 review: crowd p5 0 -> 40 at XTC 90)
+    veilSpatial: 0.75,
+    veilFlat: 0,
+    veilGate: 0.08,
+    // a milder bloom-threshold drop: at 0.72 the lit fog at the front (t 1243) entered the bright pass and
+    // bloom, star streaks and veil spread it into a milky field; the lights themselves still bloom
+    lsThreshold: 0.5,
   },
 };
 

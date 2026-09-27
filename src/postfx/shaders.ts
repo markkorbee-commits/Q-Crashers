@@ -337,6 +337,7 @@ uniform vec4 uPW1;       // wobble drift amplitude, frequency scale: swim, rotat
 uniform vec4 uPC0;       // chroma factor, peripheral blur factor, wobble edge compensation, -
 uniform vec4 uPC1;       // ghost x, ghost y, double vision at which the ghost mix is full, vergence term
 uniform vec4 uPC2;       // afterimage dim, afterimage add, -, -
+uniform vec4 uPV;        // body veil: spatial weight, flat (frame centre) weight, luma-gate width (0 = off), -
 uniform sampler2D tTrail;    // light trail buffer (TRAILS)
 uniform sampler2D tTrailNow; // the bright pass it was built from (same size)
 uniform vec4 uTrailSize;     // w, h, 1/w, 1/h
@@ -587,7 +588,7 @@ void main() {
   vec4 p1 = mix(uA1, uB1, side); // tunnel, saturation, contrast, exposure
   vec4 p2 = mix(uA2, uB2, side); // bloomBoost, lightSensitivity, afterimage, patternWarp
   vec4 p3 = mix(uA3, uB3, side); // hueShift, motionBlur, trails, warmth
-  vec4 p4 = mix(uA4, uB4, side); // glow, nausea tint, recede, -
+  vec4 p4 = mix(uA4, uB4, side); // glow, nausea tint, recede, midtone lift
   vec2 cp = (uv - 0.5) * vec2(aspect, 1.0);
   float r = length(cp);
 
@@ -634,6 +635,9 @@ void main() {
   // ---- exposure + energy-conserving bloom: the share that feeds the glow is taken from the pixel
   float ex = uLook.x * p1.w;
   col *= ex;
+  // ---- midtone lift (XTC, dilated pupils): darker surroundings open up, bright areas (a lit fog field,
+  // the lights themselves) are protected, so a bright scene does not turn milky
+  if (p4.w > 0.001) col *= 1.0 + p4.w * (1.0 - smoothstep(0.06, 0.45, dot(texture(tD1, suv).rgb, LUMA) * ex));
   if (uBloom.y > 0.5) {
     float bs = min(uBloom.x * (1.0 + p2.x), 1.0);
     vec2 tk = side > 0.5 ? uThr.zw : uThr.xy;
@@ -642,10 +646,12 @@ void main() {
   }
   // ---- light trails (altered side): only the persisted part of the trail buffer
   if (uTrail.x > 0.0 && side > 0.5) col += max(bicubic(tTrail, suv, uTrailSize) - bicubic(tTrailNow, suv, uTrailSize), 0.0) * uTrail.x;
-  // ---- soft glow around lit areas (XTC): blurred scene gated by its brightness, blacks stay black
+  // ---- soft glow around lit areas (XTC): blurred scene gated by its brightness, blacks stay black. Only
+  // what stands out from its wide surroundings glows (local contrast): a uniformly bright fog field does not
   if (p4.x > 0.001) {
     vec3 gl = blurLayer(suv, 1.5) * ex;
-    col += p4.x * gl * smoothstep(0.05, 0.6, dot(gl, LUMA));
+    vec3 gw = bicubic(tD3, suv, uD3Size) * ex;
+    col += p4.x * max(gl - gw, 0.0) * smoothstep(0.05, 0.6, dot(gl, LUMA));
   }
   if (uFeat.x > 0.0 && p2.y > 0.001) col += texture(tGlare, suv).rgb * (uFeat.x * p2.y);
   // ---- scene veiling glare (both sides): a lens looking into a flame wall scatters its light over the
@@ -654,8 +660,14 @@ void main() {
   if (uGlare.w > 0.0) col += bicubic(tVeil, suv, uVeilSize) * uGlare.w;
   col += uGlare.rgb;
   if (uGN > 0) col += glareHalos((suv - 0.5) * vec2(aspect, 1.0));
-  // ---- veiling glare: dilated pupils scatter every bright light over the whole picture (milky wash)
-  if (uBody.w > 0.001 && side > 0.5) col += (bicubic(tVeil, suv, uVeilSize) * 0.75 + texture(tVeil, vec2(0.5, 0.55)).rgb * 0.25) * uBody.w;
+  // ---- veiling glare: dilated pupils scatter every bright light over the whole picture (milky wash).
+  // Strong preset: no flat frame-wide share, and the scatter shows on what is lit (luma gate), so dark
+  // silhouettes stay dark instead of turning into a pink wash
+  if (uBody.w > 0.001 && side > 0.5) {
+    vec3 vl = bicubic(tVeil, suv, uVeilSize) * uPV.x + texture(tVeil, vec2(0.5, 0.55)).rgb * uPV.y;
+    if (uPV.z > 0.0) vl *= smoothstep(0.0, uPV.z, dot(texture(tD1, suv).rgb, LUMA) * ex);
+    col += vl * uBody.w;
+  }
 
   // ---- afterimages: bleached regions no longer lit show the complementary colour
   if (uFeat.y > 0.5 && p2.z > 0.001) {
@@ -675,17 +687,24 @@ void main() {
   float v2 = dot(cp, cp) / (0.25 * (aspect * aspect + 1.0));
   col *= mix(1.0, 1.0 / ((1.0 + 0.9 * v2) * (1.0 + 0.9 * v2)), uLook.y * 1.4);
 
-  // ---- grading (linear): warmth + nausea tint (luma kept), hue, saturation, moire shimmer
-  if (abs(p3.w) > 0.001 || p4.y > 0.001) {
+  // ---- grading (linear): warmth (luma kept), hue, saturation, nausea tint, moire shimmer
+  if (abs(p3.w) > 0.001) {
+    // clamp first: a pixel with a slightly negative channel has a near-zero luma, and the renormalisation
+    // would blow it up into a saturated green / magenta firefly
+    col = max(col, 0.0);
     float l0 = dot(col, LUMA);
-    vec3 k = mix(vec3(1.0), p3.w > 0.0 ? vec3(1.10, 1.02, 0.86) : vec3(0.90, 0.98, 1.12), abs(p3.w));
-    k *= mix(vec3(1.0), vec3(0.94, 1.03, 0.97), p4.y);
-    col *= k;
-    col *= l0 / max(dot(col, LUMA), 1e-6);
+    col *= mix(vec3(1.0), p3.w > 0.0 ? vec3(1.10, 1.02, 0.86) : vec3(0.90, 0.98, 1.12), abs(p3.w));
+    col *= clamp(l0 / max(dot(col, LUMA), 1e-4), 0.0, 1.5);
   }
   if (abs(p3.x) > 0.001) col = hueRotate(col, p3.x);
   float l = dot(col, LUMA);
   col = max(mix(vec3(l), col, p1.y), 0.0);
+  // nausea (XTC onset, ketamine return): a green-grey tint over the greyed picture (luma kept)
+  if (p4.y > 0.001) {
+    float l1 = dot(col, LUMA);
+    col *= mix(vec3(1.0), vec3(0.82, 1.09, 0.88), p4.y);
+    col *= clamp(l1 / max(dot(col, LUMA), 1e-4), 0.0, 1.5);
+  }
   if (p2.w > 0.001) col *= 1.0 + moire(cp) * 0.07 * p2.w * smoothstep(0.02, 0.6, l);
 
   // ---- tone map + contrast (display linear)

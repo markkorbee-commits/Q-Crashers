@@ -78,6 +78,15 @@ export interface PerceptionTune {
   /** star glare tap stride factor, desktop / mobile */
   starStride: number;
   starStrideM: number;
+  /**
+   * body veil (dilated pupils): weight of the spatial scatter and of the flat frame-centre share, and the
+   * exposed luma below which the veil fades out (0 = off: the veil also lifts dark silhouettes)
+   */
+  veilSpatial: number;
+  veilFlat: number;
+  veilGate: number;
+  /** bloom threshold drop at lightSensitivity 1 (0.72 = the threshold falls to 28 %) */
+  lsThreshold: number;
 }
 
 /**
@@ -178,6 +187,10 @@ export class PostFX {
     afterAdd: 0.16,
     starStride: 1,
     starStrideM: 1,
+    veilSpatial: 0.75,
+    veilFlat: 0.25,
+    veilGate: 0,
+    lsThreshold: 0.72,
   };
   /** scene veiling glare from the pyro (written by SceneGlare each frame); identity = amount 0 */
   readonly glare: GlareParams = {
@@ -351,6 +364,7 @@ export class PostFX {
       uPC0: v4(),
       uPC1: v4(),
       uPC2: v4(),
+      uPV: v4(),
       tTrail: tex(),
       tTrailNow: tex(),
       uTrailSize: v4(),
@@ -392,6 +406,7 @@ export class PostFX {
       glow: 0,
       tint: 0,
       recede: 0,
+      lift: 0,
       split: -1,
     };
   }
@@ -541,6 +556,7 @@ export class PostFX {
     if (p.blur > 0.001 || p.tunnel > 0.001) fx.push('blur');
     if (p.glow > 0.003) fx.push('glow');
     if (p.recede > 0.003) fx.push('recede');
+    if (p.lift > 0.003) fx.push('lift');
     if (Math.abs(p.warmth) > 0.003 || p.tint > 0.003) fx.push('tint');
     if (this.dofActive(this.last.camera)) fx.push('dof');
     if (this.motionBlurActive()) fx.push('motionblur');
@@ -629,7 +645,7 @@ export class PostFX {
     const ls = clamp(p.lightSensitivity, 0, 1);
     const thA = this.bloomThreshold * (1 - gt.threshold * G);
     const knA = this.bloomKnee;
-    const thB = thA * (1 - 0.72 * ls);
+    const thB = thA * (1 - this.percTune.lsThreshold * ls);
     const knB = knA * (1 + 0.6 * ls);
     const step = Math.max(dt, 1 / 240);
 
@@ -866,6 +882,7 @@ export class PostFX {
     (u.uPC0.value as THREE.Vector4).set(pt.chroma, pt.periph, pt.edge, 0);
     (u.uPC1.value as THREE.Vector4).set(pt.ghostX, pt.ghostY, Math.max(0.05, pt.ghostFull), pt.vergence);
     (u.uPC2.value as THREE.Vector4).set(pt.afterDim, pt.afterAdd, 0, 0);
+    (u.uPV.value as THREE.Vector4).set(pt.veilSpatial, pt.veilFlat, pt.veilGate, 0);
     u.tTrail.value = trailTex;
     u.tTrailNow.value = trailNow;
     {
@@ -1064,7 +1081,7 @@ function packParams(p: PerceptionParams, u0: THREE.Vector4, u1: THREE.Vector4, u
   u1.set(clamp(p.tunnel, 0, 1), clamp(p.saturation, 0, 3), clamp(p.contrast, 0.3, 2), clamp(p.exposure, 0, 8));
   u2.set(Math.max(0, p.bloomBoost), clamp(p.lightSensitivity, 0, 1), clamp(p.afterimage, 0, 1), clamp(p.patternWarp, 0, 1));
   u3.set(p.hueShift, clamp(p.motionBlur, 0, 1), clamp(p.trails, 0, 0.97), clamp(p.warmth, -1, 1));
-  u4.set(clamp(p.glow, 0, 1), clamp(p.tint, 0, 1), clamp(p.recede, 0, 1), 0);
+  u4.set(clamp(p.glow, 0, 1), clamp(p.tint, 0, 1), clamp(p.recede, 0, 1), clamp(p.lift, 0, 1));
 }
 
 /** Lottes tone curve constants: returns (a, d, b, c) for x^a / (x^(a*d) * b + c) */

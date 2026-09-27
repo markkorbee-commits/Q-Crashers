@@ -95,6 +95,7 @@ const KEYS = [
   'glow',
   'tint',
   'recede',
+  'lift',
 ] as const satisfies readonly (keyof PerceptionParams)[];
 
 const MOTOR_KEYS = ['sway', 'inputLag', 'balance', 'lookJitter', 'speedScale'] as const;
@@ -1406,7 +1407,7 @@ function resetParams(t: PerceptionParams): void {
   t.blur = t.doubleVision = t.chroma = t.wobble = t.tunnel = 0;
   t.saturation = t.contrast = t.exposure = 1;
   t.bloomBoost = t.lightSensitivity = t.trails = t.afterimage = t.patternWarp = t.hueShift = t.motionBlur = 0;
-  t.warmth = t.glow = t.tint = t.recede = 0;
+  t.warmth = t.glow = t.tint = t.recede = t.lift = 0;
 }
 
 function resetMotor(m: MotorEffects): void {
@@ -1454,12 +1455,16 @@ function alcoholMotor(m: MotorEffects, bac: number, F: AlcoholFx): void {
  */
 function xtcVisual(t: PerceptionParams, m: MotorEffects, x: number, drained: number, nausea: number, dazzle: number, G: XtcGains, rf: boolean): void {
   if (x > 0.001) {
+    // a nausea crest greys out the warm, glowing crest look (strong preset: nDamp 1)
+    const nWarm = 1 - G.nDamp * nausea;
+    const nExp = 1 - 0.7 * G.nDamp * nausea;
     t.saturation *= 1 + G.sat * x;
-    t.warmth += G.warmth * x;
-    t.exposure *= 1 + G.exp * x + G.expDazzle * x * dazzle * (rf ? 0.5 : 1);
+    t.warmth += G.warmth * x * nWarm;
+    t.exposure *= 1 + G.exp * x * nExp + G.expDazzle * x * dazzle * (rf ? 0.5 : 1);
+    t.lift = Math.max(t.lift, G.lift * x * nExp);
     t.lightSensitivity = Math.max(t.lightSensitivity, G.ls * x);
     t.bloomBoost += G.bloom * x;
-    t.glow = Math.max(t.glow, G.glow * x);
+    t.glow = Math.max(t.glow, G.glow * x * nWarm);
     t.trails = Math.max(t.trails, G.trails * x);
     t.afterimage = Math.max(t.afterimage, G.after * x);
     // decreased visual acuity (a clinical sign) and a little colour fringing: soft, not glamorous
@@ -1482,6 +1487,7 @@ function xtcVisual(t: PerceptionParams, m: MotorEffects, x: number, drained: num
     t.saturation *= 1 - G.dSat * drained;
     t.contrast *= 1 - G.dContrast * drained;
     t.exposure *= 1 - G.dExp * drained;
+    t.tunnel = Math.max(t.tunnel, G.dTunnel * drained);
     t.warmth -= G.dWarmth * drained;
     m.speedScale *= 1 - G.dSpeed * drained;
     m.inputLag += G.dLag * drained;

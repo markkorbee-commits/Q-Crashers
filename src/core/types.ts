@@ -181,6 +181,11 @@ export interface PerceptionParams {
   tint: number;
   /** 0..1 the world recedes: the picture shrinks towards the centre into a dark surround (ketamine) */
   recede: number;
+  /**
+   * 0..1 midtone lift (XTC, dilated pupils): exposure gain on the darker parts of the picture; lit areas
+   * (a bright fog field, the lights) are protected, so it never turns a bright scene milky; 0 = normal
+   */
+  lift: number;
   /** <0 = off; otherwise screen x (0..1) of the compare split: left of it sober, right altered */
   split: number;
 }
