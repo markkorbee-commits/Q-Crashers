@@ -241,6 +241,10 @@ step 2.2 per 40 ms at 802.84 with the other light systems off; 3.6 in one frame 
 the tightest laser change in 802.7–805 is 0.5 s apart (well under 3 Hz).
 
 **Calibration hooks** added to `LaserSystem.tune`: `webGlow`, `webFade`, `webEdge` (see the code comment).
+Cost at v804.2 with the proposed web (12 units × 10 lines + 12 wedge sprites): lasers CPU 0.054 → 0.066 ms,
+3 draw calls as before, +2.3 k triangles; mobile budget PASS (90–100 / 110 calls). If the stage engineer ever
+registers wall-walk housings in `laser_stage`, the rig's classifier would file them as `tower` / `corner` next
+to the fixed rampart list: classify Y < 12 with 37 < \|x\| < 89 as `rampart` then and drop the list.
 
 ### Round 9 cue proposals (measured in-page against the exact-time frames; not applied, the show group owns the cues)
 
@@ -251,7 +255,7 @@ moments 798–839.25: 63.8 → 66.7 % (calibrated 28.8 → 34.5).
 | cue | change | effect |
 |---|---|---|
 | 803.734 zigzag (blue web) | target `front_line`, `count` 10, `spread` 80, `height` 13 | 804.0 58.4 → 65.6, 804.25 65.0 → 71.3, 804.5 64.9 → 71.8, 804.75 52.2 → 58.7 |
-| 804.3 trees | target `towers`, `height` 18, `spread` 32: v804.38 shows ~8 tents over the castle (bases at the wall walk, frame y 0.69; apexes at 0.55, ~16 m up), while the side units keep the web's wedges | not on a 4 fps frame; checked on the 25 fps frame v804.38 |
+| 804.3 trees | target `castle` (the 8 castle wall-walk units; the lasers' `towers` token is the same set, but in lights `towers` means the delay towers), `height` 18, `spread` 32: v804.38 shows ~8 tents over the castle (bases at the wall walk, frame y 0.69; apexes at 0.55, ~16 m up), while the side units keep the web's wedges | not on a 4 fps frame; checked on the 25 fps frame v804.38 |
 | 797.921 zigzag (violet web) | target `front_line` | 798.0 66.3 → 68.0, 798.5 53.4 → 56.3 |
 | new 802.796, dur 0.563 (to the half beat 803.359) | `{fx:'look', target:'front_line', p:{preset:'sky', color:'white', count:10, spread:80, splay:50, tilt:84, reach:45, speed:0.25, intensity:1, fade:0.05}}`: the white fans along the whole front (v802.82–803.38); it starts after the 798.859 `off` (latest start wins) | 803.0 73.2 → 75.5, 803.25 56.7 → 60.8, 802.75 / 803.5 unchanged |
 | 838.046 zigzag (violet web) | target `front_line`, `height` 13, but only together with a refit of the 837.964 camera shot (camera group): the shot `pos [0,5,165]`, fov 30 is not the terrace tripod of the video (its near lanterns stand at frame x 0.10 / 0.91 and the V bottoms at y 0.71); with the current pose the retarget costs 838.25 66.0 → 63.8, 838.75 69.2 → 66.1, 839.25 67.8 → 64.6 | — |
