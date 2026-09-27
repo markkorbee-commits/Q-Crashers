@@ -3724,9 +3724,98 @@ ul.fx.links a {
 .gate .note {
   margin-top: 10px;
 }
+.gate-opt small.gate-x {
+  color: var(--dim);
+}
+/* opened again via 'Change': the saved choice is marked */
+.gate-opt .gate-cur {
+  align-self: flex-start;
+  margin: -2px 0 2px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--line-2);
+  font: 600 9.5px/1.2 var(--font-ui);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--paper-2);
+}
+.gate-opt.full.current {
+  border-color: rgba(255, 60, 30, 0.5);
+}
+.gate .gate-more .gm-short {
+  display: none;
+}
 @media (max-width: 560px) {
   .gate-choices {
     grid-template-columns: 1fr;
+  }
+}
+/* phones held landscape (the recommended orientation): the whole warning fits without scrolling */
+@media (max-height: 460px) {
+  .scrim.gate-scrim {
+    padding-top: calc(8px + var(--sa-t));
+    padding-bottom: calc(8px + var(--sa-b));
+  }
+  .card.gate {
+    width: min(640px, 100%);
+    padding: 14px 18px 12px;
+  }
+  .gate .gate-kicker .ico {
+    width: 18px;
+    height: 18px;
+  }
+  .gate h3 {
+    font-size: 22px;
+    margin: 4px 0 4px;
+  }
+  .gate .gate-lead {
+    font-size: 13.5px;
+    line-height: 1.4;
+    margin-bottom: 4px;
+  }
+  .gate .gate-more {
+    font-size: 12px;
+    line-height: 1.35;
+    margin-bottom: 0;
+  }
+  .gate .gate-more .gm-long {
+    display: none;
+  }
+  .gate .gate-more .gm-short {
+    display: inline;
+  }
+  .gate-choices {
+    grid-template-columns: 1fr 1fr;
+    margin-top: 10px;
+    gap: 8px;
+  }
+  .gate-opt {
+    padding: 9px 10px;
+    gap: 10px;
+  }
+  .gate-opt .gi .ico {
+    width: 20px;
+    height: 20px;
+  }
+  .gate-opt small {
+    font-size: 11.5px;
+    line-height: 1.3;
+  }
+  /* the reduce-motion switch and the 'remembered' note share one line */
+  .gate-motion {
+    display: inline-flex;
+    flex-wrap: nowrap;
+    margin: 8px 16px 0 0;
+    vertical-align: middle;
+  }
+  .gate-motion small {
+    display: none;
+  }
+  .gate .note {
+    display: inline-flex;
+    margin: 8px 0 0;
+    vertical-align: middle;
+    font-size: 11.5px;
   }
 }
 .landing .flashing-btn {
@@ -3763,6 +3852,17 @@ ul.fx.links a {
 .fl-opt.on {
   background: var(--paper);
   color: var(--ink);
+}
+/* touch: a thumb-sized target */
+#ui.touch .fl-opt {
+  min-height: 38px;
+  padding: 4px 16px;
+}
+@media (pointer: coarse) {
+  .fl-opt {
+    min-height: 38px;
+    padding: 4px 16px;
+  }
 }
 .fl-opt:not(.on):hover {
   color: var(--paper);
@@ -3802,6 +3902,25 @@ html.vcmp-on #ui .toolbar.cmp-tight .sep {
 html.vcmp-on #ui .toolbar {
   max-width: calc(100% - 16px);
 }
+/* desktop side by side: the show bar spans both pictures in the band below them (it covers neither;
+   Compare.layout keeps that band free) instead of being squeezed into the render column */
+html.vcmp-sbw #ui .showbar {
+  position: fixed;
+  left: var(--vc-bx);
+  width: var(--vc-bw);
+  transform: none;
+}
+html.vcmp-sbw #ui .showbar.away {
+  transform: translateY(24px);
+}
+/* the half-width interface: the Help key list in two columns */
+html.vcmp-side #ui .legend.full {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+/* the perception outcome card stays in the render region like the other cards (not under the video) */
+html.vcmp-on #ui .p-outcome {
+  position: absolute;
+}
 /* touch, side by side: the left half is the video, so the thumb joystick (left half) cannot start there */
 html.vcmp-side .tc-joy,
 html.vcmp-side .tc-hint-move {
@@ -3818,7 +3937,8 @@ html.vcmp-on .tc-portrait {
   flex-direction: column;
   padding: 0;
   overflow: hidden;
-  border-radius: 12px;
+  /* only the title bar is rounded: the player's own corners are never clipped */
+  border-radius: 12px 12px 0 0;
   pointer-events: auto;
 }
 .vcmp.show {
@@ -3904,6 +4024,9 @@ html.vcmp-on .tc-portrait {
   padding: 0 10px;
   font-size: 11px;
 }
+.vcmp .vcmp-cam[hidden] {
+  display: none;
+}
 .vcmp .vcmp-cam .ico {
   width: 15px;
   height: 15px;
@@ -3963,6 +4086,9 @@ html.vcmp-on .tc-portrait {
   font-size: 12px;
   color: var(--muted);
 }
+a.btn {
+  text-decoration: none;
+}
 .vcmp-msg-actions {
   display: flex;
   flex-wrap: wrap;
@@ -3989,4 +4115,12 @@ html.vcmp-on .tc-portrait {
   .vcmp .vcmp-drift {
     display: none;
   }
+}
+
+/* "Reduce flashing is on: open the official video?" */
+.card.cmp-confirm {
+  width: min(500px, 100%);
+}
+.card.cmp-confirm .actions {
+  margin-top: 16px;
 }

@@ -7,7 +7,7 @@ import { debugState } from '../debug/debugState';
 import { AudioFlow } from './AudioFlow';
 import { BarMenu } from './BarMenu';
 import { VideoCompare } from './Compare';
-import { openEnded, openHelp, openOnboarding, openPhotoGate } from './Cards';
+import { flashingToast, openEnded, openHelp, openOnboarding, openPhotoGate } from './Cards';
 import { CAMERA_MODES, cameraRig, player, tryCall, type CameraLike, type CamMode } from './contracts';
 import { h, isTypingTarget, store } from './dom';
 import { installGrain } from './grain';
@@ -231,12 +231,14 @@ export class UI {
       if (app.params.has('play')) void this.play();
       return;
     }
-    this.landing?.setReady();
+    // a card opened over the title while loading (the photosensitivity 'Change') keeps the focus
+    this.landing?.setReady(!this.layers.anyOpen);
   }
 
   /** ENTER THE HOLY GROUNDS (user gesture) */
   private async enter(): Promise<void> {
-    if (!this.app.ready || this.entered) return;
+    // (Enter on the title's button while the warning card is open over it must not walk past it)
+    if (!this.app.ready || this.entered || this.layers.isOpen('photogate')) return;
     const btn = this.landing?.enterBtn;
     if (btn) btn.disabled = true;
     this.app.audio.ensure();
@@ -272,11 +274,13 @@ export class UI {
     return prefs.reduceFlashing ? 'reduced' : 'full';
   }
 
-  /** "Change" on the landing: the warning card again, without entering */
+  /** "Change" on the landing: the warning card again, without entering (Escape keeps the saved choice) */
   private async changeFlashing(): Promise<void> {
     if (this.layers.isOpen('photogate')) return;
-    await openPhotoGate(this);
+    const before = prefs.reduceFlashing;
+    const reduce = await openPhotoGate(this, { current: before });
     this.landing?.setFlashNote(this.flashNote());
+    if (reduce !== before) flashingToast(this, reduce);
     const btn = this.landing?.enterBtn;
     if (btn && !btn.disabled) btn.focus({ preventScroll: true });
   }
@@ -318,6 +322,9 @@ export class UI {
     if (save) savePref('reduceFlashing', on);
     else prefs.reduceFlashing = on;
     (this.app as unknown as { reduceFlashing?: boolean }).reduceFlashing = on;
+    // the official video in the compare pane cannot be damped: switching to Reduced closes it
+    // (the compare does not exist yet when the constructor applies the stored choice)
+    (this.compare as VideoCompare | undefined)?.onReduceFlashing(on);
   }
 
   // ---------------------------------------------------------------------------------------

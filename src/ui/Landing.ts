@@ -102,10 +102,11 @@ export class Landing {
     this.el.querySelector('.loader')?.setAttribute('aria-valuenow', String(Math.round(v * 100)));
   }
 
-  setReady(): void {
+  /** loading finished: ENTER is enabled (and focused, unless a card over the title holds the focus) */
+  setReady(focus = true): void {
     this.setProgress('Ready', 1);
     this.enterBtn.disabled = false;
-    this.enterBtn.focus({ preventScroll: true });
+    if (focus) this.enterBtn.focus({ preventScroll: true });
   }
 
   hide(): void {

@@ -8,23 +8,46 @@ declare global {
 }
 
 let apiPromise: Promise<any> | null = null;
+/**
+ * Loads the IFrame API once. A failed attempt (script error, blocked, 15 s timeout) is forgotten, so
+ * the next call (the compare pane's 'Try again') makes a fresh request instead of re-using the
+ * rejected promise.
+ */
 function loadApi(): Promise<any> {
   if (window.YT?.Player) return Promise.resolve(window.YT);
   if (apiPromise) return apiPromise;
-  apiPromise = new Promise((resolve, reject) => {
+  const attempt: Promise<any> = new Promise((resolve, reject) => {
     const prev = window.onYouTubeIframeAPIReady;
-    window.onYouTubeIframeAPIReady = () => {
+    const s = document.createElement('script');
+    let settled = false;
+    const fail = (msg: string) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (apiPromise === attempt) apiPromise = null;
+      s.remove();
+      if (window.onYouTubeIframeAPIReady === ready) window.onYouTubeIframeAPIReady = prev;
+      // a half-loaded API (YT.loading set, widget script missing) would make the next iframe_api
+      // skip loading the widget script: start clean
+      if (window.YT && !window.YT.Player) window.YT = undefined;
+      reject(new Error(msg));
+    };
+    const ready = () => {
       prev?.();
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       resolve(window.YT);
     };
-    const s = document.createElement('script');
+    window.onYouTubeIframeAPIReady = ready;
+    const timer = setTimeout(() => fail('YouTube IFrame API timeout'), 15000);
     s.src = 'https://www.youtube.com/iframe_api';
     s.async = true;
-    s.onerror = () => reject(new Error('YouTube IFrame API could not be loaded'));
+    s.onerror = () => fail('YouTube IFrame API could not be loaded');
     document.head.appendChild(s);
-    setTimeout(() => reject(new Error('YouTube IFrame API timeout')), 15000);
   });
-  return apiPromise;
+  apiPromise = attempt;
+  return attempt;
 }
 
 /**
@@ -66,6 +89,15 @@ export class YouTubeTrack implements AudioTrack {
 
   get isReady(): boolean {
     return this.ready;
+  }
+
+  /** the player's <iframe> (null before the player exists) */
+  get iframe(): HTMLIFrameElement | null {
+    try {
+      return (this.player?.getIframe?.() as HTMLIFrameElement | undefined) ?? null;
+    } catch {
+      return null;
+    }
   }
 
   /** the video's own clock (s), without the offset; 0 before the player is ready */

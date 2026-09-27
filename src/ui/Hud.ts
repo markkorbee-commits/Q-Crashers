@@ -227,9 +227,12 @@ export class Hud {
   /** on very narrow screens and on touch devices the segmented camera control collapses into one button (camera sheet) */
   private updateNarrow() {
     const w = this.showbar.parentElement?.clientWidth || window.innerWidth;
-    // the half-width interface of the video compare has no room for the five camera buttons either
-    const cmp = document.documentElement.classList.contains('vcmp-on');
-    const narrow = w <= (cmp ? 900 : 480) || this.touch;
+    // the half-width interface of the video compare has no room for the five camera buttons either;
+    // desktop side by side the show bar spans both pictures (its own width counts, not the column's)
+    const root = document.documentElement.classList;
+    const cmp = root.contains('vcmp-on');
+    const sbw = root.contains('vcmp-sbw') ? this.showbar.offsetWidth + 28 : 0;
+    const narrow = (sbw ? sbw <= 900 : w <= (cmp ? 900 : 480)) || this.touch;
     this.camBtn.style.display = narrow ? '' : 'none';
     toggleClass(this.seg, 'cmp-narrow', narrow && cmp);
     toggleClass(this.toolbar, 'cmp-tight', cmp && w < 640);

@@ -513,6 +513,11 @@ export class App {
   private boxW = 0;
   private boxH = 0;
   private boxDirty = false;
+  /**
+   * CSS px height of the picture (the canvas box: the whole window, or its part of the video-compare
+   * split). Pixel-size uniforms (minimum line widths) should use this, not window.innerHeight.
+   */
+  viewHeight = typeof window !== 'undefined' ? window.innerHeight : 720;
 
   /**
    * Size the drawing buffer and the post chain to the canvas's CSS box: the whole window, or its part
@@ -529,6 +534,7 @@ export class App {
     this.boxDirty = false;
     const w = this.boxW || window.innerWidth;
     const h = this.boxH || window.innerHeight;
+    this.viewHeight = h;
     this.lastScale = this.governor.scale;
     const offscreen = this.offscreenScene;
     const pr = Math.min(window.devicePixelRatio || 1, this.quality.maxPixelRatio) * this.quality.renderScale * (offscreen ? 1 : this.governor.scale);

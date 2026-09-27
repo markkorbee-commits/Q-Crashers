@@ -137,20 +137,31 @@ function switchRow(label: string, checked: boolean, onChange: (on: boolean) => v
   return h('label', { class: 'sw' }, h('span', { class: 'sw-l' }, label), h('span', { class: 'switch' }, input, h('i')));
 }
 
+/** the one exception to "Reduce flashing" (the compare view embeds the official video as published) */
+const COMPARE_NOTE = 'The official video in Compare (B) is shown as published.';
+
+/** the toast that confirms a flashing choice */
+export function flashingToast(ui: UI, reduce: boolean): void {
+  ui.toast(reduce ? 'Flashing reduced — strobes, blinders and flashes are damped' : 'Flashing: full effects', 2200, 'warning');
+}
+
 /**
  * Photosensitivity + comfort block (Help, Quality): the flashing-lights warning with a small
  * "Flashing: Reduced / Full" toggle and the "Reduce motion" switch.
+ * The toggle follows the WAI-ARIA radio-group pattern: one Tab stop (the checked option), the
+ * arrow keys / Home / End move to the other option and select it.
  */
 export function flashingToggle(ui: UI, compact = false): HTMLElement {
   const seg = h('span', { class: 'fl-seg', role: 'radiogroup', 'aria-label': 'Flashing' });
+  const choose = (reduce: boolean) => {
+    if (prefs.reduceFlashing === reduce) return;
+    ui.setReduceFlashing(reduce);
+    sync();
+    flashingToast(ui, reduce);
+  };
   const opt = (reduce: boolean, label: string) => {
     const b = h('button', { class: 'fl-opt', type: 'button', role: 'radio' }, label);
-    b.addEventListener('click', () => {
-      if (prefs.reduceFlashing === reduce) return;
-      ui.setReduceFlashing(reduce);
-      sync();
-      ui.toast(reduce ? 'Flashing reduced — strobes, blinders and flashes are damped' : 'Flashing: full effects', 2200, 'warning');
-    });
+    b.addEventListener('click', () => choose(reduce));
     seg.appendChild(b);
     return b;
   };
@@ -163,8 +174,21 @@ export function flashingToggle(ui: UI, compact = false): HTMLElement {
     ] as const) {
       b.classList.toggle('on', on);
       b.setAttribute('aria-checked', String(on));
+      b.tabIndex = on ? 0 : -1;
     }
   };
+  seg.addEventListener('keydown', (e) => {
+    // two options: every arrow moves to the other one; Home = the first (Reduced), End = the last (Full)
+    let reduce: boolean;
+    if (e.key === 'Home') reduce = true;
+    else if (e.key === 'End') reduce = false;
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') reduce = !prefs.reduceFlashing;
+    else return;
+    e.preventDefault();
+    e.stopPropagation();
+    choose(reduce);
+    (reduce ? reduced : full).focus();
+  });
   sync();
   const flash = h('span', { class: 'sw fl-row' }, h('span', { class: 'sw-l' }, 'Flashing'), seg);
   const motion = switchRow('Reduce motion', ui.reduceMotion, (on) => {
@@ -175,20 +199,36 @@ export function flashingToggle(ui: UI, compact = false): HTMLElement {
     'div',
     { class: `safety${compact ? ' compact' : ''}` },
     h('span', { class: 'si', html: icon('warning') }),
-    h('span', { class: 'st' }, h('b', null, 'Contains flashing lights, strobes and bright pyrotechnics.'), h('small', null, 'Reduced damps strobes, blinders and pyro / firework flashes. Reduce motion removes head bob, sway and camera shake.')),
+    h('span', { class: 'st' }, h('b', null, 'Contains flashing lights, strobes and bright pyrotechnics.'), h('small', null, `Reduced damps strobes, blinders and pyro / firework flashes.${IS_ARTIFACT ? '' : ` ${COMPARE_NOTE}`} Reduce motion removes head bob, sway and camera shake.`)),
     h('span', { class: 'sw-group' }, flash, motion),
   );
+}
+
+/** the full-effects choice ignores clicks this soon after the warning opened (ms): a double click / tap on ENTER */
+const GATE_ARM_MS = 600;
+
+export interface PhotoGateOpts {
+  /**
+   * The saved choice when the warning is opened again ('Change' on the title screen): that option is
+   * marked as current, and Escape / a click outside keep it. Omitted on the first run, where they pick
+   * the safe choice.
+   */
+  current?: boolean;
 }
 
 /**
  * Photosensitivity warning, shown once before the show is seen (first ENTER on this device; `?calm`
  * skips it, `?autostart` never shows it). Two choices plus the reduce-motion switch; the choice is
- * saved (`dq26.reduceFlashing`). Escape, a click outside and closing all pick the safe choice.
+ * saved (`dq26.reduceFlashing`). On the first run Escape, a click outside and closing all pick the
+ * safe choice. The card opens under the pointer that clicked ENTER, so "Continue with full effects"
+ * is armed only after GATE_ARM_MS and never takes the second click of a double click; "Reduce
+ * flashing" acts at once (also the autofocused keyboard default).
  * Resolves with true when flashing is reduced.
  */
-export function openPhotoGate(ui: UI): Promise<boolean> {
+export function openPhotoGate(ui: UI, opts: PhotoGateOpts = {}): Promise<boolean> {
   return new Promise((resolve) => {
     let done = false;
+    const reopen = opts.current !== undefined;
     const finish = (reduce: boolean) => {
       if (done) return;
       done = true;
@@ -196,9 +236,21 @@ export function openPhotoGate(ui: UI): Promise<boolean> {
       ui.layers.close('photogate', true);
       resolve(reduce);
     };
-    const choice = (reduce: boolean, ico: string, title: string, sub: string) => {
-      const b = h('button', { class: `gate-opt ${reduce ? 'safe' : 'full'}`, type: 'button', autofocus: reduce || undefined }, h('span', { class: 'gi', html: icon(ico) }), h('span', { class: 'gt' }, h('b', null, title), h('small', null, sub)));
-      b.addEventListener('click', () => finish(reduce));
+    let openedAt = performance.now();
+    const choice = (reduce: boolean, ico: string, title: string, sub: string, extra?: string) => {
+      const isCurrent = reopen && opts.current === reduce;
+      const b = h(
+        'button',
+        { class: `gate-opt ${reduce ? 'safe' : 'full'}${isCurrent ? ' current' : ''}`, type: 'button', autofocus: (reopen ? isCurrent : reduce) || undefined, 'aria-pressed': reopen ? String(isCurrent) : undefined },
+        h('span', { class: 'gi', html: icon(ico) }),
+        h('span', { class: 'gt' }, isCurrent ? h('span', { class: 'gate-cur' }, 'Current') : null, h('b', null, title), h('small', null, sub), extra ? h('small', { class: 'gate-x' }, extra) : null),
+      );
+      b.addEventListener('click', (e) => {
+        // the unsafe choice needs a deliberate click: not the 2nd click of a double click, not a
+        // click that arrives right after the card opened under the pointer (touch double tap)
+        if (!reduce && (e.detail > 1 || performance.now() - openedAt < GATE_ARM_MS)) return;
+        finish(reduce);
+      });
       return b;
     };
     const motion = switchRow('Reduce motion', ui.reduceMotion, (on) => ui.setReduceMotion(on));
@@ -214,18 +266,25 @@ export function openPhotoGate(ui: UI): Promise<boolean> {
         h('b', null, 'flashing lights, strobe effects and bright pyrotechnics and fireworks'),
         ' that may trigger seizures in people with photosensitive epilepsy.',
       ),
-      h('p', { class: 'small muted' }, 'If you, or anyone watching with you, has epilepsy or has had a seizure, choose Reduce flashing. Stop and look away at once if you feel dizzy or disoriented, notice altered vision, or eye or muscle twitching.'),
+      h(
+        'p',
+        { class: 'small muted gate-more' },
+        h('span', { class: 'gm-long' }, 'If you, or anyone watching with you, has epilepsy or has had a seizure, choose Reduce flashing. Stop and look away at once if you feel dizzy or disoriented, notice altered vision, or eye or muscle twitching.'),
+        h('span', { class: 'gm-short' }, 'Epilepsy or a past seizure (you or anyone watching)? Choose Reduce flashing. Look away at once if you feel unwell.'),
+      ),
       h(
         'div',
         { class: 'gate-choices' },
-        choice(true, 'shield', 'Reduce flashing', 'Strobes, blinders and pyro / firework flashes are damped'),
+        choice(true, 'shield', 'Reduce flashing', 'Strobes, blinders and pyro / firework flashes are damped', IS_ARTIFACT ? undefined : 'Except the official video in Compare'),
         choice(false, 'bolt', 'Continue with full effects', 'Every strobe and flash, as in the official video'),
       ),
       h('div', { class: 'gate-motion' }, motion, h('small', null, 'No head bob, sway or camera shake')),
       h('p', { class: 'note', html: `${icon('info')}<span>Remembered on this device. Change it any time under Help (?) or Quality.</span>` }),
     );
-    // Escape / a click on the scrim close the card: that is the safe choice
-    ui.layers.open('photogate', card, { kind: 'modal', scrimClass: 'gate-scrim', onClose: () => finish(true) });
+    // Escape / a click on the scrim close the card: the safe choice on the first run, the saved one
+    // when it was opened again only to look
+    openedAt = performance.now();
+    ui.layers.open('photogate', card, { kind: 'modal', scrimClass: 'gate-scrim', onClose: () => finish(reopen ? !!opts.current : true) });
     card.setAttribute('role', 'alertdialog');
   });
 }
