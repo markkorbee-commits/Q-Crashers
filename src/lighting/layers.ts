@@ -80,11 +80,15 @@ function dynAttr(geo: THREE.InstancedBufferGeometry, name: string, cap: number):
   return a;
 }
 
-/** shared uniforms (noise, time, pixel angle) */
+/** shared uniforms (noise, time, pixel angle, the low fog lying on the deck / field) */
 export interface SharedUniforms {
   tNoise: { value: THREE.Data3DTexture | null };
   uTime: { value: number };
   uPixelAngle: { value: number };
+  /** low fog (`fog.lowfog`) density per zone: x deck, y near field, z far field; w = beam in-scatter gain in it */
+  uLowFog: { value: THREE.Vector4 };
+  /** albedo tint of the low fog (max channel 1, leaned to white) */
+  uLowFogTint: { value: THREE.Color };
 }
 
 // ------------------------------------------------------------------------------------------ beams
@@ -591,15 +595,20 @@ export const FB_BOOTH = 7;
 export const FB_BACK_WIDE = 8;
 /** the lit air around the performers on the deck, seen by a close-up camera on / at the deck */
 export const FB_DECK = 9;
-/** (FLOOD_FRAG sizes its uniform arrays to this) */
-export const FLOOD_BLOBS = 10;
+/**
+ * round 8: the low fog bank lit by the beams that pass through it (a flat layer over the deck / field; centre and
+ * size follow the lit part of the bank every frame)
+ */
+export const FB_LOWFOG = 10;
+/** (FLOOD_FRAG sizes its uniform arrays to this: keep them equal) */
+export const FLOOD_BLOBS = 11;
 /**
  * near edges (m) of the pre-slices in which only the local blobs glow (two, so a performer 2–3 m in front
  * of a close-up camera occludes the lit haze behind him and only carries the thin veil in front of him)
  */
 const FLOOD_PRE = [1.2, 3.2];
 /** per blob: share of its glow in the near pre-slice (only the lamps aimed at the lens: backlight, booth) */
-const FLOOD_NEAR = [0, 0, 0, 0, 0, 0, 1, 0.6, 1, 1];
+const FLOOD_NEAR = [0, 0, 0, 0, 0, 0, 1, 0.6, 1, 1, 0];
 
 /**
  * Light floods and dense lit haze ("the whole frame glows pink / red / teal / blue"): an analytic
@@ -653,6 +662,9 @@ export class FloodGlow {
     sig[FB_DECK] = S(18, 3.2, 8);
     centres[FB_BOOTH] = C(0, 3.2, -4, 1);
     sig[FB_BOOTH] = S(3.5, 2.5, 3.5);
+    // (moved per frame by LightingSystem to the lit part of the bank)
+    centres[FB_LOWFOG] = C(0, 1, 14, 1);
+    sig[FB_LOWFOG] = S(30, 1.4, 14);
     this.material = new THREE.ShaderMaterial({
       name: 'FloodGlow',
       vertexShader: FLOOD_VERT,

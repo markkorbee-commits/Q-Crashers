@@ -9,6 +9,26 @@ uniform sampler3D tNoise;
 uniform float uTime;
 `;
 
+/**
+ * Low fog (`fog.lowfog`, round 8): the smoke-machine bank on the deck and the field as a density field the beams
+ * pass through. Zones along Z follow FogSystem.lowfog's regions: the deck (Z −19…0, the fog on the deck surface
+ * Y 1.9, top ~3.2 m), the near field (Z 0…50, where the bank spills out, top ~2.2 m) and the far field (Z 50…160).
+ * Density 0..~1.5 of the zone at p (x its height / width fall-off).
+ */
+const LOWFOG_DECL = /* glsl */ `
+uniform vec4 uLowFog;     // zone density: x deck, y near field, z far field; w = in-scatter gain
+uniform vec3 uLowFogTint; // fog albedo (max 1)
+float lowFogAt(vec3 p) {
+  float zDeck = smoothstep(-21.0, -16.0, p.z) * (1.0 - smoothstep(-1.5, 1.5, p.z));
+  float zNear = smoothstep(-1.5, 1.5, p.z) * (1.0 - smoothstep(40.0, 60.0, p.z));
+  float zFar = smoothstep(28.0, 52.0, p.z) * (1.0 - smoothstep(140.0, 170.0, p.z));
+  float top = mix(2.2, 3.2, zDeck);
+  float v = 1.0 - smoothstep(top - 1.2, top + 0.9, p.y);
+  float w = 1.0 - smoothstep(36.0, 50.0, abs(p.x));
+  return (uLowFog.x * zDeck + max(uLowFog.y * zNear, uLowFog.z * zFar)) * v * w;
+}
+`;
+
 // ------------------------------------------------------------------------------------ beams
 export const BEAM_VERT = /* glsl */ `
 attribute vec4 iPos;   // xyz lens position, w = lens radius (m)
@@ -64,6 +84,7 @@ void main() {
 
 export const BEAM_FRAG = /* glsl */ `
 ${NOISE_DECL}
+${LOWFOG_DECL}
 uniform float uHaze;
 uniform float uNoise;
 uniform float uGain;
@@ -103,7 +124,10 @@ void main() {
   float grounded = step(0.5, vLocal.w);
   float tail = mix(1.0 - smoothstep(L * 0.6, L, along), 1.0, grounded);
   float gy = grounded * (vLocal.w - 1.0);
-  float ground = smoothstep(gy, gy + 2.2, vWorld.y);
+  // low fog: the beam lights the bank where it passes through it (v802.75: white floor beams turn the smoke
+  // on the field into a bright white band); in the bank the beam also runs down into the fog to its pool
+  float lf = uLowFog.w > 0.0 ? lowFogAt(vWorld) : 0.0;
+  float ground = smoothstep(gy, gy + mix(2.2, 0.5, min(lf, 1.0)), vWorld.y);
   float nearF = smoothstep(0.5, 9.0, camDist);
   // haze is densest near the ground / stage and thins out with altitude
   float haze = uHaze * (0.03 + 0.97 * exp(-max(vWorld.y - 6.0, 0.0) * 0.058));
@@ -123,7 +147,8 @@ void main() {
   // the beam emerges from the lens glow instead of starting with a hard cut
   float start = smoothstep(0.0, 0.8, along);
   float k = chord * hg * spreadF * atten * tail * ground * nearF * vNearBeam * haze * start * vData.w * uGain;
-  gl_FragColor = vec4(vCol * k, 1.0);
+  // (the fog's share scatters in the beam colour x the smoke's albedo)
+  gl_FragColor = vec4(vCol * k * (vec3(1.0) + uLowFogTint * (lf * uLowFog.w)), 1.0);
 }
 `;
 
@@ -220,6 +245,9 @@ void main() {
     size = max(size, px * uMinPx * 1.25);
   }
   size = max(size, px * uMinPx);
+  // blinder: how many pixels its face spans (1 = close enough to resolve the 2x2 lamps, 0 = one round glare);
+  // the lens flare passes its hot-spot level in the same varying
+  float detail = type > 0.5 && type < 1.5 ? smoothstep(14.0, 44.0, size / max(px, 1e-6)) : hot;
   vec4 mv = viewMatrix * vec4(iPos.xyz, 1.0);
   // the glare lives in the lens/eye: pull it towards the viewer so its own housing does not clip it
   mv.xyz += normalize(-mv.xyz) * min(size * 0.8, 3.0);
@@ -227,7 +255,7 @@ void main() {
   vUv = position.xy;
   vCol = iCol.rgb * glow;
   vType = type;
-  vHot = hot;
+  vHot = detail;
   gl_Position = projectionMatrix * mv;
   // standing in the beam means a clear line of sight to the lens: the glare is not occluded by
   // the floor / set around the fixture (it lives in the viewer's optics)
@@ -261,18 +289,22 @@ void main() {
     float r = sqrt(r2);
     v = exp(-r2 * 30.0) * 2.6 + exp(-r * 7.0) * 0.09;
   } else if (vType < 1.5) {
-    // 2x2 tungsten "molefay": four hot lamps + wide glare halo
+    // 2x2 tungsten "molefay": four hot lamps close up; from the field (a face of a few pixels) the lamps merge
+    // into one round glare blooming in the haze (v1224.5 / v1283: round glows in the smoke, never a row of
+    // lit squares) — plus the wide glare halo
     vec2 q = abs(p) - vec2(0.13);
-    float lamps = exp(-dot(q, q) * 380.0);
+    float lamps = exp(-dot(q, q) * 380.0) * 4.0 + exp(-r2 * 60.0) * 0.8;
     float r = sqrt(r2);
-    v = lamps * 4.0 + exp(-r * 4.2) * 0.34 + exp(-r2 * 60.0) * 0.8;
+    v = mix(exp(-r2 * 22.0) * 1.9, lamps, vHot) + exp(-r * 4.2) * 0.34;
   } else {
     // LED strobe bar + glare halo and a faint horizontal streak
     float bar = exp(-pow(abs(p.x) / 0.24, 6.0) - pow(abs(p.y) / 0.05, 4.0));
     float r = sqrt(r2);
     v = bar * 4.0 + exp(-r * 4.0) * 0.32 + exp(-abs(p.y) * 60.0) * exp(-abs(p.x) * 3.0) * 0.25;
   }
-  v *= 1.0 - smoothstep(0.82, 1.0, max(abs(p.x), abs(p.y)));
+  // quad edge: the lens flare's star streaks run to the square's edge; every other glare fades out ROUND
+  // (a square window left the halos of a blinder / strobe row as a row of lit squares at a distance)
+  v *= vType < 0.5 ? 1.0 - smoothstep(0.82, 1.0, max(abs(p.x), abs(p.y))) : 1.0 - smoothstep(0.55, 1.0, sqrt(r2));
   gl_FragColor = vec4(vCol * v, 1.0);
 }
 `;
@@ -312,10 +344,10 @@ void main() {
 `;
 
 export const FLOOD_FRAG = /* glsl */ `
-uniform vec4 uBlobC[10];   // centre xyz, w = weight
-uniform vec3 uBlobS[10];   // sigma (m) per axis
-uniform vec3 uBlobCol[10]; // colour x intensity (0 = slot off)
-uniform float uBlobNear[10]; // share of the blob in the near pre-slice (lamps aimed at the lens)
+uniform vec4 uBlobC[11];   // centre xyz, w = weight (11 = FLOOD_BLOBS in layers.ts)
+uniform vec3 uBlobS[11];   // sigma (m) per axis
+uniform vec3 uBlobCol[11]; // colour x intensity (0 = slot off)
+uniform float uBlobNear[11]; // share of the blob in the near pre-slice (lamps aimed at the lens)
 uniform float uScale;     // camera haze scale (telephoto show shots see less haze)
 varying vec3 vView;
 varying float vRatio;
@@ -339,7 +371,7 @@ void main() {
   if (rd.y < -1e-3) t1 = min(t1, max(ro.y + 0.5, 0.0) / -rd.y);
   if (t1 <= t0) discard;
   vec3 acc = vec3(0.0);
-  for (int i = 0; i < 10; i++) {
+  for (int i = 0; i < 11; i++) {
     vec3 col = uBlobCol[i] * (vPre > 0.5 ? uBlobNear[i] : 1.0);
     if (col.r + col.g + col.b <= 0.0) continue;
     vec3 s = uBlobS[i];

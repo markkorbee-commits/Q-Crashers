@@ -241,7 +241,7 @@ function parse(c: Cue, show: ShowEngine): LightCue {
     aim: vec3(p.aim),
     sway: Math.max(0, num(p.sway, 0)),
     gobo: p.gobo === 'dots' || p.gobo === 'glitter' || p.gobo === 'breakup' ? 1 : 0,
-    target: parseTargets(c.targets, p.groups, { tags: 0, side: 0 }),
+    target: parseTargets(c.targets, p.groups, { tags: 0, side: 0, band: 0 }),
     mask: null,
     pattern: str(p.pattern) ?? 'lr',
     every: p.every === 'halfbeat' ? 0.5 : p.every === 'bar' ? 4 : p.every === '2beat' ? 2 : 1,
