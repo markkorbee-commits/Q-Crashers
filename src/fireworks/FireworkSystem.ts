@@ -8,7 +8,7 @@ import { FxLayer, ribbonGeometry } from '../fx/core/FxLayer';
 import { bool, colorList, num, starColor, str } from '../fx/core/fxColors';
 import { centroid, maxAbsX, pickEven, stretches } from '../fx/core/placement';
 import { SHELLS, SHELL_TYPES, shellSpec, type ShellSpec } from './shells';
-import { FW_CURL, FW_SHED, FW_SWIM, STAR_FRAG, STAR_VERT } from './starShader';
+import { FW_CURL, FW_SHED, FW_SWIM, FW_TRUE, STAR_FRAG, STAR_VERT } from './starShader';
 
 const L_SMOKE = 0;
 const L_FLASH = 1;
@@ -18,6 +18,8 @@ const GREY = new THREE.Color(0.6, 0.6, 0.62);
 const WHITE = new THREE.Color(1, 1, 1);
 const LIFT = new THREE.Color(1.0, 0.55, 0.2);
 const G = 9.81;
+/** default radius (m per `size`) of a drone flare's glow halo */
+const FLARE_HALO = 7.5;
 const LIFT_DRAG = 0.3;
 const COMET_DRAG = 0.42;
 const DEG = Math.PI / 180;
@@ -38,6 +40,8 @@ interface ShellOpts {
   starsK?: number;
   /** burn time multiplier (small comet-top breaks burn out sooner) */
   burnK?: number;
+  /** colour-true crackle (`popColor`): the pops burn in this colour instead of white-hot micro-flashes */
+  popCol?: THREE.Color | null;
 }
 
 /** How a comet (or a cake shot) looks: resolved once per cue from its params. */
@@ -75,6 +79,18 @@ interface CometLook {
   pearlTime: number;
   /** 0..3: soft glow travelling with the heads (the bloom of a dense fan, see fanGlow) */
   glow: number;
+  /** colour-true crackle pops (`popColor`), null = white-hot micro-flashes */
+  popCol: THREE.Color | null;
+  /** `popColor: "star"`: the pops burn in each comet's own colour */
+  popStar: boolean;
+  /** burn time multiplier of comet-top breaks and `pops` ends (`endBurn`, 1 = as before) */
+  endBurn: number;
+  /** m: the head wriggles sideways along its climb (`wriggle`): thin wavy comet columns */
+  wriggle: number;
+  /** rad/s of the wriggle (0 = the serpent default, 9) */
+  wriggleHz: number;
+  /** 0..3: a dense gerb-like spark tail (sparks falling from the climbing head, `gerb`) */
+  gerb: number;
 }
 
 /**
@@ -105,7 +121,13 @@ interface CometLook {
  *    way across any range; `spray` = sparks per shot (dense sweeping streams: the heart / rings).
  *  - finale `types` (list) overrides the barrage mix, `comets` (per s) adds roof comet fans, `x`/`z`
  *    move the band, `depth` spreads it in z (shells all around a field camera).
- *  - flare: airborne drone flares from `from` to `to` over `dur` with self-lit smoke.
+ *  - flare: airborne drone flares from `from` to `to` over `dur` with self-lit smoke (`halo`, `haloGain`,
+ *    `smokeGlow`, `smokeSize`).
+ *  - round 11: launch points `pos` (absolute [[x,y,z],...]), `offset` ([dx,dy,dz], dx outward) and `between`
+ *    (n extra points between neighbours: a denser wall); comet / cake `wriggle` (+ `wriggleHz`: thin wavy
+ *    columns), `gerb` (a sheaf of streaks in the tail colour), `endBurn` (shorter comet-top breaks),
+ *    `popColor` (colour-true crackle, also for shells / salvos / finales / mines); cake `jitter` (per-point
+ *    phase); shell / salvo `life` (mean star burn time: the swimmers' wriggle duration).
  */
 export class FireworkSystem extends CueFxSystem {
   readonly name = 'fireworks';
@@ -113,6 +135,7 @@ export class FireworkSystem extends CueFxSystem {
   protected override sharedLightCap = true;
   private readonly c1 = new THREE.Color();
   private readonly c2 = new THREE.Color();
+  private readonly c3 = new THREE.Color();
   private readonly tmpA = new THREE.Vector3();
   private readonly tmpB = new THREE.Vector3();
   private readonly acc = new THREE.Vector3();
@@ -208,12 +231,16 @@ export class FireworkSystem extends CueFxSystem {
    * positions (y/z taken from the target point nearest in x unless `y`/`z` are given), mirrored,
    * and narrowed to one `side`, an |x| range (`absx`) or explicit `points` (indices, left -> right).
    */
-  private launchPoints(cue: Cue, fallback: AnchorName): THREE.Vector3[] {
+  private launchPoints(cue: Cue, fallback: AnchorName, dense = true): THREE.Vector3[] {
     const p = cue.p;
     const src = this.points(cue, fallback);
     let pts = src;
     const xs = numList(p.x);
-    if (xs.length) {
+    const pos = vec3List(p.pos);
+    if (pos.length) {
+      // `pos`: absolute launch points [[x, y, z], ...] (anywhere on the site, outside every anchor set)
+      pts = bool(p.mirror, false) ? [...pos, ...pos.filter((v) => Math.abs(v.x) > 0.01).map((v) => new THREE.Vector3(-v.x, v.y, v.z))] : pos;
+    } else if (xs.length) {
       const zs = numList(p.z);
       const ys = numList(p.y);
       const mirror = bool(p.mirror, false);
@@ -252,7 +279,41 @@ export class FireworkSystem extends CueFxSystem {
       }
       pts = pick;
     }
+    // `between`: n extra launch points evenly between neighbouring points of each stretch of the row
+    // (a denser comet wall along the U without new anchors; only a gap of more than 24 m splits a row)
+    const nb = dense ? this.betweenCount(cue) : 0;
+    if (nb > 0 && pts.length > 1) {
+      const dense: THREE.Vector3[] = [];
+      for (const s of stretches(pts, undefined, Infinity, 24)) {
+        for (let k = 0; k < s.length; k++) {
+          const a = pts[s[k]];
+          dense.push(a);
+          if (k + 1 >= s.length) continue;
+          const b = pts[s[k + 1]];
+          for (let j = 1; j <= nb; j++) dense.push(a.clone().lerp(b, j / (nb + 1)));
+        }
+      }
+      pts = dense;
+    }
+    // `offset`: [dx, dy, dz] added to every point; dx points away from the centre line (mirrored), so
+    // `offset: [19, 0, 20]` moves both crest rows 19 m further out and 20 m towards the audience
+    const off = numList(p.offset);
+    if (off.length) {
+      const dx = off[0] ?? 0;
+      const dy = off[1] ?? 0;
+      const dz = off[2] ?? 0;
+      pts = pts.map((v) => new THREE.Vector3(v.x + (Math.abs(v.x) < 0.5 ? 0 : Math.sign(v.x)) * dx, v.y + dy, v.z + dz));
+    }
     return pts;
+  }
+
+  /**
+   * `between` (0-8) of a cue; 0 on the mobile preset: its star budget (938 slots) is a quarter of
+   * desktop's and the wall of v252.9 already fills it, so a denser row would thin every other effect
+   * of the moment down to 25 %
+   */
+  private betweenCount(cue: Cue): number {
+    return this.quality.level === 'mobile' ? 0 : Math.round(num(cue.p.between, 0, 0, 8));
   }
 
   private gravAcc(k: number, windK = 1): THREE.Vector3 {
@@ -359,11 +420,13 @@ export class FireworkSystem extends CueFxSystem {
       const pops = spec.pops;
       const spread = (spec.popSpread ?? 0.7) * bk;
       const popE = new Emitter(spec.dist, 0).copyFrom(stars);
-      popE.f[R.FLAGS] = (spec.flags & ~F.FLICKER) | F.POPS;
+      const trueCol = opts.popCol ?? null;
+      popE.f[R.FLAGS] = (spec.flags & ~F.FLICKER) | F.POPS | (trueCol ? FW_TRUE : 0);
       popE
         .on(L_STARS)
         // micro-flashes: the crackle colour, a touch of the star colour; not brighter than the stars' streaks
-        .color(popCol2 ? this.c2.copy(popCol2).lerp(col, 0.2) : this.c2.copy(col).lerp(WHITE, 0.65), 24 * gain)
+        // (`popColor`: colour-true pops, e.g. the red crackle canopy of v538-548)
+        .color(trueCol ? this.c2.copy(trueCol) : popCol2 ? this.c2.copy(popCol2).lerp(col, 0.2) : this.c2.copy(col).lerp(WHITE, 0.65), (trueCol ? 30 : 24) * gain)
         .emit(nStars * pops)
         .size(0.26, 1)
         .set(R.X1, pops)
@@ -458,7 +521,9 @@ export class FireworkSystem extends CueFxSystem {
     const p = cue.p;
     const spec = shellSpec(p.type);
     const radius = num(p.size, defaultRadius(H) * spec.radiusK, 2, 150);
-    return { spec, radius };
+    // `life` (s): the stars' mean burn time (swimmers that wriggle ~3.3 s and fade, v751.5-755.5)
+    const lifeK = p.life !== undefined ? num(p.life, 1, 0.2, 12) / ((spec.burn[0] + spec.burn[1]) * 0.5) : 1;
+    return { spec, radius, lifeK };
   }
 
   private liftColor(cue: Cue): THREE.Color | null {
@@ -466,6 +531,19 @@ export class FireworkSystem extends CueFxSystem {
     if (typeof lc !== 'string' || !lc) return null;
     starColor(lc, this.palette, this.c2, 'white');
     return this.c2.clone();
+  }
+
+  /**
+   * `popColor` (alias `crackleColor`): colour-true crackle. The pops of crackle stars / crackle ends /
+   * crackling tails burn in this colour instead of as white-hot micro-flashes ("star" or true = each
+   * star's own colour), so a red crackle canopy reads red at a distance (v538-548), not white-gold.
+   */
+  private popColor(cue: Cue, starCol: THREE.Color): THREE.Color | null {
+    const v = cue.p.popColor ?? cue.p.crackleColor;
+    if (v === true || v === 'star') return starCol.clone();
+    if (typeof v !== 'string' || !v || v === 'false') return null;
+    starColor(v, this.palette, this.c3, 'red');
+    return this.c3.clone();
   }
 
   private shellCue(cue: Cue, out: EmitterSet): void {
@@ -478,7 +556,7 @@ export class FireworkSystem extends CueFxSystem {
       pts = pool.length ? [pool[Math.floor(hf(cue.seed) * pool.length) % pool.length]] : [new THREE.Vector3(0, 0, -60)];
     } else pts = this.points(cue, 'fireworks_back'); // named anchors: one shell per point
     const H0 = num(p.height, 90, 15, 400);
-    const { spec, radius } = this.shellParams(cue, H0);
+    const { spec, radius, lifeK } = this.shellParams(cue, H0);
     const cols = colorList(p.color, [spec.color]);
     const liftCol = this.liftColor(cue);
     pts.forEach((o, i) => {
@@ -490,7 +568,7 @@ export class FireworkSystem extends CueFxSystem {
       const gain = starColor(cols[i % cols.length], this.palette, this.c1, spec.color);
       const col = this.c1.clone();
       const col2 = p.color2 ? (starColor(p.color2, this.palette, this.c2, 'white'), this.c2.clone()) : null;
-      this.addShell(out, seed, spec, o, B, col, gain, { tL: tb - rise, tb, radius, smoke: this.smokeCount(5), lift: rise > 0, flashK: 1, col2, liftCol });
+      this.addShell(out, seed, spec, o, B, col, gain, { tL: tb - rise, tb, radius, smoke: this.smokeCount(5), lift: rise > 0, flashK: 1, col2, liftCol, popCol: this.popColor(cue, col), burnK: lifeK });
     });
   }
 
@@ -505,7 +583,7 @@ export class FireworkSystem extends CueFxSystem {
     const spread = num(p.spread, 120, 0, 600);
     const depth = num(p.depth, 6, 0, 400);
     const H0 = num(p.height, 90, 15, 400);
-    const { spec, radius } = this.shellParams(cue, H0);
+    const { spec, radius, lifeK } = this.shellParams(cue, H0);
     const cols = colorList(p.color, [spec.color]);
     const pattern = str(p.pattern, 'line');
     const stagger = num(p.stagger, 0, 0, 3);
@@ -525,7 +603,8 @@ export class FireworkSystem extends CueFxSystem {
       const tb = cue.t + delay + rise;
       const B = new THREE.Vector3(o.x + (hf(seed ^ 1) - 0.5) * 0.04 * H, H, o.z + (hf(seed ^ 2) - 0.5) * 0.04 * H);
       const gain = starColor(cols[i % cols.length], this.palette, this.c1, spec.color);
-      this.addShell(out, seed, spec, o, B, this.c1.clone(), gain, {
+      const col = this.c1.clone();
+      this.addShell(out, seed, spec, o, B, col, gain, {
         tL: tb - rise,
         tb,
         radius: radius * (0.85 + 0.3 * hf(seed ^ 3)),
@@ -534,6 +613,8 @@ export class FireworkSystem extends CueFxSystem {
         flashK: count > 8 ? 0.7 : 1,
         col2,
         liftCol,
+        popCol: this.popColor(cue, col),
+        burnK: lifeK,
       });
     }
   }
@@ -574,7 +655,20 @@ export class FireworkSystem extends CueFxSystem {
       arc: num(p.arc, 0, 0, 1440) * DEG,
       pearlTime: num(p.pearlTime, 1, 0.05, 4),
       glow: num(p.glow, 0, 0, 3),
+      popCol: null,
+      popStar: false,
+      endBurn: num(p.endBurn, 1, 0.2, 3),
+      wriggle: num(p.wriggle, 0, 0, 6),
+      wriggleHz: num(p.wriggleHz, 0, 0, 40),
+      gerb: num(p.gerb, 0, 0, 3),
     };
+  }
+
+  /** resolve `popColor` of a comet / cake cue into its look (after the look's colour is known) */
+  private lookPops(cue: Cue, look: CometLook): void {
+    const v = cue.p.popColor ?? cue.p.crackleColor;
+    look.popStar = v === true || v === 'star';
+    look.popCol = look.popStar ? null : this.popColor(cue, look.col);
   }
 
   /** A fan of `n` comets from o. `side` = fan plane axis; comet i points at -half + 2 half i/(n-1). */
@@ -590,6 +684,9 @@ export class FireworkSystem extends CueFxSystem {
     stagger: number,
     rise: number,
     look: CometLook,
+    seg: THREE.Vector3 | null = null,
+    /** tail flitter per comet x this (the comets of a dense wall overlap: fewer sparks each) */
+    sparkK = 1,
   ): void {
     const { col, gain, end } = look;
     const spray = look.spray > 1;
@@ -615,8 +712,16 @@ export class FireworkSystem extends CueFxSystem {
     // `arc`: the stars burn out when they have turned that far (open heart lobes, not closed rings)
     const tArc = curlRate && look.arc > 0 ? look.arc / Math.abs(curlRate) : Infinity;
     const tA = Math.min(tA0, tArc);
+    // `wriggle` uses the serpent helix with its own amplitude (thin wavy comet columns, v324.7-330)
+    const wriggle = look.wriggle > 0 && !curlRate;
     const flags =
-      F.COOL | F.FLICKER | (look.serpent && !curlRate ? F.SERPENT : 0) | (pearl ? F.PEARL : 0) | (look.zipper ? F.ZIPPER : 0) | (curlRate ? FW_CURL : 0);
+      F.COOL |
+      F.FLICKER |
+      ((look.serpent || wriggle) && !curlRate ? F.SERPENT : 0) |
+      (pearl ? F.PEARL : 0) |
+      (look.zipper ? F.ZIPPER : 0) |
+      (curlRate ? FW_CURL : 0);
+    const popTrue = look.popStar ? col : look.popCol;
     // a display comet is a small, very bright head with a thin, dim tail that hangs over the whole
     // climb (it only reads as a line because it is long); a spark stream is short sparks
     // comets burn out a little before their apex; the glowing tail is the last ~40 % of the climb
@@ -634,12 +739,13 @@ export class FireworkSystem extends CueFxSystem {
         .set(R.X2, spray ? 0.6 : 0.3)
         .set(R.X3, spray ? 0 : 0.8)
         .set(R.Y0, spray ? 0.3 : look.trailGain)
-        .set(R.Y1, look.serpent ? 0.35 : 0)
+        .set(R.Y1, wriggle ? look.wriggle : look.serpent ? 0.35 : 0)
         .set(R.Y2, spray ? 2.5 : 1.2)
         .set(R.Y3, 0.6)
         .set(R.Z0, 0.03)
         .set(R.Z1, 2.2)
         .set(R.Z3, look.wave);
+      if (wriggle && look.wriggleHz > 0) e.hz(look.wriggleHz);
       if (curlRate) {
         e.hz(curlRate);
         // (Y1 is the serpent amplitude, unused while curling: here the time the turn stops)
@@ -651,11 +757,13 @@ export class FireworkSystem extends CueFxSystem {
     const tailSparks = (parent: Emitter, count: number, tEnd: number) => {
       if (look.glitter <= 0 && !look.crackle) return;
       const cr = look.crackle;
-      const q = Math.min(1, 0.45 + this.quality.particleScale * 0.7);
+      // (mobile: dense fans (4+ comets per emitter, e.g. the glitter curtain of v783-788 with ~1700
+      // comets) shed half the flitter, so the star budget keeps the comets instead of thinning them)
+      const q = Math.min(1, 0.45 + this.quality.particleScale * 0.7) * (this.quality.level === 'mobile' && count >= 4 ? 0.5 : 1) * sparkK;
       const per = cr ? 7 : spray ? Math.max(1, Math.round(8 * look.glitter * q)) : Math.max(3, Math.round(30 * look.glitter * q));
       const se = new Emitter(0, 0).copyFrom(parent);
       se.f[R.FLAGS] = (parent.f[R.FLAGS] & (F.SERPENT | F.ZIPPER | FW_CURL)) | FW_SHED;
-      const sc = cr ? this.c2.copy(col).lerp(WHITE, 0.75) : this.c2.copy(col).lerp(WHITE, 0.35);
+      const sc = cr ? (popTrue ? this.c2.copy(popTrue) : this.c2.copy(col).lerp(WHITE, 0.75)) : this.c2.copy(col).lerp(WHITE, 0.35);
       se.on(L_STARS)
         .color(sc, (cr ? 36 : 4 + 22 * look.glitter) * gain * look.intensity)
         .color2(look.tailCol ?? col, -1)
@@ -668,38 +776,78 @@ export class FireworkSystem extends CueFxSystem {
         .window(parent.start, tEnd + (cr ? 0.9 : 0.9));
       out.add(se);
     };
+    /**
+     * `gerb`: every comet climbs inside a sheaf of thin streaks in the tail colour (a dense gerb-like
+     * tail): m streaks around its path with a little angle and speed spread, each drawing the whole climb,
+     * so a column reads as a bundle of orange lines under the comet's own head / break (v1426.6-1439).
+     */
+    const sheaf = (d: THREE.Vector3, half: number, count: number, tc: number, stg: number, sd: number) => {
+      if (look.gerb <= 0) return;
+      const m = Math.max(3, Math.round(8 * look.gerb * Math.min(1, 0.5 + this.quality.particleScale * 0.6)));
+      const tl = clamp(tA * 0.95, 0.3, 2.5);
+      out.add(
+        new Emitter(DIST.FAN, (flags & (F.SERPENT | FW_CURL)) | F.COOL)
+          .on(L_STARS)
+          .originV(o)
+          .time(tc)
+          .dirV(d, half)
+          .axisV(side)
+          .physics(k, grav)
+          .speed(v0 * 0.7, v0 * 1.0)
+          .life(tA * 0.88, tA * 1.02)
+          .emit(count * m, 0, stg / m)
+          .color(this.c2.copy(look.tailCol ?? col), 11 * gain * look.intensity)
+          .size(look.head * 0.45, 0.8)
+          .trail(tl, 0.15)
+          .seed((sd ^ 0x5e4f) & 0xffffff)
+          .hz(curlRate || (wriggle && look.wriggleHz > 0 ? look.wriggleHz : 0))
+          .set(R.X2, 0.35)
+          .set(R.Y0, 0.22 * Math.min(2, look.gerb))
+          .set(R.Y1, curlRate ? (Number.isFinite(tArc) ? tArc : 0) : wriggle ? look.wriggle : look.serpent ? 0.35 : 0)
+          .set(R.Y2, 1.2)
+          .set(R.Y3, 0.6)
+          .set(R.Z0, 0.03)
+          .set(R.Z2, half > 0 ? 0.07 : 0.16)
+          .set(R.Z3, look.wave)
+          .window(tc, tc + stg * count + tA * 1.02 + tl + 0.4),
+      );
+    };
+    // `seg`: the comets rise from random points along o -> o + seg inside a cone of halfAngle (one emitter
+    // for a whole stretch of a dense comet wall, see `between` in comets())
+    const line = seg !== null && !curlRate;
     if (!breakSpec) {
-      const e = common(new Emitter(n > 1 ? DIST.FAN : DIST.SINGLE, flags))
+      const e = common(new Emitter(line ? DIST.LINE : n > 1 ? DIST.FAN : DIST.SINGLE, flags))
         .originV(o)
         .time(t0)
-        .dirV(dir, halfAngle)
-        .axisV(side)
+        .dirV(dir, line ? Math.max(0.04, halfAngle) : halfAngle)
+        .axisV(line && seg ? seg : side)
         .speed(v0 * (spray ? 0.72 : 0.94), v0 * 1.02)
         .life(tA * lifeK[0], tA * lifeK[1])
         .emit(n, 0, stagger)
         .seed(seed)
         .set(R.Z2, spray ? 0.16 : n > 1 ? Math.min(0.08, (halfAngle * 2) / n) : 0.04)
         .window(t0, t0 + stagger * n + tA + trail + 0.6);
-      if (n === 1) e.speed(v0 * (0.96 + 0.05 * hf(seed ^ 5)));
+      if (n === 1 && !line) e.speed(v0 * (0.96 + 0.05 * hf(seed ^ 5)));
       out.add(e);
       tailSparks(e, n, t0 + stagger * n + tA);
+      if (!line) sheaf(dir, halfAngle, n, t0, stagger, seed);
       if (end === 'pops') {
         // a crackling end without a shell: the head dies in a small cloud of micro-flashes
         const pops = 6;
         const pe = new Emitter(0, 0).copyFrom(e);
-        pe.f[R.FLAGS] = (flags & ~(F.FLICKER | F.PEARL)) | F.POPS;
+        pe.f[R.FLAGS] = (flags & ~(F.FLICKER | F.PEARL)) | F.POPS | (popTrue ? FW_TRUE : 0);
         // (copyFrom does not carry the layer: derived emitters must be put on the star layer)
         pe.on(L_STARS)
-          .color(this.c2.copy(col).lerp(WHITE, 0.6), 34 * gain)
+          .color(popTrue ? this.c2.copy(popTrue) : this.c2.copy(col).lerp(WHITE, 0.6), (popTrue ? 40 : 34) * gain)
           .emit(n * pops, 0, stagger)
           .size(0.26, 1)
           .set(R.X1, pops)
-          .set(R.X2, 0.8)
+          .set(R.X2, 0.8 * look.endBurn)
           .set(R.X3, look.endSize > 0 ? look.endSize : 2.8)
-          .window(t0 + tA * lifeK[0], t0 + stagger * n + tA + 1.1);
+          .window(t0 + tA * lifeK[0], t0 + stagger * n + tA + 0.3 + 0.8 * look.endBurn);
         out.add(pe);
       }
-      if (look.smoke) this.cometSmoke(out, seed, o, dir, side, halfAngle, n, t0, stagger, v0, k, tA, col, look);
+      if (look.smoke && !line) this.cometSmoke(out, seed, o, dir, side, halfAngle, n, t0, stagger, v0, k, tA, col, look);
       return;
     }
     // comets that break into shells: every comet is aimed on the CPU so its break point is known
@@ -724,6 +872,7 @@ export class FireworkSystem extends CueFxSystem {
         .window(tc, tc + life + trail + 0.4);
       out.add(e);
       tailSparks(e, 1, tc + life);
+      sheaf(d, 0, 1, tc, 0, sd);
       const B = curlRate ? curlPoint(new THREE.Vector3(), o, d, side, sp, k, acc, curlRate, life, tArc) : ballistic(new THREE.Vector3(), o, d.multiplyScalar(sp), k, acc, life);
       // a comet's break is a small burst at its top (the video's crackle / spider tops), not a shell;
       // its small stars burn out sooner than a shell's (burn x r / 16, at least x 0.35): the red
@@ -738,7 +887,8 @@ export class FireworkSystem extends CueFxSystem {
         flashK: 0.45,
         col2: null,
         starsK: clamp(Math.pow(r / 16, 1.2), 0.2, 1),
-        burnK: clamp(r / 16, 0.35, 1),
+        burnK: clamp(r / 16, 0.35, 1) * look.endBurn,
+        popCol: popTrue,
       });
     }
     if (look.smoke) this.cometSmoke(out, seed, o, dir, side, halfAngle, n, t0, stagger, v0, k, tA, col, look);
@@ -890,7 +1040,14 @@ export class FireworkSystem extends CueFxSystem {
 
   private comets(cue: Cue, out: EmitterSet): void {
     const p = cue.p;
-    const src = this.launchPoints(cue, 'roof');
+    let end = str(p.end, 'none');
+    if (end === 'crackle_comet') end = 'pops';
+    // `between` on comets without shell breaks: the extra comets rise from LINE emitters along each gap
+    // of the row (one emitter per gap instead of one per inserted point: a dense wall stays within the
+    // star / smoke emitter budgets); comets with shell breaks, curls or X-fans get inserted points
+    const nb = this.betweenCount(cue);
+    const rowMode = nb > 0 && (end === 'none' || end === 'pearl' || end === 'pops' || !SHELLS[end]) && num(p.curl, 0) === 0 && num(p.cross, 0) === 0;
+    const src = this.launchPoints(cue, 'roof', !rowMode);
     const angle = num(p.angle, 0, -180, 180);
     const count = p.count !== undefined ? Math.round(num(p.count, 1, 1, 400)) : 0;
     let per = Math.round(num(p.per, 0, 0, 60));
@@ -908,8 +1065,6 @@ export class FireworkSystem extends CueFxSystem {
     const rise = num(p.height, 40, 3, 250);
     const stagger = num(p.stagger, per > 1 ? 0.04 : 0, 0, 3);
     const cols = colorList(p.color, ['gold']);
-    let end = str(p.end, 'none');
-    if (end === 'crackle_comet') end = 'pops';
     const look = this.cometLook(cue, end, 1);
     const spreadRad = angle * DEG;
     const mx = maxAbsX(pts);
@@ -937,6 +1092,7 @@ export class FireworkSystem extends CueFxSystem {
       const seed = this.sub(cue, i);
       look.gain = starColor(cols[i % cols.length], this.palette, look.col, 'gold');
       look.col = look.col.clone();
+      this.lookPops(cue, look);
       const sx = Math.abs(o.x) < 0.5 ? 0 : Math.sign(o.x);
       if (cross > 0) {
         // X-fan: two launch points `cross` m apart, each fan tilted towards the other
@@ -956,6 +1112,32 @@ export class FireworkSystem extends CueFxSystem {
         fire(o, new THREE.Vector3(Math.sin(a), Math.cos(a), lean).normalize(), Math.abs(spreadRad) / 2, seed);
       }
     });
+    if (rowMode && pts.length > 1) {
+      // nb x per comets along every gap between neighbouring points of a stretch (a gap > 24 m splits)
+      let gi = 0;
+      for (const s of stretches(pts, undefined, Infinity, 24)) {
+        for (let j = 0; j + 1 < s.length; j++, gi++) {
+          const a = pts[s[j]];
+          const b = pts[s[j + 1]];
+          const seed = this.sub(cue, 9000 + gi);
+          look.gain = starColor(cols[s[j] % cols.length], this.palette, look.col, 'gold');
+          look.col = look.col.clone();
+          this.lookPops(cue, look);
+          const segV = b.clone().sub(a);
+          const o0 = a.clone().addScaledVector(segV, 0.5 / (nb + 1));
+          const mid = a.clone().lerp(b, 0.5);
+          const sx = Math.abs(mid.x) < 0.5 ? 0 : Math.sign(mid.x);
+          const ta = sx * tilt;
+          const dir = new THREE.Vector3(Math.sin(ta), Math.cos(ta), lean).normalize();
+          const side = new THREE.Vector3(dir.y, -dir.x, 0).normalize();
+          const n = Math.max(1, per) * nb;
+          this.cometFan(out, seed, o0, dir, side, per > 1 ? Math.abs(spreadRad) / 2 : 0.04, n, cue.t, stagger / nb, rise, look, segV.multiplyScalar(nb / (nb + 1)), 1 / Math.sqrt(nb + 1));
+          this.launchSmoke(out, seed, mid, cue.t, Math.min(n, 4), rise, 0.3 + stagger * per, look.col, 1.5 * Math.sqrt(Math.min(per, 6)) * Math.min(1.3, look.gain) * look.intensity, 0.35 + stagger * per);
+          // (the row's flash grows with its comets; its light colour stays the launch points' average)
+          fired += nb;
+        }
+      }
+    }
     if (fired) {
       // the LightEnv flash per stretch of the row (not one flash at the centroid of a U row, which
       // sat in the middle of the field), rise / 2 up
@@ -963,7 +1145,7 @@ export class FireworkSystem extends CueFxSystem {
       this.rowFlashes(out, lp, rise * 0.5, { kind: 1, t0: cue.t, t1: cue.t + stagger * per + 2.2, color: look.col, peak: fPeak, decay: 1, strobe: 0 });
       // spatial light along the launch row while the comets climb (their launch smoke, the floor);
       // the flash-derived light it replaces had flashLightGain (0.3) x the flash peak
-      lc.multiplyScalar(1 / fired);
+      lc.multiplyScalar(1 / Math.max(1, lp.length));
       // (fans of more than 2 comets per point light their smoke more: the flash peak saturates early)
       this.rowLights(out, lp, cue.t, cue.t + stagger * per + 2.2, 1, Math.min(12, rise * 0.2), lc, 0.36 * fPeak * Math.sqrt(Math.max(2, Math.min(per, 12)) / 2), 12 + 0.1 * rise);
     }
@@ -988,11 +1170,16 @@ export class FireworkSystem extends CueFxSystem {
     const to = num(p.to, angle / 2, -270, 270) * DEG;
     const lean = num(p.lean, 0.1, -1, 1);
     const tilt = num(p.tilt, 0, -90, 90) * DEG;
+    // `jitter` 0..1: every launch point starts at its own random phase of the shot interval, so a row
+    // of cakes (the comet wall of v429-444) does not fire in lock-step as one picket fence
+    const jitter = num(p.jitter, 0, 0, 1);
     const lc = new THREE.Color(0, 0, 0);
     pts.forEach((o, i) => {
       const seed = this.sub(cue, i);
       look.gain = starColor(cols[i % cols.length], this.palette, look.col, 'gold');
       look.col = look.col.clone();
+      this.lookPops(cue, look);
+      const ph = jitter > 0 ? jitter * hf(seed ^ 0x3c1a) : 0;
       const sx = Math.abs(o.x) < 0.5 ? 1 : Math.sign(o.x);
       let dir: THREE.Vector3;
       let sideV: THREE.Vector3;
@@ -1018,12 +1205,12 @@ export class FireworkSystem extends CueFxSystem {
           const off = (hf(seed ^ (s * 0x9e37 + 5)) - 0.5) * step * 0.8;
           const d = dir.clone().multiplyScalar(Math.cos(off)).addScaledVector(sideV, Math.sin(off));
           const sv = sideV.clone().multiplyScalar(Math.cos(off)).addScaledVector(dir, -Math.sin(off));
-          this.cometFan(out, (seed ^ Math.imul(s + 1, 0x27d4eb2d)) & 0xffffff, o, d, sv, half, fill, cue.t + (s * dur) / shots, 0, rise, look);
+          this.cometFan(out, (seed ^ Math.imul(s + 1, 0x27d4eb2d)) & 0xffffff, o, d, sv, half, fill, cue.t + ((s + ph) * dur) / shots, 0, rise, look);
         }
       } else {
         // spark streams thin out with the quality preset (single comets never do)
         const n = spray > 1 ? Math.max(shots, Math.round(shots * spray * Math.min(1, 0.4 + this.quality.particleScale))) : shots;
-        this.cometFan(out, seed, o, dir, sideV, half, n, cue.t, dur / n, rise, look);
+        this.cometFan(out, seed, o, dir, sideV, half, n, cue.t + (ph * dur) / n, dur / n, rise, look);
       }
       // a firing cake stands in its own smoke, lit by the shots climbing out of it
       this.launchSmoke(out, seed, o, cue.t, Math.max(1, Math.min(4, Math.round(dur * 1.5))), rise, dur, look.col, 2.2 * Math.min(1.3, look.gain) * look.intensity, 0.9);
@@ -1080,9 +1267,10 @@ export class FireworkSystem extends CueFxSystem {
       if (type === 'crackle') {
         const pops = 5;
         const pe = new Emitter(0, 0).copyFrom(stars);
-        pe.f[R.FLAGS] = F.POPS;
+        const pc = this.popColor(cue, col);
+        pe.f[R.FLAGS] = F.POPS | (pc ? FW_TRUE : 0);
         pe.on(L_STARS)
-          .color(this.c2.copy(col).lerp(WHITE, 0.6), 32 * gain)
+          .color(pc ? this.c2.copy(pc) : this.c2.copy(col).lerp(WHITE, 0.6), (pc ? 38 : 32) * gain)
           .emit(stars.count * pops)
           .size(0.28, 1)
           .set(R.X1, pops)
@@ -1241,6 +1429,12 @@ export class FireworkSystem extends CueFxSystem {
     const spacing = num(p.spacing, 2.2, 0, 20);
     const size = num(p.size, 1, 0.3, 4);
     const I = num(p.intensity, 1, 0, 3);
+    // `halo` (m per size unit): radius of the glow each flare has in its own smoke; `haloGain` its brightness
+    const halo = num(p.halo, FLARE_HALO, 0, 20);
+    const haloGain = num(p.haloGain, 1, 0, 4);
+    // `smokeGlow`: self-light of the flare smoke (x the default), `smokeSize`: size of its clouds
+    const smokeGlow = num(p.smokeGlow, 1, 0, 3);
+    const smokeSize = num(p.smokeSize, 1, 0.2, 3);
     const gain = starColor(str(p.color, 'red'), this.palette, this.c1, 'red');
     const col = this.c1.clone();
     const hot = this.c2.copy(col).lerp(WHITE, 0.55).clone();
@@ -1286,7 +1480,8 @@ export class FireworkSystem extends CueFxSystem {
             .window(ts, last ? te + 0.3 : te),
         );
         // the glow of the flare in its own smoke
-        out.add(
+        if (halo > 0 && haloGain > 0)
+          out.add(
           new Emitter(DIST.SINGLE, 0)
             .on(L_FLASH)
             .originV(o)
@@ -1294,10 +1489,10 @@ export class FireworkSystem extends CueFxSystem {
             .dirV(pd)
             .speed(vel)
             .physics(0.02, 0)
-            .color(this.c2.copy(col).lerp(WHITE, 0.15), 3.2 * I)
+            .color(this.c2.copy(col).lerp(WHITE, 0.15), 3.2 * I * haloGain)
             .life(last ? sd : sd * 1.4)
             .emit(1)
-            .size(7.5 * size, 1)
+            .size(halo * size, 1)
             .trail(1, 1)
             .seed(seed ^ 0x77)
             .set(R.X0, dur)
@@ -1336,13 +1531,13 @@ export class FireworkSystem extends CueFxSystem {
             .speed(0.8, 2.6)
             .physics(1, 0.25)
             .color(GREY, 0.24)
-            .color2(this.c2.copy(col).multiplyScalar(6.5 * I), 0)
+            .color2(this.c2.copy(col).multiplyScalar(6.5 * I * smokeGlow), 0)
             .litUntil(cue.t + dur + 0.2)
             // (it lingers less than a shell's smoke: low flare smoke drifts off the grounds)
             .life(5, 8)
             // mobile: fewer, larger puffs
             .emit(ns, 0, dur / K / ns)
-            .size((2.6 * size + spacing * n * 0.35) * (mob ? 1.25 : 1), 13 * size)
+            .size((2.6 * size + spacing * n * 0.35) * (mob ? 1.25 : 1) * smokeSize, 13 * size * smokeSize)
             .trail(0.45, 0.35)
             .seed((cue.seed ^ Math.imul(j + 1, 0x51ed27)) & 0xffffff)
             .set(R.X0, 3)
@@ -1443,7 +1638,8 @@ export class FireworkSystem extends CueFxSystem {
       const cname = palette[Math.floor(hf(seed ^ 0x29) * palette.length) % palette.length];
       const gain = starColor(cname, this.palette, this.c1, 'gold');
       const radius = clamp(0.3 * H, 9, 50) * spec.radiusK * (0.85 + 0.3 * hf(seed ^ 3));
-      this.addShell(out, seed, spec, o, B, this.c1.clone(), gain, { tL: tl, tb: tl + rise, radius, smoke, lift: true, flashK: 0.55, col2: null, liftCol });
+      const col = this.c1.clone();
+      this.addShell(out, seed, spec, o, B, col, gain, { tL: tl, tb: tl + rise, radius, smoke, lift: true, flashK: 0.55, col2: null, liftCol, popCol: this.popColor(cue, col) });
     }
     // roof comet fans woven through the barrage
     const roof = this.app.anchors.get('roof');
@@ -1476,6 +1672,21 @@ function numList(v: unknown): number[] {
   if (Array.isArray(v)) return v.filter((x): x is number => typeof x === 'number' && Number.isFinite(x));
   if (typeof v === 'string' && v.length) return v.split(',').map((s) => parseFloat(s)).filter((x) => Number.isFinite(x));
   return [];
+}
+
+/** a list of [x, y, z] points ([[x,y,z], ...]; a single [x,y,z] is one point) */
+function vec3List(v: unknown): THREE.Vector3[] {
+  if (!Array.isArray(v) || !v.length) return [];
+  if (typeof v[0] === 'number') {
+    const l = numList(v);
+    return l.length >= 3 ? [new THREE.Vector3(l[0], l[1], l[2])] : [];
+  }
+  const out: THREE.Vector3[] = [];
+  for (const q of v) {
+    const l = numList(q);
+    if (l.length >= 3) out.push(new THREE.Vector3(l[0], l[1], l[2]));
+  }
+  return out;
 }
 
 function vec3Param(v: unknown, def: THREE.Vector3): THREE.Vector3 {

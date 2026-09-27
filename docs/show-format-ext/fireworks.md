@@ -73,6 +73,22 @@ Engine: `src/fireworks/FireworkSystem.ts`, `src/fireworks/shells.ts`, `src/firew
   ground (tile luminance steps of 10 % at 11-12 per second) is gone; what remains there comes from the
   lighting strobes and the camera's stutter edit (lights.md / camera).
 
+* **Round 11** (engine only; every new param defaults to the old behaviour, cue changes go through the round's cue
+  patch). New params, all in the tables below: comet / cake / mine `pos`, `offset`, `between`; comet / cake `wriggle`
+  (+ `wriggleHz`), `gerb`, `endBurn`, `popColor`; cake `jitter`; shell / salvo `life`; shell / salvo / finale / mine
+  `popColor`; flare `halo`, `haloGain`, `smokeGlow`, `smokeSize`. One default change, mobile only: dense comet fans
+  (4+ comets per emitter) shed half the tail flitter on the mobile preset, so the glitter curtain of v783-788 (~1,700
+  comets) fits the star budget without thinning its comets (mobile, 786: 19.9k -> 12.6k star particles, the layer no
+  longer drops to 75 %; the fireworks CPU stays at 0.05-0.07 ms per frame on desktop and mobile).
+  * Launch points under the portal roof: the `dj_booth` anchor (0, 1.9, −7.5) sits inside the vault, so a comet /
+    cake fired there is invisible. Since round 10 the deck-centre fans (415.42, 421.614, 437.097, 536.194, 536.581)
+    fire from `deck_front` with `x: 0` (the deck lip in front of the booth, verified visible at v416 / v422 / v438 /
+    v538.5); the one cue that still names `dj_booth` (1085.915) gives its own `x`/`y`/`z` above the crest. Use
+    `target: deck_front, x: 0` (or `pos`) for anything that should rise from the booth.
+  * The orange X-fans of v853-861.8 already fire from x ±58 with `cross` (two points per side, each fan tilted
+    towards the other, so the fans cross). Round-11 variants (narrower crossing, more comets, orange heads, taller)
+    all measured 0.9-2.9 points lower on 853.5-861, so that cue stays as it is.
+
 ## New params
 
 ### comet, cake and mine: launch positions
@@ -84,6 +100,9 @@ Engine: `src/fireworks/FireworkSystem.ts`, `src/fireworks/shells.ts`, `src/firew
 | `side` | `left` \| `right`: only the points with x < 0 / x > 0. |
 | `absx` | `[min, max]`: only the points with min ≤ \|x\| ≤ max (e.g. the outer deck points). |
 | `points` | list of indices into the points sorted left → right; negative counts from the right (`[0, -1]` = both outermost). |
+| `pos` | round 11: list of absolute launch points `[[x, y, z], ...]` (a single `[x, y, z]` is one point). Replaces the target points, so a cue can fire from anywhere on the site, outside every anchor set; `mirror` adds the `-x` twins. The red crest streams of v66.3 stand at x ±125, z 20-55 on the bank beyond the arms (ground y 0.7 there): `pos: [[-125,0.7,20],[-125,0.7,37],[-125,0.7,55],[125,0.7,20],[125,0.7,37],[125,0.7,55]]`; as upright `fill: 6, angle: 12` bundles 70 m high on the 65.255 cake: 66.25 / 66.75 +2.6 / +2.3 points. |
+| `offset` | round 11: `[dx, dy, dz]` added to every launch point after the filters above; `dx` points away from the centre line (mirrored per side), so `offset: [19, 0, 20]` moves both crest rows 19 m further out and 20 m towards the audience. |
+| `between` | round 11: n (0-8) x the comets of a point rise from every gap between neighbouring points of the row (points in order along the U, a gap of more than 24 m splits the row): a denser comet wall along the U without new anchors. Comets without shell breaks (`end` none / pearl / pops, no `curl` / `cross`) rise from random spots along each gap out of one emitter per gap, with 1/sqrt(n + 1) of the tail flitter each (the comets overlap), so a dense wall stays within the emitter and star budgets; comets with shell breaks, cakes and mines get n evenly inserted launch points instead. Ignored on the mobile preset (its star budget is already full at v252.9). `between: 3, glitter: 0.9` (and `height` 58 / 54 on the arms) on the three green comet-wall cues of v252.9-255.3 (`front_comets`, `side_rampart`, `arm_posts`) builds the dense wall along the whole U including the arms: 253.5-254.75 +7.9 … +10.8 points (desktop medium at v254: 850 star emitters, 42k particles, within the budget). |
 
 ### comet
 | param | meaning |
@@ -112,10 +131,16 @@ Engine: `src/fireworks/FireworkSystem.ts`, `src/fireworks/shells.ts`, `src/firew
 | `pearlTime` | s the pearl head hangs on at the top (with `end: pearl`, default 1). |
 | `glow` | comet only, 0..3 (round 7, default 0): a soft glow in the comet colour travels up with the comets of each fan (soft puffs on the comets' own paths, radius 0.1 x `height`, 1.5–6 m, dying with the heads). A dense fan seen from a distance becomes one glowing mass, as the camera records it: the pink V-fans of v557.9–559.3 (`glow: 1` on the 557.872 and 558.646 fans: 558.25 +1.2, 558.75 +3.2 points). The puffs are world-sized: meant for fans seen from afar (close up they read as soft balls), and not on by default (every per ≥ 3 fan glowing cost 557.75 −3.4 and 264.75 −3.2 points). |
 
+| `wriggle` | round 11, m (0-6, default 0): the head wriggles sideways along its climb (the serpent helix with this amplitude, without the serpent's smoke trail and long tail), so a comet column draws a thin wavy line, as the white / red columns of v324.7-330 and v384.7-396.4 do. `wriggleHz` (rad/s, default 9) sets how fast. With `width: 0.8, wave: 1.4, wriggle: 0.7` the columns read as thin wavy lines instead of ruler-straight bars (measured neutral on the metric: 324.75-329.5 +0.23, 385-395.5 −0.05 points on average). |
+| `gerb` | round 11, 0-3 (default 0): every comet climbs inside a sheaf of thin streaks in the tail colour (`tailColor`, else the comet colour): ~8 x `gerb` streaks around its path with a little angle and speed spread, each drawing the whole climb, so a column reads as a dense bundle of orange lines under the comet's own head or break. The orange columns with white glitter tops of v1426.6-1439: `gerb: 2.2, glitter: 0.3` on the `end: glitter` comet columns (1436-1438.5 +0.6 … +0.7 points). Scales with the quality preset. |
+| `endBurn` | round 11, 0.2-3 (default 1): burn time of the comet-top breaks (`end` a shell type) and the `pops` ends, x this. `endBurn: 0.5` on the green crackle comets of 267.07 ends their crackle before the dark fade shot of v269.4-270.5 (270.5 +2.6, 269.5 +2.3 points) without moving their launches. |
+| `popColor` | round 11 (alias `crackleColor`): colour-true crackle. The micro-flashes of `end: crackle` / `pops` breaks and of a `crackle` tail burn in this colour instead of white-hot (`"star"` or `true` = each comet's own colour). Also on shells, salvos, finales and crackle mines (below). Note: a hex colour is sRGB, so a light red-pink crackle is `#FFA090`, while `red` crackle is deep and dim (the shader dims saturated metal-salt colours). The red crackle canopy of v538-548: `popColor: "#FFA090"` on the 536.581 / 536.968 crackle cakes and on the 537.743 dome salvo (with `size: 34`): 543-548 +1.0 … +2.4 points; pure `red` pops scored 5-7 points lower at 543 / 544.5 (too dark next to the film's bright red-white crackle). |
+
 ### cake
 | param | meaning |
 |---|---|
 | `fill` | n: every shot fires n comets across the whole `angle` at once (a steady peacock fan); shots are spread over `dur`. |
+| `jitter` | round 11, 0-1 (default 0): every launch point starts at its own random phase of the shot interval, so a row of cakes does not fire in lock-step (the comet wall of v429.4-444.2 reads as one picket fence with every comet at the same height; `jitter: 1` breaks that up, measured neutral: +0.06). |
 | `from`, `to` | deg from vertical, + = away from the centre line: one-way sweep across any range (may exceed ±90). |
 | `tilt` | deg: leans the sweep outward (negative: inward). |
 | `spray` | n: sparks per shot: a dense spark stream instead of single comets (gerb-like streams from a sweeping head). With `curl` the stream draws hooks, loops, the heart. |
@@ -123,7 +148,7 @@ Engine: `src/fireworks/FireworkSystem.ts`, `src/fireworks/shells.ts`, `src/firew
 | `curl`, `glitter`, `crackle`, `tail`, `tailGain`, `tailColor`, `wave`, `width`, `intensity`, `smoke` | as for comet. |
 
 ### mine
-`x`, `y`, `z`, `mirror`, `side`, `absx`, `points` as above. `type: glitter` now sheds twinkling flitter.
+`x`, `y`, `z`, `mirror`, `side`, `absx`, `points`, `pos`, `offset`, `between` as above. `type: glitter` now sheds twinkling flitter.
 `tail` (s, default 0.38) and `intensity` (0..3). **`dur` ≥ 0.5 s**: the mine keeps firing over dur
 (a fountain / volcano); shorter cues stay one burst, so every existing mine is unchanged.
 A `spread` of 70–85 with `count` 150–250 makes a dome; `spread` 25–35, `count` ~400, `dur` 1.6 is the
@@ -137,6 +162,8 @@ white glitter volcano behind the dragon head (v1087.5).
 | salvo `depth` | m: random z spread of the launch line (default 6). |
 | finale `x`, `z` | move the barrage band (default: behind the stage); with either set the roof positions are not used. |
 | finale `depth` | m: spread the band over four rows in z (shells all around a field / FPV camera). |
+| shell / salvo `life` | round 11, s: the stars' mean burn time (the type's own range is scaled to it; the burst radius stays). The red swimmers of v751.5-755.5 / v763.7-767.5 fade ~3.3 s after their break: `life: 2.8` on the 751.421 / 763.609 swimmer salvos (755.5 +1.3, 767.5 +0.8 points), `life: 2.6` on 850.234. |
+| shell / salvo / finale `popColor` | round 11: colour-true crackle for `crackle` shells (the pops keep this colour instead of flashing white; `"star"` = the star colour; also for `type: crackle` mines). Takes precedence over `color2` as the crackle colour. |
 
 ## New fx: `flare` (airborne drone flares)
 | param | meaning |
@@ -146,6 +173,8 @@ white glitter volcano behind the dragon head (v1087.5).
 | `count` | flares in the cluster (default 4), `spacing` m apart across the flight line (default 2.2). |
 | `color` | default `red`. `size`, `intensity` multipliers. |
 | `smoke` | default `true`: self-lit smoke left along the path. |
+| `halo` | round 11, m per `size` (default 7.5): radius of the glow each flare has in its own smoke; 0 = no halo. The filmed flares of v43-64 are bright points with a modest red glow: `halo` 2.5-3.5. `haloGain` (default 1) scales its brightness. |
+| `smokeGlow` | round 11 (default 1): how strongly the flare smoke is self-lit (x the default 6.5 x `intensity`); `smokeSize` (default 1) scales its clouds. The v43-56 flares leave no glowing pink sausage in the film: `halo: 2.0, smokeGlow: 0.15, smokeSize: 0.6` on the 50.7 cluster (51-54.5 +1.1 … +5.8 points, 55.5 −4.0), `halo: 2.5, smokeGlow: 0.2, smokeSize: 0.7` on 42.95 (47.5 +4.2, 44.75 −0.5). Not the default: on the 58.477 / 313.14 flares and at 44.75 / 313.75 (default 64) the same settings score 0.1-0.7 points lower. |
 
 Each flare is a blinding point with a glow halo in its own smoke; the cluster lights the grounds in
 its colour as it passes. Targets are ignored (use `target: "all"`).
