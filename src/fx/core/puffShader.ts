@@ -174,6 +174,11 @@ void main() {
       self = r4.rgb * exp(-tau / max(r9.x, 0.01));
       // the source that lit it has gone out (r8.z = its end, show time): no light left to scatter
       if (r8.z > 0.0) self *= 1.0 - smoothstep(0.0, 0.3, uTime - r8.z);
+    } else if (kind == 5) {
+      // low fog bank released (Emitter.releaseAfter): the machines stopped at r8.z, the bank thins out over r9.x s
+      if (r8.z > 0.0 && r9.x > 0.0) alpha *= 1.0 - smoothstep(r8.z, r8.z + r9.x, uTime);
+      // a pre-warmed bank (Emitter.visibleFrom) fades in from r11.z over the ramp time
+      if (r11.z > 0.0) alpha *= smoothstep(r11.z, r11.z + max(r9.w, 0.1), uTime);
     }
     vLit = r3.rgb * r10.x * (light + self) * fog;
     vEmis = kind == 2 ? r4.rgb * alpha * (1.0 - f) * fog : vec3(0.0);

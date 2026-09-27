@@ -287,6 +287,24 @@ export class Emitter {
     this.f[R.HZ] = t;
     return this;
   }
+  /**
+   * Low fog banks (PUFF.FOG without F.SELFLIT): the machines stop at show time `end` and the whole bank fades out
+   * over `release` s after it (0 = no fade: the puffs just live out their life). Shares the HZ slot (end) and X0
+   * (release), which a fog puff does not use otherwise.
+   */
+  releaseAfter(end: number, release: number): this {
+    this.f[R.HZ] = end;
+    this.f[R.X0] = Math.max(0, release);
+    return this;
+  }
+  /**
+   * Low fog banks (PUFF.FOG, F.FLAT): show time from which the (pre-warmed) bank is seen; it fades in over the ramp
+   * time X3 from there (0 = no fade: each puff fades in by its own age). Shares Z2, which a flat puff does not use.
+   */
+  visibleFrom(t: number): this {
+    this.f[R.Z2] = t;
+    return this;
+  }
   flag(bits: number): this {
     this.f[R.FLAGS] = (this.f[R.FLAGS] | bits) >>> 0;
     return this;

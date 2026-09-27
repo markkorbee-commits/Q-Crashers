@@ -12,6 +12,11 @@ import { installFxProxy } from './proxy';
 const L_FOG = 0;
 const WHITE = new THREE.Color(0.9, 0.9, 0.92);
 const DEFAULT_HAZE = 0.55;
+/**
+ * default `release` (s) of a `fog.lowfog` bank after its cue: the bank thins out over it (smoothstep), as the beams'
+ * view of the bank does (LightingSystem.writeLowFog: 10 s linear linger)
+ */
+const LOWFOG_RELEASE = 10;
 
 interface LevelSeg {
   t: number;
@@ -31,7 +36,9 @@ interface LevelSeg {
  *    light of the LightEnv bus. Its density = haze level + smoke accumulated from recent pyro and
  *    firework cues (an analytic sum over the cue list, so it is seek-safe).
  *  - `fog.burst` (smoke clouds at targets) and `fog.lowfog` (ground fog on the deck flowing onto the
- *    field) are analytic puff particles like the pyro smoke.
+ *    field) are analytic puff particles like the pyro smoke. A low fog bank is lit by the light bus like
+ *    all smoke plus the beam light it holds (LightEnv.lowFogLight), so it goes dark with the rig; it is
+ *    out at its cue time and thins out over `release` s (default 10) after its cue.
  */
 export class FogSystem extends CueFxSystem {
   readonly name = 'fog';
@@ -52,9 +59,13 @@ export class FogSystem extends CueFxSystem {
   /**
    * calibration hooks (in-page experiments; burst lights are baked when a cue is expanded, so clear the
    * cue cache after changing perTarget): tintLean = how far the site smoke's albedo leans to the site
-   * glow colour per unit of smoke; perTarget = glowing-burst lights per target and cluster
+   * glow colour per unit of smoke; perTarget = glowing-burst lights per target and cluster.
+   * Low fog (baked too: clear the cue cache with invalidate() after a change): release = default fade-out (s) of a
+   * bank after its cue (0 = the puffs live out their life); prewarm = the bank is out at the cue time (its puffs
+   * started one life earlier) and fades in over 3 s; tallBank = extra height of a dense bank (density 0.9 -> 1.5).
+   * The beam light a bank holds (LightEnv.lowFogLight) has its gain in FxShared.uniforms.uLowFogGain.
    */
-  readonly tune = { tintLean: 0.3, perTarget: true };
+  readonly tune = { tintLean: 0.3, perTarget: true, release: LOWFOG_RELEASE, prewarm: true, tallBank: 1 };
 
   protected override onInit(app: App): void {
     if (app.params.has('fxproxy')) installFxProxy(app);
@@ -103,8 +114,10 @@ export class FogSystem extends CueFxSystem {
     switch (cue.fx) {
       case 'burst':
         return cue.dur + Math.min(22, num(cue.p.life, 16, 1, 30) + 6);
-      case 'lowfog':
-        return cue.dur + 16;
+      case 'lowfog': {
+        const rel = this.lowfogRelease(cue);
+        return cue.dur + (rel > 0 ? Math.min(19.5, rel + 0.5) : 16);
+      }
       default:
         return cue.dur;
     }
@@ -237,20 +250,33 @@ export class FogSystem extends CueFxSystem {
     const cx = (minX + maxX) / 2;
     const dur = Math.max(1, cue.dur);
     const life = 13;
+    // the machines stop at the cue end; the bank already out there thins out over `release` s
+    const rel = this.lowfogRelease(cue);
+    const tail = rel > 0 ? Math.min(life * 1.5, rel + 0.5) : life * 1.5;
+    // the bank is there when the cue says it is (the video's fog is on screen at the cue time): the ring buffer of
+    // puffs runs from one life before the cue (every puff already out, at its own age) and the bank fades in over
+    // the ramp time — without it only 1 / 13 of the puffs were born per second and a 5-8 s cue never got its bank
+    const pre = this.tune.prewarm ? life : 0;
     // saturated smoke (the red finale bank) keeps its colour; white / pale fog stays neutral. The
     // colours are linear: even 10 % of white turns a deep red bank salmon on screen, so a saturated
     // colour only gets a trace of it
     const raw = fxColor(p.color, this.palette, this.c1, 'white');
     const rawSat = 1 - Math.min(raw.r, raw.g, raw.b) / Math.max(raw.r, raw.g, raw.b, 1e-4);
     const tint = raw.lerp(WHITE, rawSat > 0.6 ? 0.025 : 0.3).clone();
-    const regions: [THREE.Vector3, THREE.Vector3, number, number][] = [];
+    // [centre, extent, density share, floor y, flat aspect]
+    const regions: [THREE.Vector3, THREE.Vector3, number, number, number][] = [];
     const deckY = Math.max(0, y - 0.3);
-    if (area !== 'field') regions.push([new THREE.Vector3(cx, deckY + 0.5, z - 9), new THREE.Vector3(w, 0.7, 20), 0.35, deckY]);
-    if (area !== 'deck' || p.spill !== false) regions.push([new THREE.Vector3(cx, 0.45, z + 16), new THREE.Vector3(w * 0.95, 0.5, 34), area === 'deck' ? 0.55 : 1, 0]);
+    // a dense bank (density over 0.9, the thick white bank of v797-805) stands taller near the machines: its puffs
+    // billow up to ~4-5 m, the pillar shafts stand in it (v802.75)
+    const tk = Math.min(1, Math.max(0, (density - 0.9) / 0.6));
+    const tall = tk * tk * (3 - 2 * tk) * this.tune.tallBank;
+    const asp = 0.32 + 0.2 * tall;
+    if (area !== 'field') regions.push([new THREE.Vector3(cx, deckY + 0.5 + 1.2 * tall, z - 9), new THREE.Vector3(w, 0.7 + 2 * tall, 20), 0.35, deckY, asp]);
+    if (area !== 'deck' || p.spill !== false) regions.push([new THREE.Vector3(cx, 0.45 + 1.2 * tall, z + 16), new THREE.Vector3(w * 0.95, 0.5 + 2 * tall, 34), area === 'deck' ? 0.55 : 1, 0, asp]);
     // (the bank thins out over the far field: machines on the deck, the fog flows out and settles —
     // the lit laser sea over it is the lasers' own layer; the video's far field reads dark, v1536)
-    if (area === 'field' || area === 'all') regions.push([new THREE.Vector3(0, 0.45, 90), new THREE.Vector3(90, 0.5, 130), 0.65, 0]);
-    regions.forEach(([c, ext, dk, floorY], i) => {
+    if (area === 'field' || area === 'all') regions.push([new THREE.Vector3(0, 0.45, 90), new THREE.Vector3(90, 0.5, 130), 0.65, 0, 0.32]);
+    regions.forEach(([c, ext, dk, floorY, aspect], i) => {
       // the big field regions use larger, fainter sheets so the bank reads continuous, not as discs
       const big = ext.x * ext.z > 4000;
       const sz = big ? 1.5 : 1;
@@ -259,14 +285,14 @@ export class FogSystem extends CueFxSystem {
         new Emitter(DIST.BOX, F.FLAT | F.RAMP)
           .on(L_FOG)
           .originV(c)
-          .time(cue.t)
+          .time(cue.t - pre)
           .axisV(ext)
           .dir(0, 0.05, 1, 0.8)
           .speed(0.2, 0.7)
           .physics(0.25, 0)
           .color(tint, (0.42 * density * dk) / Math.sqrt(sz))
           .life(life * 0.7, life)
-          .emit(Math.min(n, 400), dur + life * 0.5)
+          .emit(Math.min(n, 400), dur + life * 0.5 + pre)
           .size(6.5 * sz, 5 * sz)
           .trail(0.7, 0.2)
           .seed(this.sub(cue, i))
@@ -278,11 +304,23 @@ export class FogSystem extends CueFxSystem {
           .set(R.Y2, 0.25)
           .set(R.Y3, 0.35)
           .set(R.Z0, 1.3)
-          .set(R.Z1, 0.32)
+          .set(R.Z1, aspect)
           .set(R.Z3, PUFF.FOG)
-          .window(cue.t, cue.t + dur + life * 1.5),
+          .releaseAfter(rel > 0 ? cue.t + cue.dur : 0, rel)
+          .visibleFrom(pre > 0 ? cue.t : 0)
+          .window(cue.t, cue.t + dur + tail),
       );
     });
+  }
+
+  /**
+   * `release` (s) of a `fog.lowfog` cue: after the cue ends the bank fades out over this time (the machines stop,
+   * the fog flows away). 0 = the puffs live out their life (up to ~16 s after the cue).
+   */
+  private lowfogRelease(cue: Omit<Cue, 'life' | 'end'>): number {
+    const r = cue.p.release;
+    if (typeof r === 'number' && Number.isFinite(r)) return Math.min(30, Math.max(0.1, r));
+    return Math.max(0, this.tune.release);
   }
 
   // ------------------------------------------------------------------ haze timeline

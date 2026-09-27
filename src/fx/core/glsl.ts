@@ -42,6 +42,12 @@ uniform float uSiteSmoke;
 // the 8 lantern crystals on the field (xyz + chase level) and their colour * intensity
 uniform vec4 uLampPos[8];
 uniform vec3 uLampCol;
+// beam light held by the low fog bank (LightEnv.lowFogLight: colour x level, premultiplied), the centre of the lit
+// part of the bank (world m, y = its floor + ~1 m) and its RMS spread (x, z m); uLowFogGain = calibration
+uniform vec3 uLowFogLight;
+uniform vec3 uLowFogPos;
+uniform vec2 uLowFogSpread;
+uniform float uLowFogGain;
 
 #define DIST_SPHERE 0
 #define DIST_CONE 1
@@ -167,6 +173,19 @@ vec3 fxLight(vec3 p, float reach) {
   return L;
 }
 
+/**
+ * Light of the moving-head beams held by the low fog bank at p (round 9): the beams that run down into a
+ * fog.lowfog bank light it where they pass (v802.75: white floor beams turn the white bank into a bright white
+ * band). A gaussian around the lit part of the bank (its RMS spread, at least ~8 x 6 m), only in the bank's
+ * lower metres (the bank top lies ~2 m over its floor; smoke higher up is not in the lit layer).
+ */
+vec3 lowFogLit(vec3 p) {
+  vec2 s = sqrt(uLowFogSpread * uLowFogSpread + vec2(64.0, 36.0));
+  vec2 d = (p.xz - uLowFogPos.xz) / s;
+  float h = 1.0 - smoothstep(uLowFogPos.y + 0.4, uLowFogPos.y + 2.4, p.y);
+  return uLowFogLight * (uLowFogGain * h * exp(-0.5 * dot(d, d)));
+}
+
 /** soft knee: linear up to k, then compressed (keeps the hue) */
 vec3 kneeC(vec3 L, float k, float slope) {
   float m = max(L.r, max(L.g, L.b));
@@ -197,8 +216,9 @@ vec3 envLight(vec3 p) {
   }
   L = kneeC(L, 0.6, 0.35);
   // the site glow (atmos.glow: the red smoke over the whole grounds, the pink whiteout) lights every
-  // bit of smoke like the pyro light field does
-  return L + kneeC(fxLight(p, 1.0) + uFxGlow + uSiteGlow * 1.1, 2.2, 0.3);
+  // bit of smoke like the pyro light field does; so do the beams held by the low fog bank (outside the
+  // rig's low knee: a bank lit by a dozen white beams glows white, not grey)
+  return L + kneeC(fxLight(p, 1.0) + uFxGlow + uSiteGlow * 1.1 + lowFogLit(p), 2.2, 0.3);
 }
 
 #define CULL() { gl_Position = vec4(0.0, 0.0, 2.0, 1.0); return; }
