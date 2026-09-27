@@ -17,8 +17,13 @@ const XTC = (EDU as unknown as { XTC_INFO?: Record<string, unknown> }).XTC_INFO 
 const COMPARE = (EDU as unknown as { COMPARE_INFO?: { title?: string; text?: string } }).COMPARE_INFO ?? {};
 const TIME_NOTE = String((EDU as unknown as { TIME_COMPRESSION_NOTE?: string }).TIME_COMPRESSION_NOTE ?? '');
 const RISK = ((EDU as unknown as { RISK_MESSAGES?: Record<string, string> }).RISK_MESSAGES ?? {}) as Record<string, string>;
+const KET = EDU.KETAMINE_INFO;
+const EXAGGERATED = EDU.EXAGGERATED_NOTE;
 
-const BAC_MAX = 4;
+/** meter end: 1‰ fills a third, so the levels players reach (up to ~1.6‰) are readable */
+const BAC_MAX = 3;
+/** seconds continuously at >= 2.0‰ before the "You need to sit down" modal opens (the preview shows the view first) */
+const AID_DELAY_S = 6;
 const list = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
 
 /**
@@ -56,21 +61,24 @@ export function tierName(t: Tier): string {
 function meter(labels = false): { el: HTMLElement; fill: HTMLElement } {
   const fill = h('div', { class: 'fill' });
   const el = h('div', { class: `meter${labels ? ' labelled' : ''}`, 'aria-hidden': 'true' }, fill);
-  for (const v of [0.5, 1, 2, 3]) {
+  for (const v of [0.5, 1, 2]) {
     const tick = h('div', { class: `tick${v === 0.5 ? ' limit' : ''}`, style: `left:${((v / BAC_MAX) * 100).toFixed(1)}%`, title: v === 0.5 ? '0.5‰ — Dutch legal driving limit' : `${v}‰` });
     if (labels) tick.appendChild(h('span', null, v === 0.5 ? '0.5' : String(v)));
     el.appendChild(tick);
   }
-  if (labels) el.appendChild(h('span', { class: 'end' }, '4‰'));
+  if (labels) el.appendChild(h('span', { class: 'end' }, `${BAC_MAX}‰`));
   return { el, fill };
 }
 
-/** the most severe messages (pinned, never rotated away) */
-const DANGER = new Set([RISK.hyperthermia, RISK.alcoholDanger, RISK.heart].filter(Boolean));
+/** the most severe messages (pinned, never rotated away; they show the first-aid action) */
+const DANGER = new Set([RISK.hyperthermia, RISK.alcoholDanger, RISK.heart, RISK.hyponatraemiaDanger, EDU.KETAMINE_MESSAGES.hole].filter(Boolean));
 const HELP = RISK.help ?? 'First aid posts and staff help without judgement.';
 
 /** trusted help links (rendered as real links) */
 const LINKS: { label: string; url: string; test: RegExp }[] = [
+  { label: 'drugsinfo.nl — ketamine (Trimbos)', url: 'https://www.drugsinfo.nl/ketamine/', test: /drugsinfo.*ketamine/i },
+  { label: 'jellinek.nl — risks of ketamine', url: 'https://www.jellinek.nl/vraag-antwoord/risicos-van-ketamine/', test: /jellinek.*ketamine/i },
+  { label: 'nida.nih.gov — ketamine', url: 'https://nida.nih.gov/research-topics/ketamine', test: /nida.*ketamine/i },
   { label: 'drugsinfo.nl (Trimbos)', url: 'https://www.drugsinfo.nl', test: /drugsinfo/i },
   { label: 'jellinek.nl', url: 'https://www.jellinek.nl', test: /jellinek/i },
   { label: 'unity.nu — peer info at festivals', url: 'https://www.unity.nu', test: /unity/i },
@@ -83,6 +91,12 @@ const LINKS: { label: string; url: string; test: RegExp }[] = [
 function linkFor(text: string): { label: string; url: string } | null {
   return LINKS.find((l) => l.test.test(text)) ?? null;
 }
+
+const byTest = (re: RegExp) => LINKS.find((l) => l.test.source === re.source) ?? LINKS[0];
+/** general information & support links (drugsinfo, jellinek, unity, celebrate safe) */
+const HELP_LINKS = [byTest(/drugsinfo/i), byTest(/jellinek/i), byTest(/unity/i), byTest(/celebrate ?safe/i)];
+/** ketamine information & support links */
+const KET_LINKS = [byTest(/drugsinfo.*ketamine/i), byTest(/jellinek.*ketamine/i), byTest(/drugsinfo/i), byTest(/unity/i)];
 
 /**
  * Perception menu (X), XTC educational disclaimer, status widget (BAC / vitals / warnings / help
@@ -123,8 +137,18 @@ export class PerceptionUI {
   private lastPhase = 'off';
   /** the XTC run was ended by the reset button (no epilogue) */
   private xtcReset = false;
+  /** the XTC epilogue waits until no outcome card is up and no ketamine run is going on */
+  private xtcEpiloguePending = false;
   /** outcome cards shown once per episode (re-armed when the value falls back) */
   private aidShown = false;
+  /** seconds continuously at >= 2.0‰ (the modal opens after AID_DELAY_S) */
+  private highBacFor = 0;
+  /** the "effects pause in the Show camera" toast was shown (once per session) */
+  private showcamNoted = false;
+  /** ketamine risk monitor (status widget) */
+  private ketBox!: HTMLElement;
+  private ketKicker!: HTMLElement;
+  private readonly ketRows: { val: HTMLElement; fill: HTMLElement; key: 'coordination' | 'awareness' | 'movement' }[] = [];
   private heatShown = false;
   /** seconds the body monitor stays after the XTC timeline ended (cool-down) */
   private recoverLeft = 0;
@@ -147,6 +171,17 @@ export class PerceptionUI {
     [this.vitalR, this.vR] = vital('heart', 'Pulse', 'bpm');
     this.xtcKicker = h('div', { class: 'kicker', style: 'margin-bottom:6px' }, 'XTC · risk monitor');
     this.xtcBox = h('div', { class: 'xtc-box' }, this.xtcKicker, h('div', { class: 'vitals' }, this.vitalT, this.vitalH, this.vitalR));
+    // ketamine monitor: one row per line (label, bar, %), the labels are too long for the vitals grid
+    const rows = h('div', { style: 'display:grid;grid-template-columns:auto 1fr auto;gap:6px 10px;align-items:center;margin-top:8px' });
+    for (const key of ['coordination', 'awareness', 'movement'] as const) {
+      const fill = h('div', { style: 'position:absolute;inset:0;transform-origin:0 50%;transform:scaleX(1);background:#7ddc8a;border-radius:3px' });
+      const bar = h('div', { style: 'position:relative;height:6px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden' }, fill);
+      const val = h('b', { style: 'font:600 13px/1 var(--font-display);min-width:3.2em;text-align:right' }, '—');
+      rows.append(h('small', { style: 'font:600 10px/1.2 var(--font-ui);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)' }, KET.monitor[key]), bar, val);
+      this.ketRows.push({ val, fill, key });
+    }
+    this.ketKicker = h('div', { class: 'kicker', style: 'margin-bottom:2px' }, 'Ketamine · risk monitor');
+    this.ketBox = h('div', { class: 'xtc-box ket-box' }, this.ketKicker, rows);
     this.warn = h('span');
     this.warnSub = h('small');
     this.warnBox = h('div', { class: 'warnline' }, h('span', { html: icon('warning'), style: 'display:contents' }), h('span', { class: 'wt' }, this.warn, this.warnSub));
@@ -163,7 +198,7 @@ export class PerceptionUI {
     this.actions = h('div', { class: 'st-actions' }, this.restBtn, this.aidBtn);
     this.cmpTag = h('div', { class: 'compare-tag', html: `${icon('split')}<span>Compare · drag the divider</span>` });
     this.airEl = h('div', { class: 'air-line' });
-    this.status = h('aside', { class: 'status glass strong hud-el', 'aria-live': 'polite', 'aria-label': 'Perception status' }, this.bacBox, this.xtcBox, this.warnBox, this.actions, this.airEl, this.cmpTag);
+    this.status = h('aside', { class: 'status glass strong hud-el', 'aria-live': 'polite', 'aria-label': 'Perception status' }, this.bacBox, this.ketBox, this.xtcBox, this.warnBox, this.actions, this.airEl, this.cmpTag);
     this.status.addEventListener('click', () => this.open());
     this.status.classList.add('ia');
     this.status.style.cursor = 'pointer';
@@ -223,10 +258,11 @@ export class PerceptionUI {
     const p = this.p;
     if (p?.xtcPhase && p.xtcPhase !== 'off') this.xtcReset = true;
     tryCall(p, 'setXtc', false);
+    tryCall(p, 'setKetamine', false);
     tryCall(p, 'setCompare', false);
     tryCall(p, 'soberUp');
     tryCall(p, 'setResting', false);
-    this.aidShown = this.heatShown = false;
+    this.aidShown = this.heatShown = this.xtcEpiloguePending = false;
     this.ui.app.events.emit('perception:changed', { mode: 'sober' });
     this.ui.toast('Back to sober perception', 1800, 'reset');
   }
@@ -249,6 +285,22 @@ export class PerceptionUI {
     this.xtcReset = false;
     this.ui.app.events.emit('perception:changed', { mode: 'xtc' });
     this.ui.toast('XTC perception simulation started — watch the risk monitor', 2800, 'warning');
+  }
+
+  /** start the ketamine scenario (after the information card and, when not sober, the combination warning) */
+  startKetamine(): void {
+    if (!tryCall(this.p, 'setKetamine', true)) {
+      this.ui.toast('The ketamine simulation is not available yet', 2400, 'info');
+      return;
+    }
+    this.ui.app.events.emit('perception:changed', { mode: 'ketamine' });
+    this.ui.toast('Ketamine perception simulation started — watch the risk monitor', 2800, 'warning');
+  }
+
+  /** effect strength preset (remembered per viewer) */
+  setStrength(s: 'strong' | 'realistic'): void {
+    if (!tryCall(this.p, 'setStrength', s, true)) return;
+    this.ui.toast(s === 'strong' ? 'Effect strength: exaggerated — so you can see them' : 'Effect strength: realistic', 2200, 'eye');
   }
 
   toggleCompare(on?: boolean): void {
@@ -296,7 +348,7 @@ export class PerceptionUI {
     const mode = p?.mode ?? 'sober';
     const { el, body } = panelShell(ui, 'Perception', 'How do you experience it?', true);
     el.classList.add('perception');
-    body.appendChild(h('p', { class: 'muted small', style: 'margin:-4px 0 12px' }, 'An educational simulation of how alcohol or XTC change perception at a festival — never an encouragement.'));
+    body.appendChild(h('p', { class: 'muted small', style: 'margin:-4px 0 12px' }, 'An educational simulation of how alcohol, XTC or ketamine change perception at a festival — never an encouragement.'));
     const card = (id: string, ico: string, title: string, sub: string, on: boolean, fn: () => void) => {
       const b = h('button', { class: `p-card ${on ? 'on' : ''}`, type: 'button', 'data-id': id }, h('span', { html: icon(ico), style: 'display:contents' }), h('b', null, title), h('small', null, sub));
       b.addEventListener('click', fn);
@@ -318,12 +370,18 @@ export class PerceptionUI {
         ui.layers.close();
         this.openXtcInfo();
       }),
+      card('ketamine', 'waves', 'Ketamine simulation', 'Read the information first', mode === 'ketamine', () => {
+        ui.layers.close();
+        this.openKetInfo();
+      }),
       card('compare', 'split', 'Compare', 'Split view: sober | altered', this.compareOn, () => {
         this.toggleCompare();
         refresh();
         this.compareDetail(detail);
       }),
     );
+    // five cards in two columns: compare spans the row
+    (grid.lastElementChild as HTMLElement).style.gridColumn = '1 / -1';
     /** highlight the cards from the live perception state (+ the card whose details are shown) */
     const refresh = (selected?: string) => {
       const m = this.p?.mode ?? 'sober';
@@ -341,14 +399,39 @@ export class PerceptionUI {
     const heat = h('p', { class: 'note', html: `${icon('sun')}<span></span>` });
     (heat.lastElementChild as HTMLElement).textContent = 'Heat (26–27 June 2026 was a red heat warning): for everyone — take breaks in the shade, cool down and drink water regularly.';
     const body2 = this.heatSection();
-    const comfort = h('p', { class: 'note', html: `${icon('motion')}<span>Motion and flashing: the simulated effects sway the view and brighten flashes. Reduce motion and Reduce flashing (Graphics panel, Help) keep them calm.</span>` });
+    const comfort = h('p', { class: 'note', html: `${icon('motion')}<span>Motion and flashing: the simulated effects sway the view and brighten flashes. Reduce motion and Reduce flashing (Graphics panel, Help) keep them calm. The effects pause in the Show camera and the other cinematic views.</span>` });
+    const strength = this.strengthSection();
     const alcoholActive = mode === 'alcohol' || (p?.bac ?? 0) > 0.005;
     // with alcohol active its details (the current state) come first
-    if (alcoholActive) body.append(detail, grid, body2 ?? heat, comfort, reset);
-    else body.append(grid, detail, body2 ?? heat, comfort, reset);
+    if (alcoholActive) body.append(detail, grid, strength, body2 ?? heat, comfort, reset);
+    else body.append(grid, detail, strength, body2 ?? heat, comfort, reset);
     if (alcoholActive) this.alcoholDetail(detail);
     else if (this.compareOn) this.compareDetail(detail);
     ui.layers.open('perception', el, { kind: 'panel', trigger: trigger ?? ui.hud.btn.perception, onClose: () => (this.panelBac = null) });
+  }
+
+  /** "Effect strength: Realistic / Exaggerated" (exaggerated = default) with the visibility note */
+  private strengthSection(): HTMLElement {
+    const cur = this.p?.strength === 'realistic' ? 'realistic' : 'strong';
+    const note = h('p', { class: 'small muted', style: 'margin:8px 0 0' }, 'Effects are exaggerated so you can see them.');
+    note.style.display = cur === 'strong' ? '' : 'none';
+    const seg = h('div', { class: 'seg-pick', role: 'radiogroup', 'aria-label': 'Effect strength' });
+    for (const [id, text] of [
+      ['realistic', 'Realistic'],
+      ['strong', 'Exaggerated'],
+    ] as const) {
+      const b = h('button', { type: 'button', role: 'radio', class: id === cur ? 'on' : '', 'aria-checked': String(id === cur) }, text);
+      b.addEventListener('click', () => {
+        this.setStrength(id);
+        seg.querySelectorAll('button').forEach((x) => {
+          x.classList.toggle('on', x === b);
+          x.setAttribute('aria-checked', String(x === b));
+        });
+        note.style.display = id === 'strong' ? '' : 'none';
+      });
+      seg.appendChild(b);
+    }
+    return h('div', { class: 'sub-panel' }, h('div', { class: 'list-h', style: 'margin-top:0' }, 'Effect strength'), seg, note);
   }
 
   /**
@@ -433,7 +516,7 @@ export class PerceptionUI {
         fx,
         h('div', { class: 'list-h' }, 'Preview a level'),
         preview,
-        h('p', { class: 'note', html: `${icon('cup')}<span>At the bars every drink raises your blood alcohol. The same drinks give a much higher level for lighter people, women, young people and on an empty stomach.</span>` }),
+        h('p', { class: 'note', html: `${icon('cup')}<span>At the bars every drink raises your blood alcohol. The same drinks give a much higher level for lighter people, women, young people and on an empty stomach. ${EXAGGERATED}</span>` }),
         TIME_NOTE ? h('p', { class: 'note', html: `${icon('info')}<span></span>` }) : null,
         h('div', { class: 'actions' }, bar),
       ),
@@ -472,7 +555,7 @@ export class PerceptionUI {
       .map(asText)
       .filter((t) => t && !/litre per hour|glass per hour/i.test(t) && !/^Questions\?/i.test(t));
     const links = h('ul', { class: 'fx links' });
-    for (const l of [LINKS[0], LINKS[1], LINKS[2], LINKS[3]]) links.appendChild(h('li', null, h('a', { href: l.url, target: '_blank', rel: 'noopener noreferrer' }, l.label)));
+    for (const l of HELP_LINKS) links.appendChild(h('li', null, h('a', { href: l.url, target: '_blank', rel: 'noopener noreferrer' }, l.label)));
     links.appendChild(h('li', null, 'Drugs Infolijn (Trimbos): 0900-1995'));
     const sources = h('ul', { class: 'fx links' });
     for (const s of list(XTC.sources)) {
@@ -507,13 +590,88 @@ export class PerceptionUI {
     ui.layers.open('xtc', card, { kind: 'modal' });
   }
 
+  /** ketamine: what it is, effects, risks, repeated use, help, sources; "I have read this" gates the start */
+  openKetInfo(): void {
+    const ui = this.ui;
+    const col = (title: string, items: readonly string[]) => {
+      const ul = h('ul', { class: 'fx' });
+      for (const it of items) ul.appendChild(h('li', null, it));
+      return h('div', null, h('h5', null, title), ul);
+    };
+    const links = h('ul', { class: 'fx links' });
+    for (const l of KET_LINKS) links.appendChild(h('li', null, h('a', { href: l.url, target: '_blank', rel: 'noopener noreferrer' }, l.label)));
+    links.appendChild(h('li', null, 'Drugs Infolijn (Trimbos): 0900-1995'));
+    const sources = h('ul', { class: 'fx links' });
+    for (const text of KET.sources) {
+      const l = linkFor(text);
+      sources.appendChild(h('li', null, l ? h('a', { href: l.url, target: '_blank', rel: 'noopener noreferrer' }, text) : text));
+    }
+    const check = h('input', { type: 'checkbox', id: 'ket-ok' });
+    const start = h('button', { class: 'btn primary', type: 'button', disabled: true, html: `${icon('check')}<span>I understand — start simulation</span>` });
+    check.addEventListener('change', () => (start.disabled = !check.checked));
+    start.addEventListener('click', () => {
+      ui.layers.close('ketamine');
+      const p = this.p;
+      // not sober (alcohol in the blood or still being absorbed, or an XTC run): the combination risks first
+      // (the simulation does not model the combination)
+      if ((p?.bac ?? 0) > 0.2 || (p?.stomach ?? 0) > 5 || (p?.xtcPhase ?? 'off') !== 'off') this.openKetCombination();
+      else this.startKetamine();
+    });
+    const cancel = h('button', { class: 'btn ghost', type: 'button' }, 'Cancel');
+    cancel.addEventListener('click', () => ui.layers.close('ketamine'));
+    const help = KET.help.filter((t) => !/^Questions\?/i.test(t));
+    const card = h(
+      'div',
+      { class: 'card wide glass strong rule-top', 'aria-label': 'Ketamine simulation information' },
+      h('div', { class: 'kicker' }, 'Educational simulation'),
+      h('h3', null, KET.title),
+      h('p', { class: 'small', style: 'margin:0 0 10px' }, KET.what),
+      h('div', { class: 'disclaimer-box', html: `${icon('warning')}<span></span>` }),
+      h('p', { class: 'small', style: 'margin:12px 0 0' }, h('b', null, 'Q-dance has a zero-tolerance drug policy.'), ' Drugs are not allowed at its events, and they are never obtainable in this experience. The First Aid team is your friend: no judgement, no consequences.'),
+      h('div', { class: 'info-cols', style: 'margin-top:16px' }, col('How it can change perception and the body', KET.effects), col('Risks at a festival', KET.risks), col('Repeated use', KET.repeated), col('Help on site', help), h('div', null, h('h5', null, 'Information & support'), links)),
+      h('div', { class: 'list-h' }, 'Sources'),
+      sources,
+      h('label', { class: 'check-row', for: 'ket-ok' }, check, h('span', null, 'I have read this. This simulation does not encourage drug use.')),
+      h('div', { class: 'actions' }, start, cancel),
+    );
+    (card.querySelector('.disclaimer-box span') as HTMLElement).textContent = KET.disclaimer;
+    ui.layers.open('ketamine', card, { kind: 'modal' });
+  }
+
+  /** the combination warning before a ketamine run on top of alcohol or XTC */
+  private openKetCombination(): void {
+    const ui = this.ui;
+    const C = KET.combination;
+    const go = h('button', { class: 'btn primary', type: 'button', html: `${icon('check')}<span>I understand — continue</span>` });
+    go.addEventListener('click', () => {
+      ui.layers.close('ket-mix');
+      this.startKetamine();
+    });
+    const cancel = h('button', { class: 'btn ghost', type: 'button', autofocus: true }, 'Cancel');
+    cancel.addEventListener('click', () => ui.layers.close('ket-mix'));
+    const ul = h('ul', { class: 'fx' });
+    for (const t of C.points) ul.appendChild(h('li', null, t));
+    const card = h(
+      'div',
+      { class: 'card glass strong rule-top outcome', 'aria-label': C.title },
+      h('div', { class: 'kicker' }, 'Combination warning'),
+      h('h3', null, C.title),
+      h('p', null, C.body),
+      ul,
+      h('p', { class: 'small muted', style: 'margin-top:10px' }, C.note),
+      h('p', { class: 'small muted' }, 'Someone does not respond? Recovery position, stay with them, get first aid or call 112.'),
+      h('div', { class: 'actions' }, go, cancel),
+    );
+    ui.layers.open('ket-mix', card, { kind: 'modal' });
+  }
+
   /** after the XTC timeline: the days after ("dinsdagdip"), mixing, help and information */
   private openEpilogue(): void {
     const ui = this.ui;
     const ok = h('button', { class: 'btn primary', type: 'button', autofocus: true, html: `${icon('check')}<span>Close</span>` });
     ok.addEventListener('click', () => ui.layers.close('xtc-after'));
     const links = h('ul', { class: 'fx links' });
-    for (const l of [LINKS[0], LINKS[1], LINKS[2], LINKS[3]]) links.appendChild(h('li', null, h('a', { href: l.url, target: '_blank', rel: 'noopener noreferrer' }, l.label)));
+    for (const l of HELP_LINKS) links.appendChild(h('li', null, h('a', { href: l.url, target: '_blank', rel: 'noopener noreferrer' }, l.label)));
     links.appendChild(h('li', null, 'Drugs Infolijn (Trimbos): 0900-1995'));
     const card = h(
       'div',
@@ -576,32 +734,52 @@ export class PerceptionUI {
     const stomach = p?.stomach ?? 0;
     const cmp = !!p?.compare;
     const phase = p?.xtcPhase ?? ((p?.xtc ?? 0) > 0.001 ? 'plateau' : 'off');
+    const ketPhase = p?.ketPhase ?? 'off';
+    const ketOn = ketPhase !== 'off';
+    // perception applies to the player's own view only: no compare divider in the Show camera & co.
+    const cam = this.ui.camMode();
+    const ownView = cam === 'first' || cam === 'third';
+    // once per session: in the Show camera while a simulation runs (entering it, starting one in it, or a
+    // session that starts in it)
+    if (cam === 'showcam' && !this.showcamNoted && this.ui.entered && (p?.mode ?? 'sober') !== 'sober') {
+      this.showcamNoted = true;
+      this.ui.toast('Perception effects pause in the Show camera — your body state keeps running.', 4200, 'film');
+    }
     const risk = p?.risk;
     const temp = risk?.bodyTemp;
     const hr = risk?.heartRate;
 
-    // XTC timeline ended by itself -> epilogue card; the monitor stays while the body cools down
+    // XTC timeline ended by itself -> epilogue card; the monitor stays while the body cools down. The card
+    // waits while an outcome card (K-hole, sit-down ...) is up or a ketamine run goes on, so cards never stack
     if (phase === 'off' && this.lastPhase !== 'off') {
-      if (!this.xtcReset && this.ui.entered) this.openEpilogue();
+      if (!this.xtcReset && this.ui.entered) this.xtcEpiloguePending = true;
       this.recoverLeft = this.xtcReset ? 0 : 150;
     }
-    if (phase !== 'off') this.xtcReset = false;
+    if (phase !== 'off') this.xtcReset = this.xtcEpiloguePending = false;
+    if (this.xtcEpiloguePending && (p?.outcome ?? 'none') === 'none' && !ketOn && !this.ui.layers.isOpen('outcome')) {
+      this.xtcEpiloguePending = false;
+      this.openEpilogue();
+    }
     this.lastPhase = phase;
     this.recoverLeft = Math.max(0, this.recoverLeft - 0.25);
 
     const alcohol = bac > 0.005 || stomach > 0.05;
     // the monitor stays through comedown / after, and until the body has cooled down
     const recovering = typeof temp === 'number' && temp >= 37.3 && this.recoverLeft > 0;
-    const showX = phase !== 'off' || recovering;
-    const show = alcohol || showX || cmp;
+    // the heat monitor also shows during a ketamine run when the body warms up (dancing)
+    const ketHeat = ketOn && typeof temp === 'number' && temp >= 37.5;
+    const showX = phase !== 'off' || recovering || ketHeat;
+    const show = alcohol || showX || cmp || ketOn;
     toggleClass(this.status, 'show', show);
-    toggleClass(this.divider, 'show', cmp);
+    toggleClass(this.divider, 'show', cmp && ownView);
     const mode = p?.mode ?? (phase !== 'off' ? 'xtc' : alcohol ? 'alcohol' : 'sober');
     this.ui.hud.setBadge('perception', mode !== 'sober' || cmp);
     toggleClass(this.ui.root, 'has-status', show);
 
-    // outcomes: once per episode, re-armed when the value falls back
-    if (bac >= 2.0 && !this.aidShown && this.ui.entered) {
+    // outcomes: once per episode, re-armed when the value falls back. The 2.0‰ modal waits until the
+    // level has held for a few seconds, so the 2.0‰ preview first shows the view (it still always opens)
+    this.highBacFor = bac >= 2.0 ? this.highBacFor + 0.25 : 0;
+    if (this.highBacFor >= AID_DELAY_S && !this.aidShown && this.ui.entered) {
       this.aidShown = true;
       this.openOutcome('alcohol');
     } else if (bac < 1.6) this.aidShown = false;
@@ -623,12 +801,30 @@ export class PerceptionUI {
       setText(this.tierEl, tierName(tierFor(bac)));
       this.bacMeter.fill.style.transform = `scaleX(${Math.min(1, bac / BAC_MAX).toFixed(3)})`;
     }
+    // ketamine risk monitor: coordination, awareness, can move
+    this.ketBox.style.display = ketOn ? '' : 'none';
+    if (ketOn) {
+      const KP: Record<string, string> = { onset: 'onset', peak: 'peak', hole: 'K-hole', return: 'coming back', after: 'after' };
+      setText(this.ketKicker, `Ketamine · risk monitor · ${KP[ketPhase] ?? ketPhase}`);
+      const km = p?.ketMonitor;
+      for (const r of this.ketRows) {
+        const v = km?.[r.key];
+        setText(r.val, typeof v === 'number' ? `${Math.round(v * 100)} %` : '—');
+        const x = typeof v === 'number' ? Math.max(0, Math.min(1, v)) : 1;
+        r.fill.style.transform = `scaleX(${x.toFixed(3)})`;
+        const c = x < 0.25 ? '#ff4a2a' : x < 0.6 ? '#ffb020' : '#7ddc8a';
+        if (r.fill.dataset.c !== c) {
+          r.fill.dataset.c = c;
+          r.fill.style.background = c;
+        }
+      }
+    }
     // xtc / body monitor
     this.xtcBox.style.display = showX ? '' : 'none';
     if (showX) {
       this.xtcBox.dataset.on = '1';
       const PH: Record<string, string> = { onset: 'onset', plateau: 'peak', comedown: 'comedown', after: 'after', off: 'recovering' };
-      setText(this.xtcKicker, `XTC · risk monitor · ${PH[phase] ?? phase}`);
+      setText(this.xtcKicker, phase === 'off' && ketHeat ? 'Body · heat monitor' : `XTC · risk monitor · ${PH[phase] ?? phase}`);
       const hyd = risk?.hydration;
       // over-hydration (MDMA water retention, hyponatraemia risk) is its own 0..1 state now
       const overK = (risk as { overhydration?: number } | undefined)?.overhydration;
@@ -649,8 +845,16 @@ export class PerceptionUI {
       toggleClass(this.vitalR, 'warn', typeof hr === 'number' && hr >= 110 && hr < 140);
     } else if (this.xtcBox.dataset.on === '1') this.clearVitals();
 
-    // warnings (alcohol and XTC): the most severe one is pinned, the others rotate below it
+    // warnings (alcohol, XTC, ketamine): the most severe one is pinned, the others rotate below it
     const warnings = list(risk?.warnings).map(asText).filter(Boolean);
+    if (ketOn) {
+      const kw = list(p?.ketWarnings).map(asText).filter(Boolean);
+      // the ketamine lines come after the life-threatening ones (overheating, alcohol poisoning, heart rate:
+      // exactly the mixing cases) and before the general ones; "cannot move" is a danger line itself
+      let i = 0;
+      while (i < warnings.length && DANGER.has(warnings[i])) i++;
+      warnings.splice(i, 0, ...kw);
+    }
     const first = warnings[0];
     const danger = !!first && DANGER.has(first);
     const rest = warnings.filter((w) => w !== first && w !== HELP);
@@ -659,7 +863,7 @@ export class PerceptionUI {
       this.warnAt = now;
       this.warnIdx++;
     }
-    const main = first ?? (showX ? 'Keep cool: take breaks in the shade and sip water regularly.' : '');
+    const main = first ?? (showX ? 'Keep cool: take breaks in the shade and sip water regularly.' : ketOn ? 'Stay close to friends who know; first aid helps without judgement.' : '');
     const sub = danger ? HELP : rest.length ? rest[this.warnIdx % rest.length] : '';
     this.warnBox.style.display = main ? '' : 'none';
     setText(this.warn, main);
@@ -671,16 +875,22 @@ export class PerceptionUI {
 
     // actions: rest while the body is under strain, first aid when in danger
     const resting = !!p?.resting;
-    const restVisible = showX || heatRisk || resting;
+    const restVisible = showX || heatRisk || resting || ketOn;
     this.restBtn.style.display = restVisible ? '' : 'none';
     toggleClass(this.restBtn, 'on', resting);
-    const restLabel = resting ? 'Resting · stand up' : 'Rest & cool down';
+    // in the K-hole the body does not respond: no "stand up" that silently does nothing
+    const hole = ketPhase === 'hole';
+    const restLabel = hole ? 'You cannot get up' : resting ? 'Resting · stand up' : 'Rest & cool down';
     const rl = this.restBtn.lastElementChild as HTMLElement;
     if (rl.textContent !== restLabel) rl.textContent = restLabel;
+    if (this.restBtn.disabled !== hole) {
+      this.restBtn.disabled = hole;
+      this.restBtn.setAttribute('aria-disabled', String(hole));
+    }
     this.aidBtn.style.display = danger || bac >= 2.0 || heatRisk ? '' : 'none';
     this.actions.style.display = restVisible || danger || bac >= 2.0 || heatRisk ? '' : 'none';
 
-    this.cmpTag.style.display = cmp ? '' : 'none';
+    this.cmpTag.style.display = cmp && ownView ? '' : 'none';
     // the air of the night and what the body is doing (both modes)
     const feels = risk?.feelsLikeC;
     const air = p?.air ? `${p.air}${typeof feels === 'number' ? ` · feels ${Math.round(feels)} °C` : ''}${p.activityLabel ? ` · ${p.activityLabel}` : ''}` : '';

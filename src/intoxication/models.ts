@@ -31,14 +31,18 @@ export function table(t: readonly number[], x: number): number {
   return t[t.length - 1];
 }
 
+/** perception effect strength: `strong` (default) exaggerates for visibility, `realistic` is the round-6 look */
+export type PerceptionStrength = 'strong' | 'realistic';
+
 /**
  * Effect strength per BAC (promille), following the design-bible tiers 0.2 / 0.5 / 0.8 / 1.2 / 1.6 / 2.0+.
  * Real 0.5–1.6‰ impairment is mostly slowed pursuit and saccades, lost glare recovery, a narrowed field
  * and double vision that comes and goes — not myopic blur. So the static blur stays low; the weight is on
  * tracking lag (motion smear, input lag), glare persistence (afterimage), refocus blur after fast head turns
  * (added live by the PerceptionSystem), intermittent diplopia and nystagmus.
+ * This is the `realistic` preset (unchanged since round 6); `ALCOHOL_FX_STRONG` exaggerates it for visibility.
  */
-export const ALCOHOL_FX = {
+export const ALCOHOL_FX_REALISTIC = {
   blur: [0.25, 0, 0.5, 0.03, 0.8, 0.08, 1.2, 0.15, 1.6, 0.22, 2.0, 0.3, 3.0, 0.42],
   /** strength of a double-vision episode (ghost 0.5–1.5°) */
   doubleVision: [0.7, 0, 1.0, 0.18, 1.2, 0.32, 1.6, 0.52, 2.0, 0.7, 3.0, 0.9],
@@ -46,7 +50,7 @@ export const ALCOHOL_FX = {
   diplopiaDuty: [0.8, 0, 1.2, 0.3, 1.6, 0.5, 2.0, 0.75, 2.8, 1],
   chroma: [0.4, 0, 0.8, 0.07, 1.2, 0.12, 1.6, 0.18, 2.0, 0.24],
   wobble: [0.15, 0, 0.5, 0.1, 0.8, 0.2, 1.2, 0.34, 1.6, 0.48, 2.0, 0.6, 3.0, 0.75],
-  /** narrowed field: FOV −15 % at 0.8‰, −25 % at 1.2‰, heavy vignette at 2‰ */
+  /** narrowed field: a darker, softer periphery (tunnel mask), a heavy vignette at 2‰ */
   tunnel: [0.4, 0, 0.8, 0.16, 1.2, 0.28, 1.6, 0.42, 2.0, 0.58, 3.0, 0.78],
   contrast: [0.1, 1, 0.2, 0.96, 0.5, 0.91, 0.8, 0.88, 1.2, 0.85, 1.6, 0.81, 2.0, 0.77],
   saturation: [0.8, 1, 1.6, 0.9, 2.0, 0.8, 2.8, 0.68],
@@ -76,7 +80,326 @@ export const ALCOHOL_FX = {
   gapLength: [1.6, 1.1, 2.0, 1.8, 2.5, 2.8],
   /** gaze-evoked nystagmus amplitude (deg) at lateral gaze / after head turns */
   nystagmus: [1.0, 0, 1.2, 0.25, 1.6, 0.45, 2.0, 0.6],
-} as const;
+  /** "the spins" while standing still: amplitude of the sideways creep (deg); off in this preset */
+  spins: [0, 0],
+  /** the world lags behind a head turn and overshoots: maximum offset (deg); off in this preset */
+  overshoot: [0, 0],
+  /** music stereo width multiplier (1 = unchanged) */
+  width: [0, 1],
+  /** music level (dB) */
+  musicDb: [0, 0],
+};
+
+export type AlcoholFx = { readonly [K in keyof typeof ALCOHOL_FX_REALISTIC]: readonly number[] };
+
+/**
+ * `strong` preset (round 7): today's 1.6‰ look arrives at about 1.0‰ and today's 2.0‰ look at about 1.6‰,
+ * the level players can actually reach at the bars. Outcome tables (stumbles, memory gaps) and the motor
+ * tables for exposure, balance, input lag and walking speed are shared with the realistic preset.
+ */
+export const ALCOHOL_FX_STRONG: AlcoholFx = {
+  ...ALCOHOL_FX_REALISTIC,
+  blur: [0.25, 0, 0.5, 0.06, 0.8, 0.14, 1.0, 0.19, 1.2, 0.24, 1.6, 0.34, 2.0, 0.44, 3.0, 0.55],
+  doubleVision: [0.2, 0, 0.5, 0.15, 0.8, 0.3, 1.0, 0.42, 1.2, 0.55, 1.6, 0.75, 2.0, 0.9, 3.0, 1.0],
+  diplopiaDuty: [0.2, 0, 0.5, 0.15, 0.8, 0.3, 1.0, 0.45, 1.2, 0.6, 1.6, 0.8, 2.0, 0.95, 3.0, 1],
+  chroma: [0.2, 0, 0.5, 0.1, 0.8, 0.2, 1.0, 0.26, 1.2, 0.32, 1.6, 0.45, 2.0, 0.55, 3.0, 0.6],
+  wobble: [0.1, 0, 0.2, 0.08, 0.5, 0.2, 0.8, 0.38, 1.0, 0.48, 1.2, 0.58, 1.6, 0.72, 2.0, 0.85, 3.0, 1.0],
+  tunnel: [0.25, 0, 0.5, 0.1, 0.8, 0.28, 1.0, 0.36, 1.2, 0.45, 1.6, 0.6, 2.0, 0.72, 3.0, 0.85],
+  contrast: [0.1, 1, 0.2, 0.96, 0.5, 0.9, 0.8, 0.86, 1.0, 0.83, 1.2, 0.8, 1.6, 0.75, 2.0, 0.7, 3.0, 0.66],
+  saturation: [0.5, 1, 0.8, 0.97, 1.0, 0.94, 1.2, 0.91, 1.6, 0.84, 2.0, 0.74, 3.0, 0.62],
+  motionBlur: [0.3, 0, 0.5, 0.22, 0.8, 0.34, 1.0, 0.4, 1.2, 0.45, 1.6, 0.55, 2.0, 0.65],
+  afterimage: [0.5, 0, 0.8, 0.4, 1.0, 0.45, 1.2, 0.52, 1.6, 0.62, 2.0, 0.66, 3.0, 0.7],
+  lightSensitivity: [0.5, 0, 0.8, 0.15, 1.0, 0.19, 1.2, 0.22, 1.6, 0.3, 2.0, 0.34, 3.0, 0.38],
+  trails: [0.5, 0, 0.8, 0.5, 1.0, 0.6, 1.2, 0.7, 1.6, 0.8, 2.0, 0.85],
+  nystagmus: [0.8, 0, 1.0, 0.3, 1.2, 0.8, 1.6, 1.2, 2.0, 1.5],
+  spins: [0.9, 0, 1.0, 0.5, 1.2, 1.5, 1.6, 3.0, 2.0, 4.5],
+  overshoot: [0.3, 0, 0.5, 0.15, 0.8, 0.4, 1.0, 0.6, 1.2, 0.8, 1.6, 1.3, 2.0, 1.8],
+  sway: [0.1, 0, 0.2, 0.1, 0.5, 0.25, 0.8, 0.45, 1.0, 0.55, 1.2, 0.65, 1.6, 0.85, 2.0, 1.0],
+  lookJitter: [0.3, 0, 0.5, 0.1, 0.8, 0.22, 1.0, 0.3, 1.2, 0.38, 1.6, 0.55, 2.0, 0.7],
+  muffle: [0.1, 0, 0.2, 0.05, 0.5, 0.3, 0.8, 0.42, 1.0, 0.5, 1.2, 0.58, 1.6, 0.68, 2.0, 0.75],
+  audioWobble: [0.5, 0, 0.8, 0.3, 1.0, 0.43, 1.2, 0.55, 1.6, 0.75, 2.0, 0.9],
+  width: [0.5, 1, 0.8, 0.92, 1.0, 0.86, 1.2, 0.8, 1.6, 0.7, 2.0, 0.62, 3.0, 0.55],
+  musicDb: [0.5, 0, 0.8, -0.5, 1.0, -1, 1.2, -1.5, 1.6, -2.5, 2.0, -3],
+};
+
+/** the alcohol tables of a preset */
+export const ALCOHOL_FX_BY: Record<PerceptionStrength, AlcoholFx> = { strong: ALCOHOL_FX_STRONG, realistic: ALCOHOL_FX_REALISTIC };
+
+/** compat: the realistic tables (the outcome tables stumbleRate / gapRate / gapLength are the same in both presets) */
+export const ALCOHOL_FX: AlcoholFx = ALCOHOL_FX_REALISTIC;
+
+/**
+ * XTC effect gains per preset (x = intensity, n = nausea, d = drained, dz = dazzle, kp = kick pulse).
+ * `realistic` holds the round-6 values.
+ */
+export interface XtcGains {
+  sat: number;
+  warmth: number;
+  exp: number;
+  /** midtone lift (dilated pupils: darker parts open up, lit areas protected), PerceptionParams.lift */
+  lift: number;
+  expDazzle: number;
+  ls: number;
+  bloom: number;
+  star: number;
+  veilBase: number;
+  veilDazzle: number;
+  glow: number;
+  trails: number;
+  after: number;
+  chroma: number;
+  blur: number;
+  wobble: number;
+  /** nystagmus (deg) */
+  nyst: number;
+  /** jaw-clench shake (screen heights) */
+  jaw: number;
+  kickExp: number;
+  kickBloom: number;
+  kickSat: number;
+  kickZoom: number;
+  jitter: number;
+  sway: number;
+  nSat: number;
+  nExp: number;
+  /**
+   * 0..1 how far a nausea crest suppresses the warm, glowing crest look (warmth and glow x (1 - n), exposure
+   * and lift x (1 - 0.7 n)); 0 = the round-6 behaviour
+   */
+  nDamp: number;
+  nTint: number;
+  nWobble: number;
+  nBlur: number;
+  nTunnel: number;
+  nSway: number;
+  nMuffle: number;
+  nAudioWobble: number;
+  dSat: number;
+  dContrast: number;
+  dExp: number;
+  /** comedown tunnel (tired, narrowed view) */
+  dTunnel: number;
+  dWarmth: number;
+  dSpeed: number;
+  dLag: number;
+  dMuffle: number;
+  dWidth: number;
+  dMusicDb: number;
+  dHighShelf: number;
+  /** music (x): high shelf dB, low shelf dB, width gain (x 1 + widthGain·x), level dB */
+  aHighShelf: number;
+  aLowShelf: number;
+  aWidth: number;
+  aMusicDb: number;
+  /** share of the distance-model level drop removed at x = 1 (the music feels closer) */
+  aDistDrop: number;
+}
+
+export const XTC_GAINS: Record<PerceptionStrength, XtcGains> = {
+  realistic: {
+    sat: 0.12,
+    warmth: 0,
+    exp: 0.06,
+    lift: 0,
+    expDazzle: 0.22,
+    ls: 0.42,
+    bloom: 0.35,
+    star: 0.3,
+    veilBase: 0.22,
+    veilDazzle: 0.78,
+    glow: 0,
+    trails: 0.5,
+    after: 0.45,
+    chroma: 0.1,
+    blur: 0.1,
+    wobble: 0.05,
+    nyst: 0.2,
+    jaw: 0.0011,
+    kickExp: 0.03,
+    kickBloom: 0.3,
+    kickSat: 0,
+    kickZoom: 0,
+    jitter: 0.15,
+    sway: 0.08,
+    nSat: 0.4,
+    nExp: 0.1,
+    nDamp: 0,
+    nTint: 0,
+    nWobble: 0.4,
+    nBlur: 0.08,
+    nTunnel: 0.2,
+    nSway: 0.35,
+    nMuffle: 0,
+    nAudioWobble: 0,
+    dSat: 0.3,
+    dContrast: 0.08,
+    dExp: 0.1,
+    dTunnel: 0,
+    dWarmth: 0,
+    dSpeed: 0.15,
+    dLag: 0.06,
+    dMuffle: 0,
+    dWidth: 0,
+    dMusicDb: 0,
+    dHighShelf: 0,
+    aHighShelf: 0,
+    aLowShelf: 0,
+    aWidth: 0,
+    aMusicDb: 0,
+    aDistDrop: 0,
+  },
+  strong: {
+    sat: 0.4,
+    // 0.6 -> 0.85: at 0.6 the warm cast hardly showed in the blue-white fog at the front (B/R 1.33 -> 1.28)
+    warmth: 0.85,
+    // round-7 review: a flat x1.2 turned the lit fog at the front milky; most of the lift moved into the
+    // highlight-protected midtone lift (the dark crowd scene gets about the same, a bright scene far less)
+    exp: 0.05,
+    lift: 0.15,
+    expDazzle: 0.4,
+    ls: 0.7,
+    bloom: 0.9,
+    // streak energy ~20 % (0.7 lifted the lit fog field)
+    star: 0.55,
+    veilBase: 0.1,
+    veilDazzle: 0.9,
+    glow: 0.35,
+    trails: 0.9,
+    after: 0.8,
+    chroma: 0.2,
+    blur: 0.12,
+    wobble: 0.1,
+    nyst: 0.6,
+    jaw: 0.0025,
+    kickExp: 0.08,
+    kickBloom: 0.6,
+    kickSat: 0.08,
+    kickZoom: 0.008,
+    jitter: 0.3,
+    sway: 0.15,
+    nSat: 0.6,
+    nExp: 0.1,
+    nDamp: 1,
+    nTint: 1,
+    nWobble: 0.7,
+    nBlur: 0.15,
+    nTunnel: 0.4,
+    nSway: 0.6,
+    nMuffle: 0.3,
+    nAudioWobble: 0.5,
+    dSat: 0.55,
+    dContrast: 0.25,
+    dExp: 0.2,
+    dTunnel: 0.15,
+    dWarmth: 0.5,
+    dSpeed: 0.25,
+    dLag: 0.1,
+    dMuffle: 0.3,
+    dWidth: 0.3,
+    dMusicDb: -2,
+    dHighShelf: -3,
+    aHighShelf: 4,
+    aLowShelf: 3,
+    aWidth: 0.35,
+    aMusicDb: 1.5,
+    aDistDrop: 0.5,
+  },
+};
+
+/**
+ * Composite-shader constants per preset (uniforms, so switching never recompiles). `realistic` = the
+ * round-6 literals. See PostFX.percTune for the meaning of each field.
+ */
+export interface PercTune {
+  swim: number;
+  rot1: number;
+  rot2: number;
+  zoom: number;
+  drift: number;
+  fSwim: number;
+  fRot: number;
+  fZoom: number;
+  chroma: number;
+  periph: number;
+  edge: number;
+  trailGain: number;
+  ghostX: number;
+  ghostY: number;
+  ghostFull: number;
+  vergence: number;
+  afterDim: number;
+  afterAdd: number;
+  /** star-glare tap stride factor, desktop / mobile */
+  starStride: number;
+  starStrideM: number;
+  /** body veil: spatial / flat weights, luma-gate width (0 = off) */
+  veilSpatial: number;
+  veilFlat: number;
+  veilGate: number;
+  /** bloom threshold drop at lightSensitivity 1 */
+  lsThreshold: number;
+}
+
+export const PERC_TUNE: Record<PerceptionStrength, PercTune> = {
+  realistic: {
+    swim: 0.0035,
+    rot1: 0.014,
+    rot2: 0.008,
+    zoom: 0.012,
+    drift: 0.0025,
+    fSwim: 1,
+    fRot: 1,
+    fZoom: 1,
+    chroma: 0.018,
+    periph: 0,
+    edge: 0,
+    trailGain: 1,
+    ghostX: 0.03,
+    ghostY: 0.005,
+    ghostFull: 0.4,
+    vergence: 0,
+    afterDim: 0.35,
+    afterAdd: 0.16,
+    starStride: 1,
+    starStrideM: 1,
+    veilSpatial: 0.75,
+    veilFlat: 0.25,
+    veilGate: 0,
+    lsThreshold: 0.72,
+  },
+  strong: {
+    swim: 0.0075,
+    rot1: 0.028,
+    rot2: 0.014,
+    zoom: 0.025,
+    drift: 0.005,
+    // swim 0.17–0.3 Hz, rotation ~0.13 / 0.05 Hz, zoom and drift ~0.1 Hz (round 6: 0.03–0.09 Hz)
+    fSwim: 3.5,
+    fRot: 4.2,
+    fZoom: 2.5,
+    chroma: 0.03,
+    periph: 2.0,
+    edge: 0.03,
+    trailGain: 0.9,
+    ghostX: 0.045,
+    ghostY: 0.012,
+    ghostFull: 0.3,
+    vergence: 0.12,
+    afterDim: 0.5,
+    afterAdd: 0.3,
+    // glare stride 1.25 -> 1.8 desktop, 1.6 -> 2.2 mobile: streaks about 45 % longer
+    starStride: 1.44,
+    starStrideM: 1.375,
+    // the veil lights up what is lit: no flat frame-wide share, and it fades out below ~0.08 exposed luma so
+    // dark silhouettes in front of the lights stay dark (round-7 review: crowd p5 0 -> 40 at XTC 90)
+    veilSpatial: 0.75,
+    veilFlat: 0,
+    veilGate: 0.08,
+    // a milder bloom-threshold drop: at 0.72 the lit fog at the front (t 1243) entered the bright pass and
+    // bloom, star streaks and veil spread it into a milky field; the lights themselves still bloom
+    lsThreshold: 0.5,
+  },
+};
 
 /** BAC at which the forced "sit down / first aid" outcome happens (bible §12.2: 2.0‰+) */
 export const SITDOWN_BAC = 2.5;
@@ -143,6 +466,70 @@ export function xtcNausea(t: number): number {
   const p = ((t - 6) % 11) / 11; // one wave every 11 s
   const wave = p < 0.4 ? Math.sin((p / 0.4) * Math.PI) : 0;
   return env * wave * wave;
+}
+
+// ---------------------------------------------------------------- ketamine timeline (real seconds)
+
+/**
+ * One fixed, anonymous scenario (never a choice of amount): onset (numb, heavy, sound far away), peak
+ * (dissociation) with a "K-hole" window (hardly able to move or speak), return (slowly back, unsteady,
+ * nausea) and a grey, tired after-phase. Compressed like the XTC run: about 5 minutes of real time.
+ */
+export type KetPhase = 'off' | 'onset' | 'peak' | 'hole' | 'return' | 'after';
+
+export const KET_TIMELINE = { onset: 30, peakEnd: 180, holeStart: 90, holeEnd: 140, returnEnd: 260, end: 310 } as const;
+export const KET_END = KET_TIMELINE.end;
+
+export function ketPhase(t: number): KetPhase {
+  const K = KET_TIMELINE;
+  if (t < 0 || t >= K.end) return 'off';
+  if (t < K.onset) return 'onset';
+  if (t < K.peakEnd) return t >= K.holeStart && t < K.holeEnd ? 'hole' : 'peak';
+  if (t < K.returnEnd) return 'return';
+  return 'after';
+}
+
+/** 0..1 depth of the K-hole window: in over 10 s, out over 10 s */
+export function ketHole(t: number): number {
+  const K = KET_TIMELINE;
+  if (t <= K.holeStart || t >= K.holeEnd) return 0;
+  return smooth01((t - K.holeStart) / 10) * (1 - smooth01((t - K.holeEnd + 10) / 10));
+}
+
+/** 0..1 dissociation (detached from body and surroundings): 0.55 at the end of the onset, 0.8 at the peak, 1 in the K-hole */
+export function ketDissociation(t: number): number {
+  const K = KET_TIMELINE;
+  if (t <= 0 || t >= K.end) return 0;
+  if (t < K.onset) return 0.55 * smooth01((t - 2) / (K.onset - 2));
+  if (t < K.peakEnd) return Math.min(1, 0.55 + 0.25 * smooth01((t - K.onset) / 40) + 0.2 * ketHole(t));
+  if (t < K.returnEnd) return 0.08 + 0.72 * (1 - smooth01((t - K.peakEnd) / (K.returnEnd - K.peakEnd)));
+  return 0.08 * (1 - smooth01((t - K.returnEnd) / 30));
+}
+
+/** 0..1 numb, heavy body (onset through peak, fading in the return) */
+export function ketNumb(t: number): number {
+  const K = KET_TIMELINE;
+  if (t <= 0 || t >= K.end) return 0;
+  if (t < K.peakEnd) return smooth01((t - 3) / 22);
+  return 1 - smooth01((t - K.peakEnd) / (K.returnEnd + 20 - K.peakEnd));
+}
+
+/** 0..1 nausea waves on the way back (every 13 s) */
+export function ketNausea(t: number): number {
+  const K = KET_TIMELINE;
+  if (t < K.peakEnd + 4 || t > K.returnEnd) return 0;
+  const env = smooth01((t - K.peakEnd - 4) / 12) * (1 - smooth01((t - K.returnEnd + 20) / 20));
+  const p = ((t - K.peakEnd - 4) % 13) / 13;
+  const wave = p < 0.45 ? Math.sin((p / 0.45) * Math.PI) : 0;
+  return env * wave * wave;
+}
+
+/** 0..1 grey, tired, flat (late return and after-phase) */
+export function ketDrained(t: number): number {
+  const K = KET_TIMELINE;
+  if (t < K.peakEnd + 30 || t >= K.end) return 0;
+  if (t < K.returnEnd) return 0.75 * smooth01((t - K.peakEnd - 30) / (K.returnEnd - K.peakEnd - 30));
+  return 0.75 - 0.25 * smooth01((t - K.returnEnd) / (K.end - K.returnEnd));
 }
 
 // ---------------------------------------------------------------- heat scenarios

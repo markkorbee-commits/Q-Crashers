@@ -1,9 +1,12 @@
 /**
  * Web Audio graph (one AudioContext for the whole app):
  *
- *   music source -> musicIn -> perception lowpass -> wobble delay
+ *   music source -> musicIn -> perception lowpass -> perception low / high shelf -> wobble delay
  *        -> distance air-absorption lowpass -> rear high-shelf -> stereo width (M/S) -> direction pan
  *        -> distance gain -> musicGain -> master
+ *   wobble delay -> perception echo send (two cross-fed delays, off by default) -> stereo width (M/S)
+ *        (so the echo follows the width, direction pan and distance / perception level like the dry music)
+ *   heartbeat (one persistent 48 Hz oscillator -> envelope gain, silent by default) -> master
  *   ambience (AmbienceSystem) -> ambienceIn -> perception lowpass -> ambienceGain -> master
  *   sfx -> sfxGain -> master
  *   master -> safety limiter -> destination
@@ -34,12 +37,23 @@ export class AudioEngine {
   private widthRL!: GainNode;
   private dirPan!: StereoPannerNode;
   private distGain!: GainNode;
+  private percLowShelf!: BiquadFilterNode;
+  private percHighShelf!: BiquadFilterNode;
+  private echoSend!: GainNode;
+  private heartGain!: GainNode;
   private volume = 0.85;
   private muted = false;
   private readyCbs: ((ctx: AudioContext) => void)[] = [];
   /** last applied spatial values (for stats / avoiding redundant automation) */
   readonly spatial = { distance: 40, gainDb: 0, cutoff: 20000, pan: 0, rear: 0, width: 1 };
+  /**
+   * perception mix (PerceptionSystem, T5d): stereo width multiplier, level (dB), low / high shelf (dB),
+   * echo send 0..1 and the share of the distance level drop that is kept (1 = all of it). Identity = 1, 0, 0, 0, 0, 1.
+   */
+  readonly percMix = { width: 1, gainDb: 0, lowDb: 0, highDb: 0, echo: 0, distDrop: 1 };
   private lastMuffle = 0;
+  /** audio-clock time of the next scheduled heartbeat (0 = not running) */
+  private nextBeatAt = 0;
 
   /** must be called from a user gesture handler at least once */
   ensure(): AudioContext {
@@ -98,8 +112,53 @@ export class AudioEngine {
     this.dirPan = ctx.createStereoPanner();
     this.distGain = ctx.createGain();
     this.musicGain = ctx.createGain();
-    this.musicIn.connect(this.lowpass).connect(this.wobbleDelay).connect(this.distLowpass).connect(this.rearShelf).connect(split);
+    // perception shelves (0 dB = identity)
+    this.percLowShelf = ctx.createBiquadFilter();
+    this.percLowShelf.type = 'lowshelf';
+    this.percLowShelf.frequency.value = 90;
+    this.percLowShelf.gain.value = 0;
+    this.percHighShelf = ctx.createBiquadFilter();
+    this.percHighShelf.type = 'highshelf';
+    this.percHighShelf.frequency.value = 5000;
+    this.percHighShelf.gain.value = 0;
+    this.musicIn.connect(this.lowpass).connect(this.percLowShelf).connect(this.percHighShelf).connect(this.wobbleDelay).connect(this.distLowpass).connect(this.rearShelf).connect(split);
     merge.connect(this.dirPan).connect(this.distGain).connect(this.musicGain).connect(this.master);
+
+    // perception echo (ketamine: sound far away, a wide echo): send gain 0 = off
+    this.echoSend = ctx.createGain();
+    this.echoSend.gain.value = 0;
+    const echoL = ctx.createDelay(1);
+    const echoR = ctx.createDelay(1);
+    echoL.delayTime.value = 0.29;
+    echoR.delayTime.value = 0.41;
+    const echoTone = ctx.createBiquadFilter();
+    echoTone.type = 'lowpass';
+    echoTone.frequency.value = 2400;
+    echoTone.Q.value = 0.5;
+    const fbL = ctx.createGain();
+    const fbR = ctx.createGain();
+    fbL.gain.value = fbR.gain.value = 0.42;
+    const echoMerge = ctx.createChannelMerger(2);
+    this.wobbleDelay.connect(this.echoSend).connect(echoTone);
+    echoTone.connect(echoL);
+    echoTone.connect(echoR);
+    // cross-fed feedback: the echo bounces between the sides (a wide, distant space)
+    echoL.connect(fbL).connect(echoR);
+    echoR.connect(fbR).connect(echoL);
+    echoL.connect(echoMerge, 0, 0);
+    echoR.connect(echoMerge, 0, 1);
+    // into the width stage: far from the PA the echo drops with the distance model like the dry sound, and
+    // the perception level (-4 dB for ketamine) applies to it too
+    echoMerge.connect(split);
+
+    // heartbeat: one persistent 48 Hz oscillator, beats are gain envelopes scheduled on the audio clock
+    const heartOsc = ctx.createOscillator();
+    heartOsc.type = 'sine';
+    heartOsc.frequency.value = 48;
+    this.heartGain = ctx.createGain();
+    this.heartGain.gain.value = 0;
+    heartOsc.connect(this.heartGain).connect(this.master);
+    heartOsc.start();
 
     this.ambienceIn = ctx.createGain();
     this.ambLowpass = ctx.createBiquadFilter();
@@ -172,9 +231,10 @@ export class AudioEngine {
 
   /**
    * Perception-driven audio: `muffle` 0..1 closes a low-pass (alcohol), `wobble` 0..1 adds slow
-   * pitch wow via a modulated delay. The muffle also applies (a bit less) to the crowd ambience.
+   * pitch wow via a modulated delay (depth up to 9 ms; `rateHz` overrides the wow rate, e.g. a slow
+   * drift). The muffle also applies (a bit less) to the crowd ambience.
    */
-  setPerception(muffle: number, wobble: number) {
+  setPerception(muffle: number, wobble: number, rateHz?: number) {
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
     const m = Math.max(0, Math.min(0.92, muffle));
@@ -183,8 +243,74 @@ export class AudioEngine {
     const fa = 20000 * Math.pow(1 - m * 0.85, 2.2) + 500;
     if (Math.abs(m - this.lastMuffle) > 1e-4) this.ambLowpass.frequency.setTargetAtTime(Math.min(20000, fa), now, 0.25);
     this.lastMuffle = m;
-    this.wobbleDepth.gain.setTargetAtTime(wobble * 0.004, now, 0.3);
-    this.wobbleLfo.frequency.setTargetAtTime(0.2 + wobble * 0.4, now, 0.3);
+    const w = Math.max(0, Math.min(1, wobble));
+    // the delay line idles at 12 ms: the depth must stay below that
+    this.wobbleDepth.gain.setTargetAtTime(w * 0.009, now, 0.3);
+    this.wobbleLfo.frequency.setTargetAtTime(rateHz !== undefined && rateHz > 0 ? rateHz : 0.2 + w * 0.4, now, 0.3);
+  }
+
+  /**
+   * Perception mix (T5d): stereo width multiplier, music level (dB), low shelf (90 Hz) and high shelf (5 kHz)
+   * gains (dB), echo send 0..1 and the share of the distance model's level drop that is kept. Multiplied
+   * into the distance model in one place (applySpatial), so it never fights setMusicDistance. Throttle-safe:
+   * unchanged values do nothing.
+   */
+  setPerceptionMix(widthScale: number, gainDb: number, lowShelfDb: number, highShelfDb: number, echo = 0, distDrop = 1): void {
+    if (!this.ctx) return;
+    const q = this.percMix;
+    const w = Math.max(0, Math.min(1.6, widthScale));
+    const g = Math.max(-24, Math.min(6, gainDb));
+    const lo = Math.max(-12, Math.min(8, lowShelfDb));
+    const hi = Math.max(-12, Math.min(8, highShelfDb));
+    const e = Math.max(0, Math.min(1, echo));
+    const dd = Math.max(0, Math.min(1, distDrop));
+    const now = this.ctx.currentTime;
+    if (Math.abs(lo - q.lowDb) > 0.01) this.percLowShelf.gain.setTargetAtTime(lo, now, 0.3);
+    if (Math.abs(hi - q.highDb) > 0.01) this.percHighShelf.gain.setTargetAtTime(hi, now, 0.3);
+    if (Math.abs(e - q.echo) > 0.002) this.echoSend.gain.setTargetAtTime(0.5 * e, now, 0.4);
+    q.lowDb = lo;
+    q.highDb = hi;
+    q.echo = e;
+    if (Math.abs(w - q.width) < 0.002 && Math.abs(g - q.gainDb) < 0.01 && Math.abs(dd - q.distDrop) < 0.002) return;
+    q.width = w;
+    q.gainDb = g;
+    q.distDrop = dd;
+    this.applySpatial(now);
+  }
+
+  /**
+   * Heartbeat close by (XTC, heat danger, ketamine): `levelDb` of the "lub" (-Infinity = silent), `bpm`
+   * sets the spacing, `phase` 0..1 aligns a restart with the simulated heart. Beats are gain envelopes
+   * scheduled ahead on the audio clock (lub 70 ms, dub 60 ms at 0.6 level, 0.3 of a period later): no node
+   * per beat. Call from a throttled path (e.g. 5 Hz).
+   */
+  setHeartbeat(bpm: number, levelDb: number, phase = 0): void {
+    if (!this.ctx) return;
+    const g = this.heartGain.gain;
+    const now = this.ctx.currentTime;
+    if (!(levelDb > -80) || !(bpm > 20)) {
+      if (this.nextBeatAt > 0) {
+        g.cancelScheduledValues(now);
+        g.setTargetAtTime(0, now, 0.05);
+        this.nextBeatAt = 0;
+      }
+      return;
+    }
+    const period = 60 / Math.min(220, bpm);
+    const amp = Math.pow(10, Math.min(0, levelDb) / 20);
+    if (this.nextBeatAt < now) this.nextBeatAt = now + 0.05 + (1 - (((phase % 1) + 1) % 1)) * period * 0.999;
+    const horizon = now + 0.5;
+    while (this.nextBeatAt < horizon) {
+      const t = this.nextBeatAt;
+      g.setValueAtTime(0, t);
+      g.linearRampToValueAtTime(amp, t + 0.012);
+      g.setTargetAtTime(0, t + 0.07, 0.02);
+      const t2 = t + 0.3 * period;
+      g.setValueAtTime(0, t2);
+      g.linearRampToValueAtTime(amp * 0.6, t2 + 0.012);
+      g.setTargetAtTime(0, t2 + 0.06, 0.02);
+      this.nextBeatAt = t + period;
+    }
   }
 
   /** music level (dB) at a listening distance from the main PA, with delay-tower support */
@@ -215,10 +341,18 @@ export class AudioEngine {
     s.gainDb = AudioEngine.distanceGainDb(meters);
     s.cutoff = AudioEngine.distanceCutoff(meters);
     s.width = 1 - 0.45 * Math.min(1, Math.max(0, (meters - 60) / 360));
-    this.distGain.gain.setTargetAtTime(Math.pow(10, s.gainDb / 20), now, 0.25);
     this.distLowpass.frequency.setTargetAtTime(s.cutoff, now, 0.25);
-    const a = (1 + s.width) / 2;
-    const b = (1 - s.width) / 2;
+    this.applySpatial(now);
+  }
+
+  /** level and stereo width = distance model x perception mix (the only place that sets them) */
+  private applySpatial(now: number): void {
+    const s = this.spatial;
+    const q = this.percMix;
+    this.distGain.gain.setTargetAtTime(Math.pow(10, (s.gainDb * q.distDrop + q.gainDb) / 20), now, 0.25);
+    const w = s.width * q.width;
+    const a = (1 + w) / 2;
+    const b = (1 - w) / 2;
     this.widthLL.gain.setTargetAtTime(a, now, 0.3);
     this.widthRR.gain.setTargetAtTime(a, now, 0.3);
     this.widthLR.gain.setTargetAtTime(b, now, 0.3);
