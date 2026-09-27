@@ -104,6 +104,8 @@ export class SynthTrack implements AudioTrack {
     this.pausedAt = this.getTime();
     this._playing = false;
     this.engine?.killSession();
+    // the session fades out over 25 ms; what is still in the distance delay is faded out by the gate
+    this.audio.musicJump(0.03);
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     this.attach(false);

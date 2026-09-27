@@ -6,12 +6,15 @@ const MAX_MUSIC_DELAY = 1.45;
 /** delay cut: gate fade out, delay jump in silence, fade back in (s) */
 const CUT_OUT = 0.04;
 const CUT_IN = 0.1;
-/** fastest delay slew while moving (s/s = pitch shift): 5 % ≈ 17 m/s, above that the lag builds up */
-const MAX_DELAY_RATE = 0.05;
+/**
+ * fastest delay slew while moving (s/s = pitch shift): 1.5 % ≈ 5 m/s (a quarter semitone), above running
+ * speed (3.4 m/s); a faster (free camera) flight builds up a lag that the gate dips catch up
+ */
+const MAX_DELAY_RATE = 0.015;
 /** a change of the target this large within one update is a jump (s ≈ 27 m), not motion */
 const JUMP_STEP = 0.08;
-/** accumulated lag behind the target that is cut even while still moving (s) */
-const MAX_LAG = 0.5;
+/** accumulated lag behind the target that is cut even while still moving (s ≈ 50 m) */
+const MAX_LAG = 0.15;
 /** once the listener has (nearly) stopped (target rate below this, s/s ≈ 5 m/s), a lag above SETTLE_LAG is cut */
 const SETTLED_RATE = 0.015;
 const SETTLE_LAG = 0.04;
@@ -80,6 +83,14 @@ export class AudioEngine {
   private slewEnd = 0;
   /** gate schedule of the running cut: fade out from `v0` at `start` to 0 at `closed`, fade in from `open` */
   private readonly cut = { start: 0, v0: 1, closed: 0, open: 0 };
+  /**
+   * audio-clock time from which the input of the delay line (musicIn) is fresh: entered after the last
+   * jump of the source (a seek / pause / restart makes everything before it stale, musicJump) and not
+   * heard yet (a cut records the input heard so far). A cut reopens the gate only once the line outputs
+   * input from this time on (freshAt + delay), so raising the delay can neither expose pre-seek audio
+   * still in the line nor replay music already heard.
+   */
+  private freshAt = 0;
   /** delay target of the last update and how fast it moves (s/s, smoothed) */
   private readonly delayTrack = { target: 0, rate: 0 };
   /** counts delay cuts: AmbienceSystem re-times the crowd vocals scheduled with the old delay */
@@ -433,10 +444,11 @@ export class AudioEngine {
   /**
    * Distance delay of the music: `seconds` = listener distance / 343 (0 for the Show camera and the
    * fly-over: the film's sound is synced to its picture), `dt` = time since the previous call.
-   * Walking or flying slews the delay (the tiny pitch shift is the physical Doppler shift, capped at 5 %
-   * ≈ 17 m/s; faster flights build up a lag). A jump of the target (teleport, spot), `cut` (camera mode
-   * switch), a lag above 0.5 s, or a lag left over after a fast flight once the listener slows down are
-   * hidden in a short gate dip instead: fade out 40 ms, set the delay in silence, fade in 100 ms.
+   * Walking or running slews the delay (the tiny pitch shift is the physical Doppler shift, capped at
+   * 1.5 % ≈ 5 m/s; faster flights build up a lag). A jump of the target (teleport, spot), `cut` (camera
+   * mode switch, audio source switch, a reposition), a lag above 0.15 s, or a lag left over after a fast
+   * flight once the listener slows down are hidden in a short gate dip instead: fade out 40 ms, set the
+   * delay in silence, fade in 100 ms once the line outputs fresh input (see `freshAt`).
    */
   setMusicDelay(seconds: number, dt: number, cut = false): void {
     if (!this.ctx) return;
@@ -452,7 +464,7 @@ export class AudioEngine {
     const lag = Math.abs(gap);
     if (lag < 1e-4) return;
     if ((cut && lag > 0.003) || step > JUMP_STEP || lag > MAX_LAG || (tr.rate < SETTLED_RATE && lag > SETTLE_LAG)) {
-      this.cutDelay(target, now, 0);
+      this.cutDelay(target, now);
       return;
     }
     // a dip is running: it already set the delay; walking on is slewed after it
@@ -468,35 +480,53 @@ export class AudioEngine {
   }
 
   /**
-   * The music source jumped (seek, track swap, restart): what is still travelling through the delay
-   * line belongs to the old position. The gate mutes it until the new sound comes out of the line
-   * (`lead` = seconds until the new audio enters musicIn). Without a distance delay there is nothing in
-   * flight and nothing changes (Show camera, fly-over).
+   * The music source jumped or stopped (seek, track swap, restart, pause): what is still travelling
+   * through the delay line belongs to the old position. From `lead` s on (when the old material has
+   * stopped entering musicIn; the new one may start then or later) the input is fresh; the gate mutes
+   * the line until that input comes out. Without a distance delay nothing is in flight and nothing
+   * changes (Show camera, fly-over), but the bookkeeping still applies: a cut that raises the delay
+   * shortly afterwards (the Moments menu's "Watch from <spot>" teleports and seeks in one click) must
+   * not reopen onto the pre-seek input still in the line.
    */
   musicJump(lead = 0.05): void {
     if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    this.freshAt = Math.max(this.freshAt, now + Math.max(0, lead));
     const lag = this.spatial.delay;
     if (lag < CUT_OUT) return;
-    this.cutDelay(lag, this.ctx.currentTime, lag + Math.max(0, lead));
+    this.cutDelay(lag, now);
   }
 
-  /** gate dip: fade out, jump the delay while silent, stay closed for `hold` s, fade back in */
-  private cutDelay(target: number, now: number, hold: number): void {
+  /**
+   * Gate dip: fade out, jump the delay while silent, fade back in once the line outputs fresh input
+   * (`freshAt` + the new delay; a delay raised by a teleport gives a short silence equal to the extra
+   * travel time instead of replaying music already heard, as physics would).
+   */
+  private cutDelay(target: number, now: number): void {
     const g = this.delayGate.gain;
+    const d = this.distDelay.delayTime;
+    const c = this.cut;
+    const inDip = now < this.cutUntil;
+    // a dip still fading out keeps its close time (the fade just continues); otherwise fade out now
+    const closing = inDip && now < c.closed;
+    const closedNow = inDip && now >= c.closed && now < c.open;
+    const closeAt = closing ? c.closed : now + CUT_OUT;
+    // what has been heard: while the gate is (partly) open the listener hears the input of `delay` s
+    // ago, until the fade out ends (the delay is held until then). Fully closed: nothing new was heard
+    if (!closedNow) this.freshAt = Math.max(this.freshAt, closeAt - d.value);
     const v0 = this.gateAt(now);
     // anchor the fade out at the gate's current value. Mid-dip cancelAndHoldAtTime freezes the running
     // ramp atomically; with no dip running it must NOT be used: after the last event Chrome inserts no
     // anchor, so the new ramp would start at the previous event (seconds ago) and step the gate down
-    if (now < this.cutUntil && typeof g.cancelAndHoldAtTime === 'function') g.cancelAndHoldAtTime(now);
+    if (inDip && typeof g.cancelAndHoldAtTime === 'function') g.cancelAndHoldAtTime(now);
     else {
       g.cancelScheduledValues(now);
       g.setValueAtTime(v0, now);
     }
-    g.linearRampToValueAtTime(0, now + CUT_OUT);
-    const t1 = now + CUT_OUT + 0.005;
+    g.linearRampToValueAtTime(0, closeAt);
+    const t1 = closeAt + 0.005;
     // freeze a running slew ramp where it is (cancelling it would snap the delay back while still
     // audible), then jump in silence
-    const d = this.distDelay.delayTime;
     if (typeof d.cancelAndHoldAtTime === 'function') d.cancelAndHoldAtTime(now);
     else {
       const v = d.value;
@@ -505,14 +535,16 @@ export class AudioEngine {
     }
     d.setValueAtTime(target, t1);
     this.slewEnd = t1;
-    g.setValueAtTime(0, t1 + hold);
-    g.linearRampToValueAtTime(1, t1 + hold + CUT_IN);
-    const c = this.cut;
+    // reopen once the line outputs input from `freshAt` on (a new cut may shorten a running dip:
+    // every reason to keep it closed is in `freshAt`)
+    const open = Math.max(t1, this.freshAt + target);
+    g.setValueAtTime(0, open);
+    g.linearRampToValueAtTime(1, open + CUT_IN);
     c.start = now;
     c.v0 = v0;
-    c.closed = now + CUT_OUT;
-    c.open = t1 + hold;
-    this.cutUntil = t1 + hold + CUT_IN;
+    c.closed = closeAt;
+    c.open = open;
+    this.cutUntil = open + CUT_IN;
     this.spatial.delay = target;
     this.delayCuts++;
   }
@@ -521,7 +553,7 @@ export class AudioEngine {
   private gateAt(t: number): number {
     const c = this.cut;
     if (t >= this.cutUntil) return 1;
-    if (t < c.closed) return c.v0 * Math.max(0, Math.min(1, (c.closed - t) / CUT_OUT));
+    if (t < c.closed) return c.v0 * Math.max(0, Math.min(1, (c.closed - t) / Math.max(1e-3, c.closed - c.start)));
     if (t < c.open) return 0;
     return Math.max(0, Math.min(1, (t - c.open) / CUT_IN));
   }
