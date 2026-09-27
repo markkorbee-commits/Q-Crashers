@@ -86,6 +86,22 @@ export function addCastleGarlands(g: Garlands): void {
     ])
       u = g.swag(new THREE.Vector3(s * a, yp, zp), new THREE.Vector3(s * b, yp, zp), 0.35, GARLAND.castle, 0.8, GARLAND_BULB.set, u);
   }
+  // round 11, group 'base': ONE straight, taut row of bulbs across the castle front at the eave height (video
+  // 412.7-413.3 / 1268-1272: unprojected through the fitted terrace telephoto the row sits at Y 7.9 and runs
+  // unbroken from X -40 to +40; the eave swags above sag between the pilasters). It passes in front of the
+  // porch screen over the portal and ends at the side sections.
+  {
+    const yb = 7.9;
+    const zb = L.facadeZ + 0.55;
+    const zpb = L.porchFrontZ + 0.5;
+    const ph = L.porchHalf + 0.3;
+    for (const s of [-1, 1]) {
+      let u = 0;
+      // porch front (centre outwards), then the facade out to the side sections
+      u = g.string([new THREE.Vector3(0, yb, zpb), new THREE.Vector3(s * ph, yb, zpb)], GARLAND.base, 0.85, GARLAND_BULB.set, u);
+      g.string([new THREE.Vector3(s * ph, yb, zb), new THREE.Vector3(s * 37.2, yb, zb)], GARLAND.base, 0.85, GARLAND_BULB.set, u);
+    }
+  }
 }
 
 export class CastleBuilder {

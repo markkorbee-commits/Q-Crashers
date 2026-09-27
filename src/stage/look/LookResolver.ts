@@ -48,6 +48,11 @@ interface StateVals {
   crownColW: number;
   wingCol: THREE.Color;
   wingColW: number;
+  /** per-side wing colour overrides (round 11: wingColorLeft / wingColorRight, on top of wingColor) */
+  wingColL: THREE.Color;
+  wingColLW: number;
+  wingColR: THREE.Color;
+  wingColRW: number;
   /** per-side emitter levels (state param `side`): audience-left (x < 0) / right */
   sideL: number;
   sideR: number;
@@ -55,9 +60,16 @@ interface StateVals {
   glowFloor: number;
   /** persistent festoon level (all groups) + colour / pattern / rate */
   garlands: number;
+  /** the persistent level per festoon group (x wings, y castle, z sides, w castle-front row): `garlandTarget` */
+  garl: THREE.Vector4;
   garlandCol: THREE.Color;
   garlandPat: number;
   garlandRate: number;
+  /** white-hot share / glare size of the bulbs (round 11) */
+  garlandHot: number;
+  garlandGlare: number;
+  /** LED glow of the white wing plates (round 11, stage.state `plates`) */
+  plates: number;
 }
 
 const newVals = (): StateVals => ({
@@ -88,19 +100,53 @@ const newVals = (): StateVals => ({
   crownColW: 0,
   wingCol: new THREE.Color(),
   wingColW: 0,
+  wingColL: new THREE.Color(),
+  wingColLW: 0,
+  wingColR: new THREE.Color(),
+  wingColRW: 0,
   sideL: 1,
   sideR: 1,
   glowFloor: 0,
   garlands: 0,
+  garl: new THREE.Vector4(),
   garlandCol: new THREE.Color(),
   garlandPat: 0,
   garlandRate: 2,
+  garlandHot: 1,
+  garlandGlare: 1,
+  plates: 0,
 });
 
 /** stage.state `mask` presets: hard isolations applied after the explicit levels */
 const MASKS = ['all', 'center', 'crown', 'wings', 'dragon'] as const;
 /** garland pattern names (stage.state garlandPattern / stage.garlands pattern) */
 const GARLAND_PATTERN: Record<string, number> = { steady: 0, chase: 1, twinkle: 2, strobe: 3 };
+/**
+ * festoon groups as bits (stage.garlands `target` / stage.state `garlandTarget`, a name or an array of names):
+ * 'all' keeps its round-6 meaning (wings + castle + sides); 'base' is the straight row along the castle front
+ * (round 11, video 412.7-413.3 / 1268-1272); 'noFacade' = wings + base + sides (every string but the castle's eave /
+ * porch swags, video 1268.12-1272.5); 'every' = all + base
+ */
+const GARLAND_GROUP: Record<string, number> = { wings: 1, castle: 2, sides: 4, base: 8, all: 7, noFacade: 13, every: 15 };
+/**
+ * bitmask of a festoon target: a group name or an array of names (the union). Missing: 'all'; an unknown name
+ * lights nothing, as before round 11.
+ */
+function garlandMask(tg: unknown): number {
+  if (typeof tg === 'string') return GARLAND_GROUP[tg] ?? 0;
+  if (Array.isArray(tg)) {
+    let m = 0;
+    for (let i = 0; i < tg.length; i++) {
+      const g = tg[i];
+      if (typeof g === 'string' && GARLAND_GROUP[g] !== undefined) m |= GARLAND_GROUP[g];
+    }
+    return m;
+  }
+  return 7;
+}
+/** the festoon glare range (stage.garlands glare / stage.state garlandGlare) */
+const clampGlare = (x: unknown, def: number) => (typeof x === 'number' && Number.isFinite(x) ? Math.max(0.5, Math.min(4, x)) : def);
+const clamp01 = (x: unknown, def: number) => (typeof x === 'number' && Number.isFinite(x) ? Math.max(0, Math.min(1, x)) : def);
 /** mean level of the festoon strobe (lit 40 % of each pulse, dragon/shading.ts) with a little extra glow */
 const GARLAND_STROBE_MEAN = 0.45;
 /** gate rates in pulses per beat + phase offset (stage.gate rate) */
@@ -113,6 +159,14 @@ const GATE_RATE: Record<string, [number, number]> = {
   half: [0.5, 0],
   bar: [0.25, 0],
 };
+/** stage.flash targets -> [dragon light weight, wing light weight, head only, dragon LEDs, wing LEDs] */
+const FLASH_TARGET: Record<string, [number, number, number, number, number]> = {
+  head: [1, 0, 1, 1, 0],
+  dragon: [1, 0, 0, 1, 0],
+  wings: [0, 1, 0, 0, 1],
+  crown: [1, 1, 0, 1, 1],
+};
+const FLASH_WHITE = new THREE.Color(1, 1, 1);
 const clamp2 = (x: unknown, def: number) => (typeof x === 'number' && Number.isFinite(x) ? Math.max(0, Math.min(2, x)) : def);
 
 /**
@@ -137,6 +191,11 @@ interface ContentTarget {
   banner: number;
   skull: number;
   emblem: number;
+  /** per-side wing colours inside the look (round 11: content params wingColor / wingColorLeft / wingColorRight) */
+  wl: THREE.Color;
+  wlw: number;
+  wr: THREE.Color;
+  wrw: number;
 }
 const newTarget = (): ContentTarget => ({
   mode: 0,
@@ -149,6 +208,10 @@ const newTarget = (): ContentTarget => ({
   banner: 0,
   skull: 0,
   emblem: 0,
+  wl: new THREE.Color(),
+  wlw: 0,
+  wr: new THREE.Color(),
+  wrw: 0,
 });
 
 /** 'screens.content' pattern names -> extended castle LED pattern (see StageLookEx.ledPatternX) */
@@ -196,6 +259,9 @@ export class LookResolver {
   private active: Cue[] = [];
   private tA = newTarget();
   private tB = newTarget();
+  private cWingL = new THREE.Color();
+  private flCol = new THREE.Color();
+  private cWingR = new THREE.Color();
   private static readonly DEFAULT_RPM = 1.2;
   /**
    * Photosensitivity option (App.reduceFlashing): the owner may set it before resolve(); the option as
@@ -344,6 +410,25 @@ export class LookResolver {
       }
       if (typeof c.p.pattern === 'string' && CONTENT_PATTERN[c.p.pattern] !== undefined) o.pat = CONTENT_PATTERN[c.p.pattern];
     }
+    // per-zone wing colours inside the look (round 11, video 515.5: the right wing orange while the dragon and
+    // the left wing stay violet): wingColor both wings, wingColorLeft / wingColorRight one side (wins)
+    o.wlw = 0;
+    o.wrw = 0;
+    if (mode !== 'off') {
+      if (c.p.wingColor !== undefined) {
+        resolveColor(c.p.wingColor, pal, o.wl, 'primary');
+        o.wr.copy(o.wl);
+        o.wlw = o.wrw = 1;
+      }
+      if (c.p.wingColorLeft !== undefined) {
+        resolveColor(c.p.wingColorLeft, pal, o.wl, 'primary');
+        o.wlw = 1;
+      }
+      if (c.p.wingColorRight !== undefined) {
+        resolveColor(c.p.wingColorRight, pal, o.wr, 'primary');
+        o.wrw = 1;
+      }
+    }
     return o;
   }
 
@@ -380,13 +465,19 @@ export class LookResolver {
     base.sidesColW = 0;
     base.crownColW = 0;
     base.wingColW = 0;
+    base.wingColLW = 0;
+    base.wingColRW = 0;
     base.sideL = 1;
     base.sideR = 1;
     base.glowFloor = 0;
     base.garlands = 0;
+    base.garl.set(0, 0, 0, 0);
     base.garlandCol.copy(GARLAND_WARM);
     base.garlandPat = 0;
     base.garlandRate = 2;
+    base.garlandHot = 1;
+    base.garlandGlare = 1;
+    base.plates = 0;
 
     // ---- 2. persistent state cue with cross-fade ---------------------------------------------------
     const si = this.stateIndex(t);
@@ -435,10 +526,13 @@ export class LookResolver {
     out.dragonWash = cur.dragonWash;
     out.sideL = cur.sideL;
     out.sideR = cur.sideR;
-    out.garland.set(cur.garlands, cur.garlands, cur.garlands);
+    out.garland.copy(cur.garl);
     out.garlandColor.copy(cur.garlandCol);
     out.garlandPattern = cur.garlandPat;
     out.garlandRate = cur.garlandRate;
+    out.garlandHot = cur.garlandHot;
+    out.garlandGlare = cur.garlandGlare;
+    out.plateGlow = cur.plates;
 
     // ---- LED defaults from the section + mode ------------------------------------------------------
     out.led.copy(pal.primary);
@@ -498,6 +592,8 @@ export class LookResolver {
     out.emblemGlow = 0.7 + 0.5 * energy;
     out.content = 0;
     out.contentMix = 0;
+    let cwl = 0;
+    let cwr = 0;
     const ci = this.contentIndex(t);
     if (ci >= 0) {
       const c = this.contents[ci];
@@ -531,6 +627,11 @@ export class LookResolver {
       out.emblemGlow += (A.emblem - out.emblemGlow) * w;
       pat = w > 0.5 ? A.pat : pat;
       ledI = ledI + (A.ledI - ledI) * w;
+      // (per-zone wing colours of the look, applied over the region colours below)
+      cwl = A.wlw * w;
+      cwr = A.wrw * w;
+      if (cwl > 0) this.cWingL.copy(A.wl);
+      if (cwr > 0) this.cWingR.copy(A.wr);
     }
     // ember: the dragon + inner wings glow on their own even when the pixel content is off
     if (cur.ember > 0) ledI += (Math.max(ledI, 0.35 + 0.65 * cur.wings) - ledI) * cur.ember;
@@ -552,8 +653,18 @@ export class LookResolver {
     out.pulseColor.setRGB(0, 0, 0);
     let gCastle = 1;
     let gCrown = 1;
+    let gDragon = 1;
+    let gWing = 1;
     let gGarl = 1;
     let garlBest = cur.garlands;
+    // stage.flash: strongest light / LED level per region + the colour of the strongest cue
+    out.sculptFlash.setRGB(0, 0, 0);
+    out.sculptFlashReg.set(0, 0);
+    out.sculptFlashHead = 0;
+    let flBest = 0;
+    let flLedD = 0;
+    let flLedW = 0;
+    const flCol = this.flCol;
     const act = show.active('stage', t, this.active);
     for (const c of act) {
       const lt = t - c.t;
@@ -565,16 +676,47 @@ export class LookResolver {
         const rel = typeof c.p.release === 'number' ? Math.max(0, c.p.release) : Math.min(0.3, c.dur * 0.4);
         const env = (att <= 0 ? 1 : smoothstep(0, att, lt)) * (rel <= 0 ? 1 : 1 - smoothstep(c.dur - rel, c.dur, lt));
         const lvl = clamp2(c.p.level, 1) * env;
-        const tg = typeof c.p.target === 'string' ? c.p.target : 'all';
+        const gm = garlandMask(c.p.target);
         const G = out.garland;
-        if (tg === 'all' || tg === 'wings') G.x = Math.max(G.x, lvl);
-        if (tg === 'all' || tg === 'castle') G.y = Math.max(G.y, lvl);
-        if (tg === 'all' || tg === 'sides') G.z = Math.max(G.z, lvl);
+        if (gm & 1) G.x = Math.max(G.x, lvl);
+        if (gm & 2) G.y = Math.max(G.y, lvl);
+        if (gm & 4) G.z = Math.max(G.z, lvl);
+        if (gm & 8) G.w = Math.max(G.w, lvl);
         if (lvl >= garlBest) {
           garlBest = lvl;
           if (c.p.color !== undefined) resolveColor(c.p.color, pal, out.garlandColor, 'accent');
           if (typeof c.p.pattern === 'string' && GARLAND_PATTERN[c.p.pattern] !== undefined) out.garlandPattern = GARLAND_PATTERN[c.p.pattern];
           if (typeof c.p.rate === 'number' && c.p.rate > 0) out.garlandRate = c.p.rate;
+          // round 11: the bulbs' white-hot share and glare size follow the strongest cue (defaults: the state's)
+          out.garlandHot = clamp01(c.p.hot, cur.garlandHot);
+          out.garlandGlare = clampGlare(c.p.glare, cur.garlandGlare);
+        }
+        continue;
+      }
+      if (c.fx === 'flash') {
+        // round 11: a transient white (or coloured) light on the head / dragon / wings, and / or their LED lines
+        // pushed to the flash colour (video 713.5-714.75 / 719.75-720.5: the head goes bone-white while the
+        // wings burn; 96.08 / 96.28: the head's LED outlines flicker on over a dark head)
+        if (lt >= c.dur) continue;
+        const att = typeof c.p.fade === 'number' ? Math.max(0, c.p.fade) : 0.03;
+        const rel = typeof c.p.release === 'number' ? Math.max(0, c.p.release) : Math.min(0.15, c.dur * 0.4);
+        let env = (att <= 0 ? 1 : smoothstep(0, att, lt)) * (rel <= 0 ? 1 : 1 - smoothstep(c.dur - rel, c.dur, lt));
+        // (photosensitivity option: half the swing, swelling in over at least 0.15 s)
+        if (calm) env *= 0.5 * smoothstep(0, Math.max(att, 0.15), lt);
+        const tg = FLASH_TARGET[typeof c.p.target === 'string' ? c.p.target : 'head'] ?? FLASH_TARGET.head;
+        const lvl = (typeof c.p.level === 'number' && Number.isFinite(c.p.level) ? Math.max(0, Math.min(3, c.p.level)) : 1) * env;
+        const led = (typeof c.p.led === 'number' && Number.isFinite(c.p.led) ? Math.max(0, Math.min(2, c.p.led)) : 0) * env;
+        const R = out.sculptFlashReg;
+        R.x = Math.max(R.x, lvl * tg[0]);
+        R.y = Math.max(R.y, lvl * tg[1]);
+        flLedD = Math.max(flLedD, led * tg[3]);
+        flLedW = Math.max(flLedW, led * tg[4]);
+        const k = Math.max(lvl, led);
+        if (k > flBest) {
+          flBest = k;
+          if (c.p.color !== undefined) resolveColor(c.p.color, pal, flCol, 'accent');
+          else flCol.copy(FLASH_WHITE);
+          out.sculptFlashHead = tg[2];
         }
         continue;
       }
@@ -599,6 +741,9 @@ export class LookResolver {
         const tg = typeof c.p.target === 'string' ? c.p.target : 'all';
         if (tg === 'all' || tg === 'castle') gCastle *= g;
         if (tg === 'all' || tg === 'crown') gCrown *= g;
+        // round 11: the dragon's or the wings' LEDs alone (video 96.08: the head flickers, the wings hold)
+        else if (tg === 'dragon') gDragon *= g;
+        else if (tg === 'wings') gWing *= g;
         if (tg === 'all' || tg === 'garlands') gGarl *= g;
         continue;
       }
@@ -637,9 +782,9 @@ export class LookResolver {
     out.gateCrown = gCrown;
     out.castleGain *= gCastle;
     out.sidesGain *= gCastle;
-    out.dragonGain *= gCrown;
-    out.wingGain *= gCrown;
-    out.wings *= gCrown;
+    out.dragonGain *= gCrown * gDragon;
+    out.wingGain *= gCrown * gWing;
+    out.wings *= gCrown * gWing;
     out.garland.multiplyScalar(gGarl);
 
     // ---- region colours: the castle / side sections / crown can each take their own LED colour -------
@@ -722,6 +867,27 @@ export class LookResolver {
     }
     out.wingLed.copy(out.led).lerp(cur.wingCol, cur.wingColW);
     out.wingLed2.copy(out.led2).lerp(_c.copy(cur.wingCol).multiplyScalar(0.55), cur.wingColW);
+    // per-side wing colours (round 11, video 515.5: the right wing orange, the left violet inside one content
+    // look): wingLed* becomes the left wing's, wingLedR* the right wing's
+    out.wingLedR.copy(out.wingLed);
+    out.wingLedR2.copy(out.wingLed2);
+    if (cur.wingColLW > 0) {
+      out.wingLed.lerp(cur.wingColL, cur.wingColLW);
+      out.wingLed2.lerp(_c.copy(cur.wingColL).multiplyScalar(0.55), cur.wingColLW);
+    }
+    if (cur.wingColRW > 0) {
+      out.wingLedR.lerp(cur.wingColR, cur.wingColRW);
+      out.wingLedR2.lerp(_c.copy(cur.wingColR).multiplyScalar(0.55), cur.wingColRW);
+    }
+    // a content look's own wing colours (screens.content wingColor / wingColorLeft / wingColorRight)
+    if (cwl > 0) {
+      out.wingLed.lerp(this.cWingL, cwl);
+      out.wingLed2.lerp(_c.copy(this.cWingL).multiplyScalar(0.55), cwl);
+    }
+    if (cwr > 0) {
+      out.wingLedR.lerp(this.cWingR, cwr);
+      out.wingLedR2.lerp(_c.copy(this.cWingR).multiplyScalar(0.55), cwr);
+    }
 
     // ---- 5. app.env: wash, flash, strobe --------------------------------------------------------------
     out.wash.copy(env.stageWashColor);
@@ -742,6 +908,37 @@ export class LookResolver {
     }
     out.ledIntensity *= out.emit;
     out.crownLedFloor *= out.emit;
+    // ---- stage.flash (after the master level: a flash can light a dark head, like the festoons) -------------
+    if (flBest > 0) {
+      // the light: colour x 1 (levels live in sculptFlashReg), normalised region weights
+      const m = Math.max(out.sculptFlashReg.x, out.sculptFlashReg.y);
+      if (m > 0) out.sculptFlash.copy(flCol).multiplyScalar(m);
+      if (m > 0) out.sculptFlashReg.multiplyScalar(1 / m);
+      if (flLedD > 0 || flLedW > 0) {
+        // LED override: the target's lines at the flash level in the flash colour; the other region keeps its
+        // own output (its gain is rescaled against the raised shared LED level)
+        const li = Math.max(out.ledIntensity, out.crownLedFloor);
+        const T = Math.max(li, flLedD, flLedW, 1e-4);
+        const dG = out.dragonGain * li;
+        const wG = out.wingGain * li;
+        out.dragonGain = Math.max(dG, flLedD) / T;
+        out.wingGain = Math.max(wG, flLedW) / T;
+        out.ledIntensity = T;
+        out.crownLedFloor = Math.min(out.crownLedFloor, T);
+        if (flLedD > 0) {
+          const kd = Math.min(1, flLedD / Math.max(dG + flLedD, 1e-4));
+          out.led.lerp(flCol, kd);
+          out.led2.lerp(flCol, kd);
+        }
+        if (flLedW > 0) {
+          const kw = Math.min(1, flLedW / Math.max(wG + flLedW, 1e-4));
+          out.wingLed.lerp(flCol, kw);
+          out.wingLed2.lerp(flCol, kw);
+          out.wingLedR.lerp(flCol, kw);
+          out.wingLedR2.lerp(flCol, kw);
+        }
+      }
+    }
     return out;
   }
 
@@ -810,6 +1007,8 @@ export class LookResolver {
     v.sidesColW = colorOverride(p.sidesColor, pal, v.sidesCol);
     v.crownColW = colorOverride(p.crownColor, pal, v.crownCol);
     v.wingColW = colorOverride(p.wingColor, pal, v.wingCol);
+    v.wingColLW = colorOverride(p.wingColorLeft, pal, v.wingColL);
+    v.wingColRW = colorOverride(p.wingColorRight, pal, v.wingColR);
     // hard isolations, applied over the explicit levels
     const mask = typeof p.mask === 'string' && (MASKS as readonly string[]).includes(p.mask) ? p.mask : 'all';
     switch (mask) {
@@ -844,9 +1043,14 @@ export class LookResolver {
     v.glowFloor = typeof p.glowFloor === 'number' && Number.isFinite(p.glowFloor) ? Math.max(0, Math.min(1, p.glowFloor)) : 0;
     // warm festoon bulb strings (persistent level; stage.garlands cues add flashes / strobes on top)
     v.garlands = clamp2(p.garlands, 0);
+    const gm = garlandMask(p.garlandTarget);
+    v.garl.set(gm & 1 ? v.garlands : 0, gm & 2 ? v.garlands : 0, gm & 4 ? v.garlands : 0, gm & 8 ? v.garlands : 0);
     if (p.garlandColor !== undefined) resolveColor(p.garlandColor, pal, v.garlandCol, 'accent');
     if (typeof p.garlandPattern === 'string' && GARLAND_PATTERN[p.garlandPattern] !== undefined) v.garlandPat = GARLAND_PATTERN[p.garlandPattern];
     if (typeof p.garlandRate === 'number' && p.garlandRate > 0) v.garlandRate = p.garlandRate;
+    v.garlandHot = clamp01(p.garlandHot, 1);
+    v.garlandGlare = clampGlare(p.garlandGlare, 1);
+    v.plates = typeof p.plates === 'number' && Number.isFinite(p.plates) ? Math.max(0, Math.min(3, p.plates)) : 0;
     v.presence = presenceOf(v);
     v.ember = v.mode === 'ember' ? 1 : 0;
   }
@@ -903,6 +1107,9 @@ function blendTarget(a: ContentTarget, b: ContentTarget, k: number, out: Content
   out.banner = a.banner + (b.banner - a.banner) * k;
   out.skull = a.skull + (b.skull - a.skull) * k;
   out.emblem = a.emblem + (b.emblem - a.emblem) * k;
+  // per-zone wing colours: a colour fades in / out through its weight (never from black)
+  out.wlw = lerpOverride(a.wl, a.wlw, b.wl, b.wlw, k, out.wl);
+  out.wrw = lerpOverride(a.wr, a.wrw, b.wr, b.wrw, k, out.wr);
 }
 
 function copyVals(dst: StateVals, src: StateVals): void {
@@ -933,13 +1140,21 @@ function copyVals(dst: StateVals, src: StateVals): void {
   dst.crownColW = src.crownColW;
   dst.wingCol.copy(src.wingCol);
   dst.wingColW = src.wingColW;
+  dst.wingColL.copy(src.wingColL);
+  dst.wingColLW = src.wingColLW;
+  dst.wingColR.copy(src.wingColR);
+  dst.wingColRW = src.wingColRW;
   dst.sideL = src.sideL;
   dst.sideR = src.sideR;
   dst.glowFloor = src.glowFloor;
   dst.garlands = src.garlands;
+  dst.garl.copy(src.garl);
   dst.garlandCol.copy(src.garlandCol);
   dst.garlandPat = src.garlandPat;
   dst.garlandRate = src.garlandRate;
+  dst.garlandHot = src.garlandHot;
+  dst.garlandGlare = src.garlandGlare;
+  dst.plates = src.plates;
 }
 
 /** region isolation part of a state (levels, wash shares, colour overrides): dst <- src */
@@ -960,6 +1175,10 @@ function copyIsolation(dst: StateVals, src: StateVals): void {
   dst.crownColW = src.crownColW;
   dst.wingCol.copy(src.wingCol);
   dst.wingColW = src.wingColW;
+  dst.wingColL.copy(src.wingColL);
+  dst.wingColLW = src.wingColLW;
+  dst.wingColR.copy(src.wingColR);
+  dst.wingColRW = src.wingColRW;
   dst.sideL = src.sideL;
   dst.sideR = src.sideR;
 }
@@ -1006,11 +1225,17 @@ function lerpVals(a: StateVals, b: StateVals, k: number, out: StateVals): void {
   out.sidesColW = lerpOverride(a.sidesCol, a.sidesColW, b.sidesCol, b.sidesColW, k, out.sidesCol);
   out.crownColW = lerpOverride(a.crownCol, a.crownColW, b.crownCol, b.crownColW, k, out.crownCol);
   out.wingColW = lerpOverride(a.wingCol, a.wingColW, b.wingCol, b.wingColW, k, out.wingCol);
+  out.wingColLW = lerpOverride(a.wingColL, a.wingColLW, b.wingColL, b.wingColLW, k, out.wingColL);
+  out.wingColRW = lerpOverride(a.wingColR, a.wingColRW, b.wingColR, b.wingColRW, k, out.wingColR);
   out.sideL = lerpN(a.sideL, b.sideL, k);
   out.sideR = lerpN(a.sideR, b.sideR, k);
   out.glowFloor = lerpN(a.glowFloor, b.glowFloor, k);
   out.garlands = lerpN(a.garlands, b.garlands, k);
+  out.garl.lerpVectors(a.garl, b.garl, k);
   out.garlandCol.lerpColors(a.garlandCol, b.garlandCol, k);
   out.garlandPat = k < 0.5 ? a.garlandPat : b.garlandPat;
   out.garlandRate = k < 0.5 ? a.garlandRate : b.garlandRate;
+  out.garlandHot = lerpN(a.garlandHot, b.garlandHot, k);
+  out.garlandGlare = lerpN(a.garlandGlare, b.garlandGlare, k);
+  out.plates = lerpN(a.plates, b.plates, k);
 }

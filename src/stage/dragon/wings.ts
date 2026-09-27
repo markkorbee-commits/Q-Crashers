@@ -27,8 +27,12 @@ export interface WingResult {
   garlands: V3[][];
 }
 
-/** spacing (m) of the 'wing_edge' anchor points along the membranes' scalloped top edges */
-const EDGE_ANCHOR_STEP = 2.0;
+/**
+ * points of the 'wing_edge' anchor per membrane panel (outer, middle, inner; ~one every 2 m). Fixed since round 11
+ * so the anchor keeps its 20 points per wing (the round-8 indexing) when the panels change length: the inner
+ * spar rooted at the wrist lengthened the inner panel's edge by ~1 m.
+ */
+const EDGE_ANCHOR_COUNT = [6, 7, 6];
 
 interface Finger {
   line: Polyline;
@@ -312,7 +316,7 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
     const tmp: V3[] = [];
     for (let i = 0; i <= 48; i++) tmp.push(pn.top(i / 48, v3()));
     const line = new Polyline(tmp);
-    const n = Math.max(2, Math.round(line.length / EDGE_ANCHOR_STEP));
+    const n = EDGE_ANCHOR_COUNT[pi];
     for (let i = pi === 0 ? 0 : 1; i <= n; i++) edgePts.push(line.at(i / n).addScaledVector(nrm, 0.6));
   });
   const P00 = v3(), P10 = v3(), P01 = v3(), P11 = v3();
@@ -483,7 +487,7 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
       const sc = THREE.MathUtils.lerp(1.12, 0.86, t);
       const am = basisZ(nrm, d, p.clone().addScaledVector(nrm, r + 0.08).addScaledVector(d, -0.3));
       am.scale(v3(sc, sc, 1));
-      W.steel.add(arrowProto.clone(), am, 0xf0f2f6);
+      W.steel.add(arrowProto.clone(), am, 0xf0f2f6, PLATE_FX);
       // kunai blade out to the side (outboard on the outer spar, alternating on the others)
       const sideSign = fi === 0 ? 1 : i % 2 ? 1 : -1;
       const dir = lat.clone().multiplyScalar(sideSign).addScaledVector(d, -0.12).normalize();
@@ -492,7 +496,7 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
       const kx = v3().setFromMatrixColumn(km, 0);
       if (kx.dot(dir) < 0) km.multiply(new THREE.Matrix4().makeRotationZ(Math.PI));
       km.scale(v3(sc, sc, 1));
-      W.steel.add(kunaiProto.clone(), km, 0xe6e9ee);
+      W.steel.add(kunaiProto.clone(), km, 0xe6e9ee, PLATE_FX);
       // black fixture clamp where the blade meets the spar + an LED along the blade's spine
       if (k.detail > 0.5) W.armor.add(box(0.3, 0.3, 0.34), new THREE.Matrix4().makeTranslation(0, 0, 0).setPosition(p.clone().addScaledVector(dir, r + 0.1).addScaledVector(nrm, 0.3)), 0x1a1a1e);
       const e0 = v3(0.3, 0, 0.06).applyMatrix4(km);
@@ -549,7 +553,7 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
     for (const a of [-1.35, -0.85, -0.4, 0.4, 0.85, 1.35]) {
       const cm = dm.clone().multiply(new THREE.Matrix4().makeRotationZ(-a)).multiply(new THREE.Matrix4().makeTranslation(0, 0.9, 0.05));
       cm.multiply(new THREE.Matrix4().makeScale(0.9 + 0.25 * (1.35 - Math.abs(a)), 0.9 + 0.25 * (1.35 - Math.abs(a)), 1));
-      W.steel.add((a < 0 ? crescentM : crescent).clone(), cm, 0xf2f4f8);
+      W.steel.add((a < 0 ? crescentM : crescent).clone(), cm, 0xf2f4f8, PLATE_FX);
       const co = a < 0 ? crescentOuterM : crescentOuter;
       W.strips.add(co.map((q) => v3(q.x, q.y, 0.09).applyMatrix4(cm)), WING_FIN, 0.12, 0, STEADY_SEED + ((0.4 + i * 0.2 + a * 0.1 + 1) % 1));
     }
@@ -683,6 +687,11 @@ function sunburstParts(): [THREE.BufferGeometry, THREE.Color][] {
 
 /** fx tag of wing geometry (crown shading: step(1.5, fx) = wing) */
 export const WING_FX = 2;
+/**
+ * fx tag of the white plates on the spars and finials (arrowheads, kunai blades, crescent fins; round 11): a wing
+ * part (>= 1.5) that also catches the wing LEDs next to it (crown shading: step(2.5, fx), PLATE_GLOW)
+ */
+export const PLATE_FX = 3;
 /** strip groups of the wing LEDs (crownLed: +2 = wing colours and the wing level) */
 const WING_LED = 2;
 const WING_ACCENT = 3;

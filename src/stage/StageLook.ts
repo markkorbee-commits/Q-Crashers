@@ -138,6 +138,12 @@ export interface StageLookEx extends StageLook {
   sidesAccent: THREE.Color;
   wingLed: THREE.Color;
   wingLed2: THREE.Color;
+  /**
+   * LED colours of the audience-RIGHT wing (x > 0; round 11, stage.state `wingColorRight`): equal to
+   * `wingLed` / `wingLed2` unless a per-side wing colour is given (then `wingLed*` is the left wing's)
+   */
+  wingLedR: THREE.Color;
+  wingLedR2: THREE.Color;
   /** 0..1 emitter level of the audience-left (x < 0) / right half (state param `side`) */
   sideL: number;
   sideR: number;
@@ -159,9 +165,19 @@ export interface StageLookEx extends StageLook {
   castleFloodTint: number;
 
   // ---- warm festoon bulb strings (stage.state garlands / stage.garlands cues) ----------------------
-  /** HDR level of the garlands per group: x wings, y castle core, z side sections */
-  garland: THREE.Vector3;
+  /**
+   * HDR level of the garlands per group: x wings, y castle core, z side sections, w the straight row along
+   * the castle front (round 11, group 'base')
+   */
+  garland: THREE.Vector4;
   garlandColor: THREE.Color;
+  /**
+   * 0..1 white-hot share of the bulbs (round 11): 1 = a white-hot core in a half-white halo (the default),
+   * 0 = bulbs in the cue colour (gold bulbs in orange smoke, video 165.5 / 173.5)
+   */
+  garlandHot: number;
+  /** >= 0.5 size / weight of the glare disc round every bulb (round 11; 1 = default, 3 = white discs in haze) */
+  garlandGlare: number;
   /** 0 steady, 1 chase, 2 twinkle, 3 strobe */
   garlandPattern: number;
   /** pulses per beat of the chase / strobe */
@@ -172,6 +188,19 @@ export interface StageLookEx extends StageLook {
   gateCastle: number;
   /** 0..1 gate multiplier of the crown LED lines this frame */
   gateCrown: number;
+
+  // ---- stage.flash (round 11): a transient light on the sculpture + an LED override ------------------
+  /** colour x level of the flash light on the dragon / wings (black = none) */
+  sculptFlash: THREE.Color;
+  /** region weights of that light: x the dragon (non-wing parts), y the wings */
+  sculptFlashReg: THREE.Vector2;
+  /** 1 = the light is confined to the head (a soft sphere round the skull), 0 = the whole region */
+  sculptFlashHead: number;
+  /**
+   * 0..3 LED glow of the white plates on the wing spars (arrowheads, kunai blades, finial crescents; round 11,
+   * stage.state `plates`, default 0): the spars read as broad candy-striped blades in the wing colour
+   */
+  plateGlow: number;
 }
 
 export function createStageLookEx(): StageLookEx {
@@ -210,17 +239,25 @@ export function createStageLookEx(): StageLookEx {
     sidesAccent: new THREE.Color('#e8f4ff'),
     wingLed: new THREE.Color('#ff2a10'),
     wingLed2: new THREE.Color('#2a60ff'),
+    wingLedR: new THREE.Color('#ff2a10'),
+    wingLedR2: new THREE.Color('#2a60ff'),
     sideL: 1,
     sideR: 1,
     crownLedFloor: 0,
     glowFloor: 0,
     sidesFloodTint: 0,
     castleFloodTint: 0,
-    garland: new THREE.Vector3(0, 0, 0),
+    garland: new THREE.Vector4(0, 0, 0, 0),
     garlandColor: new THREE.Color('#ffb46a'),
+    garlandHot: 1,
+    garlandGlare: 1,
     garlandPattern: 0,
     garlandRate: 2,
     gateCastle: 1,
     gateCrown: 1,
+    sculptFlash: new THREE.Color(0, 0, 0),
+    sculptFlashReg: new THREE.Vector2(0, 0),
+    sculptFlashHead: 0,
+    plateGlow: 0,
   };
 }
