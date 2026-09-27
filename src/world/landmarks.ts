@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { hash32, Rng } from '../core/rng';
 import { GeoBuilder, lin } from './geom';
-import { GONDOLA, GONDOLAS, gondolaPose, RIM_HALF, WHEEL_DECK, WHEEL_GATE, WHEEL_HUB_Y, WHEEL_R, WHEEL_WALK, WHEEL_X, WHEEL_Z, wheelAngle } from './ferris';
+import { GONDOLA, GONDOLAS, gondolaPose, LEG_R, RIM_HALF, WHEEL_DECK, WHEEL_GATE, WHEEL_HUB_Y, WHEEL_LEGS, WHEEL_R, WHEEL_WALK, WHEEL_X, WHEEL_Z, wheelAngle } from './ferris';
 import { dirFromAzAlt, GOLIATH, GOLIATH_H, OTHER_AREAS, terrainHeight } from './site';
 import { patchWorldMaterial } from './worldLights';
 
@@ -28,7 +28,8 @@ export interface LightPoint {
   /**
    * 0 steady, 1 obstruction blink (W-rot), 2 slow flicker, 3 steady red obstruction, 4 broad haze glow,
    * 5 steady bulb on the Ferris wheel rims (turns with the wheel), 6 gondola lamp (rim point turned with
-   * the wheel, hanging below it)
+   * the wheel, hanging below it), 7 steady bulb of the ride's gate, walkway and platform (static); kinds 5-7
+   * are drawn as small bulbs up close
    */
   kind: number;
 }
@@ -121,13 +122,11 @@ export class Landmarks {
     const x = WHEEL_X,
       z = WHEEL_Z,
       r = WHEEL_R;
-    const y0 = terrainHeight(x, z);
     const hub = new THREE.Vector3(x, WHEEL_HUB_Y, z);
     const b = new GeoBuilder();
     const white = lin('#c8ccd2');
-    // A-frame legs (wheel plane parallel to Z => axle along X)
-    for (const sx of [-1.6, 1.6])
-      for (const sz of [-7, 7]) b.beam(new THREE.Vector3(x + sx * 1.6, y0, z + sz), new THREE.Vector3(x + sx, hub.y, z), 0.6, white, true);
+    // A-frame legs (wheel plane parallel to Z => axle along X), shared with the ride camera's keep-out
+    for (const L of WHEEL_LEGS) b.beam(new THREE.Vector3(L[0], L[1], L[2]), new THREE.Vector3(L[3], L[4], L[5]), LEG_R * 2, white, true);
     // axle through the hub, bearing housings
     b.beam(new THREE.Vector3(x - 1.75, hub.y, z), new THREE.Vector3(x + 1.75, hub.y, z), 0.5, white, true);
     this.add(b.build(), mat, 'ferris-frame');
@@ -217,8 +216,9 @@ export class Landmarks {
     // ramp: a sloped timber slab from the field level up to the deck
     {
       const len = Math.hypot(W.z1 - W.z0, D.y - g0);
+      // rises towards +Z (the deck): a rotation about +X by -pitch lifts the +Z end
       const pitch = Math.atan2(D.y - g0, W.z1 - W.z0);
-      q.setFromAxisAngle(new THREE.Vector3(1, 0, 0), pitch);
+      q.setFromAxisAngle(new THREE.Vector3(1, 0, 0), -pitch);
       v.set((W.x0 + W.x1) / 2, (g0 + D.y) / 2 - 0.06, (W.z0 + W.z1) / 2);
       m.compose(v, q, sc.set(W.x1 - W.x0, 0.12, len + 0.02));
       b.add(GeoBuilder.unit('box'), m, timber);
@@ -246,7 +246,7 @@ export class Landmarks {
         const nb = Math.max(2, Math.round(len / 1.1));
         for (let i = 0; i <= nb; i++) {
           const t = (i + 0.5) / (nb + 1);
-          lights.push({ x: ax + (bx - ax) * t, y: ya + (yb - ya) * t + 1.12, z: az + (bz - az) * t, color: i % 3 === 1 ? '#c77dff' : '#ffd9a0', size: 0.28, kind: 0 });
+          lights.push({ x: ax + (bx - ax) * t, y: ya + (yb - ya) * t + 1.12, z: az + (bz - az) * t, color: i % 3 === 1 ? '#c77dff' : '#ffd9a0', size: 0.28, kind: 7 });
         }
       }
     };
@@ -265,16 +265,16 @@ export class Landmarks {
     b.box(G.x1 - G.x0 + 0.6, 0.55, 0.14, (G.x0 + G.x1) / 2, gy + 3.35, G.z, purple);
     for (let i = 0; i <= 8; i++) {
       const t = i / 8;
-      lights.push({ x: G.x0 - 0.2 + (G.x1 - G.x0 + 0.4) * t, y: gy + 3.68, z: G.z - 0.1, color: i % 2 ? '#c77dff' : '#ffd9a0', size: 0.35, kind: 0 });
+      lights.push({ x: G.x0 - 0.2 + (G.x1 - G.x0 + 0.4) * t, y: gy + 3.68, z: G.z - 0.1, color: i % 2 ? '#c77dff' : '#ffd9a0', size: 0.35, kind: 7 });
     }
-    for (const gx of [G.x0 - 0.12, G.x1 + 0.12]) for (let i = 0; i < 4; i++) lights.push({ x: gx, y: gy + 0.6 + i * 0.8, z: G.z - 0.12, color: '#ffd9a0', size: 0.3, kind: 0 });
+    for (const gx of [G.x0 - 0.12, G.x1 + 0.12]) for (let i = 0; i < 4; i++) lights.push({ x: gx, y: gy + 0.6 + i * 0.8, z: G.z - 0.12, color: '#ffd9a0', size: 0.3, kind: 7 });
     // operator cabin at the platform's south-west corner (outside the rail), lit window
     const ox = D.x0 - 1.1,
       oz = D.z0 + 0.9;
     const og = terrainHeight(ox, oz);
     b.box(1.5, 2.3, 1.5, ox, og + 1.15, oz, lin('#3a2d44'));
     b.box(1.8, 0.12, 1.8, ox, og + 2.36, oz, purple);
-    lights.push({ x: ox + 0.78, y: og + 1.5, z: oz, color: '#ffe2b0', size: 0.9, kind: 0 });
+    lights.push({ x: ox + 0.78, y: og + 1.5, z: oz, color: '#ffe2b0', size: 0.9, kind: 7 });
   }
 
   /** wheel angle + gondola matrices at show time t (no allocations) */
@@ -567,19 +567,23 @@ export class Landmarks {
         void main() {
           vec3 p = position;
           float kind = aKind;
-          if ( aKind > 4.5 ) {
+          if ( aKind > 4.5 && aKind < 6.5 ) {
             // Ferris wheel bulbs: turn about the axle (X) with the rims; gondola lamps hang below it
             vec2 d = p.yz - uWheel.xy;
             p.y = uWheel.x + d.x * uWheel.z - d.y * uWheel.w;
             p.z = uWheel.y + d.x * uWheel.w + d.y * uWheel.z;
             if ( aKind > 5.5 ) p.y -= 0.5;
-            kind = 0.0;
           }
+          if ( aKind > 4.5 ) kind = 0.0;
           vec4 mv = modelViewMatrix * vec4( p, 1.0 );
           gl_Position = projectionMatrix * mv;
           float dist = max( 1.0, - mv.z );
           // projected size of the glow sprite, at least ~1.6 px (distant lamps stay visible points)
           float px = aSize * projectionMatrix[1][1] * 0.5 * uViewH / dist;
+          // the Ferris wheel's own bulbs (kinds 5-7) seen from the walkway, the platform or a gondola, 1-10 m
+          // away: a world-size glow would draw each as a 30-48 px disc; up close they read as small bulbs
+          // (from ~20 m on nothing changes)
+          if ( aKind > 4.5 ) px = min( px, mix( 10.0, 48.0, smoothstep( 2.0, 20.0, dist ) ) * uPx );
           gl_PointSize = clamp( px, 1.6 * uPx, 48.0 * uPx );
           px /= uPx;
           float k = 1.0;
@@ -669,6 +673,9 @@ function gondolaGeometry(low: boolean): THREE.BufferGeometry {
   for (const sz of [-1, 1]) b.box(0.04, G.wallH, seg, -(hw - 0.02), fy + G.wallH / 2, sz * (G.door + seg / 2), body);
   // rim cap on the tub
   for (const sz of [-1, 1]) b.box(G.w + 0.04, 0.04, 0.07, 0, wt, sz * (hd - 0.02), steel);
+  // a closed safety gate across the door gap (bars at wall top + mid height): at 32 m the car no longer
+  // reads as missing a wall (the scripted boarding steps over it in a moment; the eye stays well above)
+  for (const h of [G.wallH, G.wallH * 0.5]) b.box(0.04, 0.04, 2 * G.door + 0.04, -(hw - 0.02), fy + h, 0, steel);
   // benches facing each other (the rider sits on the +Z one, facing the stage)
   for (const sz of [-1, 1]) {
     b.box(G.w - 0.1, 0.07, 0.42, 0, fy + G.seatH - 0.035, sz * (hd - 0.27), wood);

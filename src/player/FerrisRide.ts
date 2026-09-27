@@ -60,6 +60,10 @@ export class FerrisRide {
   private readonly prev = new THREE.Vector3();
   private readonly boardPos = new THREE.Vector3(DOOR_X - 0.3, WHEEL_DECK.y + 1.0, WHEEL_Z);
   private hintAt = -1e9;
+  /** the car has left the platform since boarding (a fresh rider is not offered "Get off" at once) */
+  private departed = false;
+  /** the "how to get down" hint was shown for the current pause (reset when the show plays again) */
+  private pauseHinted = false;
 
   constructor() {
     this.point = {
@@ -86,36 +90,36 @@ export class FerrisRide {
     return this.phase === 'board' || this.phase === 'ride' || this.phase === 'alight';
   }
 
-  /** seated and the gondola is at the platform: getting off is possible now */
+  /**
+   * seated and the gondola is at the platform: getting off is possible now — once the car has been round
+   * (right after sitting down the prompt would invite an impatient second tap to throw you straight back
+   * out), or at once while the show is paused
+   */
   get canAlight(): boolean {
-    return this.phase === 'ride' && Math.abs(fromBottom(this.gondola, this.showTime())) <= BOARD_WINDOW;
+    return this.phase === 'ride' && (this.departed || !this.app.clock?.playing) && Math.abs(fromBottom(this.gondola, this.showTime())) <= BOARD_WINDOW;
   }
 
   /** start boarding from the feet position `feet` (the gondola arriving at the platform is picked) */
   board(feet: THREE.Vector3, instant = false): void {
     if (this.phase !== 'off') return;
     const t = this.showTime();
-    const rate = this.app.clock?.playing ? 1 : 0;
-    this.from.copy(feet);
     this.pos.copy(feet);
-    // walk to the edge (~1.5 m/s), then step in: pick the car that is nearest the bottom when we get there
-    this.gondola = nearestGondola(t);
-    this.doorAt(t, this.door);
-    const walk = THREE.MathUtils.clamp(this.from.distanceTo(this.door) / 1.5, 0.45, 3);
-    this.gondola = nearestGondola(t + (walk + BOARD_S * 0.5) * rate);
     this.prev.copy(feet);
     this.vel.set(0, 0, 0);
     this.seat = 0;
+    this.departed = false;
+    this.pauseHinted = false;
     if (instant) {
+      this.gondola = nearestGondola(t);
       this.setPhase('ride');
       this.seat = 1;
       this.seatAt(t, this.pos, false);
-    } else this.next('walk', walk);
+    } else this.walkTo(t);
     this.app.events.emit('toast', {
       text: this.app.device.touch
-        ? 'All aboard! One turn takes 5 minutes — tap “Get off” when your gondola is back at the platform.'
+        ? 'All aboard! One turn takes 5 minutes — tap “Get off” when your gondola is back at the platform, or open Spots (the pin button) to leave at once.'
         : 'All aboard! One turn takes 5 minutes — press E when your gondola is back at the platform to get off.',
-      ms: 4200,
+      ms: 5200,
       icon: 'wheel',
     });
   }
@@ -147,6 +151,24 @@ export class FerrisRide {
     const dt = Math.max(1e-4, ctx.dt);
     this.prev.copy(this.pos);
     this.turnTo = null;
+    // a seek / restart while stepping in or out moves the car away: never fly the body after it (the
+    // turning wheel alone never takes the chosen car further than ~0.3 rad from the bottom in these phases)
+    if ((this.phase === 'walk' || this.phase === 'board' || this.phase === 'alight') && (ctx.seeked || Math.abs(fromBottom(this.gondola, t)) > BOARD_WINDOW * 2)) {
+      if (this.phase === 'alight') {
+        // back on the platform edge at once, then the few steps away from it
+        this.doorAt(t, this.door);
+        this.pos.copy(this.door);
+        this.prev.copy(this.door);
+        this.from.copy(this.door);
+        this.to.set(this.door.x - 1.6, WHEEL_DECK.y, this.door.z);
+        this.seat = 0;
+        this.next('leave', LEAVE_S);
+      } else {
+        // walk (again) from here to the car now arriving at the platform
+        this.seat = 0;
+        this.walkTo(t);
+      }
+    }
     this.t += ctx.dt;
     const e = Math.min(1, this.t / this.dur);
     switch (this.phase) {
@@ -172,10 +194,19 @@ export class FerrisRide {
         if (e >= 1) this.next('ride', 1);
         break;
       }
-      case 'ride':
+      case 'ride': {
         this.seatAt(t, this.pos, steady);
         this.seat = 1;
+        if (!this.departed && (ctx.seeked || Math.abs(fromBottom(this.gondola, t)) > BOARD_WINDOW)) this.departed = true;
+        // the show paused (or ended) halfway round: say once how to get down
+        const playing = !!this.app.clock?.playing;
+        if (playing) this.pauseHinted = false;
+        else if (!this.pauseHinted && !this.canAlight) {
+          this.pauseHinted = true;
+          this.hint(performance.now() / 1000, true);
+        }
         break;
+      }
       case 'alight': {
         this.seatAt(t, this.seatP, steady);
         this.midAt(t, this.mid, steady);
@@ -220,21 +251,24 @@ export class FerrisRide {
    * E / the touch button pressed while on the ride without a prompt: explain when getting off is
    * possible (throttled toast).
    */
-  hint(now: number): void {
-    if (this.phase !== 'ride' || now - this.hintAt < 3) return;
+  hint(now: number, force = false): void {
+    if (this.phase !== 'ride' || (!force && now - this.hintAt < 3)) return;
     this.hintAt = now;
     const clock = this.app.clock;
+    const leave = this.app.device.touch ? 'Open Spots (the pin button) to leave at once.' : 'Pick another spot (T) to leave at once.';
     let text: string;
-    if (!clock?.playing) text = 'The wheel turns with the show — press play to ride on. Pick another spot (T) to leave at once.';
+    if (!clock?.playing) text = `The wheel turns with the show — press play to ride on. ${leave}`;
     else {
       const d = fromBottom(this.gondola, this.showTime());
       const turn = Math.PI * 2;
-      const s = Math.round(((d > 0 ? d : turn + d) / turn) * WHEEL_PERIOD);
+      // still at the platform right after boarding: a whole turn to go
+      const a = d > 0 ? d : turn + d;
+      const s = Math.round(((this.departed ? a : a < BOARD_WINDOW * 2 ? turn : a) / turn) * WHEEL_PERIOD);
       const mm = Math.floor(s / 60),
         ss = String(s % 60).padStart(2, '0');
-      text = `You can get off when your gondola is back at the platform — in about ${mm}:${ss}. Pick another spot (T) to leave at once.`;
+      text = `You can get off when your gondola is back at the platform — in about ${mm}:${ss}. ${leave}`;
     }
-    this.app.events.emit('toast', { text, ms: 3600, icon: 'wheel' });
+    this.app.events.emit('toast', { text, ms: 4200, icon: 'wheel' });
   }
 
   // ------------------------------------------------------------------------------------------
@@ -246,6 +280,20 @@ export class FerrisRide {
     }
     if (this.canAlight) this.alight();
     else this.hint(performance.now() / 1000);
+  }
+
+  /**
+   * walk from `pos` to the platform edge beside the car that will be at the bottom when we get there
+   * (~1.5 m/s; nothing moves while the show is paused)
+   */
+  private walkTo(t: number): void {
+    const rate = this.app.clock?.playing ? 1 : 0;
+    this.from.copy(this.pos);
+    this.gondola = nearestGondola(t);
+    this.doorAt(t, this.door);
+    const walk = THREE.MathUtils.clamp(this.from.distanceTo(this.door) / 1.5, 0.45, 3);
+    this.gondola = nearestGondola(t + (walk + BOARD_S * 0.5) * rate);
+    this.next('walk', walk);
   }
 
   private next(phase: RidePhase, dur: number): void {

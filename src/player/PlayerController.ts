@@ -6,7 +6,7 @@ import { comfortFromParams } from '../intoxication/comfort';
 import type { MotorEffects } from '../intoxication/PerceptionSystem';
 import { stageWalk, surfaceTop, type StageWalk } from '../world/stageWalk';
 import { FerrisRide, SEAT_EYE } from './FerrisRide';
-import { approachAngle, damp, wobble } from './motion';
+import { approachAngle, damp, wobble, wrapAngle } from './motion';
 import { DEFAULT_SPOTS, DEFAULT_START_PITCH, DEFAULT_START_SPOT, START_CHOICES, type StartChoice } from './spots';
 
 /**
@@ -37,8 +37,17 @@ const STRONG_ROLL_PER_SWAY = 0.035;
 /** out-of-body drift (ketamine K-hole, motor.detach = 1): the eye floats this far up and back (~1.5 m) */
 const DETACH_UP = 0.9;
 const DETACH_BACK = 1.2;
+/** seated in a Ferris wheel gondola the out-of-body eye stays under the canopy and inside the car */
+const RIDE_DETACH_UP = 0.6;
+const RIDE_DETACH_BACK = 0.2;
 /** look pitch a Ferris wheel rider settles to while sitting down (just below the horizon) */
 const RIDE_PITCH = -0.04;
+/**
+ * first person: the most the view turns / tilts by itself while sitting down (no input); a scripted head
+ * rotation is a main trigger of simulator sickness, the mouse or a swipe does the rest
+ */
+const RIDE_TURN_MAX = 0.8;
+const RIDE_TILT_MAX = 0.3;
 /** eye height (m) when sitting / slumped on the ground (perception motor.seated) */
 const SEATED_EYE = 1.0;
 /** localStorage keys (per-viewer conveniences, never required) */
@@ -201,6 +210,9 @@ export class PlayerController implements System {
   /** vertical speed while falling off a ledge (m/s, <= 0; 0 = supported) */
   private fallV = 0;
   private rig: CameraModeProvider | null | undefined;
+  /** view yaw / pitch when the sit-down turn began (NaN: not turning) */
+  private rideYaw0 = NaN;
+  private ridePitch0 = 0;
   private delay = new InputDelay();
   private densityValid = false;
   private reduced = false;
@@ -344,6 +356,15 @@ export class PlayerController implements System {
     return this.ride.seat;
   }
 
+  /**
+   * height (m) of the feet above the ground under them: ~0 walking the field, the deck height on the stage,
+   * up to ~32 m at the top of the Ferris wheel (for the audio's crowd-distance model; no allocation)
+   */
+  get heightAboveGround(): number {
+    const p = this.app.playerPos;
+    return Math.max(0, p.y - this.groundAt(p.x, p.z));
+  }
+
   /** Board the Ferris wheel from where you stand (`instant`: sit down at once, for tools / deep links). */
   boardWheel(instant = false): void {
     if (this.ride.active) return;
@@ -478,12 +499,23 @@ export class PlayerController implements System {
     this.onStage = false;
     this.crowdDensity = 0;
     // sitting down: the body turns to face the stage, eyes level (never under reduced motion; the mouse
-    // still adds on top)
+    // still adds on top). The third-person camera swings round with it; the first-person view turns
+    // by at most RIDE_TURN_MAX / RIDE_TILT_MAX on its own
     if (r.turnTo !== null && this.controlsActive && !this.reduced) {
+      if (Number.isNaN(this.rideYaw0)) {
+        this.rideYaw0 = this.yaw;
+        this.ridePitch0 = this.pitch;
+      }
+      let yaw = r.turnTo,
+        pitch = RIDE_PITCH;
+      if (this.cameraMode() !== 'third') {
+        yaw = this.rideYaw0 + clamp(wrapAngle(r.turnTo - this.rideYaw0), -RIDE_TURN_MAX, RIDE_TURN_MAX);
+        pitch = this.ridePitch0 + clamp(RIDE_PITCH - this.ridePitch0, -RIDE_TILT_MAX, RIDE_TILT_MAX);
+      }
       const k = damp(2.2, ctx.dt);
-      this.yaw = approachAngle(this.yaw, r.turnTo, k);
-      this.pitch += (RIDE_PITCH - this.pitch) * k;
-    }
+      this.yaw = approachAngle(this.yaw, yaw, k);
+      this.pitch += (pitch - this.pitch) * k;
+    } else if (r.phase !== 'board') this.rideYaw0 = NaN;
     this.filterPlatforms(p.y);
     this.updateEyes(ctx, motor, 0);
     if (!on) {
@@ -520,6 +552,12 @@ export class PlayerController implements System {
     return Number.isFinite(d) ? Math.max(0, d) : 0;
   }
 
+  /** the camera rig's current mode (looked up once) */
+  private cameraMode(): string | undefined {
+    if (this.rig === undefined) this.rig = (this.app.get('camera') as CameraModeProvider | undefined) ?? null;
+    return this.rig?.mode;
+  }
+
   /**
    * Third-person spring arm under a roof: the camera rig's arm collides in 2D only, so inside the
    * vault (and the portal throat) a long arm or a steep look down would put the lens through the
@@ -528,8 +566,7 @@ export class PlayerController implements System {
   private clampCameraUnderRoof(): void {
     const w = this.walk;
     if (!w) return;
-    if (this.rig === undefined) this.rig = (this.app.get('camera') as CameraModeProvider | undefined) ?? null;
-    if (!this.rig || this.rig.mode !== 'third') return;
+    if (this.cameraMode() !== 'third') return;
     const cam = this.app.camera.position;
     if (!w.underRoof(cam.x, cam.z)) return;
     const c = w.ceilingAt(cam.x, cam.z) - PlayerController.ROOF_MARGIN;
@@ -741,9 +778,9 @@ export class PlayerController implements System {
       0.06 * trip -
       drop +
       // out-of-body (ketamine K-hole): the eye floats up and back behind the head (perception scales it
-      // down to 0.3 m under reduced motion)
-      DETACH_UP * detach;
-    o.z = press * 0.045 * wobble(t * 1.3, 5) + DETACH_BACK * detach + 0.06 * swing;
+      // down to 0.3 m under reduced motion); in a gondola it stays under the canopy, inside the car
+      lerp(DETACH_UP, RIDE_DETACH_UP, ride) * detach;
+    o.z = press * 0.045 * wobble(t * 1.3, 5) + lerp(DETACH_BACK, RIDE_DETACH_BACK, ride) * detach + 0.06 * swing;
     const r = this.eyeRot;
     if (strong) {
       r.x = 0.0015 * Math.sin(2 * ph) * bob + sway * 0.02 * wobble(t * 0.9, 5) + jit * 0.006 * wobble(t * 6.1, 8) + idle * 0.0006 * wobble(t * 0.33, 14) - 0.052 * trip + 0.02 * swing;

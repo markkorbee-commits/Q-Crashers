@@ -26,6 +26,23 @@ export const RIM_HALF = 0.9;
 /** rim angle (rad, in the YZ plane, a = 0 → +Z) of the bottom of the wheel */
 export const BOTTOM = -Math.PI / 2;
 const STEP = (Math.PI * 2) / GONDOLAS;
+/** ground height at the wheel's foot */
+const FOOT_Y = terrainHeight(WHEEL_X, WHEEL_Z);
+/** half-thickness of a rim beam (0.35 m square: half-diagonal ≈ 0.25), a spoke (0.14 m), an A-frame leg (0.6 m round) */
+const RIM_T = 0.22;
+const SPOKE_T = 0.09;
+export const LEG_R = 0.3;
+/**
+ * The four A-frame legs of the static frame as segments [ax, ay, az, bx, by, bz]: from the ground
+ * (x ± 2.56, z ± 7) up to the axle bearings (x ± 1.6 at the hub). The landmarks build them from this
+ * table and the third-person ride camera keeps its lens clear of them.
+ */
+export const WHEEL_LEGS: readonly (readonly [number, number, number, number, number, number])[] = [-1.6, 1.6].flatMap((sx) =>
+  [-7, 7].map((sz) => [WHEEL_X + sx * 1.6, FOOT_Y, WHEEL_Z + sz, WHEEL_X + sx, WHEEL_HUB_Y, WHEEL_Z] as const),
+);
+/** the axle through the hub (x ± 1.75, 0.5 m round) */
+const HUB_HALF = 1.75;
+const HUB_R = 0.25;
 
 /**
  * Gondola frame: origin at the axle (pivot) between the rims, hanging straight down (-Y), X across
@@ -146,6 +163,136 @@ export function wheelColliders(): Collider2D[] {
     box(D.x1, D.z0, D.x1, D.z1), // boarding edge
     box(D.x0, D.z1, D.x1, D.z1), // platform north rail
   ];
+}
+
+/**
+ * Clearance (m) of the world point (x, y, z) from the wheel's parts at show time t: both rims, the
+ * spokes, the 16 gondolas (as boxes around car, canopy and axle; `skip` leaves one out, e.g. the rider's
+ * own car, -1 none), the A-frame legs and the hub axle. Negative inside a part. Writes the unit
+ * direction away from the nearest part to `away`. `sight` measures only what can hide a rider (rims,
+ * legs, cars, axle — not the thin spokes). Pure math, no allocations: the third-person ride camera
+ * calls it a few dozen times per frame.
+ */
+export function wheelClearance(t: number, x: number, y: number, z: number, skip: number, sight: boolean, away: THREE.Vector3): number {
+  let best = Infinity;
+  let ax = 0,
+    ay = 1,
+    az = 0;
+  const py = y - WHEEL_HUB_Y,
+    pz = z - WHEEL_Z;
+  const rad = Math.hypot(py, pz);
+  const uy = rad > 1e-6 ? py / rad : 1,
+    uz = rad > 1e-6 ? pz / rad : 0;
+  const th = wheelAngle(t);
+  // rims: rings of radius R at x = WHEEL_X ± RIM_HALF
+  for (let s = -1; s <= 1; s += 2) {
+    const ex = x - (WHEEL_X + s * RIM_HALF),
+      er = rad - WHEEL_R;
+    const d = Math.hypot(ex, er);
+    if (d - RIM_T < best) {
+      best = d - RIM_T;
+      if (d > 1e-6) {
+        ax = ex / d;
+        ay = (uy * er) / d;
+        az = (uz * er) / d;
+      } else {
+        ax = 0;
+        ay = uy;
+        az = uz;
+      }
+    }
+  }
+  // spokes: hub → rim along the gondola angles, on both rims (the nearest three by angle)
+  if (!sight) {
+    const j0 = Math.round((Math.atan2(py, pz) + th) / STEP);
+    for (let j = j0 - 1; j <= j0 + 1; j++) {
+      const a = j * STEP - th;
+      const dy = Math.sin(a),
+        dz = Math.cos(a);
+      const s = Math.min(WHEEL_R, Math.max(0, py * dy + pz * dz));
+      const ey = py - dy * s,
+        ez = pz - dz * s;
+      for (let r = -1; r <= 1; r += 2) {
+        const ex = x - (WHEEL_X + r * RIM_HALF);
+        const d = Math.hypot(ex, ey, ez);
+        if (d - SPOKE_T < best && d > 1e-6) {
+          best = d - SPOKE_T;
+          ax = ex / d;
+          ay = ey / d;
+          az = ez / d;
+        }
+      }
+    }
+  }
+  // gondolas: car + canopy + axle stub as one box hanging from the pivot (the ±1° sway is ignored)
+  for (let k = 0; k < GONDOLAS; k++) {
+    if (k === skip) continue;
+    const a = gondolaAngle(k, t);
+    const cy = WHEEL_HUB_Y + Math.sin(a) * WHEEL_R - 1.25,
+      cz = WHEEL_Z + Math.cos(a) * WHEEL_R;
+    const ox = x - WHEEL_X,
+      oy = y - cy,
+      oz = z - cz;
+    const qx = Math.abs(ox) - 0.8,
+      qy = Math.abs(oy) - 1.33,
+      qz = Math.abs(oz) - 1.1;
+    if (qz > best || qy > best) continue;
+    const mx = Math.max(qx, 0),
+      my = Math.max(qy, 0),
+      mz = Math.max(qz, 0);
+    const lo = Math.hypot(mx, my, mz);
+    const d = lo > 0 ? lo : Math.max(qx, qy, qz);
+    if (d < best) {
+      best = d;
+      if (lo > 0) {
+        ax = (Math.sign(ox) * mx) / lo;
+        ay = (Math.sign(oy) * my) / lo;
+        az = (Math.sign(oz) * mz) / lo;
+      } else if (qx >= qy && qx >= qz) {
+        ax = Math.sign(ox) || 1;
+        ay = az = 0;
+      } else if (qy >= qz) {
+        ay = Math.sign(oy) || 1;
+        ax = az = 0;
+      } else {
+        az = Math.sign(oz) || 1;
+        ax = ay = 0;
+      }
+    }
+  }
+  // A-frame legs and the hub axle
+  for (let i = 0; i < WHEEL_LEGS.length; i++) {
+    const L = WHEEL_LEGS[i];
+    const bx = L[3] - L[0],
+      by = L[4] - L[1],
+      bz = L[5] - L[2];
+    const vx = x - L[0],
+      vy = y - L[1],
+      vz = z - L[2];
+    const s = Math.min(1, Math.max(0, (vx * bx + vy * by + vz * bz) / (bx * bx + by * by + bz * bz)));
+    const ex = vx - bx * s,
+      ey = vy - by * s,
+      ez = vz - bz * s;
+    const d = Math.hypot(ex, ey, ez);
+    if (d - LEG_R < best && d > 1e-6) {
+      best = d - LEG_R;
+      ax = ex / d;
+      ay = ey / d;
+      az = ez / d;
+    }
+  }
+  {
+    const ex = x - Math.min(WHEEL_X + HUB_HALF, Math.max(WHEEL_X - HUB_HALF, x));
+    const d = Math.hypot(ex, py, pz);
+    if (d - HUB_R < best && d > 1e-6) {
+      best = d - HUB_R;
+      ax = ex / d;
+      ay = py / d;
+      az = pz / d;
+    }
+  }
+  away.set(ax, ay, az);
+  return best;
 }
 
 function wrap(a: number): number {

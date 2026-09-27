@@ -5,6 +5,7 @@ import type { FrameContext, QualitySettings, System } from '../core/types';
 import { Avatar } from '../player/Avatar';
 import { damp, easeInOut, wobble } from '../player/motion';
 import { PlayerController } from '../player/PlayerController';
+import { RideArm } from '../player/rideArm';
 import { STAGE_FOCUS } from '../player/spots';
 import { FlyoverPath } from './FlyoverPath';
 import { SHOT_FOV, ShowDirector, type ShotPose } from './ShowDirector';
@@ -23,8 +24,8 @@ const GLIDE = new Set<CameraMode>(['first', 'third', 'free']);
  * 1 -> 27.9 %, 0.7 -> 31.8 %, 0.6 -> 32.9 %, 0.5 -> 34.0 %, 0.4 -> 34.3 % (colour starts to drop).
  */
 const SHOWCAM_EXPOSURE = 0.5;
-/** shortest third-person arm (m) in a Ferris wheel gondola: the lens stays outside the car */
-const RIDE_ARM = 2.4;
+/** shortest third-person arm (m) on the Ferris wheel: the rider, the car and the show all in frame */
+const RIDE_ARM = 4.5;
 
 /**
  * All camera modes:
@@ -68,6 +69,12 @@ export class CameraRig implements System {
   /** 0..1 third-person "this is you" rim on the avatar */
   private selfRim = 0;
   private pendingMode: CameraMode | null = null;
+  /** third-person lens while riding the Ferris wheel (clear of rims, spokes, cars and legs) */
+  private readonly rideArm = new RideArm();
+  private readonly rideLens = new THREE.Vector3();
+  /** the player was in / at a gondola last third-person frame; seconds left of the glide back to the plain arm */
+  private wasMounted = false;
+  private dismount = 0;
   private blend = { t: 1, dur: 0.65, checked: true, pos: new THREE.Vector3(), quat: new THREE.Quaternion(), fov: 72 };
   private pose: ShotPose = { pos: new THREE.Vector3(), look: new THREE.Vector3(), fov: 50, roll: 0, haze: 1 };
   /**
@@ -169,6 +176,9 @@ export class CameraRig implements System {
     if (mode === 'third') {
       this.snapPivot();
       this.arm = this.armLength;
+      this.rideArm.reset();
+      this.wasMounted = this.player.mounted;
+      this.dismount = 0;
       // start on the crowd-aware arm (no rise from shoulder height through the neighbours' heads)
       this.crowdLift = smoothstep(0.6, 2.0, this.player.crowdDensity);
     }
@@ -200,6 +210,8 @@ export class CameraRig implements System {
     if (this.player.teleports !== this.seenTeleports) {
       this.seenTeleports = this.player.teleports;
       this.snapPivot();
+      this.rideArm.reset();
+      this.dismount = 0;
       if (!this.player.controlsActive) this.setMode('first');
       this.blend.t = this.blend.dur;
     }
@@ -325,19 +337,45 @@ export class CameraRig implements System {
     const side = 0.34 * (1 - 0.35 * lift),
       up = 0.28 + 1.0 * lift;
     const L = this.armLength * (1 + 0.1 * lift);
-    // desired camera position and spring-arm collision against the 2D colliders. In a Ferris wheel
-    // gondola the arm swings freely above the grounds (the platform rails would pinch it at every
-    // height) and stays long enough to keep the lens outside the car.
+    // desired camera position and spring-arm collision against the 2D colliders. In / at a Ferris wheel
+    // gondola the ride's own arm keeps the lens clear of the wheel (player/rideArm.ts): the platform
+    // rails would pinch a 2D arm at every height, and rims, spokes, cars and legs need a 3D test.
     const dx = -fx * L + rx * side,
       dz = -fz * L + rz * side;
     const mounted = pl.mounted;
-    const free = mounted ? 1 : this.armFree(this.pivot.x, this.pivot.z, this.pivot.x + dx, this.pivot.z + dz, this.pivot.y - fy * L + up);
-    const want = mounted ? Math.max(RIDE_ARM, L) : Math.max(0.35, L * free - (free < 1 ? 0.25 : 0));
-    this.arm += (want - this.arm) * damp(want < this.arm ? 30 : 3, dt);
-    const k = this.arm / L;
-    const x = this.pivot.x + dx * k;
-    const z = this.pivot.z + dz * k;
-    let y = this.pivot.y + (-fy * L + up) * k;
+    const last = cam.position;
+    if (mounted !== this.wasMounted) {
+      // stepping into the car the lens glides from where it is; stepping out it eases back onto the plain arm
+      if (mounted) this.rideArm.resetFrom(last.x - this.pivot.x, last.y - this.pivot.y, last.z - this.pivot.z);
+      else this.dismount = 0.8;
+      this.wasMounted = mounted;
+    }
+    let x: number, y: number, z: number;
+    if (mounted) {
+      if (ctx.seeked) this.rideArm.reset();
+      const A = Math.max(RIDE_ARM, L);
+      const lens = this.rideArm.solve(dt, ctx.showTime, pl.ride.gondola, this.pivot, -fx * A + rx * side, -fy * A + up, -fz * A + rz * side, p.y, this.rideLens);
+      x = lens.x;
+      y = lens.y;
+      z = lens.z;
+      // leaving the ride continues from about this arm
+      this.arm = clamp(Math.hypot(x - this.pivot.x, z - this.pivot.z), 0.35, L);
+    } else {
+      const free = this.armFree(this.pivot.x, this.pivot.z, this.pivot.x + dx, this.pivot.z + dz, this.pivot.y - fy * L + up);
+      const want = Math.max(0.35, L * free - (free < 1 ? 0.25 : 0));
+      this.arm += (want - this.arm) * damp(want < this.arm ? 30 : 3, dt);
+      const k = this.arm / L;
+      x = this.pivot.x + dx * k;
+      z = this.pivot.z + dz * k;
+      y = this.pivot.y + (-fy * L + up) * k;
+      if (this.dismount > 0) {
+        this.dismount -= dt;
+        const a = damp(7, dt);
+        x = last.x + (x - last.x) * a;
+        y = last.y + (y - last.y) * a;
+        z = last.z + (z - last.z) * a;
+      }
+    }
     const floor = this.floorAt(x, z);
     // over a dense crowd: well above the raised hands (~2.3 m)
     y = Math.max(y, floor + 0.25, floor + (1.62 + 1.25 * lift + pl.jumpY * 0.6) * lift);
