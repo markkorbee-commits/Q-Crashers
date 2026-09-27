@@ -210,7 +210,9 @@ export class CameraRig implements System {
     if (this.player.teleports !== this.seenTeleports) {
       this.seenTeleports = this.player.teleports;
       this.snapPivot();
+      // a teleport leaves the Ferris wheel at once: no glide from the gondola across the grounds
       this.rideArm.reset();
+      this.wasMounted = this.player.mounted;
       this.dismount = 0;
       if (!this.player.controlsActive) this.setMode('first');
       this.blend.t = this.blend.dur;
