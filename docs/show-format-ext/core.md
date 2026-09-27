@@ -45,6 +45,10 @@ Engine behaviour of the show camera (no cue change, all deterministic per shot):
   kept). Only a camera that would have to rise more than 3 m (one looking down) is moved along its sight
   line to just in front of the rail (≤ 9 m, framing unchanged), as before. Until round 7 every such pose
   was moved ~5 m forward, which pushed the near lantern pair out of the terrace framings.
+* Stutter edits with the photosensitivity option (round 9): with "Reduce flashing" on (App.reduceFlashing) the
+  `alt` / `altEvery` stutter alternates no faster than every 0.34 s, i.e. under 1.5 dark/bright pairs per second.
+  The v1267.8 edit cuts between a dark close frontal and the bright lamp-string telephoto at 4.2 Hz, which is itself a
+  flashing pattern. Reduced motion (comfort) still holds the main angle. Without the option nothing changes.
 
 Authoring convention (round 7): a `camera.shot` starts on the exact first frame of its video shot,
 `t = cut − 0.036` with the cut from `$ENDSHOW_DATA/cuts.json` (exact since 27 Sep 2026), and the previous
@@ -62,6 +66,18 @@ at x 0.10/0.89 and 0.20/0.79 (v10.5, v280.7, v337.9, v508.3, v1435.96). Fit a po
 shows rather than by eye: the lantern crystals (x ±20, z 36/69/102/135, glow ≈ 10.8 m), the arm-end lights
 (±94, 12.5, 58), the Ferris wheel hub (86.5, 18.5, 187.5) and the moon (site.ts EPHEM, which the fits
 confirm to within 0.005 of the frame) pin position, aim and lens in a least-squares fit.
+
+Pose fitting (round 9): the terrace tripod is ONE camera that pans, tilts and zooms. Free fits of 45 exact frames
+(v87 … v1249, crystal centres = world y 11.2, i.e. the midpoint of the top and bottom apex, plus the moon) all land at
+(−0.3, 5.25, 171.2) ± 0.3 m with 2 px rms; only the tilt (6.8–11°) and the lens (fov 36–45°) change, often inside a
+shot (slow zooms: v86.8, v290–305, v316–321, v330–335, v415–418, v470–483, v822–826, v838–844). In our world a lens at
+5.25 m, 4.9 m behind the front rail films the balustrade, and the terrace rule's lift (≈ 1.9 m, aim kept) drops the
+near lantern pair ~20 px. So the shots are authored from one joint fit with the height fixed at 7 (rail clear): the
+tripod at (0.52, 7, 168.86) for every frame, yaw ≈ −1.25°, per-shot pitch and fov, 6 px rms (the near pair ~8 px low,
+the moon ~7 px high); a zoom is `fov` → `fovTo` with `look` → `lookTo`. Weighting the fit towards the moon and the far
+rows (stage matched, near pair 12 px low) scored the same (0.679 vs 0.680 over 101 frames). Its telephoto
+(v733.0–736.0 too) sits at (−0.7, 6.7, 169.9), fov 15.5–16.3. A per-shot near plane (≈ 5 m) for the show camera
+would let the fitted 5.25 m pose film over its own rail (contract request to the CameraRig owner, round 9).
 
 ## atmos
 

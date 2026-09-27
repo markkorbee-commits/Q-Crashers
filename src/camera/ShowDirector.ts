@@ -57,6 +57,8 @@ interface CrowdLike {
 const SUBJECT_FALLBACK = new THREE.Vector3(0, 2.2, -4.5);
 /** haze scale of a shot that follows a performer (see ShotPose.haze; 1 = the full lit veil) */
 const SUBJECT_HAZE = 1;
+/** shortest slot (s) of a stutter edit (`alt` / `altEvery`) with the photosensitivity option on */
+const ALT_CALM = 0.34;
 /** minimal duck type of the player controller (walkable ground height) */
 interface GroundLike {
   groundAt?(x: number, z: number): number;
@@ -504,9 +506,13 @@ export class ShowDirector {
     const preset = typeof p.preset === 'string' ? SHOT_BY_ID.get(p.preset) : undefined;
     this.nudged = 0;
     // stutter edit (`alt` pose, cut every `altEvery` s): the odd slots show the second camera.
-    // Reduced motion (comfort) holds the main angle.
+    // Reduced motion (comfort) holds the main angle. With the photosensitivity option (App.reduceFlashing) a
+    // stutter between a dark and a bright framing is itself a flashing pattern (v1267.8: 4.2 Hz), so the
+    // angles alternate no faster than every ALT_CALM s (< 1.5 flash pairs per second).
     const alt = !this.steady && p.alt && typeof p.alt === 'object' ? (p.alt as Record<string, unknown>) : null;
-    const altOn = alt !== null && Math.floor((t - cue.t) / clamp(num(p.altEvery, 0.1), 1 / 30, 10)) % 2 === 1;
+    const every = clamp(num(p.altEvery, 0.1), 1 / 30, 10);
+    const slot = this.app.reduceFlashing ? Math.max(every, ALT_CALM) : every;
+    const altOn = alt !== null && Math.floor((t - cue.t) / slot) % 2 === 1;
     if (preset) {
       o.fov = 50;
       preset.frame(this.L, k, rand01(cue.seed), t, o);
