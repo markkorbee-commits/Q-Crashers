@@ -4,7 +4,7 @@ import type { StageLookEx } from './StageLook';
 import { buildBody } from './dragon/body';
 import { buildHead } from './dragon/head';
 import { createKit, type PartBuckets } from './dragon/kit';
-import { HEAD, headMatrix, wingLayout } from './dragon/layout';
+import { HEAD, headMatrix, headRigMatrix, wingLayout } from './dragon/layout';
 import {
   createBulbMaterial,
   createEnvMap,
@@ -124,7 +124,7 @@ export class DragonCrown {
       // the footage floods the head in the look's colours, video 998.25 / 1047.25)
       shell: std('shell', { metalness: SHELL.metal, roughness: SHELL.rough, envMapIntensity: 1.5, side: THREE.DoubleSide, normalScale: new THREE.Vector2(1.3, 1.3) }, scale),
       armor: std('armor', { metalness: 0.82, roughness: 0.55, envMapIntensity: 1.2 }, panel, { key: 'armor' }),
-      steel: std('steel', { metalness: 0.95, roughness: 0.7, envMapIntensity: 0.8 }, steel),
+      steel: std('steel', { metalness: 0.95, roughness: 0.7, envMapIntensity: 0.8 }, steel, { key: 'steel', plates: true }),
       copper: std('copper', { metalness: 0.7, roughness: 0.75, envMapIntensity: 0.9 }, steel),
       // leopard hide (daytime photos): ~2.5x the albedo of the old lava hide, scaled back in the show
       lava: std('lava', { map: lava.map, emissiveMap: lava.emissiveMap, emissive: 0x000000, normalMap: scale.normalMap, metalness: 0.2, roughness: 0.62, envMapIntensity: 0.6 }, undefined, { key: 'lava', lava: true, nightK: 0.74 }),
@@ -171,7 +171,9 @@ export class DragonCrown {
 
     // head rig: jaw pivot lives in head space
     this.headRig.matrixAutoUpdate = false;
-    this.headRig.matrix.copy(HM);
+    this.headRig.matrix.copy(headRigMatrix());
+    // (the jaw carries the snout stretch along its own axis: head rig x jaw rotation x stretch)
+    this.jawPivot.scale.set(1, 1, HEAD.snout);
     this.headRig.add(this.jawPivot);
     this.group.add(this.headRig);
 
@@ -240,7 +242,9 @@ export class DragonCrown {
     };
     // the jaw's LED strips and pixel dots ride in the static strip / bulb draws, following the jaw
     // through uJawMat (2 draws less on every preset)
-    const restJaw = new THREE.Matrix4().multiplyMatrices(HM, new THREE.Matrix4().makeRotationX(THREE.MathUtils.lerp(HEAD.jawMin, HEAD.jawMax, 0.6)));
+    const restJaw = new THREE.Matrix4()
+      .multiplyMatrices(this.headRig.matrix, new THREE.Matrix4().makeRotationX(THREE.MathUtils.lerp(HEAD.jawMin, HEAD.jawMax, 0.6)))
+      .multiply(new THREE.Matrix4().makeScale(1, 1, HEAD.snout));
     this.U.uJawMat.value.copy(restJaw);
     kit.world.strips.absorb(kit.jaw.strips, restJaw);
     kit.world.bulbs.absorb(kit.jaw.bulbs, restJaw);
@@ -325,6 +329,8 @@ export class DragonCrown {
       shoulders: [wl.layout.shoulder.clone(), wr.layout.shoulder.clone()],
     };
     this.U.uMouthPos.value.copy(toW(new THREE.Vector3(0, -1.0, 1.6)));
+    // the head's centre for a head-only stage.flash (skull between the hinge and the snout, under the crest)
+    this.U.uHeadC.value.copy(toW(new THREE.Vector3(0, 1.8, 1.2)));
 
     this.stat.mergeMs = Math.round(performance.now() - t1);
     this.stat.draws = this.meshes.length;
@@ -364,11 +370,18 @@ export class DragonCrown {
     U.uLed2.value.copy(look.led2);
     U.uLedW.value.copy(look.wingLed);
     U.uLedW2.value.copy(look.wingLed2);
+    U.uLedWR.value.copy(look.wingLedR);
+    U.uLedWR2.value.copy(look.wingLedR2);
     U.uDragonG.value = look.dragonGain;
     U.uWingG.value = look.wingGain;
     U.uWingWash.value = look.wingWash;
     U.uSide.value.set(look.sideL, look.sideR);
     U.uDragonWash.value = look.dragonWash;
+    // stage.flash (round 11): the transient light on the sculpture
+    const sf = look.sculptFlash;
+    U.uSFlash.value.set(sf.r * SCULPT_FLASH_GAIN, sf.g * SCULPT_FLASH_GAIN, sf.b * SCULPT_FLASH_GAIN, look.sculptFlashHead);
+    U.uSFlashReg.value.copy(look.sculptFlashReg);
+    U.uPlateGlow.value = look.plateGlow;
     U.uBeat.value = ctx.beat.beat;
     // (a crown-isolating mask keeps the crown's outlines lit without screen content: crownLedFloor)
     U.uLedI.value = Math.max(0, look.ledIntensity, look.crownLedFloor);
@@ -377,7 +390,9 @@ export class DragonCrown {
     U.uGarlCol.value.copy(look.garlandColor);
     U.uGarlPat.value = look.garlandPattern;
     U.uGarlRate.value = look.garlandRate;
-    if (this.garlandMesh) this.garlandMesh.visible = Math.max(look.garland.x, look.garland.y, look.garland.z) > 0.002;
+    U.uGarlHG.value.set(look.garlandHot, look.garlandGlare);
+    const G = look.garland;
+    if (this.garlandMesh) this.garlandMesh.visible = Math.max(G.x, G.y, G.z, G.w) > 0.002;
     U.uPattern.value = look.ledPattern;
     U.uPhase.value = look.ledPhase;
     U.uPulse.value = Math.max(0, Math.min(1, look.pulse));
@@ -386,6 +401,9 @@ export class DragonCrown {
     const wl = look.wingLed;
     const wm = Math.max(wl.r, wl.g, wl.b, 1e-4);
     U.uPrintTint.value.setRGB(wl.r / wm, wl.g / wm, wl.b / wm).lerp(PRINT_WARM, PRINT_WARM_SHARE);
+    const wr = look.wingLedR;
+    const wmr = Math.max(wr.r, wr.g, wr.b, 1e-4);
+    U.uPrintTintR.value.setRGB(wr.r / wmr, wr.g / wmr, wr.b / wmr).lerp(PRINT_WARM, PRINT_WARM_SHARE);
     U.uRosette.value.copy(look.rosettes).multiplyScalar(E);
     U.uMouth.value = look.mouth;
     U.uEyes.value.copy(look.eyes).multiplyScalar(look.eyesIntensity);
@@ -466,7 +484,7 @@ export class DragonCrown {
     U.uPoolAmt.value = 0;
     U.uWingWash.value = 1;
     U.uDragonWash.value = 1;
-    U.uGarl.value.set(0, 0, 0);
+    U.uGarl.value.set(0, 0, 0, 0);
     U.uDay.value = 1;
     if (this.garlandMesh) this.garlandMesh.visible = false;
     this.eyeMat.color.setRGB(0.04, 0.015, 0.01);
@@ -555,6 +573,11 @@ export const CROWN_TUNE = {
   /** round 9: level of the throat point light (x its old level) */
   throatLight: 0.8,
 };
+/**
+ * irradiance of a stage.flash at level 1 (round 11): the night-calibrated hide / steel read bone-white under it
+ * (video 713.5 / 719.75), like the head of the 716.4 white look
+ */
+const SCULPT_FLASH_GAIN = 6;
 /** saturated red the throat light is pulled to by CROWN_TUNE.throatRed (round 9) */
 const THROAT_LIGHT_RED = new THREE.Color(1.0, 0.14, 0.1);
 

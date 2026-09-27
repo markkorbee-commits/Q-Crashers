@@ -56,16 +56,23 @@ export interface CrownUniforms {
   /** wing LED colours (wingColor / crownColor overrides of the content colour) */
   uLedW: THREE.IUniform<THREE.Color>;
   uLedW2: THREE.IUniform<THREE.Color>;
+  /** the audience-right wing's LED colours (round 11: = uLedW / uLedW2 unless a per-side wing colour is set) */
+  uLedWR: THREE.IUniform<THREE.Color>;
+  uLedWR2: THREE.IUniform<THREE.Color>;
+  /** the right wing's print tint (see uPrintTint) */
+  uPrintTintR: THREE.IUniform<THREE.Color>;
   /** 0..2 level of the dragon's LED lines / dots and of the wing LED lines (region isolation) */
   uDragonG: THREE.IUniform<number>;
   uWingG: THREE.IUniform<number>;
   /** continuous beat index (festoon chase / strobe) */
   uBeat: THREE.IUniform<number>;
-  /** festoon bulb strings: level per group (x wings, y castle, z sides), colour, pattern, pulses per beat */
-  uGarl: THREE.IUniform<THREE.Vector3>;
+  /** festoon bulb strings: level per group (x wings, y castle, z sides, w castle-front row), colour, pattern, pulses per beat */
+  uGarl: THREE.IUniform<THREE.Vector4>;
   uGarlCol: THREE.IUniform<THREE.Color>;
   uGarlPat: THREE.IUniform<number>;
   uGarlRate: THREE.IUniform<number>;
+  /** festoon bulbs: x white-hot share (1 = round-7 white core), y glare size (1 = round-7 halo) */
+  uGarlHG: THREE.IUniform<THREE.Vector2>;
   /** 0..1 how much of the wash rig + reflections reach the wings / the dragon (mask isolations) */
   uWingWash: THREE.IUniform<number>;
   uDragonWash: THREE.IUniform<number>;
@@ -82,6 +89,15 @@ export interface CrownUniforms {
   uJawMat: THREE.IUniform<THREE.Matrix4>;
   /** per-side emitter level: x audience-left (x < 0), y right (stage.state `side`) */
   uSide: THREE.IUniform<THREE.Vector2>;
+  /**
+   * stage.flash light (round 11): rgb = colour x level x SCULPT_FLASH_GAIN, w = 1 confines it to the head;
+   * uSFlashReg = weight on the dragon (non-wing parts) / the wings; uHeadC = the head's centre (world)
+   */
+  uSFlash: THREE.IUniform<THREE.Vector4>;
+  uSFlashReg: THREE.IUniform<THREE.Vector2>;
+  uHeadC: THREE.IUniform<THREE.Vector3>;
+  /** level of the white wing plates' LED glow (round 11; tunable in the page) */
+  uPlateGlow: THREE.IUniform<number>;
   /**
    * night response of the wing membranes' printed skin: x the level of the print lit by the wash rig (key,
    * rim, washes, ambient), y how far its hue is pulled to the wing LED colour, z the level of its own
@@ -128,18 +144,26 @@ export function createUniforms(): CrownUniforms {
     uMinPx: { value: 2 },
     uLedW: { value: new THREE.Color('#ff2a10') },
     uLedW2: { value: new THREE.Color('#2a60ff') },
+    uLedWR: { value: new THREE.Color('#ff2a10') },
+    uLedWR2: { value: new THREE.Color('#2a60ff') },
+    uPrintTintR: { value: new THREE.Color(1, 1, 1) },
     uDragonG: { value: 1 },
     uWingG: { value: 1 },
     uBeat: { value: 0 },
-    uGarl: { value: new THREE.Vector3(0, 0, 0) },
+    uGarl: { value: new THREE.Vector4(0, 0, 0, 0) },
     uGarlCol: { value: new THREE.Color('#ffb466') },
     uGarlPat: { value: 0 },
     uGarlRate: { value: 2 },
+    uGarlHG: { value: new THREE.Vector2(1, 1) },
     uWingWash: { value: 1 },
     uDragonWash: { value: 1 },
     uDay: { value: 0 },
     uJawMat: { value: new THREE.Matrix4() },
     uSide: { value: new THREE.Vector2(1, 1) },
+    uSFlash: { value: new THREE.Vector4(0, 0, 0, 0) },
+    uSFlashReg: { value: new THREE.Vector2(0, 0) },
+    uHeadC: { value: new THREE.Vector3(-1.4, 17, -9) },
+    uPlateGlow: { value: 0 },
     uMembLit: { value: new THREE.Vector3(MEMBRANE_LIT.level, MEMBRANE_LIT.hue, MEMBRANE_LIT.uplight) },
     uThroat: { value: new THREE.Vector2(0.5, 0) },
   };
@@ -157,6 +181,8 @@ uniform float uEmit;
 uniform float uEmber;
 uniform vec3 uLedW;
 uniform vec3 uLedW2;
+uniform vec3 uLedWR;
+uniform vec3 uLedWR2;
 uniform float uDragonG;
 uniform float uWingG;
 uniform vec2 uSide;
@@ -170,10 +196,15 @@ const float CROWN_LED_K = 0.6;
 // strip / dot group: 0 primary, 1 accent (dragon); 2 primary, 3 accent (wings: own colours + level).
 // A fractional part f (0..0.45) dims the strip to 1 - 2f (secondary outlines: top edges, rings).
 float crownWing(float g) { return step(1.5, g); }
+// world x of the emitter being shaded (set by each shader's main before crownLed / crownSteady): picks the
+// left / right wing colours (round 11; identical unless stage.state wingColorLeft / wingColorRight is given)
+float crownWX = 0.0;
+vec3 wingC1() { return mix(uLedW, uLedWR, step(0.0, crownWX)); }
+vec3 wingC2() { return mix(uLedW2, uLedWR2, step(0.0, crownWX)); }
 float crownDim(float g) { return clamp(1.0 - 2.0 * fract(g + 0.001), 0.05, 1.0); }
 vec3 crownSteady(float g) {
   float w = crownWing(g);
-  vec3 c = (g - 2.0 * w) > 0.5 ? mix(uLed2, uLedW2, w) : mix(uLed, uLedW, w);
+  vec3 c = (g - 2.0 * w) > 0.5 ? mix(uLed2, wingC2(), w) : mix(uLed, wingC1(), w);
   return c * mix(uDragonG, uWingG, w) * CROWN_LED_K;
 }
 // 'ember': the dragon and the inner wings stay lit, the outer wings fade to a dim red silhouette
@@ -183,8 +214,8 @@ float emberMask(float x) { return mix(1.0, mix(0.2, 1.0, 1.0 - smoothstep(16.0, 
 vec3 crownLed(float u, float grpIn, float side, float seed) {
   float wing = crownWing(grpIn);
   float grp = grpIn - 2.0 * wing;
-  vec3 L1 = mix(uLed, uLedW, wing);
-  vec3 L2 = mix(uLed2, uLedW2, wing);
+  vec3 L1 = mix(uLed, wingC1(), wing);
+  vec3 L2 = mix(uLed2, wingC2(), wing);
   vec3 base = grp > 0.5 ? L2 : L1;
   float b = 1.0;
   int p = int(uPattern + 0.5);
@@ -229,6 +260,9 @@ uniform float uPoolAmt;
 uniform float uWingWash;
 uniform float uDragonWash;
 uniform float uDay;
+uniform vec4 uSFlash;
+uniform vec2 uSFlashReg;
+uniform vec3 uHeadC;
 
 // soft light pools of the moving-head washes sweeping across the set (deterministic in show time)
 float crownPools(vec3 p) {
@@ -276,6 +310,19 @@ const WASH_APPLY = /* glsl */ `
   crownLight(vec3(0.0, 0.55, -0.83), uRim * mix(0.3, 1.0, wreg), geometryNormal, geometryViewDir, material, reflectedLight, 0.0);
   #endif
   crownLight(vec3(0.15, 0.75, 0.45), uFlash, geometryNormal, geometryViewDir, material, reflectedLight, 0.3);
+  #ifndef CROWN_EXT
+  // stage.flash (round 11): a white flood on the head / dragon / wings (video 713.5 / 719.75: the head plates and
+  // horns go bone-white while the wings burn); never on the castle (the set pieces sharing this rig: CROWN_EXT)
+  if (uSFlash.r + uSFlash.g + uSFlash.b > 0.0) {
+    float sreg = mix(uSFlashReg.x, uSFlashReg.y, step(1.5, vCrownFx));
+    sreg *= mix(1.0, 1.0 - smoothstep(8.0, 12.0, length(vCrownPos - uHeadC)), uSFlash.w);
+    vec3 sc = uSFlash.rgb * sreg;
+    // a soft diffuse flood (a white head; no specular: glossy steel under it glared into bloom discs)
+    vec3 Lf = normalize((viewMatrix * vec4(normalize(vec3(-0.15, 0.45, 1.0)), 0.0)).xyz);
+    float nlf = saturate((dot(geometryNormal, Lf) + 0.6) / 1.6);
+    reflectedLight.directDiffuse += sc * nlf * BRDF_Lambert(max(material.diffuseContribution, vec3(0.08)));
+  }
+  #endif
   // glowing throat: a point light between the jaws
   vec3 dm = uMouthPos - vCrownPos;
   float dd = length(dm);
@@ -317,6 +364,8 @@ export interface PatchOpts {
   nightK?: number;
   /** membrane: gain of the self-lit print (normalised to the print's mean brightness) */
   printGain?: number;
+  /** white wing plates (fx >= 2.5) glow in the wing LED colour (round 11, see uPlateGlow) */
+  plates?: boolean;
 }
 
 /** Inject the virtual wash rig (+ optional effects) into a MeshStandardMaterial. */
@@ -324,6 +373,8 @@ export function patchStandard(mat: THREE.MeshStandardMaterial, U: CrownUniforms,
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, U);
     if (o.lite) sh.defines = { ...(sh.defines ?? {}), CROWN_LITE: '' };
+    // set pieces that borrow the crown's wash rig (applyWashRig: castle / deck) never take the stage.flash light
+    if (o.key.startsWith('ext-')) sh.defines = { ...(sh.defines ?? {}), CROWN_EXT: '' };
     sh.vertexShader = sh.vertexShader
       .replace(
         '#include <common>',
@@ -368,7 +419,8 @@ diffuseColor.rgb *= mix(${nk}, 1.0, uDay);${
   // night: the printed skin under the wash rig takes the wing LED hue at its own peak level and a reduced
   // level (the footage shows dark membranes carrying the LED strokes, never the orange print under a
   // pink / violet wash: video 1320.75 / 1322.5 / 509.25); the daytime view keeps the painted inferno
-  vec3 hueW = uPrintTint / max(max(uPrintTint.r, max(uPrintTint.g, uPrintTint.b)), 1e-4);
+  vec3 pTint = mix(uPrintTint, uPrintTintR, step(0.0, vCrownPos.x));
+  vec3 hueW = pTint / max(max(pTint.r, max(pTint.g, pTint.b)), 1e-4);
   float pk = max(diffuseColor.r, max(diffuseColor.g, diffuseColor.b));
   vec3 litP = mix(diffuseColor.rgb, pk * hueW, uMembLit.y) * uMembLit.x;
   diffuseColor.rgb = mix(litP, diffuseColor.rgb, uDay);
@@ -380,8 +432,9 @@ diffuseColor.rgb *= mix(${nk}, 1.0, uDay);${
       '#include <lights_physical_pars_fragment>',
       `#include <lights_physical_pars_fragment>
 ${WASH_PARS}
-${o.membrane ? LED_GLSL + 'uniform float uWings;\nuniform vec3 uPrintTint;\nuniform vec3 uMembLit;' : ''}
+${o.membrane ? LED_GLSL + 'uniform float uWings;\nuniform vec3 uPrintTint;\nuniform vec3 uPrintTintR;\nuniform vec3 uMembLit;' : ''}
 ${o.lava && !o.membrane ? 'uniform float uDragonG;\nuniform float uWingG;' : ''}
+${o.plates && !o.membrane && !o.lava ? 'uniform vec3 uLedW;\nuniform vec3 uLedWR;\nuniform float uLedI;\nuniform float uWingG;\nuniform float uWings;\nuniform vec2 uSide;\nuniform float uEmber;\nuniform float uPlateGlow;' : ''}
 ${o.membrane ? 'varying vec3 vMemb;' : ''}`,
     );
     fs = fs.replace('#include <lights_fragment_begin>', `#include <lights_fragment_begin>\n${WASH_APPLY}`);
@@ -394,6 +447,23 @@ radiance *= uEnvTint * max(crownWashReg(), 0.03);
 iblIrradiance *= uEnvTint * max(crownWashReg(), 0.03);`,
     );
     let emissive = '';
+    if (o.plates && !o.membrane && !o.lava) {
+      // round 11: the white arrowhead / kunai / crescent plates along the spars catch the wing LEDs beside them
+      // (video 307 / 338 / 412.5 / 1463: every spar reads as a broad candy-striped blade of white and the wing
+      // colour; unlit, the glossy steel plates stayed dark and the spars read as thin lines under the arches)
+      emissive += `
+{
+  float plate = step(2.5, vCrownFx);
+  if (plate > 0.0) {
+    vec3 wc = mix(uLedW, uLedWR, step(0.0, vCrownPos.x));
+    float wm = max(wc.r, max(wc.g, wc.b));
+    vec3 pc = mix(wc, vec3(wm), 0.35);
+    float sd = mix(uSide.x, uSide.y, smoothstep(-6.0, 6.0, vCrownPos.x));
+    float em = mix(1.0, mix(0.2, 1.0, 1.0 - smoothstep(16.0, 36.0, abs(vCrownPos.x))), uEmber);
+    totalEmissiveRadiance += crownAlb * pc * uLedI * uWingG * uWings * uPlateGlow * sd * em * (1.0 - uDay);
+  }
+}`;
+    }
     if (o.lava) {
       // the cracks glow with the dragon's inner fire: a dragon emitter, so a mask that darkens the
       // dragon's LEDs darkens them too (mask 'wings': dragon 0; the wing arms' hide also goes out
@@ -429,6 +499,7 @@ iblIrradiance *= uEnvTint * max(crownWashReg(), 0.03);`,
   // lanes run in phase so chases read as horizontal bands climbing the membrane (design bible §7.3)
   // (seed step 1/0.37 keeps the chase phase identical per lane but decorrelates the sparkle hash)
   float alt = mod(lane, 3.0) < 0.5 ? 3.0 : 2.0;
+  crownWX = vCrownPos.x;
   vec3 lc = crownLed(vMemb.y, alt, side, abs(vMemb.z) + lane * 2.7027027);
   // pixel canvas fades out towards the wrist
   float grow = smoothstep(1.5, 5.0, vMemb.y);
@@ -441,8 +512,9 @@ iblIrradiance *= uEnvTint * max(crownWashReg(), 0.03);`,
   // (round 8: the print's colour is pulled to the wing LED hue like its lit response, uMembLit.y)
   vec3 printAlb = crownAlb * crownAlb;
   float pk2 = max(printAlb.r, max(printAlb.g, printAlb.b));
-  printAlb = mix(printAlb, pk2 * uPrintTint / max(max(uPrintTint.r, max(uPrintTint.g, uPrintTint.b)), 1e-4), uMembLit.y);
-  vec3 print = printAlb * uPrintTint * ${(o.printGain ?? 1.9).toFixed(3)};
+  vec3 pTintE = mix(uPrintTint, uPrintTintR, step(0.0, vCrownPos.x));
+  printAlb = mix(printAlb, pk2 * pTintE / max(max(pTintE.r, max(pTintE.g, pTintE.b)), 1e-4), uMembLit.y);
+  vec3 print = printAlb * pTintE * ${(o.printGain ?? 1.9).toFixed(3)};
   totalEmissiveRadiance += print * (0.03 * uEmit + ${PRINT_UPLIGHT.toFixed(3)} * uMembLit.z * uWings) * em * mix(1.15, 0.4, smoothstep(3.0, 18.0, vMemb.y)) * (1.0 - uDay);
   // printed fabric lets some of the back light (sky, fireworks behind the stage) shine through
   totalEmissiveRadiance += crownAlb * uRim * ${(0.35 * (o.printGain ?? 1.9) / 1.9).toFixed(3)};
@@ -451,7 +523,7 @@ iblIrradiance *= uEnvTint * max(crownWashReg(), 0.03);`,
     if (emissive) fs = fs.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n${emissive}`);
     sh.fragmentShader = fs;
   };
-  mat.customProgramCacheKey = () => 'crown-' + o.key + (o.lite ? '-lite' : '') + '-' + (o.nightK ?? 1).toFixed(3) + '-' + (o.printGain ?? 1.9).toFixed(3);
+  mat.customProgramCacheKey = () => 'crown-' + o.key + (o.lite ? '-lite' : '') + (o.plates ? '-pl' : '') + '-' + (o.nightK ?? 1).toFixed(3) + '-' + (o.printGain ?? 1.9).toFixed(3);
   return mat;
 }
 
@@ -529,6 +601,7 @@ void main() {
   float pu = vU * 8.0;
   float fw = fwidth(pu);
   float dots = mix(0.35 + 0.65 * smoothstep(0.42, 0.18, abs(fract(pu) - 0.5)), 1.0, clamp(fw * 1.5, 0.0, 1.0));
+  crownWX = vWX;
   vec3 c = crownLed(vU, vInfo.x, vInfo.y, vInfo.z);
   // from far away a chase / sparkle averages over many pixels: the outline keeps a steady level and
   // is pushed above the lit haze around the crown, so the wing ribs read as lines of light
@@ -709,6 +782,7 @@ void main() {
   if (m < 0.004) discard;
   int t = int(vInfo.x + 0.5);
   vec3 c;
+  crownWX = vWX;
   if (t == 0 || t == 1) c = crownLed(vInfo.y, float(t), sign(vInfo.w - 0.5), vInfo.w) * 1.4;
   else if (t == 6 || t == 7) c = crownLed(vInfo.y, float(t - 4), sign(vInfo.w - 0.5), vInfo.w) * 1.4;
   else if (t == 2) c = uEyes * 3.0;
@@ -779,8 +853,8 @@ export class Bulbs {
 // side-section eaves (seen in the official footage at the big warm moments). One instanced draw.
 // ---------------------------------------------------------------------------------------------
 
-/** garland groups (uGarl.x / .y / .z) */
-export const GARLAND = { wings: 0, castle: 1, sides: 2 } as const;
+/** garland groups (uGarl.x / .y / .z / .w) */
+export const GARLAND = { wings: 0, castle: 1, sides: 2, base: 3 } as const;
 /** HDR gain of a festoon bulb at level 1 (round 6: 3.2 -> 4.5, the wing strings read as bright white points) */
 const GARLAND_GAIN = 7;
 /** bulb diameter (m) of the wing strings / the castle and side-section strings (round 6: 0.15 -> 0.24 / 0.2) */
@@ -802,6 +876,7 @@ attribute vec3 iPos;
 attribute vec4 iInfo; // group, u (m along the string), size, seed
 uniform float uPixel;
 uniform float uMinPx;
+uniform vec2 uGarlHG;
 varying vec2 vC;
 varying vec4 vInfo;
 varying float vFade;
@@ -814,7 +889,8 @@ void main() {
   vFade = clamp(pow(iInfo.z / s, 0.75), 0.3, 1.0);
   // the quad also carries a glare of at least GARLAND_GLARE_PX pixels (a camera sees a frosted bulb in the
   // haze as a glaring point at any distance, video 582.75 / 1047.25)
-  float q = max(1.6 * s, GARLAND_GLARE_PX * px);
+  // (uGarlHG.y > 1: the glare disc grows with the bulb, so near bulbs bloom into wide discs, video 583.5)
+  float q = max(1.6 * s * max(uGarlHG.y, 1.0), GARLAND_GLARE_PX * px);
   vQ = q / s;
   mv.xy += corner * q;
   mv.xyz += normalize(-mv.xyz) * (s - iInfo.z) * 1.5;
@@ -824,10 +900,11 @@ void main() {
 }`,
     fragmentShader: /* glsl */ `
 #define GARLAND_GAIN ${GARLAND_GAIN.toFixed(3)}
-uniform vec3 uGarl;
+uniform vec4 uGarl;
 uniform vec3 uGarlCol;
 uniform float uGarlPat;
 uniform float uGarlRate;
+uniform vec2 uGarlHG;
 uniform float uBeat;
 uniform float uShowT;
 varying vec2 vC;
@@ -837,15 +914,18 @@ varying float vQ;
 float gHash(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 void main() {
   float g = vInfo.x;
-  float lvl = g < 0.5 ? uGarl.x : (g < 1.5 ? uGarl.y : uGarl.z);
+  float lvl = g < 0.5 ? uGarl.x : (g < 1.5 ? uGarl.y : (g < 2.5 ? uGarl.z : uGarl.w));
   if (lvl < 1e-3) discard;
   float rq2 = dot(vC, vC);
   // (radius in units of the bulb: r2 = (|vC| * q / s)^2 / 0.39, as round 6 with q = 1.6 s)
   float r2 = rq2 * vQ * vQ;
-  float core = exp(-r2 * 8.0);
+  // (glare G > 1, round 11: the bulb blooms into a wider white disc with a soft edge, video 582.75-584.2)
+  float G = uGarlHG.y;
+  float core = exp(-r2 * 8.0 / (G * G));
   // frosted globes bloom in the haze: a soft glare round every bulb (video 582.75 / 1268: bright white
   // points with halos, not pin-pricks) + a faint pixel-sized glare that keeps far bulbs glaring
-  float halo = exp(-r2 * 1.5) * 0.26;
+  // (glare > 1, round 11: a wider, brighter disc that washes out to white in the haze, video 582.75-584.2)
+  float halo = exp(-r2 * 1.5 / (G * G)) * 0.26;
   float glare = exp(-rq2 * 5.0) * 0.07;
   float m = core + halo + glare;
   if (m < 0.004) discard;
@@ -865,8 +945,13 @@ void main() {
   }
   // hot white filament in a warm glass: the core is white-hot, the halo keeps half the glass tint (round 6
   // read as cream discs; the footage shows glaring white points with a warm fringe)
+  // (uGarlHG.x, round 11: the white-hot share; 0 keeps the whole bulb in the cue colour, gold bulbs in the
+  // orange smoke of video 165.5 / 173.5)
   vec3 hot = vec3(1.0, 0.96, 0.9) * max(uGarlCol.r, max(uGarlCol.g, uGarlCol.b));
-  vec3 c = mix(mix(uGarlCol, hot, 0.5), hot, min(1.0, core * 1.1));
+  float H = uGarlHG.x;
+  // a glare disc (G > 1) is the haze lit white round the bulb: its halo leans white with the glare
+  float hw = mix(0.5, 0.85, clamp((G - 1.0) * 0.5, 0.0, 1.0)) * H;
+  vec3 c = mix(mix(uGarlCol, hot, hw), hot, min(1.0, core * 1.1) * H);
   gl_FragColor = vec4(c * m * lvl * k * vFade * GARLAND_GAIN, 1.0);
 }`,
   });
@@ -1022,6 +1107,7 @@ void main() {
   rays = mix(rays, 0.08 * (1.0 - smoothstep(R * 0.4, R * 0.9, r)), clamp(sa * 0.8, 0.0, 1.0));
   float rim = smoothstep(0.07 + fr, 0.0, abs(r - R * 0.86));
   float glow = exp(-r * 2.6) * 0.3;
+  crownWX = vSeed;
   vec3 led = crownLed(r * 2.0 + vSeed * 0.1, 3.0, sign(vSeed), 0.3);
   float lv = max(uLedI, 0.2);
   vec3 c = uRosette * (star * 1.5 + glow + rays * (0.5 + 0.6 * lv)) * (0.3 + 0.8 * uWings) + led * (rays * 0.4 + rim * 0.3);

@@ -346,7 +346,10 @@ export class MainStageSystem implements System {
       if (edgePts.length) a.set('wing_edge' as AnchorName, edgePts.map((p) => p.clone()));
       // lasers on the dragon's shoulders and on the inner / outer fingers (bible: flanks + wing bases)
       for (const sh of c.shoulders) lasers.push(sh.clone().add(new THREE.Vector3(0, 2.0, 0.2)));
-      for (const w of [c.wingLeft, c.wingRight]) if (w.length >= 15) lasers.push(w[8].clone(), w[14].clone());
+      // (inner finger: half way from its 82 % point to its tip, round 11: the inner spar now rises from the
+      // wrist, so its 82 % point moved 0.6 m outwards; this keeps the laser at the old |X| ~17.1, on the spar, and
+      // the order of the X-sorted laser_stage list unchanged)
+      for (const w of [c.wingLeft, c.wingRight]) if (w.length >= 15) lasers.push(w[8].clone(), w[14].clone().lerp(w[4], 0.5));
       roof.push(...c.roof);
     }
     set('laser_stage', byX(lasers));

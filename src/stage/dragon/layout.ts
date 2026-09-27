@@ -27,11 +27,22 @@ export const HEAD = {
   /** jaw opening at look.jaw = 0 / 1 (radians); the default look.jaw 0.6 gives a ~5.5 m tall gape */
   jawMin: 0.6,
   jawMax: 1.05,
+  /**
+   * round 11: length factor of the head along its own snout axis (head-local z; the lower jaw is stretched along
+   * its own axis by the same factor, so the gape keeps its angle). 1 = the round-3 head.
+   */
+  snout: 1,
 };
 
-export function headMatrix(): THREE.Matrix4 {
+/** the head frame without the snout stretch: the parent of the jaw pivot (head-local -> world) */
+export function headRigMatrix(): THREE.Matrix4 {
   const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(HEAD.pitch, HEAD.yaw, 0, 'YXZ'));
   return new THREE.Matrix4().compose(HEAD.hinge, q, new THREE.Vector3(HEAD.scale, HEAD.scale, HEAD.scale));
+}
+
+/** head-local -> world for the upper head (the rig frame x the snout stretch) */
+export function headMatrix(): THREE.Matrix4 {
+  return headRigMatrix().multiply(new THREE.Matrix4().makeScale(1, 1, HEAD.snout));
 }
 
 export interface WingLayout {
@@ -72,7 +83,7 @@ export function wingLayout(side: number): WingLayout {
   const shoulder = v(6.2, 14.6, -16.6);
   const wrist = v(26.4, 4.6, -8.8);
   const armCtrl = v(17.5, 19.5, -12.2);
-  const armJoinT = 0.74;
+  const armJoinT = 0.86;
   const armJoin = qb(shoulder, armCtrl, wrist, armJoinT);
   const finialTops = [v(39.8, 26.8, -21.3), v(29.4, 29.9, -21.6), v(14.5, 29.5, -21.0)];
   const bases = [v(36.2, 6.8, -9.8), v(27.6, 5.2, -9.0), armJoin.clone()];

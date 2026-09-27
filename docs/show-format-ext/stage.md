@@ -191,6 +191,43 @@ Checked side by side with the official video (Show camera, Mac GPU); default 64 
   light × 0.8, glow 0.5 → 0.3): the mouth reads red under every look (998.25 green look: a red mouth, where the
   pink-white throat light bloomed into a pale ball; 680.5 / 656 red).
 
+### Round 11: inner spar blades, festoon colour / glare / castle-front row, head flash, per-side wing colours
+
+Engine round (no show edit; the cue changes that use the new params are a patch for the show agent,
+`$ENDSHOW_DATA/work/r11_stage/cue_patch.json`). Default 64 moments 69.3 / 53.5 % → 69.3 / 53.5 % (raw / calibrated),
+no part down; every new param defaults to the round-10 behaviour. The patch lifts its 39 touched moments
+47.6 / 23.0 → 48.3 / 24.1 % (colour, light and shape all up; per cue below).
+
+- **Inner spar = a blade from the wrist** (engine change, metric-neutral). Unprojected through the fitted terrace
+  telephoto (v307 / 338 / 412.5; the finial tops land within 3 px of ours) the inner spar runs down to X ±24, Y ≈ 8.3:
+  it rises from the wrist, not from the middle of the arm. `armJoinT` 0.74 → 0.86 (root (±23.9, 8.4, −9.8), was
+  (±21.6, 11.0, −12)): the inner spar is now a long diagonal from the wrist to the inner finial, the middle panel
+  narrows to a fan and the inner panel reaches down along the arm. Finial tops, tips and the outer / middle spars are
+  unchanged. Anchors: `wing_spars` points 6–8 / 15–17 (the inner finger) and `wing_left` / `wing_right` points 4–5
+  moved 0.8–2.4 m down / outwards along the new spar (35 % point (±19.5, 16.0, −12.8) → (±21.0, 14.3, −12.3), 60 %
+  (±18.1, 19.5, −14.7) → (±19.2, 18.4, −14.5), 82 % (±17.1, 22.6, −16.4) → (±17.7, 22.2, −16.4)); `wing_edge` keeps
+  20 points per wing (counts per panel now fixed at 6 / 7 / 6; the inner-panel points moved ≤ 0.45 m); the inner
+  finger's `laser_stage` head sits half way from the 82 % point to the tip ((±17.1, 23.5, −17.5), was
+  (±17.1, 22.6, −16.4)), so the X-sorted `laser_stage` list keeps its order.
+- **Wing plates** (`stage.state` `plates`, default 0): the white arrowheads, kunai blades and finial crescents catch
+  the wing LEDs beside them (emissive in the wing colour, 35 % towards white, × LED level × `wings`): the spars read
+  as broad candy-striped blades as in every telephoto of the footage (v307 / 338 / 412.5 / 1463). Metric-neutral on
+  the 64 moments (level 2: −0.2 calibrated, within noise) and on 12 wing telephotos (level 1.2: ±0.004), so it stays
+  a cue param. Desktop / tablet presets only (the mobile mix material has no plate glow).
+- **Festoons**: bulbs can take the cue colour (`hot`), bloom into glare discs (`glare`) and light a new straight row
+  along the castle front (target `base`); targets can be arrays. See `stage.garlands` below.
+- **`stage.flash`** (new fx, below): the white head of v713.5 / 719.75 and the LED flickers of v96.08 / 96.28.
+- **Per-side wing colours**: `stage.state` `wingColorLeft` / `wingColorRight` and the same three params
+  (`wingColor`, `wingColorLeft`, `wingColorRight`) on `screens.content` (v515.5: the right wing orange, the dragon and
+  the left wing violet).
+- **`stage.gate` targets `dragon` / `wings`** gate the dragon's or the wings' LEDs alone.
+- **Head (measured, not changed).** The terrace telephoto puts the filmed gape ~2.5 m lower and ~1.5 m further to
+  audience-left than ours with the skull top in the same place (a bigger head). Two re-posed heads (scale 1.2, yaw
+  −0.4, pitch 0.48, snout ×1.2; and scale 1.32 about a hinge (−1.2, 14.8, −10.6), jaw range 0.42–0.85) fit the v338
+  points better (rms 12 → 6–7 px) but cost 0.2 calibrated on the 64 (the pit close-ups 656 / 680.5, whose Show-camera
+  poses were fitted to the current head, lose most), so the head is unchanged. `HEAD.snout` (length factor along the
+  snout axis, jaw stretched along its own axis; 1 = round 3) is in place for a round that refits those cameras.
+
 ## `stage.state`: new params
 
 Like every other `stage.state` value, the new params are cross-faded over the cue's `fade`. A param
@@ -211,8 +248,12 @@ region isolation holds for the whole fade. A dragon-only fade-in therefore never
 | `sidesColor` | colour | = castle colour | LED colour of the side sections. The side floods ("floor lights") take it at 100 %, the side-section LED panels at 85 %. |
 | `crownColor` | colour | none | LED colour of the dragon **and** the wings (overrides the `screens.content` colour on the crown only). |
 | `wingColor` | colour | = crown colour | LED colour of the wings only. |
-| `garlands` | 0..2 | 0 | Persistent level of the warm festoon bulb strings (all groups). |
+| `wingColorLeft` / `wingColorRight` | colour | = wing colour | Round 11. LED colour of the audience-left (x < 0) / right wing only (lines, strokes, plates and the print's hue), on top of `wingColor`. Video 515.5: `crownColor` violet, `wingColorRight` orange. |
+| `plates` | 0..3 | 0 | Round 11. LED glow of the white plates on the wing spars and finials (arrowheads, kunai blades, crescent fins) in the wing colour, × LED level × `wings`: the spars read as broad striped blades (v307 / 338). 1–2 is a clear blade; metric-neutral, desktop presets only. |
+| `garlands` | 0..2 | 0 | Persistent level of the warm festoon bulb strings (the groups of `garlandTarget`). |
+| `garlandTarget` | as `stage.garlands` `target` | `all` | Round 11. Which strings the persistent `garlands` level lights. |
 | `garlandColor` | colour | `#ffb466` (tungsten) | Festoon colour. |
+| `garlandHot` / `garlandGlare` | 0..1 / 0.5..4 | 1 / 1 | Round 11. Default white-hot share and glare size of the bulbs (see `stage.garlands` `hot` / `glare`). |
 | `garlandPattern` | `steady` \| `chase` \| `twinkle` \| `strobe` | `steady` | Festoon pattern. |
 | `garlandRate` | > 0 | 2 | Pulses per beat for `chase` / `strobe`. |
 | `glowFloor` | 0..1 | 0 | Round 7. The dragon's mouth / throat glow and the portal emblem keep this share of their own level while `master` dims the set (they follow `max(master, glowFloor)` instead of `master`; a dormant blackout with `windows` / `wings` at 0 still turns them off). Video 409–412: at `master` 0.1 behind the white backlight veil the mouth and the emblem stay visibly pink / red; `glowFloor: 0.6` there. |
@@ -224,20 +265,23 @@ Example, red dragon and wings on a blue castle (v519.8–534):
 
 These are the warm tungsten bulb strings: along the three sagging top edges of every wing panel,
 on top of the arched wing arms (dragon shoulder to inner finger), along the castle eave and the
-porch screen, and along the side-section eaves. There are 310 bulbs in one instanced draw call.
+porch screen, along the side-section eaves and (round 11) one straight row across the castle front.
+All bulbs are one instanced draw call.
 
 | param | values | default | |
 |---|---|---|---|
 | `level` | 0..2 | 1 | HDR level (1 = a clear warm festoon; 2 = blazing) |
-| `target` | `all` \| `wings` \| `castle` \| `sides` | `all` | which strings |
+| `target` | group name or array of names: `wings` \| `castle` \| `sides` \| `base` \| `all` \| `noFacade` \| `every` | `all` | which strings. `castle` = the eave swags + porch swags; `base` (round 11) = one straight, taut row across the castle front at Y 7.9 from X −37 to +37, in front of the porch over the portal (v412.7–413.3, 1268–1272: unprojected through the terrace telephoto the filmed row is straight and unbroken); `all` = wings + castle + sides (unchanged); `noFacade` = wings + base + sides (every string but the eave / porch swags, v1268.12); `every` = all + base. An array lights the union, e.g. `["wings","base"]`. |
 | `color` | colour | `#ffb466` | |
+| `hot` | 0..1 | state `garlandHot` (1) | Round 11. White-hot share of the bulbs: 1 = a white-hot core in a half-white halo (the round-7 look), 0 = the whole bulb in `color`. Video 165.5 / 173.5: gold bulbs in orange smoke, `hot` 0.15 with `#FF9A30`. |
+| `glare` | 0.5..4 | state `garlandGlare` (1) | Round 11. Size of the bulb's white core and glare disc (the quad grows with it): > 1 blooms near bulbs into wide white discs in haze (v582.75–584.2: 1.6); ≥ 2.2 merges neighbouring bulbs into a band. |
 | `pattern` | `steady` \| `chase` \| `twinkle` \| `strobe` | `steady` | `strobe` flashes `rate` times per beat (on 40 % of each pulse) |
 | `rate` | > 0 | 2 | pulses per beat (`strobe`, `chase`) |
 | `fade` | s | 0.08 | attack |
 | `release` | s | min(0.3, 0.4·dur) | release before `dur` ends |
 
 The level is the max of the state's `garlands` and every active `stage.garlands` cue. The
-colour and pattern come from the strongest cue. The festoons are not tied to `master`, so a cue can
+colour, pattern, `hot` and `glare` come from the strongest cue. The festoons are not tied to `master`, so a cue can
 light them in a blackout (v1381.25).
 
 ## `stage.gate` (new fx, transient)
@@ -251,9 +295,41 @@ deterministic and seek-safe. It replaces the repeated `stage.state` `master` cue
 | `duty` | 0.02..0.98 | 0.5 | on-share of every pulse |
 | `depth` | 0..1 | 1 | 1 = full off; 0.55 = the "off" phase at 45 % |
 | `phase` | pulses | 0 | added to the pulse position before the duty test (e.g. `rate:'bar', duty:0.75, phase:0.5` = dark on beat 2 of every bar) |
-| `target` | `all` \| `castle` \| `crown` \| `garlands` | `all` | `castle` gates the castle and sides; `crown` gates the dragon and wing LEDs plus the wing glow |
+| `target` | `all` \| `castle` \| `crown` \| `dragon` \| `wings` \| `garlands` | `all` | `castle` gates the castle and sides; `crown` gates the dragon and wing LEDs plus the wing glow; `dragon` (round 11) only the dragon's LEDs; `wings` (round 11) only the wing LEDs + the wing glow |
 
 Several gates multiply.
+
+## `stage.flash` (new fx, transient, round 11)
+
+A short light on the sculpture and / or an LED override that reverts after `dur`, deterministic in the cue's local
+time. Video 713.5–714.75 / 719.75–720.5: the dragon's head goes bone-white (a white flood on the plates and horns)
+while the wings burn; v96.08 / 96.28: the head's LED outlines flicker on over a dark head (only the mouth glows).
+
+| param | values | default | |
+|---|---|---|---|
+| `target` | `head` \| `dragon` \| `wings` \| `crown` | `head` | `head`: the dragon's non-wing parts inside a soft sphere round the skull (fades 8–12 m from its centre, so the neck and body stay in the look); `dragon`: every non-wing part of the crown; `wings`: the wings; `crown`: both. Never the castle. |
+| `level` | 0..3 | 1 | Level of the light: a diffuse front / top flood in `color` (no specular glare). 1 turns the night-dark head bone-white; 0 = LEDs only. |
+| `led` | 0..2 | 0 | The target's LED lines and pixel dots in `color` at this level (the other region keeps its own output). `level: 0, led: 0.7` is an LED-only flicker. |
+| `color` | colour | white | |
+| `fade` | s | 0.03 | attack |
+| `release` | s | min(0.15, 0.4·dur) | release before `dur` ends |
+
+The flash is applied after the state's `master`, so it can light a dark head (like the festoons). Several flashes take
+the max per region; the colour and the head-only confinement come from the strongest. With "Reduce flashing" a flash
+swells in over at least 0.15 s at half its level.
+
+Examples: `{"t":713.464,"dur":1.25,"sys":"stage","fx":"flash","p":{"target":"head","level":1}}` (white head);
+`{"t":96.2,"dur":0.12,"sys":"stage","fx":"flash","p":{"target":"dragon","level":0,"led":0.7,"color":"#6A48FF","fade":0.02,"release":0.03}}`
+(an LED flicker).
+
+## `screens.content`: per-zone wing colours (round 11)
+
+| param | values | default | |
+|---|---|---|---|
+| `wingColor` | colour | none | LED colour of both wings inside this content look (weighted with the look's own fade / cross-fade). |
+| `wingColorLeft` / `wingColorRight` | colour | none | The same for one wing (wins over `wingColor`). A `repeat.cycle` on these params alternates one wing's colour per beat while the dragon keeps the content colour (v514.4–517.2: the right wing orange / violet, the dragon violet). |
+
+The look's wing colours apply over the state's `crownColor` / `wingColor` / `wingColorLeft` / `wingColorRight`.
 
 ## Anchor `roof_plumes` (new)
 
