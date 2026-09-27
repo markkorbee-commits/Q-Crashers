@@ -267,11 +267,14 @@ const ZEN_B0 = SKY_KEYS.zen[0][2];
  * with too much green after v100 (the video's sky above the horizon is a pure, saturated blue: R 0, G 0
  * from v118 on; any green lifts the luminance the metric compares). Similarity on 22 sky moments:
  * 57.9 -> 60.2 % (20.25 +12, 69.25 +8, 118 +6; 167 / 191.5 -1, their drone shots expose darker).
+ * Round 8: the blue at t = 800 x 1.6 (the terrace sky of v533-925 rendered [2, 2, 17] / [1, 1, 4] against the
+ * video's [0, 0, 25-30] / [0, 0, 18]): colour +1.8-3.3 on 533.75, 582.75, 607, 631.5, 729.25, 778.25, 802.75;
+ * 876 -0.7 (red smoke under a dark-red sky); the late drone shots (t > 950, black top band) unchanged.
  */
 const DOME_KEYS: Record<'zen' | 'se' | 'nw', RGB[]> = {
-  zen: [[0.00022, 0.06, 0.36], [0.00015, 0.0015, 0.14], [0.000075, 0.00038, 0.082], [0.000075, 0.00022, 0.018], [0.000075, 0.00015, 0.0045]],
-  se: [[0.00038, 0.045, 0.12], [0.00022, 0.009, 0.052], [0.00015, 0.0022, 0.038], [0.00015, 0.00075, 0.009], [0.000075, 0.00038, 0.003]],
-  nw: [[0.00075, 0.09, 0.22], [0.00045, 0.03, 0.135], [0.0003, 0.006, 0.09], [0.00022, 0.0022, 0.038], [0.00015, 0.0015, 0.015]],
+  zen: [[0.00022, 0.06, 0.36], [0.00015, 0.0015, 0.14], [0.000075, 0.00038, 0.082], [0.000075, 0.00022, 0.0288], [0.000075, 0.00015, 0.0045]],
+  se: [[0.00038, 0.045, 0.12], [0.00022, 0.009, 0.052], [0.00015, 0.0022, 0.038], [0.00015, 0.00075, 0.0144], [0.000075, 0.00038, 0.003]],
+  nw: [[0.00075, 0.09, 0.22], [0.00045, 0.03, 0.135], [0.0003, 0.006, 0.09], [0.00022, 0.0022, 0.0608], [0.00015, 0.0015, 0.015]],
 };
 
 /** geometric interpolation of a dome key at show time t (no allocation) */
@@ -337,15 +340,38 @@ export class EnvironmentSystem implements System {
   private readonly rotM = new THREE.Matrix4();
   private fogBase = 0.0012;
   /**
-   * site smoke tuning (side-by-side calibration): `fog` = height-fog density gain per unit env.smoke,
+   * site smoke tuning (side-by-side calibration): `fog` = height-fog density gain per unit of smoke in the air (smokeAt),
    * `glow` = share of the site glow in the fog colour per unit smoke, `sky` = the lit smoke veil on the sky.
    * Round 7 (similarity, Mac GPU): fog 7 -> 2, glow 0.4 -> 0.25. The dense red / pink height fog buried the
    * fountains and the pillars under one flat veil; the video keeps them crisp inside the smoke: 76.25
    * (pink whiteout) 36.2 -> 44.5 %, 1528 45.9 -> 51.1, 1530.5 46.6 -> 54.0, 545.5 +1.4, 1508.5 +0.9;
    * 1536.25 -2.3 (the smoke is thickest there at the end of the red-smoke scene; thinner-but-redder
-   * variants, fog 2.5-3 with glow 0.6-0.7, and a fountain-lit smoke colour lost more elsewhere)
+   * variants, fog 2.5-3 with glow 0.6-0.7, and a fountain-lit smoke colour lost more elsewhere).
+   * Round 8: the height fog follows the smoke in the AIR (smokeAt: `build` s to fill, `linger` s to clear after the
+   * cue's light is gone), not the light of the cue: the 0.7 s pink whiteout of v76 no longer thickens the fog (76.25
+   * +1.2), the 27 s red bank of the finale does and hangs on after its light (v1537.5-1541: the smoke lit violet),
+   * with the fog gain back at 3 for a bank that has built up (1536.25 +0.9, 1538 +1.7, 1539.5 +1.9, 1515 +0.6;
+   * the high drone shots 1528 +0.2 / 1533 -0.4, their smoke hangs around the fountain wall, not over the site).
    */
-  readonly smokeTune = { fog: 2, glow: 0.25, sky: 1 };
+  readonly smokeTune = { fog: 3, glow: 0.25, sky: 1, build: 4, linger: 6 };
+  /**
+   * Sky and air response (in-page A/B). `bounceFog` = the flash bounce in the fog colour (the air, the far terrain,
+   * the fx haze ambient), full only with site smoke >= `bounceFogSmoke` (round 8: with no `atmos.glow smoke` the
+   * video's air stays black around the brightest walls, v1567 [1, 0, 0] top band under the blazing U: 1567 +1.6,
+   * 484.75 +1.8, 264.75 +0.6, 827.25 +0.5). `fillRG` / `fogRG` = red + green share of the sky fill and of the
+   * air colour (round 8, 0.15, was 1: the blue-hour sky light is a saturated blue, the physical keys have R/B
+   * 0.02 and G/B 0.1, the old fill 0.25 / 0.47; the video's shadows and field read pure blue [0, 0, 23-48] in
+   * v20-534; the grounds darken a touch with the green gone: 64 moments with the smoke + bounce changes 50.2 -> 50.7 %,
+   * 20.25 +3.1, 191.5 +2.6, 264.75 +2.6, 484.75 +2.8; 436 / 1047.25 / 1194 -0.7, a darker set under the stage wash).
+   */
+  readonly skyTune = { bounce: 1, bounceFog: 1, bounceFogSmoke: 0.2, fillRG: 0.15, fogRG: 0.15 };
+  /** dome keys (in-page A/B of the sky as filmed) */
+  readonly domeKeys = DOME_KEYS;
+  /** smoke in the air for the height fog (0..1), see smokeAt */
+  private smokeFog = 0;
+  /** the `atmos.glow` cues that carry `smoke` (rebuilt when the show recompiles) */
+  private readonly smokeCues: Cue[] = [];
+  private smokeRev = -1;
   /** show light on the grounds (worldLights calibration, in-page A/B) */
   readonly worldTune = worldLightTune;
   private level = 1;
@@ -522,7 +548,44 @@ export class EnvironmentSystem implements System {
       out.g += this.glowC.g * a;
       out.b += this.glowC.b * a;
     }
+    this.smokeFog = this.smokeAt(t);
     return smoke;
+  }
+
+  /**
+   * Smoke in the air for the height fog, a pure function of show time. The glow of an `atmos.glow` cue is
+   * light (it fades in and out with the cue); its `smoke` is matter: it builds up while the pyro keeps firing
+   * (full after `build` s) and hangs on after the light has gone (decays with `linger` s, at least the cue's
+   * own `out`). A sudden whiteout (v76: the 0.7 s pink gerb flash) therefore does not thicken the air, the
+   * 27 s red-smoke bank of the finale does, and it stays after its light (v1537.5-1541: the bank lit violet).
+   */
+  private smokeAt(t: number): number {
+    const show = this.app.show;
+    if (this.smokeRev !== show.revision) {
+      this.smokeRev = show.revision;
+      this.smokeCues.length = 0;
+      const all = show.all('atmos');
+      for (let i = 0; i < all.length; i++) {
+        const c = all[i];
+        if (c.fx === 'glow' && num(c.p.smoke, 0) > 0) this.smokeCues.push(c);
+      }
+    }
+    const build = this.smokeTune.build;
+    let v = 0;
+    for (let i = 0; i < this.smokeCues.length; i++) {
+      const c = this.smokeCues[i];
+      if (c.t > t) break; // sorted by start
+      const end = c.t + c.dur;
+      const tau = Math.max(num(c.p.out, 0.8), this.smokeTune.linger, 0.05);
+      if (t > end + tau * 5) continue;
+      const s = clamp(num(c.p.smoke, 0), 0, 1);
+      const kin = clamp((t - c.t) / Math.max(0.01, num(c.p.fade, 0.3)), 0, 1);
+      const age = Math.min(t, end) - c.t;
+      let x = s * kin * kin * (3 - 2 * kin) * (build > 0 ? clamp(age / build, 0, 1) : 1);
+      if (t > end) x *= Math.exp(-(t - end) / tau);
+      if (x > v) v = x;
+    }
+    return v;
   }
 
   /** after all systems: read app.env (flashes, haze, stage light) and the atmos cues */
@@ -613,14 +676,16 @@ export class EnvironmentSystem implements System {
     // lit smoke over the site: the atmos glow + the bounce of big flashes (see worldLights)
     const glow = env.glowColor;
     const bc = flashBounce(env, this.bounceC);
-    U.uGlowCol.value.setRGB(glow.r * 0.05 + bc.r * 0.012, glow.g * 0.05 + bc.g * 0.012, glow.b * 0.05 + bc.b * 0.012);
+    const bs = 0.012 * this.skyTune.bounce;
+    U.uGlowCol.value.setRGB(glow.r * 0.05 + bc.r * bs, glow.g * 0.05 + bc.g * bs, glow.b * 0.05 + bc.b * bs);
 
     // distant lightning over the W horizon (storm front arriving from the west) — deterministic
     const li = this.lightningAt(t, lightningAmt, U.uLightning.value as THREE.Vector4);
 
     // --- fog colour: dark haze over the polder = the horizon over the stage, lit by flashes / strobes
     const se = U.uHorizonSE.value as THREE.Color;
-    this.fog.color.setRGB(se.r * 0.95 + 0.0003, se.g * 0.95 + 0.0006, se.b * 0.95 + 0.0015);
+    const frg = this.skyTune.fogRG;
+    this.fog.color.setRGB((se.r * 0.95 + 0.0003) * frg, (se.g * 0.95 + 0.0006) * frg, se.b * 0.95 + 0.0015);
     if (fi > 0) {
       this.fog.color.r += env.flashColor.r * 0.0004 * fk;
       this.fog.color.g += env.flashColor.g * 0.0004 * fk;
@@ -630,9 +695,12 @@ export class EnvironmentSystem implements System {
     // with `smoke` the air is full of it and the veil is as bright as the light it scatters
     const sm = clamp(env.smoke, 0, 1);
     const gk = 0.03 + this.smokeTune.glow * sm;
-    this.fog.color.r += glow.r * gk + bc.r * 0.006;
-    this.fog.color.g += glow.g * gk + bc.g * 0.006;
-    this.fog.color.b += glow.b * gk + bc.b * 0.006;
+    const smF = clamp(this.smokeFog, 0, 1);
+    const bs0 = this.skyTune.bounceFogSmoke;
+    const bf = 0.006 * this.skyTune.bounceFog * (bs0 > 0 ? clamp(sm / bs0, 0, 1) : 1);
+    this.fog.color.r += glow.r * gk + bc.r * bf;
+    this.fog.color.g += glow.g * gk + bc.g * bf;
+    this.fog.color.b += glow.b * gk + bc.b * bf;
     U.uSmoke.value = sm * this.smokeTune.sky;
     const sb = env.strobe * 0.01;
     this.fog.color.r += sb;
@@ -640,7 +708,7 @@ export class EnvironmentSystem implements System {
     this.fog.color.b += sb;
     U.uFogColor.value.copy(this.fog.color);
     // atmos.glow `smoke`: the site fills with smoke (red smoke v1510–1537, pink whiteout v76)
-    this.fog.density = this.fogBase * (0.75 + 0.45 * clamp(env.haze, 0, 1.5)) * (1 + this.smokeTune.fog * env.smoke);
+    this.fog.density = this.fogBase * (0.75 + 0.45 * clamp(env.haze, 0, 1.5)) * (1 + this.smokeTune.fog * smF);
     (this.app.scene.background as THREE.Color).copy(this.fog.color);
 
     // --- lights (sky ambient follows the sky; the moon keeps a floor of cool-warm fill). Round 4: the
@@ -648,7 +716,8 @@ export class EnvironmentSystem implements System {
     //     the sky fill fades with the sky to a moonlit minimum that still lets a walker read the
     //     paving and the silhouettes at eye level
     const hl = 0.22 + 0.78 * Math.pow(L, 0.8);
-    this.hemi.color.setRGB(0.16 * hl, 0.3 * hl, 0.64 * hl);
+    const hrg = this.skyTune.fillRG * hl;
+    this.hemi.color.setRGB(0.16 * hrg, 0.3 * hrg, 0.64 * hl);
     this.hemi.groundColor.setRGB(0.04 * hl, 0.032 * hl, 0.024 * hl);
     this.hemi.intensity = 0.26;
     this.moonLight.position.copy(U.uMoonDir.value).multiplyScalar(500);
@@ -757,6 +826,6 @@ export class EnvironmentSystem implements System {
   }
 
   stats(): Record<string, number | string> {
-    return { ...this.stats_, fog: this.fog ? this.fog.density.toFixed(5) : 0 };
+    return { ...this.stats_, fog: this.fog ? this.fog.density.toFixed(5) : 0, smokeAir: +this.smokeFog.toFixed(3) };
   }
 }
