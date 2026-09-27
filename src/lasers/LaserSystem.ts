@@ -18,7 +18,8 @@ import { type Emitter, type EmitterGroup, LaserRig } from './LaserRig';
  *         origin stage|field|all, height (m), intensity, kick;
  *         extensions (optional): fade (s crossfade from the look it replaces), aim [x,y,z] (world point the
  *         figure centres on), distance (chevron / x / dashes, m), segments + path (piano bounce), reach (m,
- *         visible beam length), rows (pillar rows), parallel (chevron), rings / lobes / squash (rings, tunnel)
+ *         visible beam length), rows (pillar rows), parallel (chevron), rings / lobes / squash (rings, tunnel),
+ *         splay (sky: outer fans lean outwards); target tokens incl. front_line / ramparts (round 9)
  *   hit   short full-rig burst: color, pattern fan|star; lens (bool) = one beam straight into the camera
  *   off   lasers off for dur — gates the looks / hits that started before it (a later look overrides it)
  *
@@ -49,8 +50,13 @@ type Preset =
   | 'fan' | 'sheet' | 'tunnel' | 'sweep' | 'crossfire' | 'sky' | 'wave' | 'cone' | 'grid' | 'burst' | 'chevron'
   | 'zigzag' | 'x' | 'rings' | 'dashes' | 'trees';
 
-const G: Record<EmitterGroup, number> = { deck: 1, tower: 2, high: 4, corner: 8, pillar: 16, base: 32, turret: 64, dragon: 128, piano: 256 };
+const G: Record<EmitterGroup, number> = { deck: 1, tower: 2, high: 4, corner: 8, pillar: 16, base: 32, turret: 64, dragon: 128, piano: 256, rampart: 512 };
+/** (the side-section wall-walk units, round 9, are not part of it: only their own tokens select them) */
 const STAGE_MASK = G.deck | G.tower | G.high | G.corner | G.dragon;
+/** |x| (m) from which a `sky` fan leans by the full `splay` (round 9: the white fans of v802.8-803.4) */
+const SPLAY_X = 60;
+/** deck level the zigzag / trees `height` counts from: raised units lift the figure with them (round 9) */
+const DECK_UNIT_Y = 2.2;
 const FIELD_MASK = G.pillar | G.base | G.turret | G.piano;
 /** head plane of a standing crowd (m) and the audience-scanning clearance above it (design-bible §7.4) */
 const HEAD_PLANE = 1.8;
@@ -220,6 +226,12 @@ const TOKENS: Record<string, [number, number]> = {
   plinths: [G.base, 0],
   piano: [G.piano, 0],
   foh: [G.piano, 0],
+  // round 9: the side-section wall walks (|x| 40-85, Y 10.6) and, with the castle wall-walk units (Y 8.4), the
+  // whole U front at the wall-top line (LaserRig `front`: v802.8-804.9 / v838.2, frame x 0.07-0.93)
+  ramparts: [G.rampart, 0],
+  side_rampart: [G.rampart, 0],
+  side_sections: [G.rampart, 0],
+  front_line: [G.rampart | G.tower, 0],
 };
 
 /** crude solid volumes of the stage set (design-bible §5): beams from the field stop on them */
@@ -308,6 +320,10 @@ class LookSlot {
   lens = false;
   /** figure distance (m) for x / dashes / chevron */
   distance = 0;
+  /** sky: outward lean (rad) of the fans of the outer units (|x| >= SPLAY_X), proportionally less nearer the centre */
+  splay = 0;
+  /** `front_line` without another tower token: only the castle units on the front line (LaserRig `front`) */
+  frontOnly = false;
 }
 
 export class LaserSystem implements System {
@@ -424,7 +440,10 @@ export class LaserSystem implements System {
    *   webK            level of the ground web (grid looks from the plinths / pillars / deck at a height)
    *   glowK / glowSize  soft glow at the aperture of a cone the camera looks into (level, sprite size in m)
    *   bankClip        1 = low beams end where the side banks rise above them
-   *   scanK / scanW   level / glow width of the scanned deck figures (zigzag web, trees)
+   *   scanK / scanW   level / glow width of the scanned deck figures (zigzag web, trees; 1.5 before round 9)
+   *   webGlow         level of the lit smoke wedge over each rising zigzag V (0 = none, the round-8 look)
+   *   webFade         fraction of a zigzag line's length from which it fades out towards the top line (was 0.75)
+   *   webEdge         level of a zigzag fan's two edge lines relative to its inner lines (1 = even)
    */
   readonly tune = {
     blueR: 0,
@@ -444,8 +463,11 @@ export class LaserSystem implements System {
     glowK: 3,
     glowSize: 7,
     bankClip: 1,
-    scanK: 1.5,
+    scanK: 2.2,
     scanW: 1.6,
+    webGlow: 2,
+    webFade: 0.45,
+    webEdge: 2,
   };
   /** half-width of the lit sea this frame (FOG_ZONE_X, wider on a dense bank with tune.seaBank) */
   private seaZoneX = FOG_ZONE_X;
@@ -864,6 +886,7 @@ export class LaserSystem implements System {
       s.squash = num(p.squash, pr === 'rings' ? 0.5 : 1, 0.1, 3);
       s.parallel = p.parallel === true;
       s.distance = num(p.distance, pr === 'x' ? 15 : pr === 'dashes' ? 14 : 70, pr === 'chevron' ? 20 : 2, 200);
+      s.splay = num(p.splay, 0, -80, 80) * DEG;
       const a = t - c.t;
       const b = c.t + c.dur - t;
       s.env = this.calm ? clamp01(a / 0.12) * clamp01(b / 0.12) : clamp01(a / 0.03) * clamp01(b / 0.05);
@@ -876,6 +899,8 @@ export class LaserSystem implements System {
     s.groupSide = 0;
     s.hasGroupToken = false;
     s.filter = 0;
+    s.frontOnly = false;
+    let otherTowers = false;
     // pillar rows (1 = nearest the stage), like pyro `rows`
     s.rowMask = 0;
     const rows = p.rows;
@@ -895,9 +920,12 @@ export class LaserSystem implements System {
           s.groupMask |= m[0];
           if (m[1] !== 0) s.groupSide = m[1];
           s.hasGroupToken = true;
+          if (tk === 'front_line') s.frontOnly = true;
+          else if (m[0] & G.tower) otherTowers = true;
         }
       }
     }
+    if (otherTowers) s.frontOnly = false;
     if (s.hit && !s.hasGroupToken) {
       s.groupMask = (s.origin & 1 ? STAGE_MASK : 0) | (s.origin & 2 ? G.pillar | G.turret : 0);
       s.hasGroupToken = true;
@@ -923,6 +951,7 @@ export class LaserSystem implements System {
     if (s.hasGroupToken) {
       if (!(s.groupMask & bit)) return false;
       if (s.groupSide !== 0 && Math.sign(e.pos.x) !== s.groupSide) return false;
+      if (s.frontOnly && e.group === 'tower' && !e.front) return false;
       return true;
     }
     const def = PRESETS[s.preset];
@@ -1114,7 +1143,8 @@ export class LaserSystem implements System {
     const ph = TAU * s.speed * s.bars;
     const lean = Math.max(0, Math.PI / 2 - s.tilt) + 0.07 * Math.sin(ph + e.rank * TAU);
     const tl = Math.tan(lean);
-    const sway = e.side * 0.07 * Math.sin(ph * 0.5);
+    // (`splay`: the outer units' fans lean outwards, the centre ones stay upright — v802.8-803.4)
+    const sway = e.side * 0.07 * Math.sin(ph * 0.5) + s.splay * Math.max(-1, Math.min(1, e.pos.x / SPLAY_X));
     const pb = I * this.perBeam(n);
     for (let i = 0; i < n; i++) {
       const u = n > 1 ? i / (n - 1) : 0.5;
@@ -1494,6 +1524,10 @@ export class LaserSystem implements System {
    * beams end on the top line `height` (world Y, default 11), so neighbouring fans cross into a lattice
    * under the lanterns. Negative tilt = Λ down-fans that land on the floor in front of the deck (v803.8).
    * The fans breathe with `speed`, alternate units in counter-phase (galvo dashes: scanned look).
+   * Round 9 (the filmed web of v804 / v838 is a row of luminous scanned wedges along the whole U front): the
+   * edges read brighter than the inner lines (tune.webEdge), the lines fade out towards the top line from
+   * tune.webFade of their length, and a rising V lights the smoke in its plane (tune.webGlow, a soft wedge
+   * sprite brightest at the apex). On `front_line` the figure stands on the wall-top line (figureLift).
    */
   private genZigzag(s: LookSlot, e: Emitter, I: number): void {
     const n = s.nEff;
@@ -1505,7 +1539,7 @@ export class LaserSystem implements System {
     const cl = Math.cos(lean);
     const sl = Math.sin(lean);
     const spreadT = s.spread * (0.8 + 0.2 * Math.sin(ph + alt * 1.3));
-    const top = s.heightGiven ? s.height : 11;
+    const top = (s.heightGiven ? s.height : 11) + this.figureLift(e);
     const pb = I * this.perBeam(n) * 0.9 * this.tune.scanK;
     const r0 = this.reachNow;
     this.widthK = this.tune.scanW;
@@ -1523,14 +1557,40 @@ export class LaserSystem implements System {
         maxLen = (top - e.pos.y) / this.dy;
         if (r0 <= 0 || maxLen < r0) {
           this.reachNow = maxLen + 1;
-          this.reachFade = 0.75;
+          this.reachFade = this.tune.webFade;
         }
       }
       if (this.tribe) this.tribeLift(e.pos.x, e.pos.y, e.pos.z);
-      this.beam(e, this.lerpColor(s, u), pb, 0.35, maxLen);
+      // the galvo dwells where the scan turns: the fan's two edges read brighter than its inner lines
+      this.beam(e, this.lerpColor(s, u), n > 2 && (i === 0 || i === n - 1) ? pb * this.tune.webEdge : pb, 0.35, maxLen);
     }
     this.reachNow = r0;
     this.widthK = 1;
+    // the scan lights the smoke in its plane: a soft luminous wedge over the rising V (sprite kind 3). The deck
+    // units stand 6 m apart, so their wedges overlap into one band: they glow at pitch / 15 m (v838.2 shows
+    // distinct Vs), the front line (12-18 m pitch) at full level
+    const gk = this.tune.webGlow * (e.group === 'deck' ? Math.min(1, this.deckPitch / 15) : 1);
+    if (gk > 0 && sl > 0.3 && !this.recording) {
+      const H = top > e.pos.y + 0.3 ? top - e.pos.y : 12 * sl;
+      // (half aperture capped at 74°: the sprite kind carries tan / 4 < 1)
+      const tH = Math.tan(Math.min(0.5 * spreadT, 1.3));
+      const k = (0.5 * H) / sl;
+      const P = pb * Math.sqrt(n) * gk;
+      const c = s.color;
+      this.gfx.pushSprite(
+        e.pos.x + cl * e.fwd.x * k, e.pos.y + sl * k, e.pos.z + cl * e.fwd.z * k,
+        0.5 * H * Math.sqrt(1 + 4 * tH * tH), c.r * P, c.g * P, c.b * P, 3 + tH / 4,
+      );
+    }
+  }
+
+  /**
+   * The scanned deck figures (zigzag, trees) count `height` in world Y from the deck. A raised unit (the
+   * castle / side-section wall walks of `front_line`, Y 8.4–10.6) lifts the figure with it: the same cue
+   * draws the same figure standing on the wall-top line (round 9; deck units, Y 2.2–2.5, are unchanged).
+   */
+  private figureLift(e: Emitter): number {
+    return e.pos.y > 5 ? e.pos.y - DECK_UNIT_Y : 0;
   }
 
   /**
@@ -1542,7 +1602,7 @@ export class LaserSystem implements System {
    */
   private genTrees(s: LookSlot, e: Emitter, I: number): void {
     const n = s.nEff;
-    const top = s.heightGiven ? s.height : 10;
+    const top = (s.heightGiven ? s.height : 10) + this.figureLift(e);
     const h = top - e.pos.y;
     if (h < 0.5) return;
     const ph = TAU * s.speed * s.bars;
