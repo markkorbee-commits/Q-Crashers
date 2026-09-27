@@ -6,7 +6,8 @@ import { CueFxSystem, EmitterSet } from '../fx/core/CueFxSystem';
 import { DIST, Emitter, F, PUFF, R, apexTime, speedForHeight } from '../fx/core/Emitter';
 import type { FlashSpec } from '../fx/core/Emitter';
 import { bool, fxColor, num, str } from '../fx/core/fxColors';
-import { clusters, densify, patternSteps, stretches, tiltedUp, uCoord, wingFire } from '../fx/core/placement';
+import { clusters, densify, patternSteps, stretches, tiltedUp, uCoord, wingFire, wingSurface } from '../fx/core/placement';
+import type { WingSurface } from '../fx/core/placement';
 
 const L_SMOKE = 0;
 const L_FIRE = 1;
@@ -24,6 +25,41 @@ const FIRE = new THREE.Color(1.0, 0.36, 0.08);
 const FIRE_LIGHT = new THREE.Color(1.0, 0.46, 0.14);
 const DEEP_ORANGE = new THREE.Color(1.0, 0.3, 0.06);
 const PALE_GOLD = new THREE.Color(1.0, 0.72, 0.4);
+
+/**
+ * burning wings on the wing surface (wingSurface): grid pitch (m); the flame units of the top-edge
+ * row / finger ends (tongues) and of the membrane skin below: base life (s) + per m of height, rise
+ * (x H, + m) and puff growth (x H), start radius (m), puffs per s, brightness, cone spread (rad), velocity stretch
+ */
+const WING_SPACING = 2;
+const WING_EDGE = { life: 0.45, lifeH: 0.05, rise: 0.6, riseM: 1.5, grow: 0.17, r0: 0.5, rate: 30, bright: 4, spread: 0.22, stretch: 0.12 };
+const WING_SKIN = { life: 0.4, lifeH: 0.03, rise: 0.25, riseM: 0, grow: 0.1, r0: 0.6, rate: 24, bright: 2.8, spread: 0.45, stretch: 0.06 };
+/** flame texture of the burning wings: noise scale, erosion, soot share + start */
+const WING_NOISE = 0.9;
+const WING_ERODE = 1.25;
+const WING_SOOT = 0.5;
+const WING_SOOT_START = 0.62;
+/** light of a burning wing (wingLight): strength and reach (m) of a reference-size band, its lit-smoke share */
+const WING_AREA_REF = 250;
+const WING_LIGHT = 1.6;
+const WING_REACH = 14;
+const WING_HAZE = 0.6;
+/** light share of the roll-over fireballs on the surface wings (the band light carries the fire) */
+const WING_BALL_LIGHT = 0.35;
+
+/** big mine / flash-pot bursts (burst `size` >= BLAST_SIZE) throw a lit cloud (blastCloud): glow time (s), self-light, light */
+const BLAST_SIZE = 1.8;
+const BLAST_GLOW = 0.7;
+const BLAST_SELF = 14;
+const BLAST_HAZE = 0.6;
+const BLAST_LIGHT = 0.9;
+const WHITE_SMOKE = new THREE.Color(0.8, 0.8, 0.82);
+
+/** white / silver gerbs below 22-30 m (silverDim): share of the row smoke's self-light and opacity taken away */
+const SILVER_SELF = 0.8;
+const SILVER_OPAC = 0.09;
+/** ... and the share of their sparks taken away on walls taller than 14 m */
+const SILVER_THIN = 0.55;
 
 /** pillar geometry for `corners` (src/world/site.ts PILLAR: capital 3.4 m, plinth deck 8.4 m) */
 const CAPITAL_DROP = 3.1;
@@ -47,13 +83,14 @@ const PLINTH_HALF = 3.4;
  *   flame/firewall: `angle` (deg, tilt away from the stage centre), `intensity`, `width` (x column
  *     width), `fireball: true` (8–10 m fireball with a smoke cap, `size`); `fan` (heads per unit)
  *     + `fanSpread` (deg, default 50): multi-head V / fan flame units; firewall on the wings burns
- *     along the finger spars; `billow` (default: on for rows ≥ 14 m): rolling 20–35 m fireball
+ *     on the wing surface (fingers + membranes, see wingSurface); `billow` (default: on for rows ≥ 14 m): rolling 20–35 m fireball
  *     barrage; `blowout: true`: + spark wall + fireball row + bigger flash (finale)
  *   gerb/sparkular: `angle`, `spread` (deg), `colors` (list: colour sequence over the burn) +
  *     `changes` (relative switch times, s), `smoke` (0..3: a self-lit smoke column per unit)
  *   jet: `count` + `radius` (several jets around each anchor), `cloud: true` (the jets merge into
  *     one big coloured, self-lit CO2 cloud), `color`
- *   burst: dur >= 2 s or `type: "bengal"` turns it into a Bengal flare (any dur); `color`
+ *   burst: dur >= 2 s or `type: "bengal"` turns it into a Bengal flare (any dur); `color`;
+ *     `size` >= 1.8: a big mine that throws a lit smoke cloud over the deck and the field (blastCloud)
  *   bengal (burst type bengal / pyro.bengal): `size`, `path` (flare drone: list of [x,y,z]
  *     waypoints, or a list of such lists for several drones) + `times` (relative s per waypoint),
  *     `mirror: true` (also fly the X-mirrored path), `sparkler: true` (white sparkler drone),
@@ -183,6 +220,37 @@ export class PyroSystem extends CueFxSystem {
         a: A,
         b: B,
         radius: radius + 0.15 * A.distanceTo(B),
+      });
+    }
+  }
+
+  /**
+   * Light of the burning wings (wingSurface): one line light per wing across its burning band, sized
+   * by the fire (a fully engulfed wing is a ~250 m² sheet of flame, far bigger than a fireball or a
+   * row of jets): the reach grows with the square root of the burning area, the strength gently with
+   * the area and the flame height (a 3.5 m burst along the top edges still lights the site, v148.5,
+   * v788.5). Part of it is lit smoke (`haze`): the fire burns in its own soot and in the smoke over
+   * the wings, which the haze field then fills with the fire's colour (v713.25-714.25).
+   */
+  private wingLight(out: EmitterSet, cue: Cue, surf: WingSurface, H: number, dur: number, color: THREE.Color, inten: number): void {
+    for (const b of surf.bands) {
+      const size = Math.sqrt(Math.max(1, b.area) / WING_AREA_REF);
+      const I = WING_LIGHT * Math.sqrt(size) * Math.pow(H / 6, 0.5) * inten;
+      if (!(I > 0)) continue;
+      const len = b.a.distanceTo(b.b);
+      out.lights.push({
+        kind: 1,
+        t0: cue.t,
+        t1: cue.t + dur + 0.3,
+        decay: 0.3,
+        strobe: 0,
+        color: color.clone(),
+        peak: I,
+        pos: b.a.clone().add(b.b).multiplyScalar(0.5),
+        a: b.a.clone(),
+        b: b.b.clone(),
+        radius: WING_REACH * size + 0.3 * H + 0.1 * len,
+        haze: WING_HAZE,
       });
     }
   }
@@ -440,8 +508,11 @@ export class PyroSystem extends CueFxSystem {
    *  - H >= 12 on a few stand-alone units ("power flames", e.g. the two 15 m tower torches): 3 m
    *    wide at the base, 8–9 m fireball top, slower and fuller.
    *  - `fireball: true`: a spherical 8–10 m fireball with a dark smoke cap (corner fireballs).
-   *  - firewall on `wing_left`/`wing_right`: the burning wings — fire runs up every finger spar
-   *    (1.7 m pitch), wide billowing flames, a roll-over fireball at each tip on every ignition.
+   *  - firewall on `wing_left`/`wing_right`: the burning wings ON the wing surface (placement
+   *    wingSurface, from the stage's `wing_spars` anchor): a 2 m grid over the upper membranes and
+   *    fingers — tongues along the scalloped top edges and at the finger ends, a low burning skin
+   *    below them (down to ~60 % of the wing for H >= 6, only the top band for H 3.5) — a roll-over
+   *    fireball at each finger end, and one light per wing sized by its burning area (wingLight).
    *  - tall rows (H >= 14, or `billow: true`): the mass eruption — rolling fireballs, see billowWall.
    *  - `fan: n`: n heads per unit spread over `fanSpread` degrees (V / fan flame units).
    *  - coloured (non-hydrocarbon) flames keep their hue: no white-hot core, less soot.
@@ -456,8 +527,21 @@ export class PyroSystem extends CueFxSystem {
     const wing = wall && cue.targets.length > 0 && cue.targets.every((t) => t === 'wing_left' || t === 'wing_right');
     let pts = this.points(cue, 'deck_front');
     let tops: THREE.Vector3[] = [];
-    if (wing) ({ points: pts, tops } = wingFire(pts, this.app.anchors.get('wing_tips'), 1.8));
-    else if (wall) pts = densify(pts, 3.2);
+    // burning wings ON the wing surface (fingers + membranes, the upper part of every wing), from the
+    // stage's `wing_spars` anchor; without it the older spar-chain geometry
+    let surf: WingSurface | null = null;
+    if (wing) {
+      // (the band reaches further down the membranes the bigger the fire: a 3.5 m burst burns along
+      // the top edges and the upper spars, a 6-7 m burst engulfs the upper ~60 % of the wing)
+      surf = wingSurface(this.app.anchors.get('wing_spars' as AnchorName), WING_SPACING, 0.73 - 0.31 * smooth01(3.5, 6, H));
+      if (surf) {
+        // one wing only when the cue targets one
+        const L = cue.targets.includes('wing_left');
+        const Rt = cue.targets.includes('wing_right');
+        if (!(L && Rt)) surf = keepWing(surf, L ? -1 : 1);
+        ({ points: pts, tops } = surf);
+      } else ({ points: pts, tops } = wingFire(pts, this.app.anchors.get('wing_tips'), 1.8));
+    } else if (wall) pts = densify(pts, 3.2);
     const color = this.flameColor(p.color);
     const warm = this.warm;
     const pattern = str(p.pattern, 'all');
@@ -502,35 +586,66 @@ export class PyroSystem extends CueFxSystem {
       const t0 = cue.t + steps[u] * stagger;
       maxDelay = Math.max(maxDelay, steps[u] * stagger);
       const seed = this.sub(cue, u * 8);
+      // a burning wing SURFACE (wingSurface): along the scalloped top edges and at the finger ends
+      // (level 1) a row of narrow tongues licking up (v788.5: discrete jets ~2 m apart; v413.9, v713.5),
+      // below them (level < 1) a low burning skin on the membrane, each cell a short, small flame, so
+      // the grid reads as one sheet of fire with the wing's structure still showing through
+      let lifeU = life,
+        v0U = v0,
+        r0U = r0,
+        rGU = rG,
+        countU = count,
+        briU = (warm ? (wing ? 5 : 8) : 6) * inten,
+        spreadU = wing ? 0.42 : big ? 0.38 : 0.075,
+        stretchU = wing ? 0.02 : big ? 0.04 : 0.075;
+      const edge = surf !== null && surf.level[u] > 0.99;
+      if (surf) {
+        const lv = surf.level[u];
+        const J = edge ? WING_EDGE : WING_SKIN;
+        lifeU = J.life + J.lifeH * H;
+        const trU = lifeU * 0.75;
+        v0U = Math.max(0.8, vT + ((H * J.rise + J.riseM - vT * trU) * k) / (1 - Math.exp(-k * trU)));
+        r0U = J.r0 * wK;
+        rGU = H * J.grow * wK * (warm ? 1 : 1.35);
+        countU = this.pc(J.rate * lifeU, 6);
+        briU = (warm ? J.bright : J.bright * 1.2) * (edge ? 1 : 0.6 + 0.4 * lv) * inten;
+        spreadU = J.spread;
+        stretchU = J.stretch;
+      }
       for (let h = 0; h < fan; h++) {
         const a = fan > 1 ? angle + fanSpread * (h / (fan - 1) - 0.5) : angle;
         const d = tiltedUp(pos.x, a, this.v1);
         // the column: fast narrow tongue near the nozzle (stretched along its velocity), fireball on top
+        // (a surface unit is born over its grid cell, so the cells merge into one burning skin
+        // instead of a lattice of bright nozzles)
+        const em = new Emitter(surf && !edge ? DIST.BOX : DIST.CONE, F.RAMP);
+        if (surf && !edge) em.axis(WING_SPACING * 1.1, WING_SPACING * 0.9, 0.4);
         out.add(
-          new Emitter(DIST.CONE, F.RAMP)
+          em
             .on(L_FIRE)
             .originV(pos)
             .time(t0)
-            .dirV(d, wing ? 0.42 : big ? 0.38 : 0.075)
-            .speed(v0 * hj * 0.86, v0 * hj * 1.06)
+            .dirV(d, spreadU)
+            .speed(v0U * hj * 0.86, v0U * hj * 1.06)
             .physics(k, buoy)
             // (the wing units overlap ~4x along the spars: less each, so the mass stays orange-yellow)
-            .color(color, (warm ? (wing ? 5 : 8) : 6) * inten)
+            .color(color, briU)
             .color2(SOOT, warm)
-            .life(life * 0.8, life * 1.05)
-            .emit(count, dur)
-            .size(r0, rG * hj)
-            .trail(wing ? 0.7 : 0.9, 0.55 + 0.02 * H) // TRAIL = size exponent, GLITTER = noise scale
+            .life(lifeU * 0.8, lifeU * 1.05)
+            .emit(countU, dur)
+            .size(r0U, rGU * hj)
+            .trail(wing ? 0.7 : 0.9, surf ? WING_NOISE : 0.55 + 0.02 * H) // TRAIL = size exponent, GLITTER = noise scale
             .seed(seed + h * 0x3571)
             .set(R.X1, 1.5)
-            .set(R.X2, 0.95)
+            .set(R.X2, surf ? WING_ERODE : 0.95)
             .set(R.X3, 0.06)
-            .set(R.Y0, soot)
-            .set(R.Y1, sootStart)
+            // (a burning skin: ragged tongues that stay flame to their tips, only a little soot on top)
+            .set(R.Y0, surf ? soot * WING_SOOT : soot)
+            .set(R.Y1, surf ? WING_SOOT_START : sootStart)
             .set(R.Y3, 0.6)
-            .set(R.Z2, wing ? 0.02 : big ? 0.04 : 0.075)
+            .set(R.Z2, stretchU)
             .set(R.Z3, PUFF.FLAME)
-            .window(t0, t0 + dur + life * 1.1),
+            .window(t0, t0 + dur + lifeU * 1.1),
         );
       }
       const d = tiltedUp(pos.x, angle, this.v1);
@@ -580,7 +695,8 @@ export class PyroSystem extends CueFxSystem {
     if (n > 0) {
       // roll-over fireballs where the fire reaches the wing tips (at the tips, not a flame length above
       // them: v101, v713.5, v729.25 the fire licks along the wing outline and stays on the wings)
-      if (wing) tops.forEach((tp, i) => this.fireball(out, this.sub(cue, 7000 + i), tp.x + Math.sign(tp.x) * 1.5, tp.y + H * 0.2, tp.z, cue.t + 0.12 + 0.05 * i, 0.5 * H, color, 1, 0.2));
+      // (on the surface wings the band light below carries the light: the balls only add a little)
+      if (wing) tops.forEach((tp, i) => this.fireball(out, this.sub(cue, 7000 + i), tp.x + Math.sign(tp.x) * 1.5, tp.y + H * 0.2, tp.z, cue.t + 0.12 + 0.05 * i, 0.5 * H, color, 1, 0.2, 0, true, surf ? WING_BALL_LIGHT : 1));
       // a big power flame rolls into a fireball at its top when it cuts
       if (big) {
         for (let u = 0; u < pts.length; u++)
@@ -591,9 +707,10 @@ export class PyroSystem extends CueFxSystem {
       // spatial light: the fire lights its smoke, the haze and the floor in front of it
       const lc = warm ? FIRE_LIGHT : color;
       const per = (wing ? 0.22 : 0.5) * Math.pow(H / 8, 0.8) * inten * (warm ? 1 : 0.8) * Math.sqrt(fan);
+      if (surf) this.wingLight(out, cue, surf, H, dur + maxDelay, lc, inten * (warm ? 1 : 0.8));
       // (a burning wing: short, close lights along its spars, so the glow follows the wing shape
       // instead of one dome over the whole wing)
-      this.rowLight(out, cue, pts, steps, stagger, dur, 0.3, H * 0.45, lc, per, 0.45 * H + (wing ? 2.5 : 6), wing ? 14 : 40);
+      else this.rowLight(out, cue, pts, steps, stagger, dur, 0.3, H * 0.45, lc, per, 0.45 * H + (wing ? 2.5 : 6), wing ? 14 : 40);
       this.rowFlash(out, pts, steps, H * 0.5, {
         kind: 1,
         t0: cue.t,
@@ -1164,6 +1281,10 @@ export class PyroSystem extends CueFxSystem {
       const hueK = white || gold ? 1 : 0.62;
       const inten = intenP * (cold ? 11 : 17) * hueK;
       const hotMix = white ? 0.6 : gold ? 0.45 : 0.18;
+      // white / silver sparks of a shorter tall wall: thin, loose streaks (v1441 from the drone, v1446
+      // close up), not dense sheets: fewer sparks, each as bright (not a wall authored brighter than
+      // normal: the white pillar fans of v1565.5 stay dense)
+      const thin = white && tall && intenP < 1.3 ? 1 - SILVER_THIN * silverDim(H) : 1;
       for (let u = 0; u < pts.length; u++) {
         if (steps[u] < 0) continue;
         const pos = pts[u];
@@ -1186,11 +1307,12 @@ export class PyroSystem extends CueFxSystem {
             .physics(k, -9.81)
             .color(col, inten)
             .life(life0, lifeMax)
-            .emit(Math.max(10, Math.round((count * Math.min(1, wd / dur + 0.35)) / Math.max(1, Math.sqrt(nC)))), wd)
+            .emit(Math.max(10, Math.round((count * thin * Math.min(1, wd / dur + 0.35)) / Math.max(1, Math.sqrt(nC)))), wd)
             .size(cold ? 0.03 : 0.05, 0.45)
             .trail(cold ? 0.06 : 0.12, cold ? 0.55 : 0.3)
             .seed(seed)
-            .set(R.X3, 0.18)
+            // (a tall wall stands at once: its first sparks are not faded in, v1565.4)
+            .set(R.X3, tall ? 0.06 : 0.18)
             .set(R.Y0, 0.85)
             .set(R.Y3, 0.3)
             .set(R.Z0, 0.02)
@@ -1289,11 +1411,12 @@ export class PyroSystem extends CueFxSystem {
         const sI = Math.min(1, Math.max(0, (intenP - 1.5) / 1.5));
         const sL = 0.6 * smooth01(18, 30, H) * smooth01(2.5, 4, dur);
         const sC = Math.max(sI, sL);
-        if (sC > 0.02) this.burnCloud(out, cue, pts, steps, stagger, cue.t, dur, H, firstCol, 4.5 * Math.sqrt(sC) * (hueKs[0] < 1 ? 0.8 : 1), 0.17 * sC, sI >= sL ? 0.12 : 3);
+        // (a trace of cloud, sC < 0.08: the 20-22 m silver walls, is left out: only glowing blobs at the nozzles, v1446)
+        if (sC >= 0.08) this.burnCloud(out, cue, pts, steps, stagger, cue.t, dur, H, firstCol, 4.5 * Math.sqrt(sC) * (hueKs[0] < 1 ? 0.8 : 1), 0.17 * sC, sI >= sL ? 0.12 : 3);
         // silver / white (titanium) sparks of a shorter wall light their smoke far less than their
         // glare suggests: thinner, darker smoke, so the colour of the stage light on it reads (v1439.5)
         const wd = saturation(firstCol) < 0.22 ? silverDim(H) : 0;
-        this.rowSmoke(out, cue, pts, steps, H * 0.35, H, firstCol, 1.4 * (1 - 0.64 * wd) * Math.min(2, Math.max(1, intenP)), 0.14 - 0.04 * wd, (1 + dur * 0.8) * n, cue.t + 0.3, dur + maxDelay, 6, 9, 0.7, 0.9, 1, cue.t + maxDelay + dur + 0.2);
+        this.rowSmoke(out, cue, pts, steps, H * 0.35, H, firstCol, 1.4 * (1 - SILVER_SELF * wd) * Math.min(2, Math.max(1, intenP)), 0.14 - SILVER_OPAC * wd, (1 + dur * 0.8) * n, cue.t + 0.3, dur + maxDelay, 6, 9, 0.7, 0.9, 1, cue.t + maxDelay + dur + 0.2);
       }
       this.rowFlash(out, pts, steps, H * 0.5, {
         kind: 1,
@@ -1434,8 +1557,75 @@ export class PyroSystem extends CueFxSystem {
         }
         mn.y = mx.y = y / grp.length + 2;
         this.pointLight(out, 0, cue.t, cue.t + 1.2, 0.3, mn, color, Math.min(8, 2.5 * size * Math.sqrt(grp.length)), 10 + 5 * sq, mx);
+        if (size >= BLAST_SIZE) this.blastCloud(out, cue, grp, size, color);
       }
     }
+  }
+
+  /**
+   * The cloud of a big mine / flash-pot burst (`size` >= 1.8): the charge throws a wall of white
+   * smoke 30-60 m out over the deck and the field within ~0.2 s, lit from inside by the flash for
+   * ~0.8 s (v1565.4-1566.2: the white bloom over the whole middle of the U; v600.25-600.75 the gold
+   * clouds on the deck; v877 the frame full of gold-white smoke), then hanging as smoke lit by the
+   * show. Its light is lit smoke (`haze` 1): the haze field fills with the burst colour around it.
+   */
+  private blastCloud(out: EmitterSet, cue: Cue, grp: THREE.Vector3[], size: number, color: THREE.Color): void {
+    const mn = new THREE.Vector3(Infinity, Infinity, Infinity);
+    const mx = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+    for (const q of grp) {
+      mn.min(q);
+      mx.max(q);
+    }
+    const c = mn.clone().add(mx).multiplyScalar(0.5);
+    const k = smooth01(BLAST_SIZE, 3, size);
+    const R0 = 6 + 6 * size;
+    const n = this.pc(30 + 16 * size, 10);
+    const glowEnd = cue.t + Math.max(0.3, cue.dur) + BLAST_GLOW;
+    out.add(
+      new Emitter(DIST.BOX, F.SELFLIT)
+        .on(L_SMOKE)
+        .origin(c.x, c.y + 1.5, c.z + 2)
+        .axis(mx.x - mn.x + 4, 2, mx.z - mn.z + 4)
+        .time(cue.t)
+        // (a mine blows up and forward: over the deck front, out over the field)
+        .dir(0, 1, 0.55, 1.1)
+        .speed(8 * size, 20 * size)
+        .physics(2.3, 1.2)
+        .color(WHITE_SMOKE, 0.6 * (0.6 + 0.4 * k))
+        .color2(this.c2.copy(color).lerp(WHITE, 0.3).multiplyScalar(BLAST_SELF * (0.5 + 0.5 * k)), 0)
+        .litUntil(glowEnd)
+        .life(3.5, 5.5)
+        .emit(n, 0, 0.22 / n)
+        .size(0.35 * R0, R0)
+        .trail(0.35, 0.3)
+        .seed(this.sub(cue, 6100 + Math.round(c.x)))
+        .set(R.X0, BLAST_GLOW)
+        .set(R.X1, 0.15)
+        .set(R.X2, 0.8)
+        .set(R.Y0, 0.7)
+        .set(R.Y2, 0.03)
+        .set(R.Y3, 1)
+        .set(R.Z0, 1)
+        .set(R.Z3, PUFF.SMOKE)
+        .window(cue.t, cue.t + 6),
+    );
+    // the glowing cloud lights the air around it (a lit-smoke light, grown with the cloud)
+    const a = new THREE.Vector3(mn.x - 4, c.y + 0.35 * R0, c.z + 0.25 * R0);
+    const b = new THREE.Vector3(mx.x + 4, c.y + 0.35 * R0, c.z + 0.25 * R0);
+    out.lights.push({
+      kind: 1,
+      t0: cue.t,
+      t1: glowEnd,
+      decay: BLAST_GLOW,
+      strobe: 0,
+      color: this.c2.copy(color).lerp(WHITE, 0.3).clone(),
+      peak: BLAST_LIGHT * size * (0.5 + 0.5 * k),
+      pos: c.clone(),
+      a,
+      b,
+      radius: 0.8 * R0 + 4,
+      haze: BLAST_HAZE,
+    });
   }
 
   /**
@@ -1678,6 +1868,22 @@ function columnLaw(mat: THREE.ShaderMaterial): void {
   if (!vs.includes(SUBPX_LAW)) return;
   mat.vertexShader = vs.replace(SUBPX_LAW, `gain = (flags & ${F_COLUMN}) != 0 ? wpx / uMinPx : pow(wpx / uMinPx, 1.5);`);
   mat.needsUpdate = true;
+}
+
+/** only the wing on `side` (-1 left, 1 right) of a wing surface */
+function keepWing(s: WingSurface, side: number): WingSurface {
+  const out: WingSurface = { points: [], level: [], tops: s.tops.filter((p) => Math.sign(p.x) === side), bands: [] };
+  for (const b of s.bands) {
+    if (Math.sign(b.a.x) !== side) continue;
+    const units: number[] = [];
+    for (const i of b.units) {
+      units.push(out.points.length);
+      out.points.push(s.points[i]);
+      out.level.push(s.level[i]);
+    }
+    out.bands.push({ ...b, units });
+  }
+  return out;
 }
 
 function hashF(seed: number, i: number, salt: number): number {

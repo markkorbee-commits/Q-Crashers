@@ -74,7 +74,8 @@ export function patternSteps(pts: THREE.Vector3[], pattern: string, seed: number
 }
 
 /**
- * Burning-wing geometry from the wing anchors. The spar anchors are clustered by x (one cluster per
+ * Fallback burning-wing geometry (anchors without `wing_spars`, e.g. the fx proxy stage; the stage
+ * uses wingSurface below). The spar anchors are clustered by x (one cluster per
  * finger, bottom -> top) and the nearest wing tip is appended; every finger is resampled every
  * `spacing` metres, and the membrane edge between neighbouring finger tops (a scallop that sags
  * between the fingers) is sampled too. So the fire covers the whole upper wing — fingers and the
@@ -127,6 +128,148 @@ export function wingFire(pts: THREE.Vector3[], tips: THREE.Vector3[], spacing: n
     points.pop(); // b itself is already a finger point
   }
   return { points, tops };
+}
+
+/** One burning wing of wingSurface(): the band of fire over its membranes, for the wing's light. */
+export interface WingBand {
+  /** outer / inner end of the burning band (world, m) at the height of its centre */
+  a: THREE.Vector3;
+  b: THREE.Vector3;
+  /** wing plane normal (towards the audience) */
+  n: THREE.Vector3;
+  /** burning area (m²): the upper part of the membranes that is on fire */
+  area: number;
+  /** indices into WingSurface.points of this wing's units */
+  units: number[];
+}
+
+export interface WingSurface {
+  /** fire units ON the wing: the fingers and the membranes between them, a little in front of the skin */
+  points: THREE.Vector3[];
+  /** per point 0..1: height in the burning band (1 = the scalloped top edge / the finger ends) */
+  level: number[];
+  /** the finger ends (the sun discs under the spear points): the roll-over fireballs */
+  tops: THREE.Vector3[];
+  bands: WingBand[];
+}
+
+/** spar parameters of the `wing_spars` anchor points per finger (src/stage/MainStage.ts: 35 / 60 / 82 %) */
+const SPAR_T = [0.35, 0.6, 0.82];
+/** the membranes attach at 93 % of every finger (src/stage/dragon/wings.ts ATT) */
+const ATTACH_T = 0.93;
+/**
+ * Sag of the membranes' top edges (outer, middle, inner panel; wings.ts sagCurve): the edge is a
+ * quadratic Bezier whose control point sits `sag` below and 0.5 m behind the chord middle, so the
+ * edge hangs sag / 2 below the chord at its middle.
+ */
+const PANEL_SAG = [3.8, 5.4, 3.4];
+/** the inner panel's top edge runs from the inner finger down to the riser over the dragon's shoulder (layout.ts: ~10.4 m inward, ~7 m lower) */
+const INNER_RISER = new THREE.Vector3(-10.4, -7.0, 0.2);
+
+/**
+ * The burning wings ON the wing surface (video 101, 713.5, 729.25: the fire covers the upper part of
+ * every wing, fingers and membranes alike, and licks up over the scalloped top edges; it does not
+ * stand in columns above the wing).
+ *
+ * `spars` = the `wing_spars` anchor (per finger the points at 35 / 60 / 82 % of the spar, 0.8 m in
+ * front of it; both wings). Every finger is a quadratic curve, so the three points give it exactly:
+ * it is extended to the membrane attachment (93 %) and the finger end (100 %). Between neighbouring
+ * fingers the membrane rows are sampled from `t0` (fraction of the spar) up to the top edge, every
+ * `spacing` m along a row and ~1.3 x `spacing` between rows (odd rows staggered), each row sagging
+ * like the edge above it (fading out downwards); the top row IS the scalloped edge. The inner panel
+ * burns only near the inner finger (`innerU` of its edge). Points are pushed `front` m further
+ * towards the audience (the membrane billows up to 0.55 m back behind the spar plane).
+ * Returns null when the anchor does not have three fingers per wing (use wingFire then).
+ * Build-time only (allocates).
+ */
+export function wingSurface(spars: THREE.Vector3[], spacing = 2, t0 = 0.42, front = 0.3, innerU = 0.3): WingSurface | null {
+  const out: WingSurface = { points: [], level: [], tops: [], bands: [] };
+  for (const side of [-1, 1]) {
+    const pts = spars.filter((p) => Math.sign(p.x) === side).sort((a, b) => side * (b.x - a.x));
+    // fingers: clusters along x, outer finger first
+    const chains: THREE.Vector3[][] = [];
+    for (const p of pts) {
+      const last = chains[chains.length - 1];
+      if (last && Math.abs(last[last.length - 1].x - p.x) < 4.5) last.push(p);
+      else chains.push([p]);
+    }
+    if (chains.length !== 3 || chains.some((c) => c.length < 2 || c.length > 3)) return null;
+    // quadratic (3 points) or linear (2 points) curve per finger, parameter = spar fraction
+    const fingers = chains.map((c) => {
+      const q = [...c].sort((a, b) => a.y - b.y);
+      const ts = q.length === 3 ? SPAR_T : SPAR_T.slice(1);
+      return (t: number, o = new THREE.Vector3()) => {
+        o.set(0, 0, 0);
+        for (let i = 0; i < q.length; i++) {
+          let w = 1;
+          for (let j = 0; j < q.length; j++) if (j !== i) w *= (t - ts[j]) / (ts[i] - ts[j]);
+          o.addScaledVector(q[i], w);
+        }
+        return o;
+      };
+    });
+    // wing plane normal (towards the audience)
+    const across = fingers[0](0.6).sub(fingers[2](0.6));
+    const along = fingers[1](0.82).sub(fingers[1](0.35));
+    const n = along.clone().cross(across).normalize();
+    if (n.z < 0) n.negate();
+    const first = out.points.length;
+    const add = (p: THREE.Vector3, lv: number) => {
+      p.addScaledVector(n, front);
+      for (let i = first; i < out.points.length; i++) if (out.points[i].distanceToSquared(p) < spacing * spacing * 0.2) return;
+      out.points.push(p);
+      out.level.push(lv);
+    };
+    const att = fingers.map((f) => f(ATTACH_T));
+    const riser = att[2].clone().add(new THREE.Vector3(INNER_RISER.x * side, INNER_RISER.y, INNER_RISER.z));
+    let area = 0;
+    for (let pi = 0; pi < 3; pi++) {
+      const inner = pi === 2;
+      const fa = fingers[pi];
+      const fb = inner ? null : fingers[pi + 1];
+      const sag = PANEL_SAG[pi];
+      const uMax = inner ? innerU : 1;
+      // rows from t0 to the edge: ~1.3 x spacing apart along the finger
+      const len = fa(ATTACH_T).distanceTo(fa(t0));
+      const rows = inner ? 0 : Math.max(1, Math.round(len / (spacing * 1.3)));
+      for (let r = 0; r <= rows; r++) {
+        const edge = r === rows;
+        const t = inner ? ATTACH_T : t0 + ((ATTACH_T - t0) * r) / rows;
+        const lv = inner ? 1 : r / rows;
+        const L = fa(t);
+        const R = edge ? (inner ? riser : att[pi + 1]) : (fb as (t: number) => THREE.Vector3)(t);
+        // the row sags like the top edge, less the lower it lies
+        const k = edge ? 1 : Math.pow(lv, 2);
+        const w = L.distanceTo(R) * uMax;
+        const m = Math.max(1, Math.round(w / spacing));
+        const odd = r % 2 === 1 && !edge;
+        const us: number[] = [0];
+        for (let j = 1; j <= m; j++) us.push(((odd && j < m ? j - 0.5 : j) / m) * uMax);
+        if (odd) us.push(((m - 0.5) / m) * uMax);
+        for (const u of us) {
+          const p = L.clone().lerp(R, u);
+          const b = 2 * u * (1 - u) * k;
+          p.y -= b * sag;
+          p.addScaledVector(n, -0.5 * b);
+          add(p, lv);
+        }
+        if (!inner && r > 0) area += (w * len) / rows;
+      }
+    }
+    // the finger ends (sun discs) burn too, and roll the fireballs over
+    for (const f of fingers) {
+      const e = f(1);
+      out.tops.push(e.clone());
+      add(e, 1);
+    }
+    const units: number[] = [];
+    for (let i = first; i < out.points.length; i++) units.push(i);
+    // the band's light: along the wing at 70 % of the burning height, outer to inner finger
+    const a = fingers[0](t0 + (ATTACH_T - t0) * 0.7).addScaledVector(n, 1.5);
+    const b = fingers[2](t0 + (ATTACH_T - t0) * 0.7).addScaledVector(n, 1.5);
+    out.bands.push({ a, b, n, area, units });
+  }
+  return out;
 }
 
 /** Insert interpolated points so neighbouring units are at most `maxGap` apart (for flame walls). */

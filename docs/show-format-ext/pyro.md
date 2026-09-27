@@ -148,6 +148,53 @@ listed under "Engine behaviour". Unknown params are still ignored.
   +1.6, 713.5 +1.7, 734 +1.3 points (the orange domes around the wings are the lens glare of
   src/postfx/SceneGlare.ts, driven by the wing lights, which are unchanged).
 
+## Engine behaviour, round 8 (no cue changes needed)
+
+* **Burning wings on the wing surface.** A `firewall` on `wing_left` / `wing_right` burns ON the
+  wings (`wingSurface` in `src/fx/core/placement.ts`), no longer in 6 m columns standing above the
+  membranes. The fingers come from the stage anchor `wing_spars` (per finger the points at 35 / 60 /
+  82 % of the spar): each finger is a quadratic curve through its three points, extended to the
+  membrane attachment (93 %) and the finger end (100 %). Between the fingers the membrane is sampled
+  on a 2 m grid (odd rows staggered), each row sagging like the scalloped top edge above it (sag
+  3.8 / 5.4 / 3.4 m for the outer / middle / inner panel, as in `src/stage/dragon/wings.ts`); the
+  inner panel burns only next to the inner finger. The points sit 1.1 m in front of the skin. Two
+  kinds of flame unit: along the top edges and at the finger ends narrow tongues that rise
+  0.6 H + 1.5 m (v788.5: discrete jets ~2 m apart; v713.5 flames licking over the edges), below them
+  a low burning skin (short, small flames born over their grid cell, rising 0.25 H), so the wing reads
+  as one sheet of fire with its structure still showing through. The band reaches down to ~60 % of
+  the wing for `height` ≥ 6 and only the top rows for 3.5 m (v148, v787). About 63 units per wing;
+  without `wing_spars` (the fx proxy stage) the older spar-chain geometry is used. The roll-over
+  fireballs sit on the finger ends.
+* **Wing light sized by the fire.** Instead of six 12 m torch lights at the finger tops (the
+  roll-over fireballs, each 1.2–2.0), every burning wing pushes one line light across its burning
+  band whose reach grows with the square root of the burning area (~17 m for an engulfed wing) and
+  whose strength grows gently with the area and the flame height (1.6 × (area / 250 m²)^0.25 ×
+  (H / 6)^0.5), 60 % of it lit smoke (`haze`: the fire burns in its own soot). The fireballs keep 35 %
+  of their light. FieldLight, the haze and the lens glare see the fire where it burns. Measured (Mac
+  GPU, `--settle 500 --min-frames 30`, placement + light together): 713.5 23.0 → 27.8 %, 714.25
+  28.6 → 40.5, 734 41.4 → 44.0, 101 54.3 → 56.3, 413.9 37.7 → 41.3, 729.25 72.0 → 74.1, 788.5
+  42.4 → 43.1, 148.5 46.6 → 45.8. A generic size
+  weighting in `FxLights` (every light × (length + reach) / 60 m) was measured and not kept: +3.6 at
+  484.75 and +1.6 at 264.75, but −3 at 713.5 / 714.25 / 413.9 and −7.5 at 788.5, 64-moment score
+  unchanged.
+* **Big bursts throw a lit cloud.** A `burst` with `size` ≥ 1.8 (the mines of v1565.3, v600.1, the
+  stage explosion of v876.9) also throws a wall of white smoke up and out over the deck and the field
+  within ~0.3 s (puffs of 0.35–1 × (6 + 6 size) m, one emitter per group of units), lit from inside
+  in the burst colour for ~0.7 s, with a lit-smoke light (`haze` 0.6). 1565.5 32.7 → 34.2 %, 1566
+  24.7 → 26.7, 877.25 28.9 → 31.8, 600.5 60.7 → 61.4 (607, 484.75 unchanged).
+* **Tall walls stand at once.** Gerbs taller than 14 m fade their first sparks in over 0.06 s (was
+  0.18 s), so a wall is up within the first frames of its cue (v1565.4).
+* **Silver walls are loose streaks.** White / silver gerb walls taller than 14 m and below 22–30 m
+  (`silverDim`, not authored brighter than `intensity` 1.3) emit 45 % of the sparks, each as bright:
+  thin, loose streaks (v1441 from the drone, v1446 close up) instead of dense sheets. Their row
+  smoke is thinner and darker (opacity 0.05, self-light × 0.2) and a trace of burning cloud
+  (< 0.08) is left out. 1446 34.2 → 40.8 %, 1438.5 57.6 → 58.4; the other white walls in the 64
+  (69.25, 264.75, 460.5, 1536.25) unchanged. An attribution run (pyro layers hidden one at a time)
+  showed the sparks, not the smoke, carry the whiteness at 1446 (sparks hidden +11.2, smoke hidden
+  +1.2 points).
+* **64 moments:** 67.1 / 50.2 % → 67.2 / 50.3 % (colour 67.9, light 80.5, shape 54.8); only 729.25
+  (+2.0) and 1438.5 (+0.8) of the 64 change.
+
 ## pyro — new params
 
 | fx | param | meaning |
