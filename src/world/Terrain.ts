@@ -16,7 +16,8 @@ import { patchWorldMaterial, SKY_REFLECT_GLSL, worldUniforms } from './worldLigh
  *    crests at |X| 100–109, a rear bank behind the stage, the back plaza / 12 m road / timber
  *    decking falling to the lake (AHN4, analytic fit ±0.3 m)
  *  - heat-parched grass on the banks after the June 2026 heatwave (ASSUMPTION, research U6), walked
- *    paths, gravel pads, damp gutters after the 21–22 h shower that preceded the storm (INFERENCE)
+ *    paths, gravel pads; the paving is DRY (bible §8.4: dry during the show, no dew — the storm rain came
+ *    23:00–24:00, after the show, following a 31 °C afternoon), gully grates in darker gutters
  *  - steel trackway plates (rijplaten) on vehicle routes over grass, cable ramps along the pillar rows
  *  - the lake behind the audience, tree belts (OSM) and the flat polder to the horizon
  * heightAt(x, z) is the walkable ground used by the player, crowd and props.
@@ -169,7 +170,12 @@ export class TerrainSystem implements System {
       tDetail: { value: this.detail },
       tMacro: { value: this.macro },
       uSiteRect: { value: new THREE.Vector4(SITE_RECT.x0, SITE_RECT.z0, 1 / SITE_RECT.w, 1 / SITE_RECT.h) },
-      uWet: { value: 1 },
+      /**
+       * damp gutters / low spots with a glossy sky reflection (a shader switch, 1 = wet). Round 12: 0 — the night was dry
+       * (bible §8.4) and the damp patches rendered as sharp-edged speckled mirror blobs, one right on the axis at
+       * z ≈ 80 in the default 'middle' view; no wet reflection shows on the field in any wide video frame
+       */
+      uWet: { value: 0 },
     };
     patchWorldMaterial(mat, {
       key: 'ground',
@@ -582,7 +588,7 @@ float gDamp = 0.0;
     float grate = ( 1.0 - smoothstep( 0.28 - fwm.x * 0.5, 0.28 + fwm.x * 0.5, gd ) ) * ( 1.0 - smoothstep( 0.3 - fwm.y * 0.5, 0.3 + fwm.y * 0.5, gz ) ) * inFloor;
     cc = mix( cc, cc * 0.6, gut );
     cc = mix( cc, vec3( 0.025 ), grate );
-    // damp: the gutters and low spots still wet from the shower before the storm (INFERENCE)
+    // damp (uWet, 0 = the dry night of bible §8.4): gutters and low spots with a glossy sky reflection
     float damp = uWet * clamp( gut * 1.2 + smoothstep( 0.7, 0.86, mac2.b + ( d2.a - 0.5 ) * 0.2 ) * 0.6 + smoothstep( 0.74, 0.86, mac.a ) * 0.4, 0.0, 1.0 );
     gDamp = damp * conc;
     cc *= 1.0 - 0.35 * damp;

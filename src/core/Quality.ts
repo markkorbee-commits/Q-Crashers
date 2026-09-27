@@ -8,7 +8,14 @@ import type { QualityLevel, QualitySettings } from './types';
 export const QUALITY_PRESETS: Record<QualityLevel, QualitySettings> = {
   ultra: {
     level: 'ultra',
-    maxPixelRatio: 2,
+    /**
+     * Round 12: 2 -> 1.5. At DPR 2 ultra rendered 3024x1890 (5.7 MP, half-float MSAA target, 6 bloom levels):
+     * warm-GPU sweep on an M4 Max median 11.0 ms, 33 / 264 moments over 16.7 ms, the finale's red haze at 1514 s
+     * 37.9 ms (the additive beams / haze / pyro overdraw scales with the pixel count). At 1.5 the scene target is
+     * 2268x1417 (3.2 MP, PostFX keeps MSAA 4 below its 1.75 DPR cap), the size high renders at (median 5.95 ms);
+     * ultra keeps its extra content (beams, lasers, bloom levels, trees, textures).
+     */
+    maxPixelRatio: 1.5,
     renderScale: 1,
     msaa: 4,
     shadows: false,
@@ -125,12 +132,16 @@ export function detectDevice(gl?: WebGL2RenderingContext | null): DeviceProfile 
   };
 }
 
-/** Initial preset guess. The runtime governor refines it using measured frame times. */
+/**
+ * Initial preset guess. The runtime governor refines it using measured frame times.
+ * Round 12: ultra only for Apple Max / Ultra chips (and the discrete desktop classes); a Pro chip has roughly a
+ * half to a third of an M4 Max's GPU and would sit at the lowest resolution step through the finale: high.
+ */
 export function pickQuality(d: DeviceProfile): QualityLevel {
   const g = d.gpu.toLowerCase();
   if (d.mobile) return 'mobile';
   if (/swiftshader|llvmpipe|software|basic render/.test(g)) return 'mobile';
-  if (/rtx|radeon rx [5-9]|rx 6|rx 7|rx 9|apple m[1-9] (pro|max|ultra)|arc a7/.test(g)) return 'ultra';
+  if (/rtx|radeon rx [5-9]|rx 6|rx 7|rx 9|apple m[1-9] (max|ultra)|arc a7/.test(g)) return 'ultra';
   if (/apple m[1-9]|geforce|radeon|arc/.test(g)) return 'high';
   if (/intel|uhd|iris|mali|adreno|powervr/.test(g)) return 'medium';
   return 'high';

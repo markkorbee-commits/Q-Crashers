@@ -29,6 +29,9 @@ export class GroundsSystem implements System {
   private proxy?: THREE.Object3D;
   private readonly size = new THREE.Vector2();
   private envSys: (System & { skyLevel?: number }) | null | undefined;
+  /** crowd mode ('tribe' | 'filmed') and camera mode ('showcam' ...), read duck-typed (lazily cached) */
+  private crowdSys: { mode?: unknown } | null | undefined;
+  private camRig: { mode?: unknown } | null | undefined;
 
   init(app: App): void {
     this.app = app;
@@ -173,6 +176,10 @@ export class GroundsSystem implements System {
     this.app.renderer.getDrawingBufferSize(this.size);
     if (this.envSys === undefined) this.envSys = this.app.get<System & { skyLevel?: number }>('environment') ?? null;
     this.landmarks.update(ctx.showTime, this.app.renderer.getPixelRatio(), this.size.y, this.envSys?.skyLevel ?? 1);
+    // the other areas' sky beams: only with the festival running (Tribe mode) and never in the Show camera
+    if (this.crowdSys === undefined) this.crowdSys = (this.app.get('crowd') as unknown as { mode?: unknown } | undefined) ?? null;
+    if (this.camRig === undefined) this.camRig = (this.app.get('camera') as unknown as { mode?: unknown } | undefined) ?? null;
+    this.landmarks.setAreaBeams(this.crowdSys?.mode === 'tribe' && this.camRig?.mode !== 'showcam');
   }
 
   setQuality(_q: QualitySettings): void {}
