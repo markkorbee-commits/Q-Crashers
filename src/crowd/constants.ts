@@ -114,6 +114,14 @@ export const HAIR = { SHORT: 0, LONG: 1, PONY: 2, BUZZ: 3 } as const;
 /** performer props (look.z bits 8..) */
 export const PROP = { LANTERN_L: 1, LANTERN_R: 2, MIC: 4, CAMERA: 8, CTRL: 16 } as const;
 
+/**
+ * The fire troupe's hand lantern (v646–740): a flat, square, warm-white glowing panel held by its bail in
+ * the fist and hanging plumb below it (the shader keeps it upright whatever the arm does). ax/ay/az = the
+ * fist it hangs from in the rest pose (left hand; mirror x for the right), drop = fist → lantern centre,
+ * w / h / d = the glowing body (metres, reference body).
+ */
+export const LANTERN = { ax: 0.21, ay: 0.8, az: 0.015, drop: 0.145, w: 0.19, h: 0.2, d: 0.05 } as const;
+
 /** Look of one person, packed into 4 floats (exact integers < 2^24). */
 export interface Look {
   skin: number;

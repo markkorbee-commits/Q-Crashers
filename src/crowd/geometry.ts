@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { BONE, SLOT } from './constants';
+import { BONE, LANTERN, SLOT } from './constants';
 
 /**
  * Procedural people for the GPU-skinned crowd. Every piece is authored in the rest pose of a 1.75 m
@@ -405,28 +405,32 @@ function slotParts(d: Detail): G[] {
 
 function performerProps(): G[] {
   const parts: G[] = [];
-  // hand lanterns (Sacred Flame troupe, f069–f071): a small square lantern hanging from the fist on
-  // a bail — glass panes (lit in the shader, dark frame + warm flickering core), roof and base plate
+  // hand lanterns (Sacred Flame troupe, v646–740): a flat square panel lantern on a short bail from the
+  // fist — glowing body (lit in the shader: warm-white core, thin dark frame), a thin cap and base plate.
+  // Authored hanging from the rest-pose fist; the vertex shader keeps it plumb below the posed fist.
+  const Ln = LANTERN;
   for (const s of [1, -1]) {
     const slot = s > 0 ? SLOT.LANTERN_L : SLOT.LANTERN_R;
     const hand = s > 0 ? BONE.HAND_L : BONE.HAND_R;
-    const x = 0.215 * s;
-    const body = new THREE.BoxGeometry(0.11, 0.13, 0.11);
-    body.translate(x, 0.59, 0.03);
+    const x = Ln.ax * s;
+    const cy = Ln.ay - Ln.drop;
+    const body = new THREE.BoxGeometry(Ln.w, Ln.h, Ln.d);
+    body.translate(x, cy, Ln.az);
     parts.push(tag(body, hand, slot));
-    const roof = new THREE.ConeGeometry(0.085, 0.05, 4, 1);
-    roof.rotateY(Math.PI / 4);
-    roof.translate(x, 0.68, 0.03);
-    parts.push(tag(roof, hand, slot));
-    const base = new THREE.BoxGeometry(0.125, 0.014, 0.125);
-    base.translate(x, 0.52, 0.03);
-    parts.push(tag(base, hand, slot));
-    const bail = new THREE.BoxGeometry(0.008, 0.06, 0.008);
-    bail.translate(x, 0.73, 0.03);
+    for (const y of [cy + Ln.h / 2 + 0.004, cy - Ln.h / 2 - 0.004]) {
+      const plate = new THREE.BoxGeometry(Ln.w + 0.008, 0.008, Ln.d + 0.008);
+      plate.translate(x, y, Ln.az);
+      parts.push(tag(plate, hand, slot));
+    }
+    const bl = Ln.drop - Ln.h / 2 - 0.008;
+    const bail = new THREE.BoxGeometry(0.012, bl, 0.012);
+    bail.translate(x, Ln.ay - bl / 2, Ln.az);
     parts.push(tag(bail, hand, slot));
   }
-  // handheld microphone (left hand)
-  parts.push(tag(capsule(v(0.212, 0.78, 0.05), v(0.212, 0.71, 0.13), [[0, 0.016], [0.6, 0.019], [1, 0.028]], 8, [0.5, 0.9]), BONE.HAND_L, SLOT.MIC));
+  // handheld microphone (the MC's right hand, as in the film): the handle runs across the fist towards
+  // the body's midline, so with the arm in the MC's mic pose (performers.ts MIC_ARM) the ball sits just in
+  // front of the lips (reference body: fist ≈ (−0.18, 1.52, 0.22), ball ≈ (−0.035, 1.59, 0.155))
+  parts.push(tag(capsule(v(-0.215, 0.79, 0.018), v(-0.035, 0.7835, 0.036), [[0, 0.015], [0.62, 0.018], [0.8, 0.026], [1, 0.029]], 10, [0.5, 1.0]), BONE.HAND_R, SLOT.MIC));
   // shoulder-mounted camera on the right shoulder
   const cam = new THREE.BoxGeometry(0.13, 0.18, 0.42);
   cam.translate(-0.2, 1.6, 0.06);

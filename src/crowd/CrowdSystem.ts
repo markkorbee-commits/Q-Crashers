@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { App } from '../core/App';
 import { QUALITY_PRESETS } from '../core/Quality';
 import { clamp, hash32, hashN } from '../core/rng';
-import type { FrameContext, NamedSpot, QualityLevel, QualitySettings, System } from '../core/types';
+import type { Collider2D, FrameContext, NamedSpot, QualityLevel, QualitySettings, System } from '../core/types';
 import { TimeSlicer } from '../core/yieldTo';
 import { DEFAULT_SPOTS, START_CHOICES } from '../player/spots';
 import { buildFlagAtlas, buildSilhouetteAtlas } from './atlas';
@@ -18,7 +18,7 @@ import {
   buildSpriteGeometry,
   triCount,
 } from './geometry';
-import { analyticHeight, generateLayout, LayoutCancelled, sampleDensity, type ClearZone, type CrowdLayout, type QueuePoint } from './layout';
+import { analyticHeight, BARRIER_Z, generateLayout, LayoutCancelled, sampleDensity, type ClearZone, type CrowdLayout, type QueuePoint } from './layout';
 import { Performers } from './performers';
 import { buildProps } from './props';
 import {
@@ -95,14 +95,30 @@ const FADE_MAX = 256;
 const CREW_HIDE_R = 6;
 
 /**
- * Viewpoints the crowd keeps clear (see layout.ts ClearZone): every start choice plus the other
- * showcase viewpoints — nobody within 2.5 m, nobody in the ±60° forward cone out to 6 m, ~35 % of
- * the people between 6 and 9 m. Raised spots (y ≥ 8) look over the heads and need nothing.
+ * Viewpoints the crowd keeps clear (see layout.ts ClearZone): every start choice plus the dragon view.
+ * A viewer stands IN the Tribe: nobody within 1.1 m, a narrow (±32°) lane out to 2.6 m so the first
+ * image is the show and not the back of a head at the lens, 80 % of the people from there to 4.2 m,
+ * the shorter part of the crowd in the forward view out to 9 m (heads under the eye line, the deck line
+ * stays visible) and pit priority out to 18 m on thinned presets. Raised spots (y ≥ 8) look over the
+ * heads and need nothing. The near-lens fade and the player push (shaders.ts) handle anything closer.
  */
-const CLEAR_VIEW_IDS = new Set<string>([...START_CHOICES.map((c) => c.id), 'dragon_view', 'piano']);
-const CLEAR_VIEW = { ring: 2.5, cone: Math.PI / 3, r1: 6, r2: 9, keep: 0.35 };
+const CLEAR_VIEW_IDS = new Set<string>([...START_CHOICES.map((c) => c.id), 'dragon_view']);
+const START_IDS = new Set<string>(START_CHOICES.map((c) => c.id));
+const CLEAR_VIEW = { ring: 1.1, cone: 0.55, r1: 2.6, r2: 4.2, keep: 0.8, short: 9 };
+/** start views keep packed-crowd priority out to this radius (m) when a preset thins the crowd */
+const DENSE_R = 18;
+/**
+ * the piano riser's own viewpoint (4.6, 64.2, facing the pianist): a narrow lane to the riser only —
+ * the riser has its 1.5 m clear ring (layout.ts), so the lane never stacks onto the view from 'middle'
+ */
+const PIANO_VIEW = { ring: 1.2, cone: 0.42, r1: 4.2, r2: 4.2, keep: 1 };
 /** every other named ground spot: a small ring so a teleport never lands inside a body */
 const CLEAR_RING = 1.8;
+
+/** the front barrier line's colliders (Z 3 ± 0.5): the crowd layout uses the barrier line itself instead */
+function frontBarrier(c: Collider2D): boolean {
+  return c.tag === 'barrier' && c.kind === 'box' && Math.abs((c.minZ + c.maxZ) / 2 - BARRIER_Z) < 0.1 && c.maxX - c.minX > 1.5;
+}
 
 /** viewpoints where no flag carrier should stand right in front of the camera (x, z, radius) */
 const FLAG_FREE: [number, number, number][] = [
@@ -508,9 +524,9 @@ export class CrowdSystem implements System {
   }
 
   /**
-   * The viewpoints kept clear of people: each start choice (+ dragon view, piano riser, the deck
-   * spots) gets the full clear view, every other named ground spot a small ring. Spots not registered
-   * yet (the player adds its defaults after the crowd) come from player/spots.ts DEFAULT_SPOTS.
+   * The viewpoints kept clear of people: each start choice (+ dragon view and the deck spots) gets the
+   * clear view, the piano riser a lane to the pianist, every other named ground spot a small ring. Spots
+   * not registered yet (the player adds its defaults after the crowd) come from player/spots.ts DEFAULT_SPOTS.
    */
   private clearZones(): ClearZone[] {
     const spots = new Map<string, NamedSpot>();
@@ -520,15 +536,31 @@ export class CrowdSystem implements System {
     for (const s of spots.values()) {
       const p = s.position;
       if (p.y >= 8) continue;
+      if (s.id === 'piano') {
+        out.push({ x: p.x, z: p.z, yaw: s.yaw, ...PIANO_VIEW });
+        continue;
+      }
       const view = CLEAR_VIEW_IDS.has(s.id) || p.z < 3; // start choices, showcase views, the deck spots
       if (!view) {
         out.push({ x: p.x, z: p.z, ring: CLEAR_RING });
         continue;
       }
       // raised viewpoints (stage deck, photo terrace) look over the heads: their cone stays clear,
-      // but the 6–9 m band is not thinned (it would open holes in the packed barrier rows)
+      // but the band beyond is not thinned (it would open holes in the packed barrier rows)
       const raised = p.y - this.heightAt(p.x, p.z) >= 1.5;
-      out.push({ x: p.x, z: p.z, yaw: s.yaw, ...CLEAR_VIEW, keep: raised ? 1 : CLEAR_VIEW.keep });
+      // a spot close behind the barrier: the lane ends at the barrier (the front row stays either side)
+      const r1 = p.z > BARRIER_Z ? Math.min(CLEAR_VIEW.r1, Math.max(0, p.z - BARRIER_Z - 0.3)) : CLEAR_VIEW.r1;
+      out.push({
+        x: p.x,
+        z: p.z,
+        yaw: s.yaw,
+        ...CLEAR_VIEW,
+        r1,
+        r2: Math.max(r1, CLEAR_VIEW.r2),
+        keep: raised ? 1 : CLEAR_VIEW.keep,
+        short: raised ? 0 : CLEAR_VIEW.short,
+        dense: !raised && START_IDS.has(s.id) ? DENSE_R : 0,
+      });
     }
     return out;
   }
@@ -563,7 +595,7 @@ export class CrowdSystem implements System {
         {
           target: n,
           heightAt: this.heightAt,
-          colliders: this.app.colliders.filter((c) => c.tag !== 'piano-riser'),
+          colliders: this.app.colliders.filter((c) => c.tag !== 'piano-riser' && !frontBarrier(c)),
           queues: this.queues,
           flagTarget,
           flagAvoid: avoid,

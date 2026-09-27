@@ -1,5 +1,6 @@
 import type { Collider2D } from '../core/types';
 import { clamp, hash32, hashN, lerp, Rng, smoothstep } from '../core/rng';
+import { L as STAGE } from '../stage/layout';
 import { BOTTOM, HAIR, HEAD, newLook, packLook, PRINT, STAGE_FOCUS, TOP, ZONE, type Look } from './constants';
 
 /**
@@ -48,10 +49,23 @@ function inPoly(x: number, z: number, poly: [number, number][]): boolean {
   return inside;
 }
 
-/** pit barrier line (bible §5.4): (−92,−1) → (−46,6) → (46,6) → (92,−1) */
-export function barrierZ(x: number): number {
+/**
+ * The built crowd barrier (stage/layout.ts, the one source the stage builds its barrier runs from):
+ * the front line at Z 3 across |X| ≤ 90 (photo pit and security behind it) and the arm barriers along
+ * X ±90 from Z 3 to the arm ends. The front row stands on the barrier's footplate with its chest at the
+ * panel: feet from Z 3.45.
+ */
+export const BARRIER_Z = STAGE.barrierZ;
+export const BARRIER_X = STAGE.barrierX;
+const FRONT_ROW_Z = BARRIER_Z + 0.45;
+
+/** is (x, z) on the audience side of the built barriers (not in the pit, not in an arm's service lane) */
+export function audienceSide(x: number, z: number): boolean {
   const ax = Math.abs(x);
-  return ax <= 46 ? 6 : 6 - ((ax - 46) * 7) / 46;
+  if (ax <= BARRIER_X + 0.5 && z < FRONT_ROW_Z) return false;
+  // the closed service lane between the arm barrier (X ±90) and the rampart face
+  if (z > BARRIER_Z - 0.5 && z < STAGE.armEnd.z + 2 && ax > BARRIER_X - 0.45 && ax < rampartX(z) + 1.3) return false;
+  return true;
 }
 
 /** x of the forward-arm rampart at depth z (bible §5.8: (±92,−4) → (±94,+58)) */
@@ -99,6 +113,17 @@ export interface ClearZone {
   r1?: number;
   r2?: number;
   keep?: number;
+  /**
+   * people in the forward view out to this distance (m) are drawn from the shorter part of the crowd
+   * (heads below the ~1.68 m eye line), so the deck line stays visible over the heads
+   */
+  short?: number;
+  /**
+   * packed-crowd priority out to this distance (m, fading over the next 16 m): when a preset thins the
+   * crowd below full capacity the area around a start view keeps pit-like priority, so the first view
+   * of a light preset is not a sparse row with the stage visible between the bodies
+   */
+  dense?: number;
 }
 
 export interface LayoutInput {
@@ -172,9 +197,29 @@ export function clearFactor(x: number, z: number, zones: readonly ClearZone[] | 
   return f;
 }
 
+/** 0..1: inside the forward view of a start spot's `short` range (see ClearZone.short) */
+function shortFactor(x: number, z: number, zones: readonly ClearZone[] | undefined): number {
+  if (!zones) return 0;
+  let f = 0;
+  for (let i = 0; i < zones.length; i++) {
+    const c = zones[i];
+    if (c.yaw === undefined || !c.short) continue;
+    const dx = x - c.x;
+    const dz = z - c.z;
+    const d = Math.hypot(dx, dz);
+    if (d > c.short + 1.5 || d < 1e-3) continue;
+    const cosA = (-dx * Math.sin(c.yaw) - dz * Math.cos(c.yaw)) / d;
+    const ang = Math.acos(clamp(cosA, -1, 1));
+    const cone = (c.cone ?? Math.PI / 3) + (22 * Math.PI) / 180;
+    const k = (1 - smoothstep(cone, cone + CONE_EDGE, ang)) * (1 - smoothstep(c.short, c.short + 1.5, d));
+    if (k > f) f = k;
+  }
+  return f;
+}
+
 function zonesKey(zones: readonly ClearZone[] | undefined): string {
   if (!zones) return '';
-  return zones.map((c) => `${c.x.toFixed(1)},${c.z.toFixed(1)},${c.ring},${c.yaw?.toFixed(2) ?? '-'},${c.cone ?? ''},${c.r1 ?? ''},${c.r2 ?? ''},${c.keep ?? ''}`).join('|');
+  return zones.map((c) => `${c.x.toFixed(1)},${c.z.toFixed(1)},${c.ring},${c.yaw?.toFixed(2) ?? '-'},${c.cone ?? ''},${c.r1 ?? ''},${c.r2 ?? ''},${c.keep ?? ''},${c.dense ?? ''}`).join('|');
 }
 
 export interface FlagDef {
@@ -212,7 +257,7 @@ export interface CrowdLayout {
 export function fullDensity(x: number, z: number, out: { zone: number }): number {
   const ax = Math.abs(x);
   if (z > 172 || z < -2 || ax > 107.5) return 0;
-  if (z < barrierZ(x) + 0.7) return 0;
+  if (!audienceSide(x, z)) return 0;
   // stage front of the side sections and the arm ramparts
   if (ax >= 37 && z < -3) return 0;
   if (z <= 59.5 && ax > 90.5) {
@@ -338,6 +383,8 @@ function vnoise(x: number, z: number, s: number): number {
  * presets, the banks, crests and the back plaza thin out first.
  */
 const ZONE_P = [0.35, 0.5, 0.72, 1.3, 1.15, 2.0, 2.2, 1];
+/** priority exponent around the start views (ClearZone.dense): as packed as the pit */
+const DENSE_P = 0.2;
 const MAX_MULT = 1.22; // 65,000 / 53,200
 
 /** flag mix (design-bible §9.3): [atlas type, weight] — types are FLAG_TYPES indices in atlas.ts */
@@ -465,16 +512,49 @@ interface Cand {
   yaw: number;
 }
 
+/** priority exponent per cell, in hundredths (ZONE_P of the cell's zone, lowered near dense start views) */
+const PRIO_N = 256;
+function multTable(k: number, out: Float32Array): Float32Array {
+  for (let p = 0; p < PRIO_N; p++) out[p] = Math.min(MAX_MULT, Math.pow(k, p / 100));
+  return out;
+}
+
 /** expected people count of the grid for a zone multiplier k */
-function expectedCount(dens: Float32Array, zones: Uint8Array, k: number): number {
+function expectedCount(dens: Float32Array, prio: Uint8Array, k: number, tab: Float32Array): number {
   const a = CELL * CELL;
-  const mult = ZONE_P.map((p) => Math.min(MAX_MULT, Math.pow(k, p)));
+  const mult = multTable(k, tab);
   let s = 0;
   for (let i = 0; i < dens.length; i++) {
     const d = dens[i];
-    if (d > 0) s += Math.min(1, d * mult[zones[i]] * a);
+    if (d > 0) s += Math.min(1, d * mult[prio[i]] * a);
   }
   return s;
+}
+
+/** the per-cell priority exponents (hundredths) for a set of clear zones (see ClearZone.dense) */
+function priorities(zones: Uint8Array, nx: number, nz: number, clear: readonly ClearZone[] | undefined): Uint8Array {
+  const prio = new Uint8Array(zones.length);
+  for (let i = 0; i < zones.length; i++) prio[i] = Math.round(ZONE_P[zones[i]] * 100);
+  for (const c of clear ?? []) {
+    if (!c.dense) continue;
+    const R = c.dense + 16;
+    const iz0 = Math.max(0, Math.floor((c.z - R - Z0) / CELL));
+    const iz1 = Math.min(nz - 1, Math.ceil((c.z + R - Z0) / CELL));
+    const ix0 = Math.max(0, Math.floor((c.x - R - X0) / CELL) - 1);
+    const ix1 = Math.min(nx - 1, Math.ceil((c.x + R - X0) / CELL));
+    for (let iz = iz0; iz <= iz1; iz++) {
+      const z = Z0 + (iz + 0.5) * CELL;
+      const off = (iz & 1) * 0.5 * CELL;
+      for (let ix = ix0; ix <= ix1; ix++) {
+        const i = iz * nx + ix;
+        const w = 1 - smoothstep(c.dense, R, Math.hypot(X0 + (ix + 0.5) * CELL + off - c.x, z - c.z));
+        if (w <= 0) continue;
+        const p = Math.round(lerp(ZONE_P[zones[i]] * 100, Math.min(ZONE_P[zones[i]] * 100, DENSE_P * 100), w));
+        if (p < prio[i]) prio[i] = p;
+      }
+    }
+  }
+  return prio;
 }
 
 // cached static field (independent of count)
@@ -587,6 +667,8 @@ export async function generateLayout(input: LayoutInput, hooks?: LayoutHooks): P
   const { zones, nx, nz } = field;
   const dens = applyClear(field.dens, nx, nz, input.clear);
   const clear = input.clear;
+  const prio = priorities(zones, nx, nz, clear);
+  const tab = new Float32Array(PRIO_N);
   await hooks?.step?.('placing people', 0.35);
 
   // --- queues first (they count towards the total)
@@ -602,7 +684,7 @@ export async function generateLayout(input: LayoutInput, hooks?: LayoutHooks): P
       const dist = 1.1 + k * 0.62 + (hash32(hs + 1) / 4294967296) * 0.15;
       const x = Q.x + Q.dx * dist + px * j;
       const z = Q.z + Q.dz * dist + pz * j;
-      if (hash.hit(x, z, 0.3)) continue;
+      if (hash.hit(x, z, 0.3) || !audienceSide(x, z)) continue;
       if (clearFactor(x, z, clear, true) <= 0) continue;
       const yaw = Math.atan2(-Q.dx, -Q.dz) + (hash32(hs + 2) / 4294967296 - 0.5) * 0.5;
       cands.push({ x, z, zone: ZONE.Q, seed: hash32(hs + 3) & 0xffffff, yaw });
@@ -616,11 +698,11 @@ export async function generateLayout(input: LayoutInput, hooks?: LayoutHooks): P
   for (let it = 0; it < 22; it++) {
     await slice(hooks);
     const mid = (lo + hi) / 2;
-    if (expectedCount(dens, zones, mid) < want) lo = mid;
+    if (expectedCount(dens, prio, mid, tab) < want) lo = mid;
     else hi = mid;
   }
   const k = (lo + hi) / 2;
-  const mult = ZONE_P.map((p) => Math.min(MAX_MULT, Math.pow(k, p)));
+  const mult = multTable(k, tab);
   const a = CELL * CELL;
 
   for (let iz = 0; iz < nz && cands.length < input.target; iz++) {
@@ -632,7 +714,7 @@ export async function generateLayout(input: LayoutInput, hooks?: LayoutHooks): P
       const d = dens[i];
       if (d <= 0) continue;
       const zone = zones[i];
-      const p = Math.min(1, d * mult[zone] * a);
+      const p = Math.min(1, d * mult[prio[i]] * a);
       const h = hashN(seed, ix, iz);
       if (hash32(h) / 4294967296 >= p) continue;
       const xc = X0 + (ix + 0.5) * CELL + off;
@@ -667,8 +749,9 @@ export async function generateLayout(input: LayoutInput, hooks?: LayoutHooks): P
       } else {
         yaw += (r3 - 0.5) * 0.36 + (vnoise(x * 0.2, z * 0.2, 9) - 0.5) * 0.3;
       }
-      // the jitter / warp / group pull moved the person off the cell centre: re-test the viewpoints'
-      // empty zones at the final position (sparse-zone walkers along their whole stroll)
+      // the jitter / warp / group pull moved the person off the cell centre: re-test the barrier and the
+      // viewpoints' empty zones at the final position (sparse-zone walkers along their whole stroll)
+      if (!audienceSide(x, z)) continue;
       if (clear && inClearHole(x, z, yaw, sparse, clear)) continue;
       cands.push({ x, z, zone, seed: hash32(h + 15) & 0xffffff, yaw });
       if (cands.length >= input.target) break;
@@ -725,7 +808,12 @@ export async function generateLayout(input: LayoutInput, hooks?: LayoutHooks): P
     const c = cands[order[s]];
     const y = input.heightAt(c.x, c.z);
     const rng = new Rng(c.seed * 2654435761 + 7);
-    const { height, build } = makeLook(rng, l, c.zone);
+    const look0 = makeLook(rng, l, c.zone);
+    let height = look0.height;
+    const build = look0.build;
+    // in the forward view of a start spot: the shorter part of the Tribe (heads under the eye line)
+    const sf = clear ? shortFactor(c.x, c.z, clear) : 0;
+    if (sf > 0) height = Math.min(height, lerp(height, 1.57 + 0.11 * (hash32(hashN(c.seed, 61)) / 4294967296), sf));
     if (l.cape) capes++;
     pos[s * 4] = c.x;
     pos[s * 4 + 1] = y;
