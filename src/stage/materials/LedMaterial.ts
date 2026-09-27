@@ -25,6 +25,12 @@ export const LED_KIND = {
   blind: 9,
   /** LED panel over a printed banner: shows 'screens' content, invisible (discarded) when off */
   panel: 10,
+  /**
+   * window bar: a solid dashed LED tube standing in front of the ground floor, lit as a window (windowColor x
+   * the state's `windows` level, lit share, window modes / patterns) with a white-clipped core at high levels;
+   * a line emitter of the overlay pass (minimum on-screen width like the battens)
+   */
+  wbar: 11,
 } as const;
 
 /** 'screens.content' modes -> uContent index used by the panel shader */
@@ -88,6 +94,10 @@ export function createLedMaterial(): THREE.ShaderMaterial {
         uRegion: { value: new THREE.Vector4(1, 1, 1, 0.35) },
         /** 0..1 window level (share of the windows lit) */
         uWinLvl: { value: 1 },
+        /** 0..1 share of a window bar's core clipped to white (a bright LED tube on camera, video 509.25) */
+        uWinCore: { value: 0 },
+        /** window bars: x HDR level relative to the window colour (a pane's tubes: 1.6), y far-field line width (x uMinPx), z far-field level floor */
+        uWinBar: { value: new THREE.Vector3(1.6, 1.5, 0.85) },
         /** per-side level: x audience-left (x < 0), y right (stage.state `side`) */
         uSide: { value: new THREE.Vector2(1, 1) },
       },
@@ -114,6 +124,7 @@ const LED_VERT = /* glsl */ `
       uniform float uMinPx;
       uniform float uOverNear;
       uniform float uOverFloor;
+      uniform vec3 uWinBar;
       varying float vOverlay;
       varying float vFarO;
       #endif
@@ -136,9 +147,11 @@ const LED_VERT = /* glsl */ `
           vec3 nV = normalize(mat3(viewMatrix) * vN);
           float facing = dot(nV, toCam);
           float ratio = 1.0;
-          if (kind < 0.5 || (kind > 6.5 && kind < 7.5)) {
+          if (kind < 0.5 || (kind > 6.5 && kind < 7.5) || kind > 10.5) {
             float hw = max(aAux.w, 1e-3);
-            float extra = max(0.5 * uMinPx * px - hw, 0.0);
+            // (window bars: a wider far-field line at a higher floor, the camera's glow round a bright LED tube)
+            float minPx = kind > 10.5 ? uMinPx * uWinBar.y : uMinPx;
+            float extra = max(0.5 * minPx * px - hw, 0.0);
             vec3 dirV = normalize(mat3(viewMatrix) * aAux.xyz);
             vec3 side = cross(dirV, toCam);
             float sl = length(side);
@@ -154,7 +167,7 @@ const LED_VERT = /* glsl */ `
             ratio = hs / (hs + extra);
           }
           // near: a faint extra glow above the haze; far: the minimum-width line carries the element
-          vOverlay = mix(uOverNear, 1.0, 1.0 - ratio) * max(sqrt(ratio), uOverFloor) * step(-0.15, facing);
+          vOverlay = mix(uOverNear, 1.0, 1.0 - ratio) * max(sqrt(ratio), kind > 10.5 ? uWinBar.z : uOverFloor) * step(-0.15, facing);
           vFarO = smoothstep(0.1, 0.7, 1.0 - ratio);
         }
         #endif
@@ -198,6 +211,8 @@ const LED_FRAG = /* glsl */ `
       uniform vec3 uAccentS;
       uniform vec4 uRegion;
       uniform float uWinLvl;
+      uniform float uWinCore;
+      uniform vec3 uWinBar;
       varying vec4 vLed;
       varying vec2 vUv;
       varying vec3 vWP;
@@ -265,6 +280,38 @@ const LED_FRAG = /* glsl */ `
           c = mix(cA * 0.06, cA * 1.5, on);
         }
         return c;
+      }
+
+      // per-window level: lit share at the state's window level, per-window variation, the window modes
+      // (fire flicker, frozen shimmer, embers) and the facade-mapping patterns (windows as big pixels)
+      float windowMod(float rnd, vec2 uv) {
+        float lit = smoothstep(rnd - 0.12, rnd + 0.12, 0.25 + 0.85 * uWinLvl);
+        float var = (0.75 + 0.5 * rnd) * lit;
+        float mode = uWinMode;
+        if (mode > 0.5 && mode < 1.5) {
+          // fire flicker
+          var *= 0.55 + 0.6 * vnoise(vec2(rnd * 91.0, uTime * 7.0)) + 0.25 * vnoise(vec2(rnd * 13.0, uTime * 17.0));
+        } else if (mode > 1.5 && mode < 2.5) {
+          // frozen shimmer
+          var *= 0.8 + 0.35 * vnoise(vec2(rnd * 50.0 + uv.x * 6.0, uv.y * 8.0 + uTime * 0.6));
+        } else if (mode > 2.5) {
+          // embers: slow breathing, some windows dark
+          var *= step(0.35, rnd) * (0.4 + 0.6 * (0.5 + 0.5 * sin(uTime * 1.3 + rnd * 20.0)));
+        }
+        float wp = 1.0;
+        float pat = uPattern;
+        if (pat > 0.5 && pat < 1.5) {
+          float k = fract(vWP.x / 26.0 - uPhase);
+          wp = 0.55 + 0.75 * smoothstep(0.0, 0.1, k) * (1.0 - smoothstep(0.12, 0.45, k));
+        } else if (pat > 1.5 && pat < 2.5) {
+          wp = uCalm > 0.5 ? 0.75 + 0.25 * exp(-fract(uBeat) * 4.0) : 0.65 + 0.5 * exp(-fract(uBeat) * 4.0);
+        } else if (pat > 2.5 && pat < 3.5) {
+          wp = 0.6 + 0.9 * step(0.82, h21(vec2(rnd * 131.0, floor(uTime * (uCalm > 0.5 ? 2.5 : 4.0)))));
+        } else if (pat > 3.5 && pat < 4.5) {
+          float swap = mod(floor(uBeat / 4.0), 2.0);
+          wp = mix(1.15, 0.45, abs(step(0.0, vWP.x) - swap));
+        }
+        return var * wp;
       }
 
       float fbm2(vec2 p) { return vnoise(p) * 0.55 + vnoise(p * 2.03 + 7.1) * 0.3 + vnoise(p * 4.1 + 3.3) * 0.15; }
@@ -481,34 +528,7 @@ const LED_FRAG = /* glsl */ `
           // far away the tubes average out: keep their mean light instead of shimmering
           tube = mix(tube, 0.11, clamp(fwx * 4.0 - 0.5, 0.0, 1.0));
           float bars = g + 1.5 * tube;
-          float lit = smoothstep(rnd - 0.12, rnd + 0.12, 0.25 + 0.85 * uWinLvl);
-          float var = (0.75 + 0.5 * rnd) * lit;
-          float mode = uWinMode;
-          if (mode > 0.5 && mode < 1.5) {
-            // fire flicker
-            var *= 0.55 + 0.6 * vnoise(vec2(rnd * 91.0, uTime * 7.0)) + 0.25 * vnoise(vec2(rnd * 13.0, uTime * 17.0));
-          } else if (mode > 1.5 && mode < 2.5) {
-            // frozen shimmer
-            var *= 0.8 + 0.35 * vnoise(vec2(rnd * 50.0 + vUv.x * 6.0, vUv.y * 8.0 + uTime * 0.6));
-          } else if (mode > 2.5) {
-            // embers: slow breathing, some windows dark
-            var *= step(0.35, rnd) * (0.4 + 0.6 * (0.5 + 0.5 * sin(uTime * 1.3 + rnd * 20.0)));
-          }
-          // windows act as big pixels of the facade mapping
-          float wp = 1.0;
-          float pat = uPattern;
-          if (pat > 0.5 && pat < 1.5) {
-            float k = fract(vWP.x / 26.0 - uPhase);
-            wp = 0.55 + 0.75 * smoothstep(0.0, 0.1, k) * (1.0 - smoothstep(0.12, 0.45, k));
-          } else if (pat > 1.5 && pat < 2.5) {
-            wp = uCalm > 0.5 ? 0.75 + 0.25 * exp(-fract(uBeat) * 4.0) : 0.65 + 0.5 * exp(-fract(uBeat) * 4.0);
-          } else if (pat > 2.5 && pat < 3.5) {
-            wp = 0.6 + 0.9 * step(0.82, h21(vec2(rnd * 131.0, floor(uTime * (uCalm > 0.5 ? 2.5 : 4.0)))));
-          } else if (pat > 3.5 && pat < 4.5) {
-            float swap = mod(floor(uBeat / 4.0), 2.0);
-            wp = mix(1.15, 0.45, abs(step(0.0, vWP.x) - swap));
-          }
-          col = uWin * bars * var * wp * pulse;
+          col = uWin * bars * windowMod(rnd, vUv) * pulse;
         } else if (kind < 2.5) {
           float r = length(vUv - 0.5) * 2.0;
           float core = 1.0 - smoothstep(0.35, 1.0, r);
@@ -544,6 +564,18 @@ const LED_FRAG = /* glsl */ `
         } else if (kind < 9.5) {
           float g = mix(0.9, 0.05, clamp(vUv.y * 1.3, 0.0, 1.0));
           col = uArcade * 0.16 * g * pulse;
+        } else if (kind > 10.5) {
+          // window bar (round 9): a solid LED tube lit as a window, at the level of a pane's tubes. A bright
+          // saturated LED tube clips on camera: its core reads white-ish while the fringe keeps the hue (video
+          // 509.25: white-cored blue bars under a pure blue windowColor; 338 cyan-white). vUv.y runs across the
+          // tube (also across the overlay's widened far-field line); a tube only a few pixels wide shows its
+          // mean core share instead of a sub-pixel stripe.
+          vec3 base = uWin * (uWinBar.x * windowMod(rnd, vec2(0.3, 0.38)) * pulse);
+          float across = abs(vUv.y - 0.5) * 2.0;
+          float core = 1.0 - smoothstep(0.0, 0.65, across);
+          core = mix(core, 0.4, clamp(fwidth(vUv.y) * 2.5 - 0.5, 0.0, 1.0));
+          float peak = max(base.r, max(base.g, base.b));
+          col = mix(base, vec3(0.85, 0.93, 1.0) * peak, clamp(uWinCore * core, 0.0, 1.0));
         } else {
           // LED panel over a printed banner: dissolves in/out (screen-door), discarded when off
           float d = h21(floor(gl_FragCoord.xy));

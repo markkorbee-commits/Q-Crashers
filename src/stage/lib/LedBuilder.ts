@@ -9,7 +9,7 @@ const _zero = new THREE.Vector4();
 const _aux = new THREE.Vector4();
 
 /** element kinds that also get the far-field overlay pass (see createLedOverlayMaterial) */
-const OVERLAY_KINDS: number[] = [LED_KIND.bar, LED_KIND.dots, LED_KIND.lamp, LED_KIND.lantern, LED_KIND.window];
+const OVERLAY_KINDS: number[] = [LED_KIND.bar, LED_KIND.dots, LED_KIND.lamp, LED_KIND.lantern, LED_KIND.window, LED_KIND.wbar];
 
 /**
  * Builds the single merged geometry of all emissive set elements (LED battens, windows, lamps,
@@ -90,10 +90,11 @@ export class LedBuilder {
 
   /**
    * A solid LED tube from a to b lit as a WINDOW element (windowColor x the state's `windows` level, its
-   * lit share and window patterns): the "window bars" of the real set (round 8). Every vertex sits on the
-   * window shader's tube line (u 0.3) inside its lit height (v 0.38), so the whole quad glows as one tube
-   * with no dim pane and no far-field averaging; `segs` pixel segments with 14 % gaps (the dashed LED bars
-   * of the footage, video 338 / 509.25).
+   * lit share and window patterns): the "window bars" of the real set (round 8). Kind `wbar` (round 9): the
+   * whole quad glows as one tube (the level of a pane's tubes, no dim pane) with a white-clipped core at high
+   * levels, and it is a line emitter of the overlay pass (aAux = tube direction + half width, uv like a
+   * batten: u along, v across), so it keeps a minimum on-screen width far away instead of dissolving;
+   * `segs` pixel segments with 14 % gaps (the dashed LED bars of the footage, video 338 / 509.25).
    */
   windowTube(a: THREE.Vector3, b: THREE.Vector3, out: THREE.Vector3, width: number, rnd: number, segs = 1): void {
     _d.subVectors(b, a);
@@ -102,14 +103,16 @@ export class LedBuilder {
     _w.crossVectors(out, _d).normalize().multiplyScalar(width / 2);
     const n = out.clone().normalize();
     const lift = n.clone().multiplyScalar(0.02);
-    const uv = [0.3, 0.38, 0.3, 0.38, 0.3, 0.38, 0.3, 0.38];
+    const uv = [0, 0, 1, 0, 1, 1, 0, 1];
     const seg = len / segs;
+    this.cur = _aux.set(_d.x, _d.y, _d.z, width / 2);
     for (let i = 0; i < segs; i++) {
       const p0 = a.clone().addScaledVector(_d, i * seg).add(lift);
       const p1 = a.clone().addScaledVector(_d, (i + (segs > 1 ? 0.86 : 1)) * seg).add(lift);
       const s0 = i * seg;
-      this.quad4(p0.clone().sub(_w), p1.clone().sub(_w), p1.clone().add(_w), p0.clone().add(_w), n, uv, [s0, s0 + seg, s0 + seg, s0], 0, LED_KIND.window, rnd);
+      this.quad4(p0.clone().sub(_w), p1.clone().sub(_w), p1.clone().add(_w), p0.clone().add(_w), n, uv, [s0, s0 + seg, s0 + seg, s0], 0, LED_KIND.wbar, rnd);
     }
+    this.cur = _zero;
     this.tally(LED_KIND.window);
   }
 
