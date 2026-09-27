@@ -129,6 +129,9 @@ const GLOW_GAIN = 0.8;
  * already counts the height itself). Similarity (Mac GPU): 264.75 36.6 -> 44.0 %, the pyro-lit set of 876
  * (flash centre at 30 m) unchanged, 1291.75 -0.9 (a faint red field under 68 m breaks); h0 = 20 cost 876 -1.2.
  * In-page A/B: `__app.get('environment').worldTune` (h0 / hw; 1e9 = off).
+ * Round 8: a bucket's centroid mixes low rows and high breaks (1566: stage bucket at 24.5 m). Weighting each source
+ * by its own height (Σ colour x intensity x share(y) per bucket, tried in a local LightEnv patch) changed no moment
+ * by more than 0.3 points (1566, 1536.25, 1515, 876, 264.75 ...): the centroid share stays.
  */
 export const worldLightTune = { h0: 30, hw: 15 };
 

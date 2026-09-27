@@ -799,6 +799,27 @@ low-to-mid (below).
   crisp: the smoke is a coloured veil, not a wall. The height fog thickens by 1 + 2 × smoke (was 7) and takes
   0.25 × smoke of the glow colour (was 0.4): v76.25 +8, v1528 +5, v1530.5 +7 points; v1536.25 −2 (the end of
   the red-smoke scene is the smokiest moment of the video).
+- **Round 8: the height fog follows the smoke in the air, not the light of the cue.** An `atmos.glow smoke` cue is
+  light (it fades in and out with the cue) plus smoke (matter). The smoke builds up over 4 s of the cue and hangs on
+  6 s after it (the video: the red bank of v1510–1537.5 stays over the site to v1541, lit violet by the stage once
+  the red light is gone); the height fog thickens by 1 + 3 × that smoke. The 0.7 s pink whiteout of v76 is a gerb
+  flash, not a smoke bank: its fog no longer thickens (v76.25 +1.1), the built-up finale bank does (v1536.25 +0.9,
+  v1538 +1.7, v1539.5 +1.9, v1515 +0.6; the high drone shots v1528 +0.2 / v1533 −0.4: there the smoke hangs around
+  the fountain wall, not over the site).
+  The fx haze volumes keep following the cue's light (tried: 76.25 −2.4, the whiteout itself lives in the haze).
+- **Round 8: flash light in the air needs smoke.** Without `atmos.glow smoke` the video's air stays black around
+  the brightest walls (v1567: [1, 0, 0] top band under the blazing U, v484.75, v827.25), so the flash bounce in the
+  fog colour (air, far terrain, fx haze ambient) is gated by the site smoke (full at smoke 0.2).
+- **v1564.5–1569 measured (top band / bottom band, sRGB median of the f4 frames):** black to v1565.25; the eruption
+  turns the sky and field red from v1565.5 ([59, 0, 0] / [138, 8, 0]), peak v1565.75 ([120, 0, 0] / [223, 89, 28]),
+  v1566.0 [96, 0, 0] / [211, 58, 10], v1566.25 [46, 0, 0] / [143, 0, 0], black sky again from v1566.5 while the
+  U and the band keep blazing (field [37–56, 0, 0] fading to [6, 0, 0] at v1567.5). The red sky at 1565.5–1566.3 is
+  real; the cues 1564.815 `atmos.sky` and 1565.3 `atmos.glow` (to 1566.3) match it. Our 1566 frame misses the
+  whiteout itself (mean [55, 26, 24] against the video's [177, 80, 64]: the U fountain wall and the white burst are
+  far dimmer than filmed), not a red sky.
+- **Ground light per source height (round 8 check):** a flash bucket's centroid mixes low rows and high breaks
+  (v1566: stage bucket centred at 24.5 m); weighting each source by its own height changed no moment by more than
+  0.3 points, so the centroid share stays.
 - **Ground light under aerial breaks:** the field stays dark under firework breaks (v264.75: green breaks at
   57 m over a black field) and turns orange only under the low walls (v600.4, v1508–1510, flame and gerb rows
   at 6–25 m). The flash light on the grounds keeps its full share up to a source height of 30 m and falls as
@@ -859,6 +880,11 @@ horizon of the drone shots teal and darker ([9, 39, 70] v44.75, [0, 25, 47] v142
 The dome therefore has its own keys (`DOME_KEYS`, "the sky as filmed"); SKY_KEYS stay the physical sky
 light for the fog colour, the hemisphere fill, the reflections and the cloud shading. Where lasers or the rig light the smoke (Embers 1110–1190: the whole upper half
 a lit blue haze, [0, 0, 93] at v1120.5), that light belongs to the haze and the laser ceiling, not to the sky.
+**Round 8:** the dome blue at t = 800 × 1.6 (rendered terrace sky [2, 2, 17] at v607 and [1, 1, 4] at v900–925
+against the video's [0, 0, 25] and [0, 0, 18]); the late drone shots (t > 950) film a black top band and stay as
+they were. The sky FILL (hemisphere light) and the air colour now carry the blue of the physical keys (red + green
+× 0.15; the fill was a teal 0.25 : 0.47 : 1): the video's shadows and field read pure blue ([0, 0, 23–48] v20–534),
+ours were grey.
 
 Clouds: broken mid-level deck (coverage 0.5–0.6, base 2.5–3.5 km) with gaps (the moon stays visible, FACT);
 pale haze bands visible in the early sky (FACT f001–f031); cloud undersides pick up stage and pyro colour
