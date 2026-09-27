@@ -189,14 +189,3 @@ export interface PerceptionParams {
   /** <0 = off; otherwise screen x (0..1) of the compare split: left of it sober, right altered */
   split: number;
 }
-
-export interface PhotoParams {
-  enabled: boolean;
-  /** metres, 0 = no depth of field */
-  focusDistance: number;
-  /** 0..1 */
-  aperture: number;
-  exposure: number;
-  vignette: number;
-  grain: number;
-}

@@ -37,7 +37,7 @@ function rowBtn(ico: string | HTMLElement, title: string, sub: string, meta: str
 /** list order: ON the stage first (the view you never get as a visitor), then the audience (closest to the stage first), then the grounds */
 const STAGE = ['dj', 'dancers', 'castle', 'stage_left', 'stage_right'];
 const AUDIENCE = ['front', 'crowd', 'dragon_view', 'middle', 'foh', 'photo', 'aisle', 'side_left', 'side_right', 'back'];
-const SPECIAL = ['piano', 'crest_left', 'decking', 'entrance'];
+const SPECIAL = ['ferris', 'piano', 'crest_left', 'decking', 'entrance'];
 /** one-line description per spot (instead of coordinates) */
 const SPOT_BLURB: Record<string, string> = {
   dj: 'Behind the decks in the gold vault, facing the field',
@@ -58,6 +58,7 @@ const SPOT_BLURB: Record<string, string> = {
   piano: 'The piano riser of Domitor Draconis',
   crest_left: 'Up on the west crest by the bars',
   decking: 'On the decking by the lake',
+  ferris: 'Ride the wheel: the show from 34 m up',
   entrance: 'Where you walk in (entrance E1)',
 };
 

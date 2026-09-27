@@ -16,22 +16,19 @@ import { Landing } from './Landing';
 import { Layers } from './Layers';
 import { openAudioMenu, openCameraSheet, openCrowd, openMoments, openPositions, openQuality } from './menus';
 import { PerceptionUI } from './PerceptionUI';
-import { PhotoPanel } from './PhotoPanel';
 import { PiP } from './PiP';
 import { prefs, savePref } from './settings';
 import { Toasts } from './Toasts';
 
-const LOCK_MODES = new Set(['first', 'third', 'free', 'photo']);
-const DIGIT_MODES: Record<string, CamMode> = { Digit1: 'first', Digit2: 'third', Digit3: 'free', Digit4: 'flyover', Digit5: 'showcam', Digit6: 'photo' };
+const LOCK_MODES = new Set(['first', 'third', 'free']);
+const DIGIT_MODES: Record<string, CamMode> = { Digit1: 'first', Digit2: 'third', Digit3: 'free', Digit4: 'flyover', Digit5: 'showcam' };
 /** play / skip / mute: also active while a panel is open */
 const MEDIA_KEYS = new Set(['KeyK', 'KeyJ', 'KeyL', 'KeyM']);
-/** shortcuts still active in photo mode (F = autofocus there, not fullscreen) */
-const PHOTO_KEYS = new Set(['KeyO', 'KeyH', 'KeyF', 'KeyK', 'KeyJ', 'KeyL', 'KeyM', ...Object.keys(DIGIT_MODES)]);
 /** seconds between the last show frame and the "Thank you" card (the final image breathes first) */
 const END_CARD_DELAY = 5;
 
 /**
- * DOM overlay: landing, audio source, onboarding, HUD show controls, menus, photo / cinema modes,
+ * DOM overlay: landing, audio source, onboarding, HUD show controls, menus, cinema mode,
  * toasts, bar ordering. The UI talks to the App; systems never import UI.
  */
 export class UI {
@@ -42,7 +39,6 @@ export class UI {
   readonly hud: Hud;
   readonly audio: AudioFlow;
   readonly perc: PerceptionUI;
-  readonly photo: PhotoPanel;
   readonly barMenu: BarMenu;
   readonly touch: boolean;
   readonly autostart: boolean;
@@ -75,7 +71,6 @@ export class UI {
   private nearest: Interactable | null = null;
   private camEvents = 0;
   private pendingKey: { code: string; frame: number; camEvents: number } | null = null;
-  private prevCamMode: CamMode = 'first';
   private lastCamMode = '';
   private lastLocked = false;
   private lastPlaying = false;
@@ -121,7 +116,6 @@ export class UI {
     this.toasts = new Toasts(this.root);
     this.hud = new Hud(app, this.root, this.actions(), this.touch);
     this.perc = new PerceptionUI(this, this.root);
-    this.photo = new PhotoPanel(this, this.root);
     this.pip = new PiP(this.root, this.root.classList.contains('touch'));
     this.barMenu = new BarMenu(this);
     this.audio = new AudioFlow(this);
@@ -132,7 +126,7 @@ export class UI {
     // ---- app events
     const ev = app.events;
     ev.on('loading:progress', ({ label, progress, next, etaMs }) => this.landing?.setProgress(label, progress, next, etaMs));
-    ev.on('toast', ({ text, ms }) => this.toast(text, ms));
+    ev.on('toast', ({ text, ms, icon }) => this.toast(text, ms, icon));
     ev.on('show:ended', () => {
       if (!this.entered || this.autostart) return;
       // let the last firework / cold-fire moment breathe before the card fades in over it
@@ -317,7 +311,6 @@ export class UI {
       openCrowd: (t: HTMLElement) => this.togglePanel('crowd', () => openCrowd(this, t)),
       openAudio: (t: HTMLElement) => this.togglePanel('audio', () => openAudioMenu(this, t)),
       openCamera: (t: HTMLElement) => this.togglePanel('camera', () => openCameraSheet(this, t)),
-      togglePhoto: () => this.togglePhoto(),
       toggleCinema: () => this.toggleCinema(),
       toggleFullscreen: () => this.toggleFullscreen(),
       openHelp: (t: HTMLElement) => openHelp(this, t),
@@ -429,14 +422,6 @@ export class UI {
   }
 
   setCamera(m: CamMode): void {
-    if (m === 'photo') {
-      this.togglePhoto(true);
-      return;
-    }
-    if (this.photo.open) {
-      this.togglePhoto(false, m);
-      return;
-    }
     const rig = this.rig();
     if (!rig?.setMode) {
       this.toast('Camera modes are not available yet', 2000, 'info');
@@ -448,44 +433,11 @@ export class UI {
   private onCameraMode(mode: string, initial = false) {
     this.camEvents++;
     this.hud.setCameraMode(mode);
-    if (mode === 'photo' && !this.photo.open) {
-      if (this.lastCamMode && this.lastCamMode !== 'photo') this.prevCamMode = this.lastCamMode as CamMode;
-      this.enterPhotoUi();
-    } else if (mode !== 'photo' && this.photo.open) this.exitPhotoUi();
-    if (!initial && mode !== this.lastCamMode && mode !== 'photo' && !this.layers.modalOpen) {
+    if (!initial && mode !== this.lastCamMode && !this.layers.modalOpen) {
       const m = CAMERA_MODES.find((x) => x.id === mode);
       if (m) this.toast(`${m.label} — ${m.hint}`, 1800, m.icon);
     }
     this.lastCamMode = mode;
-  }
-
-  togglePhoto(on?: boolean, exitTo?: CamMode): void {
-    const want = on ?? !this.photo.open;
-    const rig = cameraRig(this.app);
-    if (want) {
-      if (this.photo.open) return;
-      const cur = this.camMode();
-      if (cur !== 'photo') this.prevCamMode = cur as CamMode;
-      rig?.setMode?.('photo');
-      this.enterPhotoUi();
-    } else {
-      if (!this.photo.open && this.camMode() !== 'photo') return;
-      this.exitPhotoUi();
-      if (this.camMode() === 'photo') rig?.setMode?.(exitTo ?? (this.prevCamMode === 'photo' ? 'first' : this.prevCamMode));
-    }
-  }
-
-  private enterPhotoUi() {
-    this.layers.closeAll();
-    this.root.classList.add('photo');
-    this.photo.show();
-    this.hud.setCameraMode('photo');
-  }
-
-  private exitPhotoUi() {
-    this.root.classList.remove('photo');
-    this.photo.hide();
-    this.poke();
   }
 
   toggleCinema(on?: boolean): void {
@@ -523,8 +475,7 @@ export class UI {
       return;
     }
     p.teleport(spot);
-    if (this.photo.open) this.togglePhoto(false, 'first');
-    else if (this.camMode() !== 'first') cameraRig(this.app)?.setMode?.('first');
+    if (this.camMode() !== 'first') cameraRig(this.app)?.setMode?.('first');
     if (spot.id.startsWith('bar_')) this.toast(`${spot.label} — walk up to the counter and ${this.touch ? 'tap “Order a drink”' : 'press E'} to order`, 3400, 'cup');
     else if (!this.arrivalToast(spot.id)) this.toast(`You are now at: ${spot.label}`, 2000, 'pin');
     this.tryLock();
@@ -535,6 +486,7 @@ export class UI {
     if (id === 'dj') this.toast('DJ-booth — zo ziet de DJ het veld', 3600, 'music');
     else if (id === 'dancers') this.toast("Dancers' podium — walk up the grey steps into the vault to the DJ booth", 3200, 'pin');
     else if (id === 'castle') this.toast('Castle gallery — up the stone stairs, between the skull cube and the portal', 3000, 'pin');
+    else if (id === 'ferris') this.toast(`Ferris wheel — ${this.touch ? 'tap “Board the Ferris wheel”' : 'press E'} to step into the next gondola`, 3400, 'wheel');
     else return false;
     return true;
   }
@@ -594,7 +546,10 @@ export class UI {
   }
 
   private promptTap() {
-    if (this.nearest && (this.externalLabel || !this.externalPrompt)) this.nearest.onInteract();
+    // the prompt shows the player's own target (bars, the Ferris wheel): act on exactly that one
+    const pl = player(this.app);
+    if (this.externalPrompt && this.externalLabel && pl?.interact) pl.interact();
+    else if (this.nearest && (this.externalLabel || !this.externalPrompt)) this.nearest.onInteract();
     else if (this.barSys()?.holding) this.barSys()!.sip();
     this.poke();
   }
@@ -607,7 +562,7 @@ export class UI {
     const walk = mode === 'first' || mode === 'third';
     this.nearest = walk && this.entered ? this.findNearest() : null;
     const ps = this.pState;
-    if (!this.entered || this.layers.anyOpen || this.photo.open) {
+    if (!this.entered || this.layers.anyOpen) {
       if (ps.kind !== 0) this.hud.setPrompt(null);
       ps.kind = 0;
       return;
@@ -673,10 +628,10 @@ export class UI {
 
   /**
    * Touch: double tap on the left or right third of the picture skips 10 s back / forward (video-app
-   * convention), with a ripple on that side. Not in photo mode (taps there aim the shot).
+   * convention), with a ripple on that side.
    */
   private doubleTapSkip(x: number, ts: number): void {
-    if (!this.entered || this.photo.open || this.layers.anyOpen || !this.root.classList.contains('touch')) return;
+    if (!this.entered || this.layers.anyOpen || !this.root.classList.contains('touch')) return;
     const w = window.innerWidth;
     const side = x < w / 3 ? -1 : x > (2 * w) / 3 ? 1 : 0;
     // event timestamps: a slow frame between the two taps must not break the double tap
@@ -729,7 +684,6 @@ export class UI {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.code === 'Escape') {
       if (this.layers.escape()) e.preventDefault();
-      else if (this.photo.open) this.togglePhoto(false);
       else if (this.cinema) this.toggleCinema(false);
       return;
     }
@@ -745,7 +699,6 @@ export class UI {
       // media keys keep working while a panel (not a modal card) is open
       if (!(this.layers.kindOf(top) === 'panel' && MEDIA_KEYS.has(e.code))) return;
     }
-    if (this.photo.open && !PHOTO_KEYS.has(e.code)) return;
     let handled = true;
     switch (e.code) {
       case 'KeyK':
@@ -775,20 +728,16 @@ export class UI {
         this.toggleMute();
         break;
       case 'KeyF':
-        // photo mode: F = autofocus (the camera rig focuses; the panel follows)
-        if (this.photo.open) this.photo.autofocus();
-        else this.toggleFullscreen();
+        this.toggleFullscreen();
         break;
       case 'KeyE':
         this.interact();
         break;
-      case 'KeyO':
       case 'Digit1':
       case 'Digit2':
       case 'Digit3':
       case 'Digit4':
       case 'Digit5':
-      case 'Digit6':
         // the CameraRig may bind these itself: act only if it did not react this frame
         this.pendingKey = { code: e.code, frame: this.app.frame, camEvents: this.camEvents };
         break;
@@ -804,11 +753,8 @@ export class UI {
     if (!pk || this.app.frame <= pk.frame) return;
     this.pendingKey = null;
     if (this.camEvents !== pk.camEvents) return; // the camera rig handled it
-    if (pk.code === 'KeyO') this.togglePhoto();
-    else {
-      const m = DIGIT_MODES[pk.code];
-      if (m && m !== this.camMode()) this.setCamera(m);
-    }
+    const m = DIGIT_MODES[pk.code];
+    if (m && m !== this.camMode()) this.setCamera(m);
   }
 
   // ---------------------------------------------------------------------------------------
@@ -842,7 +788,7 @@ export class UI {
     if (eligible && !this.resumeEligible) this.resumeSince = now;
     this.resumeEligible = eligible;
     const showResume = eligible && !this.hud.hovering && now - this.resumeSince < 4500;
-    this.hud.setResume(showResume, this.photo.open ? 'Click the scene to look around · Esc to adjust the photo' : 'Click the scene to look around');
+    this.hud.setResume(showResume, 'Click the scene to look around');
 
     this.limitFlashes(ctx.dt);
 
@@ -855,12 +801,6 @@ export class UI {
       this.toast('The official video is not playing (unavailable, blocked or buffering). Switch the audio source in the top bar.', 6000, 'warning');
     }
     if (tr.kind !== 'youtube') this.stallWarned = false;
-
-    // roll fallback for photo mode when the rig has no setRoll
-    if (this.photo.open) {
-      this.photo.tick();
-      if (this.photo.fallbackRoll !== 0) this.app.camera.rotation.z = this.photo.fallbackRoll;
-    }
   }
 
   /**

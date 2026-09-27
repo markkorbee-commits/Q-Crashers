@@ -76,10 +76,11 @@ node scripts/budget-check.mjs --base http://localhost:5173/   # mobile draw-call
 npm run build:artifact                       # claude.ai artifact variant in dist-artifact/
 ```
 
-URL params: `autostart`, `t=<s>`, `play`, `quality=ultra|high|medium|mobile`, `nogovernor`, `camera=first|third|free|flyover|showcam|photo`,
-`cam=x,y,z,yaw,pitch`, `spot=<id>` (front, crowd, middle, foh, dj, dancers, bar_west, ...), `mode=filmed`, `off=<systems>`,
+URL params: `autostart`, `t=<s>`, `play`, `quality=ultra|high|medium|mobile`, `nogovernor`, `camera=first|third|free|flyover|showcam`,
+`cam=x,y,z,yaw,pitch`, `spot=<id>` (front, crowd, middle, foh, dj, dancers, bar_west, ferris, ...), `mode=filmed`, `off=<systems>`,
 `nopost`, `debug`, `daylight` (dev), `analyze=0`. In the page: `window.__app` (`__app.clock.seek(t)`,
-`__app.get('camera').setFreePose(x,y,z,yaw,pitch,fov)`, `__app.postfx.exposure`).
+`__app.get('camera').setFreePose(x,y,z,yaw,pitch,fov)`, `__app.postfx.exposure`, `__app.get('player').boardWheel(true)`:
+sit in the Ferris wheel gondola at the bottom at once; it reaches the top 150 s of show time later).
 
 Browser for all harnesses (`scripts/lib/browser.mjs`): `CHROME_PATH`, else Google Chrome in /Applications (macOS),
 else a Playwright Chromium, else /opt/pw-browsers. `RENDERER=gpu|swiftshader` overrides the automatic choice (macOS =

@@ -7,6 +7,7 @@ import { Landmarks } from './landmarks';
 import { LanternPillars } from './pillars';
 import { buildProps, type PropsOut } from './props';
 import { ARM, CAM_PEN, DECK_HALF, LANTERN_Y, PILLAR, PILLAR_ANCHOR_Y, PILLARS, SIDE_FRONT_Z, STAGE_HALF, TERRACE, terrainHeight } from './site';
+import { DOOR_X, WHEEL_DECK, WHEEL_Z, wheelColliders } from './ferris';
 import { buildStructures } from './structures';
 import { patchWorldMaterial } from './worldLights';
 
@@ -45,6 +46,8 @@ export class GroundsSystem implements System {
     this.props.colliders.forEach((c) => app.addCollider(c));
     this.landmarks = new Landmarks(this.props.lamps, low);
     this.root.add(this.landmarks.group);
+    // the Ferris wheel ride's walkway + platform railings (the gate is a gap in the terrain's bounds)
+    wheelColliders().forEach((c) => app.addCollider(c));
 
     this.registerAnchors();
     this.registerSpots();
@@ -96,6 +99,10 @@ export class GroundsSystem implements System {
     // eye ≈ 6.8 m, looking straight down the aisle, slightly up
     const T = TERRACE;
     const photo: NamedSpot = { id: 'photo', label: 'Photo terrace (official photo)', position: new THREE.Vector3(-0.9, T.deckY, T.z0 + 1.6), yaw: 0, pitch: 0.06 };
+    // the Ferris wheel's boarding platform (world/ferris.ts): inside the "Board" reach, facing the
+    // open edge where the gondolas pass, looking up the wheel
+    const fp = new THREE.Vector3(WHEEL_DECK.x0 + 2.2, WHEEL_DECK.y, WHEEL_Z - 1.6);
+    const ferris: NamedSpot = { id: 'ferris', label: 'Ferris wheel', position: fp, yaw: yawTowards(fp, new THREE.Vector3(DOOR_X + 1.2, 0, WHEEL_Z)), pitch: 0.2 };
     const spots: NamedSpot[] = [
       S('entrance', 'Field entrance (E1)', 121.4, 151.2),
       S('back', 'Back of the field', 0, 134),
@@ -111,6 +118,7 @@ export class GroundsSystem implements System {
       S('aisle', 'Lantern aisle', 0, 118),
       S('crest_left', 'Left crest (bars)', -93, 90),
       S('decking', 'Decking by the lake', -24, 162),
+      ferris,
     ];
     for (const s of spots) this.app.addSpot(s);
   }

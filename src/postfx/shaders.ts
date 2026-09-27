@@ -45,7 +45,7 @@ void gather13(out vec3 b0, out vec3 b1, out vec3 b2, out vec3 b3, out vec3 b4) {
 
 /**
  * First downsample of the HDR frame (MRT):
- *  out0 = plain blurred scene (blur / tunnel / DOF chain)
+ *  out0 = plain blurred scene (blur / tunnel chain)
  *  out1 = exposure-scaled, soft-knee thresholded bright pass with soft Karis weighting (bloom chain).
  * The threshold differs per side of the compare split.
  */
@@ -224,69 +224,21 @@ void main() {
 }
 `;
 
-/** Shared depth helpers (perspective depth -> positive view distance) and circle of confusion. */
+/** Shared depth helpers: scene depth at a screen uv (motion blur), perspective depth -> positive view distance. */
 const DEPTH = /* glsl */ `
 uniform sampler2D tDepth;
 uniform vec4 uDepthRect; // used part of the scene depth (dynamic resolution): uv scale xy, clamp zw
 uniform vec2 uClip;  // near, far
-uniform vec4 uDof;   // focus distance (m), coc scale (px), max coc (px), unused
 /** scene depth at a screen uv */
 float depthAt(vec2 uv) { return texture(tDepth, min(uv * uDepthRect.xy, uDepthRect.zw)).r; }
 float viewZ(float d) {
   float z = d * 2.0 - 1.0;
   return 2.0 * uClip.x * uClip.y / (uClip.y + uClip.x - z * (uClip.y - uClip.x));
 }
-float cocPx(float z) { return min(uDof.y * abs(1.0 - uDof.x / max(z, 1e-3)), uDof.z); }
 `;
 
 /**
- * Bokeh depth of field, gather at base resolution (scatter-as-gather, golden-angle spiral).
- * A sparse ring probe finds blurry foreground so it can bleed over sharper background.
- * out.a = kernel radius (px) used by the composite to blend sharp -> blurred.
- */
-export const DOF = /* glsl */ `${HEADER}${DEPTH}
-#ifndef SAMPLES
-#define SAMPLES 48
-#endif
-uniform sampler2D tColor;
-uniform vec2 uTexel;
-in vec2 vUv;
-out vec4 fragColor;
-float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
-void main() {
-  float zc = viewZ(depthAt(vUv));
-  float cc = cocPx(zc);
-  float R = cc;
-  for (int i = 0; i < 12; i++) {
-    float a = float(i) * 0.5236 + 0.2;
-    float rad = uDof.z * (i < 6 ? 0.45 : 0.95);
-    vec2 o = vec2(cos(a), sin(a)) * rad;
-    float zs = viewZ(depthAt(vUv + o * uTexel));
-    if (zs < zc) { float cs = cocPx(zs); if (cs > rad * 0.8) R = max(R, cs); }
-  }
-  vec3 acc = texture(tColor, vUv).rgb;
-  float wsum = 1.0;
-  if (R > 0.5) {
-    float rot = ign(gl_FragCoord.xy) * 6.2831853;
-    for (int i = 0; i < SAMPLES; i++) {
-      float fi = float(i) + 0.5;
-      float r = sqrt(fi / float(SAMPLES)) * R;
-      float a = fi * 2.3999632 + rot;
-      vec2 suv = vUv + vec2(cos(a), sin(a)) * r * uTexel;
-      float zs = viewZ(depthAt(suv));
-      float cs = cocPx(zs);
-      if (zs > zc) cs = min(cs, cc * 1.5 + 0.5);
-      float w = smoothstep(r - 1.0, r + 0.5, cs);
-      acc += texture(tColor, suv).rgb * w;
-      wsum += w;
-    }
-  }
-  fragColor = vec4(acc / wsum, R);
-}
-`;
-
-/**
- * The composite: warps -> sharp image (motion blur, chroma) -> double vision -> DOF -> blur/tunnel
+ * The composite: warps -> sharp image (motion blur, chroma) -> double vision -> blur/tunnel
  * -> exposure -> energy-conserving bloom, glare, afterimage -> vignette -> grading -> hue-preserving
  * tone map -> contrast -> sRGB + grain + dither -> compare divider.
  * Perception params come as two sets (sober A / altered B) selected per pixel by the compare split.
@@ -307,7 +259,6 @@ uniform sampler2D tD3;
 uniform sampler2D tBloom;
 uniform sampler2D tGlare;
 uniform sampler2D tAfter;
-uniform sampler2D tDof;
 uniform sampler2D tVeil;  // coarsest bloom mip: veiling glare
 uniform vec4 uVeilSize;  // its w, h, 1/w, 1/h
 uniform vec4 uGlare;     // scene (pyro) glare: frame-wide lift colour (exposed HDR), wide-PSF gain
@@ -345,7 +296,7 @@ uniform vec4 uTrail;         // gain (0 = off), -, -, -
 uniform vec4 uThr;       // bloom threshold/knee: sober xy, altered zw
 uniform vec2 uBloom;     // strength, enabled
 uniform vec4 uLook;      // exposure, vignette, grain, head-motion view transform on
-uniform vec4 uFeat;      // glare gain, afterimage on, dof on, base motion blur
+uniform vec4 uFeat;      // glare gain, afterimage on, -, base motion blur
 uniform vec2 uMB;        // velocity scale (shutter / dt), max length (uv)
 uniform mat4 uInvViewProj;
 uniform mat4 uPrevViewProj;
@@ -612,13 +563,6 @@ void main() {
     ghostOff = vec2(uPC1.x * (0.85 + 0.25 * sin(uTime * 0.31)) * verg, uPC1.y * sin(uTime * 0.23 + 1.0)) * p0.y;
     ghostMix = 0.48 * smoothstep(0.0, uPC1.z, p0.y);
     col = mix(col, fetch(suv + ghostOff, p0.z), ghostMix);
-  }
-
-  // ---- photographic depth of field
-  if (uFeat.z > 0.5) {
-    vec4 dof = bicubic4(tDof, suv, uBaseSize);
-    float coc = cocPx(viewZ(depthAt(suv)));
-    col = mix(col, dof.rgb, smoothstep(0.35, 1.3, max(coc, dof.a)));
   }
 
   // ---- blur + tunnel vision (blurred, dark periphery)

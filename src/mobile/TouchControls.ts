@@ -45,7 +45,7 @@ const store = {
  *  - dynamic virtual joystick on the left half (appears under the thumb; push past the ring = run)
  *  - swipe-look on the right half (and with a second finger anywhere)
  *  - buttons: jump, run toggle, first/third view, interact (only while a prompt is active),
- *    up / down in the free & photo cameras, "my view" to return from any camera
+ *    up / down in the free camera, "my view" to return from any camera
  *  - dismissible advice to rotate to landscape (portrait keeps working)
  * Multi-touch safe (tracked per pointerId), honours safe-area insets, writes into app.input.
  */
@@ -76,6 +76,8 @@ export class TouchControls {
   private lift = 0;
   /** hidden by the overlay UI (cinema, menus): swipes only look around, nothing walks */
   private hidden = false;
+  /** on the Ferris wheel: no walking (joystick, run, jump hidden), the whole screen swipes to look */
+  private riding = false;
   /** joystick radius in CSS px (knob travel) */
   readonly radius = 56;
   /** swipe-look speed multiplier (1 = right half of the screen is ~110 degrees); × the viewer's setting */
@@ -118,6 +120,13 @@ export class TouchControls {
     this.app.events.on('interact:prompt', ({ label }) => {
       this.el.classList.toggle('can-interact', !!label);
       if (label) this.interactLabel.textContent = label;
+    });
+    this.app.events.on('ride:state', ({ phase }) => {
+      const on = phase !== 'off';
+      if (on === this.riding) return;
+      this.riding = on;
+      this.el.classList.toggle('riding', on);
+      if (on) this.releaseJoy();
     });
     this.onResize();
     if (store.get(HINTS_KEY)) this.hideHints();
@@ -228,7 +237,7 @@ export class TouchControls {
     b.addEventListener('pointerleave', up);
   }
 
-  /** hold button for vertical flight (free / photo cameras) */
+  /** hold button for vertical flight (free camera) */
   private hold(b: HTMLElement, dir: number): void {
     let id: number | null = null;
     b.addEventListener('pointerdown', (e) => {
@@ -250,7 +259,7 @@ export class TouchControls {
   }
 
   private setGroup(mode: CameraMode): void {
-    const g: Group = mode === 'first' || mode === 'third' ? 'walk' : mode === 'free' || mode === 'photo' ? 'fly' : 'watch';
+    const g: Group = mode === 'first' || mode === 'third' ? 'walk' : mode === 'free' ? 'fly' : 'watch';
     this.viewBtn.textContent = mode === 'third' ? '1ST' : '3RD';
     if (g === this.group) return;
     this.group = g;
@@ -268,7 +277,7 @@ export class TouchControls {
   private onDown = (e: PointerEvent): void => {
     if (e.pointerType === 'mouse' || e.target !== this.app.canvas || this.group === 'watch') return;
     e.preventDefault();
-    if (e.clientX < window.innerWidth * 0.5 && this.joyId === null && !this.hidden) {
+    if (e.clientX < window.innerWidth * 0.5 && this.joyId === null && !this.hidden && !this.riding) {
       this.joyId = e.pointerId;
       const R = this.radius + 8;
       this.ox = Math.min(Math.max(e.clientX, this.safe.l + R), window.innerWidth * 0.5);
