@@ -82,6 +82,12 @@ export interface CrownUniforms {
   uJawMat: THREE.IUniform<THREE.Matrix4>;
   /** per-side emitter level: x audience-left (x < 0), y right (stage.state `side`) */
   uSide: THREE.IUniform<THREE.Vector2>;
+  /**
+   * night response of the wing membranes' printed skin: x the level of the print lit by the wash rig (key,
+   * rim, washes, ambient), y how far its hue is pulled to the wing LED colour, z the level of its own
+   * uplight relative to PRINT_UPLIGHT (see MEMBRANE_LIT)
+   */
+  uMembLit: THREE.IUniform<THREE.Vector3>;
 }
 
 export function createUniforms(): CrownUniforms {
@@ -129,6 +135,7 @@ export function createUniforms(): CrownUniforms {
     uDay: { value: 0 },
     uJawMat: { value: new THREE.Matrix4() },
     uSide: { value: new THREE.Vector2(1, 1) },
+    uMembLit: { value: new THREE.Vector3(MEMBRANE_LIT.level, MEMBRANE_LIT.hue, MEMBRANE_LIT.uplight) },
   };
 }
 
@@ -281,6 +288,16 @@ const WASH_APPLY = /* glsl */ `
  */
 export const PRINT_UPLIGHT = 0.28;
 
+/**
+ * night response of the membranes' print (round 8): `level` scales the print lit by the wash rig (the LED
+ * strokes and the back light through the fabric are not affected), `hue` pulls the print's colour (lit and
+ * self-lit) to the wing LED hue (uPrintTint), `uplight` scales its own uplight (PRINT_UPLIGHT x `wings`).
+ * Video 1320.75 / 1322.5: dark red membranes under the pink wash with red / pink strokes, where the orange
+ * print had read as a lit red-orange sheet (metric-neutral on the 64 moments, +0.4-0.7 at 1320-1323).
+ * Tunable in the page: `__app.get('stage').crown.U.uMembLit.value` (x level, y hue, z uplight).
+ */
+export const MEMBRANE_LIT = { level: 0.3, hue: 0.6, uplight: 0.5 };
+
 export interface PatchOpts {
   /** cache key suffix */
   key: string;
@@ -338,13 +355,26 @@ transformed += objectNormal * (sin(uTime * 0.9 + position.x * 0.16 + position.y 
       '#include <color_fragment>',
       `#include <color_fragment>
 vec3 crownAlb = diffuseColor.rgb;
-diffuseColor.rgb *= mix(${nk}, 1.0, uDay);`,
+diffuseColor.rgb *= mix(${nk}, 1.0, uDay);${
+        o.membrane
+          ? `
+{
+  // night: the printed skin under the wash rig takes the wing LED hue at its own peak level and a reduced
+  // level (the footage shows dark membranes carrying the LED strokes, never the orange print under a
+  // pink / violet wash: video 1320.75 / 1322.5 / 509.25); the daytime view keeps the painted inferno
+  vec3 hueW = uPrintTint / max(max(uPrintTint.r, max(uPrintTint.g, uPrintTint.b)), 1e-4);
+  float pk = max(diffuseColor.r, max(diffuseColor.g, diffuseColor.b));
+  vec3 litP = mix(diffuseColor.rgb, pk * hueW, uMembLit.y) * uMembLit.x;
+  diffuseColor.rgb = mix(litP, diffuseColor.rgb, uDay);
+}`
+          : ''
+      }`,
     );
     fs = fs.replace(
       '#include <lights_physical_pars_fragment>',
       `#include <lights_physical_pars_fragment>
 ${WASH_PARS}
-${o.membrane ? LED_GLSL + 'uniform float uWings;\nuniform vec3 uPrintTint;' : ''}
+${o.membrane ? LED_GLSL + 'uniform float uWings;\nuniform vec3 uPrintTint;\nuniform vec3 uMembLit;' : ''}
 ${o.lava && !o.membrane ? 'uniform float uDragonG;\nuniform float uWingG;' : ''}
 ${o.membrane ? 'varying vec3 vMemb;' : ''}`,
     );
@@ -402,8 +432,12 @@ iblIrradiance *= uEnvTint * max(crownWashReg(), 0.03);`,
   // saturated print, brightest at the lower edge, falling off towards the scalloped top. Kept below
   // the blades / spars (video 1047.25, 1389.5: the skin reads as a dim red-orange ground under the
   // lit blades and the printed suns, never as a glowing orange sheet)
-  vec3 print = crownAlb * crownAlb * uPrintTint * ${(o.printGain ?? 1.9).toFixed(3)};
-  totalEmissiveRadiance += print * (0.03 * uEmit + ${PRINT_UPLIGHT.toFixed(3)} * uWings) * em * mix(1.15, 0.4, smoothstep(3.0, 18.0, vMemb.y)) * (1.0 - uDay);
+  // (round 8: the print's colour is pulled to the wing LED hue like its lit response, uMembLit.y)
+  vec3 printAlb = crownAlb * crownAlb;
+  float pk2 = max(printAlb.r, max(printAlb.g, printAlb.b));
+  printAlb = mix(printAlb, pk2 * uPrintTint / max(max(uPrintTint.r, max(uPrintTint.g, uPrintTint.b)), 1e-4), uMembLit.y);
+  vec3 print = printAlb * uPrintTint * ${(o.printGain ?? 1.9).toFixed(3)};
+  totalEmissiveRadiance += print * (0.03 * uEmit + ${PRINT_UPLIGHT.toFixed(3)} * uMembLit.z * uWings) * em * mix(1.15, 0.4, smoothstep(3.0, 18.0, vMemb.y)) * (1.0 - uDay);
   // printed fabric lets some of the back light (sky, fireworks behind the stage) shine through
   totalEmissiveRadiance += crownAlb * uRim * ${(0.35 * (o.printGain ?? 1.9) / 1.9).toFixed(3)};
 }`;

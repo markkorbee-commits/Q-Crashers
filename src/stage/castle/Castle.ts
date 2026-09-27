@@ -54,6 +54,8 @@ interface TowerSpec {
 const INNER: TowerSpec = { kind: 'inner', x: 17.3, w: 4.0, frontZ: -15.0, depth: 3.75, body: 13.3, base: 6.8, capTop: 15.4 };
 /** the former outer tower span (X ±23…±28): a plain facade bay under the lower wing now */
 const OUTER = { x: 25.5, w: 5.0 };
+/** |x| of the ground-floor window bars (pairs: arcade 14.7, the free part of arch 17.4, outboard of the skull cube) */
+const WINDOW_BARS = [14.3, 15.1, 16.75, 17.25, 22.95, 23.45];
 /** skull cubes on the deck either side of the portal (daytime photos: ~4 m white stone blocks with a skull relief) */
 export const SKULL_CUBE = { x: 19.6, z: -8.3, w: 4.2, d: 4.1, top: 7.4 };
 /** stair arches in the porch screen (round, springing 4.5, apex 7.0) */
@@ -435,6 +437,14 @@ export class CastleBuilder {
         boxMinMax(k.stone, x - 0.3, y0, z, x + 0.3, y1, z + 0.32, TINT.trim);
         const st = k.led.newStrip();
         k.led.bar(new THREE.Vector3(x, y0 + 0.25, z + 0.33), new THREE.Vector3(x, y1 - 0.2, z + 0.33), OUT, 0.12, st, 0, LED_KIND.bar, 1);
+      }
+      // window bars (round 8): pairs of dashed LED tubes standing in front of the ground floor beside the
+      // skull cubes, lit as windows (windowColor x `windows`): in the arcade opening at 14.7, in the
+      // part of the 17.4 arch left free by the cube and on the wall outboard of it (design bible §5.5
+      // "vertical white / cyan LED bars, ~6 per side"; video 509.25 blue, 338 cyan-white, 131.3 white)
+      for (const bx of WINDOW_BARS) {
+        const x = s * bx;
+        k.led.windowTube(new THREE.Vector3(x, Y + 0.45, z + 0.42), new THREE.Vector3(x, 5.7, z + 0.42), OUT, 0.16, ((bx * 7.31) % 1) * 0.3, 4);
       }
       for (const px of [13.35, 16.5, 28.5, 32.7, 36.6]) this.pinnacle(s * px, top + 0.8, z - 0.2, 0.5, 1.6);
       // parapet gerbs on the wall walk (bible X ±25.7…±35; the outer towers take ±23…±28 here)
