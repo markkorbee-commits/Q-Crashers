@@ -131,6 +131,8 @@ lens tilt in degrees (+ up), vfov in degrees:
 | v311–316, v327–330, v335–338, v341–347, v382–397 | the Sacred Oath drone: ONE drone hovering over the lake behind the terrace, x 6–7, z 233–248, at different heights | v311–316 descending 70 → 52 m (fits above, tilt −14.4 → −8.7); v327–330 rising 65 → 80 m; v335–338 ≈ 97 m; v341–347 descending 92 → 69 m; v382–397 descending 79 → 29 m while tilting up (fits at v384, 385, 390, 393, 396 in research/video-timeline/02.md) |
 | v460.2–465.0 | high drone behind | (6.5, 62, 246), vfov 47 |
 | v1188.36–1200.24 | one climbing drone | (−1.5, 52, 241) → (−4, 86, 245), tilt −10 → −22, vfov 55 → 43 |
+| v1324.16–1346.08 (round 12) | one drone take from the audience-LEFT REAR, long lens, flying in | v1326 (−167.1, 58.9, 301.9) → look (−117.4, 49.2, 215.6); v1336 (−176.5, 57.1, 261.9) → (−120.5, 44.2, 180.1); v1345.96 (−150.4, 41.5, 228.3) → (−93.6, 30.3, 146.7); vfov 28.5, 7–10 px rms (moon, lantern silhouettes, the two extra reference points below) |
+| v1346.08–1370.88 (round 12) | drone behind on the axis, climbing ~1.8 m/s and tilting down | v1347.5 (−0.29, 50.0, 250.4) tilt −10.2; v1355 (0.05, 63.3, 251.3) tilt −14.5; v1360 (0.1, 72.0, 252.5) tilt −17.1; v1368 (3.0, 88.2, 250.3) tilt −20.7; vfov 53.4, 2–4.5 px rms (eight crystals + the moon) |
 | v1389.5 / 1398 / 1405 | the long drone shot v1380.16–1408.0 | (−27, 20, 215) vfov 31; (0.9, 23, 172) vfov 29; (25, 26.5, 175) vfov 29.5 |
 | v1408.0, v1417.28, v1438.96 | drone behind on the axis | (1.7, 49.6, 252) vfov 53; (1.6, 74, 252) vfov 53; (2.4, 84, 246) vfov 54 |
 | v1423.32 | far drone front-right | (87, 38, 214) → (87, 39, 229), vfov 27 |
@@ -165,6 +167,17 @@ the moon ~7 px high); a zoom is `fov` → `fovTo` with `look` → `lookTo`. Weig
 rows (stage matched, near pair 12 px low) scored the same (0.679 vs 0.680 over 101 frames). Its telephoto
 (v733.0–736.0 too) sits at (−0.7, 6.7, 169.9), fov 15.5–16.3. A per-shot near plane (≈ 5 m) for the show camera
 would let the fitted 5.25 m pose film over its own rail (contract request to the CameraRig owner, round 9).
+
+Pose fitting (round 12): two more reference points, triangulated from four fitted drone frames (v1347.5–1368, the
+rays meet within 0.1–1 m), help where few crystals are lit: a lit lantern with a spiked crown and a red glow at
+(−84, 7.8, 144) (not part of our world: it stands in the audience-left rear, in the foreground of the v1324 drone
+take) and a pink/magenta arch far right of the set at (173.5, 7.4, −22.8) (the magenta "side section with violet
+haze" of the In The Cold drone shots is this structure, NOT the MainStage, whose centre is dark there). With the
+moon they pin a pose from a single frame (6 constraints); add lantern silhouettes (crystal diamond ≈ Y 12) to check.
+Fix the lens across the frames of one take (vfov 28.5 for the long-lens drone, 53.4 for the wide drones) or the
+fits trade distance against focal length. The fitted poses become `path` keys (linear ease, `look` per key).
+Subject shots (round 12, v440): offsets from the MC's feet at 0.3 m height looking steeply up read as his back
+against the castle wall; the film's close-ups are at his chest height with a long lens (fov ≈ 30).
 
 ## atmos
 
