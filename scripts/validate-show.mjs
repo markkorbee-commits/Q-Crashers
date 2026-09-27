@@ -210,6 +210,8 @@ const EXT_ENUM = {
   'fog.lowfog.area': ['deck', 'field', 'all'],
   'fireworks.comet.end': ['none', 'pearl', 'crackle', 'brocade', 'strobe', 'willow', 'peony', 'crossette', 'palm', 'kamuro'],
   'fireworks.salvo.pattern': ['line', 'v', 'arc', 'random'],
+  // round 11 (docs/show-format-ext/lights.md "Round 11"): the crystals flash on the beat grid
+  'lights.pillars.mode': ['strobe'],
 };
 for (const [k, vals] of Object.entries(extEnumFromDocs)) EXT_ENUM[k] = [...new Set([...(EXT_ENUM[k] ?? []), ...vals])];
 // "add" / "adds" lists extend an enumeration that exists (base table or EXT_ENUM); they never create a
@@ -222,6 +224,16 @@ for (const [k, vals] of Object.entries(extAddsFromDocs)) {
 const LASER_TOKENS = (() => {
   const m = read('src/lasers/LaserSystem.ts').match(/const TOKENS[^=]*=\s*\{([\s\S]*?)\n\};/);
   return new Set(m ? [...m[1].matchAll(/^\s*([a-z0-9_]+):/gm)].map((x) => x[1]) : []);
+})();
+/**
+ * lights-only target tokens that are no anchors: the wing-spar lamp row (round 11, docs/show-format-ext/lights.md:
+ * `spar_lamps` / `spar_lamp` / `wing_lamps`, `lights.blinder` only), read from the T_SPARLAMP entries of the target
+ * map in src/lighting/rig.ts
+ */
+const SPAR_LAMP_TOKENS = (() => {
+  const src = read('src/lighting/rig.ts');
+  const found = [...src.matchAll(/^\s*([a-z0-9_]+):\s*T_SPARLAMP\s*,/gm)].map((x) => x[1]);
+  return new Set(found.length ? found : ['spar_lamps', 'spar_lamp', 'wing_lamps']);
 })();
 /** anchors registered at runtime by a module (not in src/data/layout.gen.ts): MainStage registers 'roof_plumes'
  * (docs/show-format-ext/stage.md) */
@@ -406,10 +418,14 @@ function* expand(def) {
 }
 
 // ------------------------------------------------------------------------------ cues
-function checkTargets(list, where, sys) {
+function checkTargets(list, where, sys, fx) {
   for (const t of list) {
     if (typeof t !== 'string') err(`${where}: target must be a string`);
     else if (sys === 'lasers' && LASER_TOKENS.has(t) && !ANCHORS.has(t)) noteExt(`lasers target token "${t}"`);
+    else if (SPAR_LAMP_TOKENS.has(t) && !ANCHORS.has(t)) {
+      if (sys === 'lights' && fx === 'blinder') noteExt(`lights.blinder target "${t}"`);
+      else err(`${where}: target "${t}" is the spar lamp row: lights.blinder only`);
+    }
     else if (!ANCHORS.has(t) && !FILTERS.has(t) && !RUNTIME_ANCHORS.has(t)) err(`${where}: unknown target "${t}" (not an AnchorName or filter)`);
   }
 }
@@ -490,8 +506,19 @@ function tableParams(md) {
 }
 const DOC_PARAMS = tableParams(read('docs/show-format.md'));
 for (const { md } of EXT_DOCS) for (const [k, set] of Object.entries(tableParams(md))) for (const n of set) addExtParam(k, n);
+/**
+ * params documented only in the source so far (no docs/show-format-ext page for the module yet): the round-11
+ * environment params of src/world/Environment.ts (atmos.sky `level` / `air`: the sky dome and the sky light in the
+ * haze as the shot's camera films it; atmos.glow `ground` 0..8: how strongly the glow lights the grounds)
+ */
+const SRC_PARAMS = { 'atmos.sky': new Set(['level', 'air']), 'atmos.glow': new Set(['ground']) };
 function documentedParam(sys, fx, k) {
-  return (DOC_PARAMS[`${sys}.${fx}`]?.has(k) ?? false) || (EXT_PARAMS.get(`${sys}.${fx}`)?.has(k) ?? false) || (EXT_PARAMS.get(sys)?.has(k) ?? false);
+  return (
+    (DOC_PARAMS[`${sys}.${fx}`]?.has(k) ?? false) ||
+    (EXT_PARAMS.get(`${sys}.${fx}`)?.has(k) ?? false) ||
+    (EXT_PARAMS.get(sys)?.has(k) ?? false) ||
+    (SRC_PARAMS[`${sys}.${fx}`]?.has(k) ?? false)
+  );
 }
 
 const cues = show.cues ?? [];
@@ -508,7 +535,7 @@ for (const [i, c] of cues.entries()) {
     err(`${where}: fx "${c.fx}" is not in the ${c.sys} vocabulary (${Object.keys(VOCAB[c.sys] ?? {}).join(', ')})`);
     continue;
   }
-  if (c.target !== undefined) checkTargets(Array.isArray(c.target) ? c.target : [c.target], where, c.sys);
+  if (c.target !== undefined) checkTargets(Array.isArray(c.target) ? c.target : [c.target], where, c.sys, c.fx);
   if (c.snap !== undefined && !['beat', 'halfbeat', 'bar', 'none'].includes(c.snap)) err(`${where}: snap "${c.snap}"`);
   checkParams(c, where);
   if (c.repeat) {
