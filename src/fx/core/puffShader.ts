@@ -81,6 +81,20 @@ void main() {
   vec4 vp = viewMatrix * vec4(P, 1.0);
   vec2 vp0 = vp.xy;
   float depth = -vp.z;
+  // round 12: burning puffs (flames, glows, flashes) never shrink below PUFF_MIN_PX x uMinPx on screen:
+  // a far drone camera sees a flame row as flames (v535.75, v870), not as sub-pixel specks the raster
+  // misses. The grown puff keeps a bit more than its light (x s^PUFF_SUBPX_LAW, s = true / drawn size:
+  // the camera's bloom and overexposure make a far flame read bigger than its geometry)
+  float subK = 1.0;
+  if (kind == 0 || kind == 3 || kind == 4) {
+    float rpx = rad * uProjScale / max(depth, 0.1);
+    float rmin = uMinPx * PUFF_MIN_PX;
+    if (rpx < rmin) {
+      float s = max(rpx, 0.02) / rmin;
+      rad /= s;
+      subK = pow(s, PUFF_SUBPX_LAW);
+    }
+  }
   float ang = rnd(key, 4u) * 6.2831853 + r9.y * tau * (rnd(key, 5u) - 0.5) * 2.0;
   vec2 cs = vec2(cos(ang), sin(ang));
   vec2 corner = position.xy;
@@ -124,6 +138,9 @@ void main() {
   if (kind == 0) {
     // flame fireball: temperature falls with age; soot takes over near the end
     float temp = pow(1.0 - f, 1.1) * (0.66 + 0.26 * rnd(key, 9u));
+    // X0 (flames, round 12): extra heat of a blinding mass (the bulky eruption v1508.4-1509.8, the
+    // flame ring v865): the young fire runs past T 1 into its white-hot core (flameRamp)
+    temp += r9.x * pow(1.0 - f, 0.7);
     float soot = r10.x * smoothstep(r10.y, 0.92, f) * (1.0 - smoothstep(0.9, 1.0, f));
     // valve closed (a continuous projector past its emission window): the plume is fed no more and
     // burns out within ~0.35 s (v1509.6-1510.0: the 28 m wall is gone well within half a second of
@@ -139,9 +156,9 @@ void main() {
         soot *= 0.25 + 0.75 * (1.0 - smoothstep(0.1, 0.6, cut));
       }
     }
-    vEmis = r3.rgb * r3.w * em * fog * nearF * thinGain * burn;
+    vEmis = r3.rgb * r3.w * em * fog * nearF * thinGain * burn * subK;
     vLit = (r4.rgb * envLight(P) * 1.4 + r3.rgb * r3.w * 0.004) * fog;
-    vPar = vec4(smoothstep(0.0, 0.03, f) * em * nearF, temp, soot, 0.0);
+    vPar = vec4(smoothstep(0.0, 0.03, f) * em * nearF * min(1.0, subK * 1.5), temp, soot, 0.0);
     // flame body opacity (Z1): dense rows / billowing walls occlude what lies behind (and each
     // other) instead of summing into a clipped white band
     vOpac = r11.y * burn;
@@ -161,7 +178,7 @@ void main() {
         : kind == 4 ? (0.75 + 0.5 * rnd(key, uint(floor(uTime * 30.0)) + 40u))
                     : (0.85 + 0.3 * rnd(key, uint(floor(uTime * 12.0)) + 40u));
     }
-    vEmis = r3.rgb * r3.w * g * em * fog * smoothstep(0.0, att, tau) * (1.0 - smoothstep(0.7, 1.0, f)) * nearF * thinGain;
+    vEmis = r3.rgb * r3.w * g * em * fog * smoothstep(0.0, att, tau) * (1.0 - smoothstep(0.7, 1.0, f)) * nearF * thinGain * subK;
     vPar = vec4(0.0, 0.0, 0.0, float(kind));
   } else {
     // smoke / CO2 / fog: lit by the show's light bus (+ optional self illumination from a burst)
@@ -214,7 +231,12 @@ vec3 flameRamp(vec3 base, float T, float warm) {
   // dark hues (deep blue, red) get a luminance lift so a blue plume reads as brightly as a warm one
   float lumK = clamp(0.35 / max(dot(c, vec3(0.2126, 0.7152, 0.0722)), 0.05), 1.0, 2.2);
   float lum = mix((0.12 + 0.55 * t + 0.45 * t * t) * lumK, 0.08 + 0.5 * t + 0.9 * t * t, warm) * I;
-  return hue * lum;
+  // round 12: the hottest core of a hydrocarbon fireball (T past 1: a young puff's centre) burns
+  // white-hot and the camera clips it to white (v1509.25 flame wall, v865 flame ring): near-neutral
+  // and up to 1 + FLAME_HOT x brighter; coloured flames keep their hue
+  float Tw = smoothstep(0.8, 1.3, T) * warm;
+  hue = mix(hue, vec3(1.0, 0.96, 0.86), Tw * 0.85);
+  return hue * lum * (1.0 + FLAME_HOT * Tw);
 }
 
 void main() {
@@ -229,14 +251,16 @@ void main() {
     float turb = (nz.r - 0.5) + (nz2.g - 0.5) * 0.7;
     float shape = smoothstep(0.92, 0.4, d + turb * vErode) * smoothstep(1.0, 0.8, d);
     float T = vPar.y * (1.4 - d * 0.9) + turb * 0.75;
-    vec3 e = flameRamp(vEmis, T, vWarm) * shape;
+    vec3 e = clipWhite(flameRamp(vEmis, T, vWarm) * shape, 1.0);
     float soot = clamp(vPar.z * shape * (0.5 + nz2.b * 1.0), 0.0, 0.95);
     float body = vOpac * shape * (0.55 + 0.45 * nz.g);
     gl_FragColor = vec4((e * (1.0 - soot) + vLit * soot) * vPar.x, clamp(soot + body * (1.0 - soot), 0.0, 0.97) * vPar.x);
   } else if (kind == 3 || kind == 4 || kind == 6) {
     float g = kind == 6 ? exp(-d2 * 3.2) * (0.65 + 0.7 * nz.r) - 0.04
                         : exp(-d2 * 5.0) * (0.8 + 0.4 * nz.r) + exp(-d2 * 28.0) * 0.9;
-    gl_FragColor = vec4(vEmis * max(g, 0.0), 0.0);
+    // (glows and flashes clip to white where they are far brighter than the camera's white; ground pools not)
+    vec3 eg = vEmis * max(g, 0.0);
+    gl_FragColor = vec4(kind == 6 ? eg : clipWhite(eg, 1.0), 0.0);
   } else {
     float turb = (nz.r - 0.5) * 0.9 + (nz2.g - 0.5) * 0.45;
     float shape = smoothstep(1.0, 0.1, d + turb * vErode) * smoothstep(1.0, 0.72, d);

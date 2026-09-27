@@ -60,6 +60,13 @@ void main() {
   int flags = int(r8.y + 0.5);
   uint seed = uint(r7.w + 0.5);
   bool cont = (flags & F_CONTINUOUS) != 0;
+  // round 12: the valve closed at HZ (F_CUT): every spark in flight burns out within SPARK_CUT s
+  float cutK = 1.0;
+  if ((flags & F_CUT) != 0 && (flags & F_STROBE) == 0) {
+    float cutT = uTime - r8.z;
+    if (cutT > SPARK_CUT) CULL();
+    cutK = 1.0 - smoothstep(0.0, SPARK_CUT, cutT);
+  }
   int nRec = max(int(r5.w + 0.5), 1);
   // instance -> particle through the emitter's index permutation (FxLayer): a layer over budget
   // draws a stable, evenly spread, nested subset of it, with a little light compensation
@@ -239,10 +246,24 @@ void main() {
       if (r4.w < -0.5) coolTo = r4.rgb;
       else {
         vec3 hn = c1 / max(max(c1.r, max(c1.g, c1.b)), 1e-4);
-        float goldish = step(hn.b, hn.g + 0.02) * step(hn.g, hn.r + 0.02) * smoothstep(0.12, 0.3, hn.g);
-        coolTo = mix(hn * vec3(0.8, 0.5, 0.6), vec3(1.0, 0.3, 0.06), goldish);
+        // (round 12, as in the fireworks' star shader: a near-neutral titanium white is not a gold, it
+        // cools to a pale warm white instead of deep orange; the white columns of the colour-sequence
+        // walls v1522-1537 stayed salmon otherwise)
+        float hs = 1.0 - min(hn.r, min(hn.g, hn.b));
+        float goldish = step(hn.b, hn.g + 0.02) * step(hn.g, hn.r + 0.02) * smoothstep(0.12, 0.3, hn.g) * smoothstep(0.18, 0.35, hs);
+        vec3 cold = mix(hn * vec3(0.95, 0.86, 0.74), hn * vec3(0.8, 0.5, 0.6), smoothstep(0.2, 0.45, hs));
+        coolTo = mix(cold, vec3(1.0, 0.3, 0.06), goldish);
       }
       col = mix(c1, coolTo, clamp(cool * 0.85 + lifeCool * 0.8, 0.0, 1.0));
+      // round 12: a titanium / charcoal spark that has just left the nozzle burns white-hot, and the
+      // camera clips it to white (the finale walls v1509-1537, the pillar fans v1565): the young head
+      // of a white spark turns near-neutral, a gold one partly; metal-salt colours keep their hue
+      vec3 cn1 = c1 / max(max(c1.r, max(c1.g, c1.b)), 1e-4);
+      float sat1 = 1.0 - min(cn1.r, min(cn1.g, cn1.b));
+      float gold1 = step(cn1.b, cn1.g + 0.02) * step(cn1.g, cn1.r + 0.02) * smoothstep(0.12, 0.3, cn1.g);
+      float whiteK = mix(gold1 * WH_GOLD, WH_WHITE, 1.0 - smoothstep(0.2, 0.4, sat1));
+      float heat = (1.0 - smoothstep(0.0, HEAT_TRAIL, cool)) * (1.0 - smoothstep(0.35, 1.0, lf));
+      col = mix(col, WHITE_HOT * max(c1.r, max(c1.g, c1.b)), whiteK * heat);
     }
     glit = r6.w * smoothstep(0.0, 0.3, sPar);
     hot = (1.0 - sPar) * (0.35 + pearl * 0.4);
@@ -258,9 +279,13 @@ void main() {
   hot *= mix(1.0, 0.3, s2);
   I *= mix(1.0, 0.42, s2);
   vec3 hotCol = mix(vec3(1.0, 0.94, 0.82), mix(chn, vec3(1.0), 0.45), s2);
+  // round 12: HDR white-hot core of white / gold heads (x HOT_K, near-neutral): dense columns and fans
+  // reach the tone mapper's white where the video clips, their trails keep the colour
+  hot *= mix(1.0, HOT_K, 1.0 - s2);
+  hotCol = mix(hotCol, WHITE_HOT, (1.0 - s2) * 0.7);
 
   // sparks die on the ground (no spark ever tunnels through the field)
-  I *= smoothstep(-0.3, 0.25, P.y) * thinGain;
+  I *= smoothstep(-0.3, 0.25, P.y) * thinGain * cutK;
   vec4 vp = viewMatrix * vec4(P, 1.0);
   float depth = -vp.z;
   if (depth < 0.15) CULL();
@@ -283,6 +308,10 @@ void main() {
   gl_Position = c;
 
   float fog = fogT(depth);
+  // round 12: sensor clipping. A white / gold spark far brighter than the camera's white records as
+  // white whatever its hue (all three channels clip): past CLIP_LO its colour runs to WHITE_HOT
+  float cmx2 = max(col.r, max(col.g, col.b));
+  col = mix(col, WHITE_HOT * cmx2, (1.0 - s2) * smoothstep(CLIP_LO, CLIP_HI, I * gain * cmx2));
   vCol = col * I * gain * fog;
   vHot = hotCol * I * gain * fog * hot;
   vUv = vec2(side, cap);

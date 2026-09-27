@@ -4,7 +4,7 @@ import type { QualitySettings } from '../core/types';
 import type { Cue } from '../show/ShowTypes';
 import { CueFxSystem, EmitterSet } from '../fx/core/CueFxSystem';
 import { DIST, Emitter, F, PUFF, R, aimVelocity, apexTime, ballistic, hf, speedForHeight, type FlashSpec } from '../fx/core/Emitter';
-import { FxLayer, ribbonGeometry } from '../fx/core/FxLayer';
+import { FxLayer, pointGeometry, ribbonGeometry } from '../fx/core/FxLayer';
 import { bool, colorList, num, starColor, str } from '../fx/core/fxColors';
 import { centroid, maxAbsX, pickEven, stretches } from '../fx/core/placement';
 import { SHELLS, SHELL_TYPES, shellSpec, type ShellSpec } from './shells';
@@ -13,6 +13,8 @@ import { FW_CURL, FW_SHED, FW_SWIM, FW_TRUE, STAR_FRAG, STAR_VERT } from './star
 const L_SMOKE = 0;
 const L_FLASH = 1;
 const L_STARS = 2;
+/** round 12: point-like stars (crackle pops, shed glitter sparks) in their own 2-triangle layer */
+const L_POINTS = 3;
 
 const GREY = new THREE.Color(0.6, 0.6, 0.62);
 const WHITE = new THREE.Color(1, 1, 1);
@@ -147,15 +149,23 @@ export class FireworkSystem extends CueFxSystem {
     const smoke = this.shared.puffLayer('fw-smoke', Math.round(8192 * Math.max(0.35, ps)), 1024, 11);
     const flash = this.shared.puffLayer('fw-flash', 2048, 1024, 13);
     const stars = this.starLayer(q, Math.round(90000 * Math.max(0.15, ps)), 2048, 15);
-    this.layers = [smoke, flash, stars];
+    // (round 12: crackle pops and shed glitter sparks are points: head and tail coincide, so a full
+    // ribbon of (segments + 2) * 2 triangles was ~90 % degenerate. At the finale they are ~88 % of all
+    // star instances: ultra t=1536 drew 1.09 M star triangles, 0.9 M of them for points)
+    const points = this.starLayer(q, Math.round(90000 * Math.max(0.15, ps)), 2048, 15, true);
+    this.layers = [smoke, flash, stars, points];
     for (const l of this.layers) this.app.scene.add(l.mesh);
   }
 
-  /** the fireworks' own star ribbons (additive HDR); long comet tails get more trail samples */
-  private starLayer(q: QualitySettings, maxParticles: number, maxEmitters: number, renderOrder: number): FxLayer {
-    const seg = q.level === 'mobile' ? 3 : q.level === 'medium' ? 5 : q.level === 'high' ? 8 : 10;
+  /**
+   * the fireworks' own star ribbons (additive HDR); long comet tails get more trail samples.
+   * `points`: the layer of the point-like stars (pops, shed sparks), 2 triangles each (pointGeometry)
+   */
+  private starLayer(q: QualitySettings, maxParticles: number, maxEmitters: number, renderOrder: number, points = false): FxLayer {
+    const seg = points ? 1 : q.level === 'mobile' ? 3 : q.level === 'medium' ? 5 : q.level === 'high' ? 8 : 10;
+    const name = points ? 'fw-points' : 'fw-stars';
     const mat = new THREE.ShaderMaterial({
-      name: 'fx-fw-stars',
+      name: `fx-${name}`,
       uniforms: { ...this.shared.uniforms, uSegments: { value: seg } },
       vertexShader: STAR_VERT,
       fragmentShader: STAR_FRAG,
@@ -167,7 +177,7 @@ export class FireworkSystem extends CueFxSystem {
       blendSrc: THREE.OneFactor,
       blendDst: THREE.OneMinusSrcAlphaFactor,
     });
-    return new FxLayer({ name: 'fw-stars', slotSize: 32, maxEmitters, maxParticles, geometry: ribbonGeometry(seg), material: mat, renderOrder });
+    return new FxLayer({ name, slotSize: 32, maxEmitters, maxParticles, geometry: points ? pointGeometry() : ribbonGeometry(seg), material: mat, renderOrder });
   }
 
   protected lifetime(cue: Omit<Cue, 'life' | 'end'>): number {
@@ -195,6 +205,16 @@ export class FireworkSystem extends CueFxSystem {
   }
 
   protected expand(cue: Cue, out: EmitterSet): void {
+    this.expandCue(cue, out);
+    // point-like stars (crackle pops, shed glitter sparks) go to the 2-triangle point layer
+    const em = out.emitters;
+    for (let i = 0; i < em.length; i++) {
+      const e = em[i];
+      if (e.layer === L_STARS && (e.f[R.FLAGS] & (F.POPS | FW_SHED)) !== 0) e.layer = L_POINTS;
+    }
+  }
+
+  private expandCue(cue: Cue, out: EmitterSet): void {
     switch (cue.fx) {
       case 'shell':
         this.shellCue(cue, out);

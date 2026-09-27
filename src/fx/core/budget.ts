@@ -8,7 +8,8 @@ import { F } from './Emitter';
  *  - fw-stars / fw-smoke get headroom on the desktop presets: the finale barrages (e.g. 841-846 s)
  *    exceeded the nominal budget and had to be thinned.
  *  - mobile caps the ribbon layers to what a phone GPU draws comfortably (every ribbon particle is
- *    (segments + 3) * 2 vertices): fw-stars ~15k, pyro sparks ~12k particles.
+ *    (segments + 3) * 2 vertices): fw-stars ~12k, fw-points (pops, glitter: 4 vertices) ~12k, pyro sparks
+ *    ~12k particles.
  *  - crackle pops (F.POPS emitters: stars x pops) are thinned on medium / mobile: each star keeps a
  *    random ~60 % / ~40 % of its pops. Their light is compensated a little in the shaders.
  *
@@ -24,7 +25,10 @@ interface Rule {
 }
 
 const RULES: Record<string, Rule> = {
-  'fw-stars': { scale: { ultra: 1.3, high: 1.3, medium: 1.25, mobile: 1 }, cap: { mobile: 15000 } },
+  // (round 12: the point-like stars, crackle pops and shed glitter, have their own layer `fw-points` at 2
+  // triangles each; the two mobile caps together stay below the old shared one's triangles)
+  'fw-stars': { scale: { ultra: 1.3, high: 1.3, medium: 1.25, mobile: 1 }, cap: { mobile: 12000 } },
+  'fw-points': { scale: { ultra: 1.3, high: 1.3, medium: 1.25, mobile: 1 }, cap: { mobile: 12000 } },
   'fw-smoke': { scale: { ultra: 1.5, high: 1.5, medium: 1.5, mobile: 1.3 } },
   'pyro-sparks': { cap: { mobile: 12000 } },
 };
