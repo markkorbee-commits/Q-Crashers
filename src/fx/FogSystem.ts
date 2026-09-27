@@ -6,8 +6,9 @@ import { CueFxSystem, EmitterSet } from './core/CueFxSystem';
 import { DIST, Emitter, F, PUFF, R } from './core/Emitter';
 import { fxColor, num, str } from './core/fxColors';
 import { clusters } from './core/placement';
-import { HazeField } from './haze';
+import { HazeField, type HazeBank } from './haze';
 import { installFxProxy } from './proxy';
+import { PILLAR_X, PILLAR_Z } from '../world/site';
 
 const L_FOG = 0;
 const WHITE = new THREE.Color(0.9, 0.9, 0.92);
@@ -36,7 +37,10 @@ interface LevelSeg {
  *    systems read it for beam/laser visibility.
  *  - A haze field of large soft sprites (stage cloud, field layer, high smoke band) glows in the
  *    light of the LightEnv bus. Its density = haze level + smoke accumulated from recent pyro and
- *    firework cues (an analytic sum over the cue list, so it is seek-safe).
+ *    firework cues (an analytic sum over the cue list, so it is seek-safe). Round 12: low smoke banks roll off the
+ *    deck lip, the pillar feet (lit by the shafts' uplight) and the side sections / arms (the castle-base wash band),
+ *    built up by recent pyro and smoke cannons; for a spectator (first / third person) the lit haze clears round the
+ *    eye and does not glow high up.
  *  - `fog.burst` (smoke clouds at targets) and `fog.lowfog` (ground fog on the deck flowing onto the
  *    field) are analytic puff particles like the pyro smoke. A low fog bank is lit by the light bus like
  *    all smoke plus the beam light it holds (LightEnv.lowFogLight), so it goes dark with the rig; it is
@@ -51,6 +55,8 @@ export class FogSystem extends CueFxSystem {
   private levelRev = -1;
   private readonly c1 = new THREE.Color();
   private stageSmoke = 0;
+  /** 0..1 smoke of recent pyro and smoke cannons (no fireworks): builds the low smoke banks */
+  private groundSmoke = 0;
   private skySmoke = 0;
   private hazeLevel = DEFAULT_HAZE;
   private readonly glowNow = new THREE.Color();
@@ -59,6 +65,7 @@ export class FogSystem extends CueFxSystem {
   private readonly tintSum = new THREE.Color();
   private readonly tint = new THREE.Color(1, 1, 1);
   private crowdSys: { mode?: unknown } | null | undefined = undefined;
+  private camSys: { mode?: unknown } | null | undefined = undefined;
   /**
    * calibration hooks (in-page experiments; burst lights are baked when a cue is expanded, so clear the
    * cue cache after changing perTarget): tintLean = how far the site smoke's albedo leans to the site
@@ -68,7 +75,27 @@ export class FogSystem extends CueFxSystem {
    * started one life earlier) and fades in over 3 s; tallBank = extra height of a dense bank (density 0.9 -> 1.5).
    * The beam light a bank holds (LightEnv.lowFogLight) has its gain in FxShared.uniforms.uLowFogGain.
    */
-  readonly tune = { tintLean: 0.3, perTarget: true, release: LOWFOG_RELEASE, prewarm: true, tallBank: 1 };
+  readonly tune = {
+    tintLean: 0.3,
+    perTarget: true,
+    release: LOWFOG_RELEASE,
+    prewarm: true,
+    tallBank: 1,
+    // round 12, low smoke banks (HazeField.setBanks): bankBase = density per unit of haze level; bankSmoke = density
+    // added by the smoke of recent pyro and smoke / CO2 cannons (groundSmoke, eased in between bankK0 and bankK1);
+    // bankDeck / bankPillars = share of the deck lip / the pillar feet; bankSides = the side-section band per unit of
+    // haze level, bankArms = the arms' share of it. Their light: HazeField uBankLight / uBankFill.
+    bankBase: 0,
+    bankSmoke: 1.2,
+    bankK0: 0.15,
+    bankK1: 1.1,
+    bankDeck: 0.7,
+    bankPillars: 0.7,
+    bankSides: 2,
+    bankArms: 0.8,
+    // first / third person: how far the lit haze clears round the spectator and stops glowing high up (HazeField.setViewer)
+    viewer: 1,
+  };
 
   protected override onInit(app: App): void {
     if (app.params.has('fxproxy')) installFxProxy(app);
@@ -85,11 +112,24 @@ export class FogSystem extends CueFxSystem {
   private buildHaze(q: QualitySettings): void {
     this.haze?.dispose();
     const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
-    this.haze = new HazeField(this.shared.uniforms, [
-      { min: V(-105, 3, -38), max: V(105, 30, 12), size: [13, 26], aspect: 0.8, count: 46 },
-      { min: V(-80, 1.5, 4), max: V(80, 8, 205), size: [16, 30], aspect: 0.35, count: 64 },
-      { min: V(-150, 40, -110), max: V(150, 105, 20), size: [24, 44], aspect: 0.65, count: 26 },
-    ]);
+    // round 12: low smoke banks at the deck lip, round the pillar bases, along the side-section fronts and the arms
+    // (site.ts: deck X ±37 front Z 0 at Y 1.9, side sections to X ±92 front Z −4, arms X ±92..94 Z −4..58, pillars
+    // X ±20 at Z 36 / 69 / 102 / 135)
+    const banks: HazeBank[] = [{ min: V(-38, 1.5, 1), max: V(38, 3.5, 6), size: [10, 16], count: 14, group: 0 }];
+    for (const pz of PILLAR_Z) for (const sx of [-1, 1]) banks.push({ min: V(sx * PILLAR_X - 5, 0.9, pz - 4), max: V(sx * PILLAR_X + 3, 2.2, pz + 4), size: [5, 9], count: 6, group: 1 });
+    for (const sx of [-1, 1]) {
+      banks.push({ min: V(sx > 0 ? 38 : -92, 0.8, -3), max: V(sx > 0 ? 92 : -38, 2.4, 3), size: [9, 15], count: 8, group: 2 });
+      banks.push({ min: V(sx * 93 - 3, 0.8, 2), max: V(sx * 93 + 3, 2.4, 56), size: [9, 14], count: 5, group: 3 });
+    }
+    this.haze = new HazeField(
+      this.shared.uniforms,
+      [
+        { min: V(-105, 3, -38), max: V(105, 30, 12), size: [13, 26], aspect: 0.8, count: 46 },
+        { min: V(-80, 1.5, 4), max: V(80, 8, 205), size: [16, 30], aspect: 0.35, count: 64 },
+        { min: V(-150, 40, -110), max: V(150, 105, 20), size: [24, 44], aspect: 0.65, count: 26 },
+      ],
+      banks,
+    );
     this.haze.setShare(hazeShare(q));
     this.app.scene.add(this.haze.mesh);
   }
@@ -530,7 +570,10 @@ export class FogSystem extends CueFxSystem {
     const t = ctx.showTime;
     const level = this.hazeAt(t);
     this.hazeLevel = level;
-    const pyro = this.accumulate('pyro', t, false) + this.accumulate('fog', t, false) + this.accumulate('fireworks', t, false);
+    const ground = this.accumulate('pyro', t, false) + this.accumulate('fog', t, false);
+    const pyro = ground + this.accumulate('fireworks', t, false);
+    // smoke of the pyro and the smoke / CO2 cannons (not the fireworks, whose smoke hangs over the site) for the banks
+    this.groundSmoke = 1 - Math.exp(-ground);
     const sky = this.accumulate('fireworks', t, true);
     this.stageSmoke = 1 - Math.exp(-pyro);
     this.skySmoke = 1 - Math.exp(-sky);
@@ -555,6 +598,20 @@ export class FogSystem extends CueFxSystem {
       const stage = (0.062 * level + 0.1 * this.stageSmoke) * sk + 0.22 * siteSmoke;
       const field = ((0.022 * level + 0.02 * this.stageSmoke) * sk + 0.09 * siteSmoke) * (tribe ? 0.55 : 1);
       const skyD = 0.02 * level + 0.2 * this.skySmoke + 0.12 * siteSmoke;
+      // low smoke banks (round 12): the pyro and the smoke / CO2 cannons build a bank at the deck lip and round the
+      // pillar feet (their accumulated smoke: ~10-20 s to clear, v70 / v505 / v1047; bankBase 0: the show haze alone
+      // leaves none, a trace cost v240 / v289); the side sections and arms carry a band of low fog in the castle-base
+      // wash from the first frame (the U of the opening drone shots, v30)
+      const bt = this.tune;
+      // (eased in: a trace of smoke leaves no bank — v240 / v289 keep a clean floor; a burst of cannons does, v505)
+      const gs = Math.min(1, Math.max(0, (this.groundSmoke - bt.bankK0) / Math.max(0.01, bt.bankK1 - bt.bankK0)));
+      const bSmoke = bt.bankSmoke * gs * gs * (3 - 2 * gs);
+      const bBase = bt.bankBase * level;
+      const bSide = bt.bankSides * level + 0.6 * bSmoke;
+      this.haze.setBanks((bBase + bSmoke) * bt.bankDeck, (bBase + bSmoke) * bt.bankPillars, bSide, bSide * bt.bankArms);
+      this.haze.setShaftLight(env.pillarShaftColor, env.pillarShaftIntensity);
+      const cm = this.cameraMode();
+      this.haze.setViewer(cm === 'first' || cm === 'third' ? this.tune.viewer : 0);
       this.haze.setDensity(stage, field, skyD);
       // close-ups at the deck: distance from the camera to the lit deck volume (X ±37, Z −30…8, Y ≤ 20)
       const cp = ctx.camera.position;
@@ -578,6 +635,13 @@ export class FogSystem extends CueFxSystem {
     }
   }
 
+  /** the camera rig's mode ('first', 'third', 'free', 'flyover', 'showcam'), read duck-typed */
+  private cameraMode(): string {
+    if (this.camSys === undefined) this.camSys = (this.app.get('camera') as unknown as { mode?: unknown } | undefined) ?? null;
+    const m = this.camSys?.mode;
+    return typeof m === 'string' ? m : 'showcam';
+  }
+
   /** 'tribe' (crowd present) or 'filmed' (empty grounds), read duck-typed from the crowd system */
   private crowdMode(): string {
     if (this.crowdSys === undefined) this.crowdSys = (this.app.get('crowd') as unknown as { mode?: unknown } | undefined) ?? null;
@@ -589,6 +653,7 @@ export class FogSystem extends CueFxSystem {
     const s = super.stats();
     s.haze = +this.hazeLevel.toFixed(2);
     s.stageSmoke = +this.stageSmoke.toFixed(2);
+    s.groundSmoke = +this.groundSmoke.toFixed(2);
     s.skySmoke = +this.skySmoke.toFixed(2);
     s.hazeSprites = this.haze?.count ?? 0;
     return s;
