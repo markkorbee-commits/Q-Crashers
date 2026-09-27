@@ -7,8 +7,20 @@ const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
 
 /** distance (m) at which a pyro light's contribution to the lens glare has fallen to one half */
 const GLARE_DIST = 350;
-/** scene light energy (Σ intensity x view x distance x zoom) that gives 63 % of the full glare */
-const GLARE_E0 = 7;
+/**
+ * scene light energy (Σ intensity x view x distance x zoom) that gives 63 % of the full glare. Round 9 (7 -> 5, with
+ * GLARE_WARM 2): re-checked after the round-8 wing fire (one ~22 m line light per wing, energy 2.0 at v101, 1.9 at
+ * v729.25, 2.9 at v713.5, well inside the size clamp): the video's burning wings sit in a deep orange glow of lit smoke
+ * (v713.5 frame-filling), ours had a pale yellow halo. Similarity (Mac GPU): 713.5 +3.7, 788.5 +2.7, 729.25 +1.3,
+ * 827.25 +0.8, 1194 +0.7, 101 +0.1; 313.75 / 1536.25 -0.6, 600.4 -0.5, 1509.5 -0.4 (the gold walls); 64 moments +0.04
+ */
+const GLARE_E0 = 5;
+/**
+ * saturation of the halos: the halo colour is the light's colour warped towards its dominant channel,
+ * c' = I (c / I)^GLARE_WARM (I = max channel). The halo is the fire's light scattered in its own smoke and in the
+ * lens, deeper than the flame core (gold 1 : 0.67 : 0.33 -> 1 : 0.45 : 0.11; white stays white, red stays red)
+ */
+const GLARE_WARM = 2;
 /** the site-wide `atmos.glow` (lit smoke) counts as a light of this intensity per unit of glow */
 const GLOW_WEIGHT = 3;
 /**
@@ -50,9 +62,10 @@ export class SceneGlare {
   /**
    * tuning: `psf` = angular radius of the lens' glare kernel (screen heights; fixed in image space),
    * `src` = visible size of a light around its line (share of its reach: the flames and the smoke they
-   * light), `dist` (m) / `e0` / `glow` / `size` (m, 0 = off) as the constants above
+   * light), `dist` (m) / `e0` / `glow` / `size` (m, 0 = off) / `warm` (1 = the light's own colour) as the
+   * constants above
    */
-  readonly tune = { psf: 0.05, src: 0.35, dist: GLARE_DIST, e0: GLARE_E0, glow: GLOW_WEIGHT, size: GLARE_SIZE };
+  readonly tune = { psf: 0.05, src: 0.35, dist: GLARE_DIST, e0: GLARE_E0, glow: GLOW_WEIGHT, size: GLARE_SIZE, warm: GLARE_WARM };
   /** unsmoothed glare amount of this frame (debug) */
   target = 0;
   /** light energy seen this frame (debug) */
@@ -148,7 +161,11 @@ export class SceneGlare {
       cb += C.z * df * vis;
       if (vis < 0.002) continue;
       out.seg[k].set(nax * hx, nay * 0.5, nbx * hx, nby * 0.5);
-      out.col[k].set(C.x * df, C.y * df, C.z * df, ra);
+      // the halo is the fire's light scattered in its smoke and the lens: more saturated than the flame core (GLARE_WARM)
+      const wp = tn.warm;
+      if (wp !== 1) {
+        out.col[k].set(I * Math.pow(Math.max(0, C.x) / I, wp) * df, I * Math.pow(Math.max(0, C.y) / I, wp) * df, I * Math.pow(Math.max(0, C.z) / I, wp) * df, ra);
+      } else out.col[k].set(C.x * df, C.y * df, C.z * df, ra);
       out.rb[k] = rb;
       k++;
     }

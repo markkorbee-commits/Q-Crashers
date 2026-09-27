@@ -133,7 +133,31 @@ const GLOW_GAIN = 0.8;
  * by its own height (Σ colour x intensity x share(y) per bucket, tried in a local LightEnv patch) changed no moment
  * by more than 0.3 points (1566, 1536.25, 1515, 876, 264.75 ...): the centroid share stays.
  */
-export const worldLightTune = { h0: 30, hw: 15 };
+export const worldLightTune = { h0: 30, hw: 15, smokeFilter: 1.5 };
+
+/**
+ * Per-channel transmission of the coloured site smoke (round 9, written by updateWorldLights): a dyed smoke bank is a
+ * colour filter, the flash light that crosses it on its way to the grounds (and the light it scatters into the air,
+ * see the EnvironmentSystem) takes its hue: 1 - a + a x glow / max(glow), a = min(1, smokeFilter x smoke in the air).
+ * The smoke in the AIR (built up over seconds), not the glow light: the white U fountains of the 27 s red bank light a
+ * pure red field on the video (v1524-1533 [49-93, 0-3, 0-2]; ours was [74-81, 14-16, 13-14]), the white-orange fire of
+ * the 1 s red eruption at v1565.5 does not turn red. Similarity (Mac GPU, 1.5): 1524.75 +0.7, 1530.5 +0.6,
+ * 1536.25 +0.6; 1566 -0.4. In-page A/B: `__app.get('environment').worldTune.smokeFilter` (0 = off).
+ */
+export const smokeTransmission: { readonly r: number; readonly g: number; readonly b: number } = { r: 1, g: 1, b: 1 };
+const filt = smokeTransmission as { r: number; g: number; b: number };
+function smokeFilter(env: LightEnv, smokeAir: number): void {
+  const g = env.glowColor;
+  const m = Math.max(g.r, g.g, g.b);
+  const a = Math.min(1, Math.max(0, smokeAir) * worldLightTune.smokeFilter);
+  if (!(m > 1e-4) || !(a > 0)) {
+    filt.r = filt.g = filt.b = 1;
+    return;
+  }
+  filt.r = 1 - a + (a * g.r) / m;
+  filt.g = 1 - a + (a * g.g) / m;
+  filt.b = 1 - a + (a * g.b) / m;
+}
 
 /** share of a flash bucket's light that reaches the grounds, by the height (m) of its centre */
 function groundShare(y: number): number {
@@ -175,7 +199,7 @@ function setFlash(b: FlashBucket, k: number, pos: THREE.Vector4, col: THREE.Vect
   // aerial breaks high over the field light the ground far less than the walls on the deck
   const fl = FLASH_GAIN * k * groundShare(b.pos.y);
   const c = b.color;
-  warm(c.r, c.g, c.b, FLASH_WARM, fl, warmOut);
+  warm(c.r * filt.r, c.g * filt.g, c.b * filt.b, FLASH_WARM, fl, warmOut);
   col.set(warmOut.r, warmOut.g, warmOut.b);
   const s = b.spread;
   // area light: a wall of sources softens the near hot spot and carries further (1/(d² + R²))
@@ -202,9 +226,10 @@ export function pillarChase(env: LightEnv, i: number): number {
 
 /**
  * write this frame's show light state into the shared uniforms (call after all emitters ran).
- * `flashScale` < 1 softens the flash light on the grounds (photosensitivity setting).
+ * `flashScale` < 1 softens the flash light on the grounds (photosensitivity setting); `smokeAir` = the site smoke in
+ * the air (0..1, EnvironmentSystem smokeAt) for the coloured-smoke filter.
  */
-export function updateWorldLights(env: LightEnv, time: number, flashScale = 1): void {
+export function updateWorldLights(env: LightEnv, time: number, flashScale = 1, smokeAir = 0): void {
   const u = worldUniforms;
   u.uWTime.value = time;
   for (let i = 0; i < N; i++) {
@@ -226,13 +251,14 @@ export function updateWorldLights(env: LightEnv, time: number, flashScale = 1): 
   u.uWStageCol.value.z += sb;
   // flashes: the total is compressed once, both buckets share the factor
   const k = flashCompression(env.flashIntensity, WORLD_FLASH_K) * flashScale;
+  smokeFilter(env, smokeAir);
   setFlash(env.flashStage, k, u.uWFlash.value, u.uWFlashCol.value);
   setFlash(env.flashField, k, u.uWFlash2.value, u.uWFlashCol2.value);
   // bounce off the lit smoke around the flash centre (falls to a quarter at WORLD_BOUNCE_R + 0.6 spread)
   flashBounce(env, bounceC);
   const F = env.flashIntensity;
   const bk = F > 0 ? (flashScale * WORLD_BOUNCE_K * F * groundShare(env.flashPos.y)) / (F + WORLD_BOUNCE_F) : 0;
-  u.uWAmbCol.value.set(bounceC.r * bk, bounceC.g * bk, bounceC.b * bk);
+  u.uWAmbCol.value.set(bounceC.r * bk * filt.r, bounceC.g * bk * filt.g, bounceC.b * bk * filt.b);
   const sp = env.flashSpread;
   const r = WORLD_BOUNCE_R + 0.6 * sp;
   u.uWAmbPos.value.set(env.flashPos.x, Math.max(8, env.flashPos.y), env.flashPos.z, 1 / (r * r));
