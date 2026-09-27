@@ -195,6 +195,63 @@ listed under "Engine behaviour". Unknown params are still ignored.
 * **64 moments:** 67.1 / 50.2 % → 67.2 / 50.3 % (colour 67.9, light 80.5, shape 54.8); only 729.25
   (+2.0) and 1438.5 (+0.8) of the 64 change.
 
+## Engine behaviour, round 9 (no cue changes needed)
+
+Measured with `scripts/similarity.mjs` (Show camera, Mac GPU, `--settle 500 --min-frames 30`, pre-roll on).
+
+* **The eruption of the biggest mines lights the field.** A `burst` with `size` from 2.6 (full at 3: the
+  white burst on `mines` at 1565.3) also pushes one strong line light from the mines 60 m out over the
+  field, reaching 0.75 × (the burst's width + 40 m) (60 m for the four mines), peak 12 × size, warm white
+  (the burst colour, 30 % white, then halfway to the fire colour: the white burst inside the gold crackle
+  and the white-gold wall), 60 % lit smoke (`haze`), for the burn + 0.85 s (release 0.6 s: white to
+  v1566.0, orange by v1566.25, gone by v1566.5 as in the video). It ranks first among the pyro lights
+  (kept on every preset); FieldLight, the haze, the smoke and the lens glare see it. The pyro light cap
+  is unchanged (9). 1565.75 26.5 → 35.8 %, 1566 27.8 → 35.5, 1566.25 30.3 → 38.5, 1565.5 37.0 → 39.6;
+  1566.5–1568 and the size 2 / 2.5 bursts (600.5, 877) unchanged. An extra lit smoke cloud rolling out
+  over the field measured the same and was left out; a light cap of 20 instead of 9 measured the same too.
+  What is left at 1565.5–1566.25 is the red of the site (video sky [133,8,0], trees [141,10,1], ours
+  ~[40,11,11]: atmos glow / flood, not pyro) and the framing (the video camera is closer).
+* **The bulky flame eruption towers.** A billowing wall with `width` ≳ 2 (bulk B from 1.3 to 1.7: the
+  `width: 3` wall of 1508.3) rises (0.78 + 0.35 (B − 1) + 0.6) × H (was without the + 0.6) with balls
+  1.3 × bigger: from the fitted drone of v1508.4–1509.8 (−0.3, 66.7, 231.8, fov 52) the fire mass
+  now reaches frame y ≈ 0.1 as in the video. Scored from that drone: 1509 50.0 → 53.7 %, 1509.5 44.9 →
+  49.5, 1508.5 unchanged. The Show camera of 1507.004 is closer than the fitted drone ((0, 49.5, 200),
+  fov 48 at v1509), so there the taller mass overfills the frame (1509 50.3 → 43.8, 1509.5 45.1 → 38.6):
+  the camera fit is the camera group's (requested). The ball life is unchanged: a longer life left
+  soot hanging at 1511.75 (−9.5).
+* **Tall U walls fan out.** Gerb walls (8+ units) taller than 14 m without an authored `angle` (and
+  without `fan`) lean their side-section and arm units outward by up to 12° (from |x| 40 m, full at
+  88 m); without an authored `spread` their cone also opens up to 1.8 × (an authored `spread` stays as
+  written): the plumes at the ends of the U lean out towards the frame edges (v1193, v1199). Measured
+  neutral (1190–1200, 1301–1307, 1528, 1536.25, 877.25/877.75, 1313.5/1314, 1566.5/1567.5 within ±0.6).
+* **Pale tints keep their hue; the chroma push is gentler.** A pale non-warm author colour of saturation
+  0.1–0.22 (`#FFD8F0` pink, `#E8D8FF` lilac) is a colour, no longer white titanium: white-hot sparks
+  (hot core 0.56) that cool to their own hue, nearly white brightness (× 0.96), and the light, the row
+  smoke, the burning cloud and the flash of the row carry the hue at saturation 0.5 (`#FFD8F0` lights its
+  smoke (1, 0.5, 0.8)): the pink waves of v1192 / v1198 stand in pink air, the lilac waves of v1302 /
+  v1305 in lilac. Warm pale whites (`#FFF0D8`, `#FFF2E0`, …: r ≥ g ≥ b) and near-neutral colours (< 0.1,
+  `#F4F8FF`) stay white. The push of pale tints towards the saturated star colour is gentler: each
+  channel's distance from white × k, k from 1 at saturation 0.12 to at most 1.25 at 0.3, blending into
+  the older push (k = 1 + min(0.7, 2.2 (sat − 0.2))) between 0.4 and 0.55; gold / orange and saturated
+  colours are unchanged. Brightness of coloured sparks: × (1 − 0.38 smoothstep(0.12, 0.3, sat)) (0.62
+  from 0.3, as before).
+
+  | author colour | round 8 spark colour | round 9 spark colour | light / smoke colour |
+  |---|---|---|---|
+  | `#FFD8F0` | white (1, 0.85, 0.94) | pale pink (1, 0.84, 0.94) | (1, 0.50, 0.80) |
+  | `#E8D8FF` | white (0.91, 0.85, 1) | pale lilac (0.91, 0.84, 1) | (0.71, 0.50, 1) |
+  | `#FFA0D8` | (1, 0.49, 0.79) | (1, 0.53, 0.81) | (1, 0.53, 0.81) |
+  | `#FFB0E0` | (1, 0.62, 0.85) | (1, 0.61, 0.85) | (1, 0.61, 0.85) |
+  | `#FF60B0`, `#FF30C0`, `#FF7020`, `#FF3818` | unchanged | unchanged | unchanged |
+
+  1303 60.0 → 61.5 %, 1193 −0.6, 1199 −0.4, 1301/1304 within ±0.6.
+* **`column` on a whole wall stays a bad idea.** Tested on the 3.6 s 32 m wall of 1565.3: +4.0 at
+  1566.5, −2.4 / −6.0 / −5.8 at 1567 / 1567.5 / 1568 (the round-8 finding). A law that fades the loose
+  edge of the cone like loose sparks (energy-conserving only near the axis) halves both the gain and the
+  loss; still net negative, not kept. Both 1566.5 and 1567.5 are seen from the same distance, so no
+  distance-dependent law can separate them: in the video the wall is brightest in the first second of
+  its burn and thinner after. Use `column` on narrow jets seen from far (the pillar fans, see `fan`).
+
 ## pyro — new params
 
 | fx | param | meaning |
@@ -209,6 +266,7 @@ listed under "Engine behaviour". Unknown params are still ignored.
 | flame / firewall | `blowout` | `true` (with billow): the finale version. Adds a white-gold spark wall between the columns, a row of fireballs at the cut and a larger flash. |
 | gerb / sparkular | `colors`, `changes` | a colour sequence over the burn, e.g. `["#FFE0A0","#FF30C0","#FF7020"]`, with switch times in seconds relative to the cue (default: evenly spaced). The whole column turns at once: sparks already in flight change colour too. |
 | gerb | `smoke` | 0..3: a self-lit smoke column per unit (the obelisk capitals) |
+| gerb | `fan`, `fanSpread` | (round 9) heads per unit (1–7) spread over `fanSpread` degrees (default 70) around `angle`, the heads sharing the unit's sparks (÷ √fan): multi-armed gerb fans such as the three-armed white trees on the lantern pillars (v1565.5–1566.9: `fan: 3, fanSpread: 70, angle: 0, spread: 4`). With `column: true` they stay bright lines from a far drone. A `fan` wall does not get the round-9 outward lean. |
 | gerb | `column` | `true` (round 7): a dense column that keeps its full light when its sparks are thinner than a pixel. Sparks under a pixel are normally drawn at (w / w_min)^1.5 of their light (a lone spark fades out at a distance); the sparks of a `column` gerb use the energy-conserving (w / w_min)^1, so a wall seen from a far drone reads as bright columns (the white wall of v1565.3–1568.8 from ~400 m; metric-neutral there while the red site glow still covers that frame). Close up nothing changes. Use it only where the video shows bright columns from far away: on every wall it over-brightens the distant walls of v1190 / v1300 (measured −17 / −7 points). |
 | jet | `count`, `radius` | several jets around each anchor (the piano tower rig), leaning slightly outward |
 | jet | `cloud` | `true`: the plumes merge into one big CO2 cloud over the middle of the rig. It glows in `color` for about 2 s (the green cloud at v767.25). |

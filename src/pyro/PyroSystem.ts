@@ -47,6 +47,26 @@ const WING_HAZE = 0.6;
 /** light share of the roll-over fireballs on the surface wings (the band light carries the fire) */
 const WING_BALL_LIGHT = 0.35;
 
+/**
+ * the biggest mines (burst `size` from ERUPT_SIZE to 3, v1565.3) light the field inside the U (eruption):
+ * light strength per unit of size, its glow time (s), its warmth (share of the fire colour), the
+ * forward length of the light (m) and its reach per m of the burst's width
+ */
+const ERUPT_SIZE = 2.6;
+const ERUPT_LIGHT = 12;
+const ERUPT_GLOW = 0.85;
+const ERUPT_WARM = 0.5;
+const ERUPT_LEN = 60;
+const ERUPT_REACH = 0.75;
+/** the bulky flame eruption (billow `width` >= ~2, v1508.4): extra rise (x H) and ball size */
+const BULK_RISE = 0.6;
+const BULK_SIZE = 0.3;
+/** tall U walls (gerbs > 14 m, 8+ units, no authored angle): outward lean (deg) and cone widening (no authored spread) of the side units */
+const SIDE_LEAN = 12;
+const SIDE_SPREAD = 0.8;
+/** the smoke and the air around a pale non-warm fountain tint glow at this saturation (glowTint) */
+const GLOW_SAT = 0.5;
+
 /** big mine / flash-pot bursts (burst `size` >= BLAST_SIZE) throw a lit cloud (blastCloud): glow time (s), self-light, light */
 const BLAST_SIZE = 1.8;
 const BLAST_GLOW = 0.7;
@@ -86,7 +106,8 @@ const PLINTH_HALF = 3.4;
  *     on the wing surface (fingers + membranes, see wingSurface); `billow` (default: on for rows ≥ 14 m): rolling 20–35 m fireball
  *     barrage; `blowout: true`: + spark wall + fireball row + bigger flash (finale)
  *   gerb/sparkular: `angle`, `spread` (deg), `colors` (list: colour sequence over the burn) +
- *     `changes` (relative switch times, s), `smoke` (0..3: a self-lit smoke column per unit)
+ *     `changes` (relative switch times, s), `smoke` (0..3: a self-lit smoke column per unit);
+ *     gerb: `column` (see columnLaw), `fan` (heads per unit, 1-7) + `fanSpread` (deg, default 70)
  *   jet: `count` + `radius` (several jets around each anchor), `cloud: true` (the jets merge into
  *     one big coloured, self-lit CO2 cloud), `color`
  *   burst: dur >= 2 s or `type: "bengal"` turns it into a Bengal flare (any dur); `color`;
@@ -104,6 +125,7 @@ export class PyroSystem extends CueFxSystem {
   private readonly c1 = new THREE.Color();
   private readonly c2 = new THREE.Color();
   private readonly v1 = new THREE.Vector3();
+  private readonly v2 = new THREE.Vector3();
   /** 1 = warm hydrocarbon flame ramp, 0 = coloured flame (set by flameColor) */
   private warm = 1;
 
@@ -755,10 +777,13 @@ export class PyroSystem extends CueFxSystem {
     // ignition, as in the video), then decelerating into a buoyant, rolling cloud at the top
     const k = 3;
     const buoy = 9;
+    // the bulky eruption (`width` ~3, B ~1.7) towers far over its authored height: from the fitted drone
+    // of v1508.4-1509.8 the fire mass rises ~1.6 x H (frame y 0.1), the balls ~1.3 x bigger
+    const m = smooth01(1.3, 1.7, B);
     const life = 1.5 + 0.035 * Hh;
     const tr = 0.45;
     const vT = buoy / k;
-    const v0 = vT + (((0.78 + 0.35 * (B - 1)) * Hh - vT * tr) * k) / (1 - Math.exp(-k * tr));
+    const v0 = vT + (((0.78 + 0.35 * (B - 1) + BULK_RISE * m) * Hh - vT * tr) * k) / (1 - Math.exp(-k * tr));
     const rate = 30;
     const count = this.pc(rate * life * Math.min(1, Math.sqrt(26 / Math.max(1, n))), 10);
     let maxDelay = 0;
@@ -783,7 +808,7 @@ export class PyroSystem extends CueFxSystem {
           .color2(SOOT, warm)
           .life(life * 0.75, life)
           .emit(count, dur)
-          .size((1.4 + 0.04 * H) * B, 0.3 * Hh * hj * B)
+          .size((1.4 + 0.04 * H) * B * (1 + BULK_SIZE * m), 0.3 * Hh * hj * B * (1 + BULK_SIZE * m))
           .trail(0.45, 0.32)
           .seed(seed)
           .set(R.X1, 1.1)
@@ -1243,6 +1268,15 @@ export class PyroSystem extends CueFxSystem {
     // `column`: a dense column keeps its full light when its sparks are smaller than a pixel (a far
     // drone camera), see columnLaw
     const column = !cold && bool(p.column, false);
+    // `fan`: n heads per unit spread over `fanSpread` degrees around `angle` (the three-armed white
+    // fans on the lantern pillars, v1565.5-1566.9); the heads share the unit's sparks a little
+    const fan = cold ? 1 : Math.round(num(p.fan, 1, 1, 7));
+    const fanSpread = num(p.fanSpread, 70, 0, 160);
+    // a tall U wall (8+ units) fans out: its side-section and arm units lean outward and throw a wider
+    // plume (v1193, v1199: the plumes at the ends of the U lean out towards the frame edges); an
+    // authored `angle` or `fan` keeps the lean off, an authored `spread` is used as written
+    const leanU = tall && pts.length >= 8 && p.angle === undefined && fan === 1 ? SIDE_LEAN : 0;
+    const sideSpread = p.spread === undefined ? SIDE_SPREAD : 0;
     const smoke = Math.min(3, typeof p.smoke === 'number' ? p.smoke : bool(p.smoke, false) ? 1 : 0);
     // colour sequence over the burn (`colors` + `changes`), else one colour
     const list = colorSpecs(p.colors);
@@ -1260,27 +1294,27 @@ export class PyroSystem extends CueFxSystem {
     const hueKs: number[] = [];
     for (let ci = 0; ci < nC; ci++) {
       const c = sparkChroma(fxColor(specs[ci], this.palette, this.c1, cold ? 'warm' : 'gold'), new THREE.Color());
-      const sat = saturation(c);
       cols.push(c);
-      hueKs.push(sat < 0.22 || isGoldish(c) ? 1 : 0.62);
+      hueKs.push(sparkHueK(c));
     }
     for (let ci = 0; ci < nC; ci++) {
       const w0 = winT[ci];
       const wd = Math.max(0.05, winT[ci + 1] - w0);
       const col = cols[ci];
       if (ci === 0) firstCol.copy(col);
-      const sat = saturation(col);
-      const white = sat < 0.22;
+      const white = isWhiteSpark(col);
       const gold = !white && isGoldish(col);
+      // a pale non-warm tint (#FFD8F0 pink, #E8D8FF lilac): white-hot sparks in a coloured glow
+      const pale = white || gold ? 0 : 1 - smooth01(0.12, 0.3, saturation(col));
       // the sparks of this window still in the air switch to the next colour with the column
       const next = ci + 1 < nC ? this.c2.copy(cols[ci + 1]).multiplyScalar(hueKs[ci + 1] / hueKs[ci]).clone() : null;
       // what the sparks cool to: charcoal gold -> deep orange, white (titanium) -> pale gold,
       // metal-salt colours -> a darker version of their own hue
       const coolTo = white ? PALE_GOLD.clone() : gold ? DEEP_ORANGE.clone() : col.clone().multiplyScalar(0.55);
       // saturated sparks at gold's HDR level would clip to white in the tone mapper
-      const hueK = white || gold ? 1 : 0.62;
+      const hueK = hueKs[ci];
       const inten = intenP * (cold ? 11 : 17) * hueK;
-      const hotMix = white ? 0.6 : gold ? 0.45 : 0.18;
+      const hotMix = white ? 0.6 : gold ? 0.45 : 0.18 + 0.42 * pale;
       // white / silver sparks of a shorter tall wall: thin, loose streaks (v1441 from the drone, v1446
       // close up), not dense sheets: fewer sparks, each as bright (not a wall authored brighter than
       // normal: the white pillar fans of v1565.5 stay dense)
@@ -1290,34 +1324,39 @@ export class PyroSystem extends CueFxSystem {
         const pos = pts[u];
         const t0 = cue.t + steps[u] * stagger + w0;
         if (ci === 0) maxDelay = Math.max(maxDelay, steps[u] * stagger);
-        const d = tiltedUp(pos.x, angle, this.v1);
+        const side = leanU > 0 ? smooth01(40, 88, Math.abs(pos.x)) : 0;
         const seed = this.sub(cue, u * 4 + ci * 997);
         // continuing colour windows start "hot" (no fade-in ramp): the fountain never stops
         const rampF = ci === 0 ? F.RAMP : 0;
-        const sp = new Emitter(DIST.CONE, F.COOL | F.FLICKER | rampF | (next ? F.ABSCHANGE : 0) | (column ? F_COLUMN : 0));
-        if (next) sp.color2(next, 0).set(R.Z3, t0 + wd);
-        else sp.color2(coolTo, -1);
-        out.add(
-          sp
-            .on(L_SPARK)
-            .originV(pos)
-            .time(t0)
-            .dirV(d, spread)
-            .speed(v0 * 0.72, v0 * 1.02)
-            .physics(k, -9.81)
-            .color(col, inten)
-            .life(life0, lifeMax)
-            .emit(Math.max(10, Math.round((count * thin * Math.min(1, wd / dur + 0.35)) / Math.max(1, Math.sqrt(nC)))), wd)
-            .size(cold ? 0.03 : 0.05, 0.45)
-            .trail(cold ? 0.06 : 0.12, cold ? 0.55 : 0.3)
-            .seed(seed)
-            // (a tall wall stands at once: its first sparks are not faded in, v1565.4)
-            .set(R.X3, tall ? 0.06 : 0.18)
-            .set(R.Y0, 0.85)
-            .set(R.Y3, 0.3)
-            .set(R.Z0, 0.02)
-            .window(t0, t0 + wd + lifeMax),
-        );
+        for (let h = 0; h < fan; h++) {
+          const a = (fan > 1 ? angle + fanSpread * (h / (fan - 1) - 0.5) : angle) + leanU * side;
+          const dh = tiltedUp(pos.x, a, this.v2);
+          const sp = new Emitter(DIST.CONE, F.COOL | F.FLICKER | rampF | (next ? F.ABSCHANGE : 0) | (column ? F_COLUMN : 0));
+          if (next) sp.color2(next, 0).set(R.Z3, t0 + wd);
+          else sp.color2(coolTo, -1);
+          out.add(
+            sp
+              .on(L_SPARK)
+              .originV(pos)
+              .time(t0)
+              .dirV(dh, spread * (1 + sideSpread * side))
+              .speed(v0 * 0.72, v0 * 1.02)
+              .physics(k, -9.81)
+              .color(col, inten)
+              .life(life0, lifeMax)
+              .emit(Math.max(10, Math.round((count * thin * Math.min(1, wd / dur + 0.35)) / Math.max(1, Math.sqrt(nC)) / Math.sqrt(fan))), wd)
+              .size(cold ? 0.03 : 0.05, 0.45)
+              .trail(cold ? 0.06 : 0.12, cold ? 0.55 : 0.3)
+              .seed(seed + h * 0x3571)
+              // (a tall wall stands at once: its first sparks are not faded in, v1565.4)
+              .set(R.X3, tall ? 0.06 : 0.18)
+              .set(R.Y0, 0.85)
+              .set(R.Y3, 0.3)
+              .set(R.Z0, 0.02)
+              .window(t0, t0 + wd + lifeMax),
+          );
+        }
+        const d = tiltedUp(pos.x, angle + leanU * side, this.v1);
         // bright core at the nozzle
         out.add(
           new Emitter(DIST.SINGLE, F.RAMP)
@@ -1395,9 +1434,10 @@ export class PyroSystem extends CueFxSystem {
       // around — the air and the set around the 16-22 m silver walls of v1439-1446 stay pink from the
       // stage light, not lit white; the 30-34 m finale walls keep their full light, see silverDim)
       const per = (cold ? 0.05 : 0.2 * Math.pow(H / 10, 0.6)) * intenP * (white ? 1 - 0.6 * silverDim(H) : gold ? 1 : 0.85);
-      this.rowLight(out, { ...cue, t: cue.t + w0 }, pts, steps, stagger, wd, 0.25, H * 0.4, col, per, 0.35 * H + 5);
+      this.rowLight(out, { ...cue, t: cue.t + w0 }, pts, steps, stagger, wd, 0.25, H * 0.4, glowTint(col, this.c1), per, 0.35 * H + 5);
     }
     if (n > 0) {
+      glowTint(firstCol, firstCol);
       // a burning gerb wall stands in a dense cloud of its own smoke, lit brightly in the fountain's
       // colour while it burns (v460.5 white wall, v558 pink fans, v600.4 gold-white wall, v1536 white
       // U): the light of the big moments is carried by that cloud
@@ -1415,7 +1455,7 @@ export class PyroSystem extends CueFxSystem {
         if (sC >= 0.08) this.burnCloud(out, cue, pts, steps, stagger, cue.t, dur, H, firstCol, 4.5 * Math.sqrt(sC) * (hueKs[0] < 1 ? 0.8 : 1), 0.17 * sC, sI >= sL ? 0.12 : 3);
         // silver / white (titanium) sparks of a shorter wall light their smoke far less than their
         // glare suggests: thinner, darker smoke, so the colour of the stage light on it reads (v1439.5)
-        const wd = saturation(firstCol) < 0.22 ? silverDim(H) : 0;
+        const wd = isWhiteSpark(firstCol) ? silverDim(H) : 0;
         this.rowSmoke(out, cue, pts, steps, H * 0.35, H, firstCol, 1.4 * (1 - SILVER_SELF * wd) * Math.min(2, Math.max(1, intenP)), 0.14 - SILVER_OPAC * wd, (1 + dur * 0.8) * n, cue.t + 0.3, dur + maxDelay, 6, 9, 0.7, 0.9, 1, cue.t + maxDelay + dur + 0.2);
       }
       this.rowFlash(out, pts, steps, H * 0.5, {
@@ -1624,6 +1664,41 @@ export class PyroSystem extends CueFxSystem {
       a,
       b,
       radius: 0.8 * R0 + 4,
+      haze: BLAST_HAZE,
+    });
+    const e = smooth01(ERUPT_SIZE, 3, size);
+    if (e > 0) this.eruption(out, cue, mn, mx, size, color, e);
+  }
+
+  /**
+   * The light of the biggest mines (`size` ERUPT_SIZE..3, full at 3: the white burst of v1565.3 that
+   * opens the last eruption): for ~1 s the whole field inside the U is lit near-white to orange out to
+   * the second pillar row and beyond (v1565.5 field [240,180,131], v1566.0 [245,207,169], orange by
+   * v1566.25, red by v1566.5). One strong line light from the mines out over the field (towards the
+   * audience, ERUPT_LEN m) reaching 0.75 x (the burst's width + 40 m), warm white (the white
+   * burst mixed with the gold crackle and the white-gold wall around it), 60 % lit smoke (`haze`).
+   * It ranks first among the pyro lights, so the medium preset's 8 kept lights always include it;
+   * FieldLight, the haze, the smoke and the lens glare see it. No extra smoke: the r8 blast cloud over
+   * the deck stays the burst's smoke (an extra lit cloud over the field measured the same).
+   */
+  private eruption(out: EmitterSet, cue: Cue, mn: THREE.Vector3, mx: THREE.Vector3, size: number, color: THREE.Color, e: number): void {
+    const cx = (mn.x + mx.x) * 0.5;
+    const z0 = (mn.z + mx.z) * 0.5;
+    const w = mx.x - mn.x + 40;
+    const a = new THREE.Vector3(cx, 12, z0 + 4);
+    const b = new THREE.Vector3(cx, 12, z0 + ERUPT_LEN);
+    out.lights.push({
+      kind: 1,
+      t0: cue.t,
+      t1: cue.t + Math.max(0.3, cue.dur) + ERUPT_GLOW,
+      decay: ERUPT_GLOW * 0.7,
+      strobe: 0,
+      color: this.c2.copy(color).lerp(WHITE, 0.3).lerp(FIRE_LIGHT, ERUPT_WARM).clone(),
+      peak: ERUPT_LIGHT * size * e,
+      pos: a.clone().add(b).multiplyScalar(0.5),
+      a,
+      b,
+      radius: ERUPT_REACH * w,
       haze: BLAST_HAZE,
     });
   }
@@ -1969,16 +2044,59 @@ function isGoldish(c: THREE.Color): boolean {
 }
 
 /**
- * Spark chemistry colour for a fountain: the author colour normalised to max 1, and a pale tint
- * (the washed-out colour the camera recorded of a bright metal-salt gerb) pushed back to the
- * saturated star colour that produces it. Near-white colours stay white.
+ * The colour a fountain lights its smoke and the air with: for a pale non-warm tint (#FFD8F0 pink,
+ * #E8D8FF lilac) the sparks are white-hot and the camera records them pale, but their glow in the
+ * smoke carries the hue (v1193 / v1199: the pink fountains stand in pink air), so the light, the row
+ * smoke and the burning cloud get the tint at saturation GLOW_SAT (hue kept). White, gold and already
+ * saturated colours are used as they are.
+ */
+function glowTint(c: THREE.Color, out: THREE.Color): THREE.Color {
+  out.copy(c);
+  if (isWhiteSpark(c) || isGoldish(c)) return out;
+  const sat = saturation(c);
+  if (sat >= GLOW_SAT) return out;
+  const mx = Math.max(c.r, c.g, c.b, 1e-4);
+  const k = GLOW_SAT / Math.max(sat, 1e-3);
+  return out.setRGB(1 - (1 - c.r / mx) * k, 1 - (1 - c.g / mx) * k, 1 - (1 - c.b / mx) * k);
+}
+
+/**
+ * White / titanium spark colour: near-neutral (saturation < 0.1), or a pale warm white of the gold
+ * family below 0.22 (#FFF0D8, #FFF2E0). A pale pink / lilac / blue tint of 0.1-0.22 is a colour
+ * (round 9: #FFD8F0 was white before, so the pink waves of v1192 / v1198 burnt white).
+ */
+function isWhiteSpark(c: THREE.Color): boolean {
+  const sat = saturation(c);
+  return sat < 0.1 || (sat < 0.22 && isGoldish(c));
+}
+
+/**
+ * Brightness of a spark colour relative to gold: saturated metal-salt stars at gold's HDR level would
+ * clip to white in the tone mapper (0.62 from saturation 0.3); pale tints stay nearly as bright as white.
+ */
+function sparkHueK(c: THREE.Color): number {
+  if (isWhiteSpark(c) || isGoldish(c)) return 1;
+  return 1 - 0.38 * smooth01(0.12, 0.3, saturation(c));
+}
+
+/**
+ * Spark chemistry colour for a fountain: the author colour normalised to max 1, and a pale tint (the
+ * washed-out colour the camera recorded of a bright metal-salt gerb) pushed a little towards the
+ * saturated star colour that produces it (hue kept: every channel's distance from white x k).
+ * Round 9, gentler for pale non-warm tints: k grows from 1 at saturation 0.12 to at most 1.25 at 0.3
+ * (#FFA0D8 -> (1, 0.53, 0.81), was (1, 0.49, 0.79); #FFB0E0 -> (1, 0.61, 0.85) as before; #FFD8F0 /
+ * #E8D8FF stay pale) and blends into the older, stronger push (k = 1 + min(0.7, 2.2 (sat - 0.2)))
+ * between saturation 0.4 and 0.55, which saturated and gold / orange colours keep unchanged
+ * (#FF60B0 -> (1, 0.02, 0.47), #FF7020 -> (1, 0.05, 0.02)).
  */
 function sparkChroma(c: THREE.Color, out: THREE.Color): THREE.Color {
   const mx = Math.max(c.r, c.g, c.b, 1e-4);
   out.setRGB(c.r / mx, c.g / mx, c.b / mx);
   const sat = saturation(out);
-  if (sat < 0.2) return out;
-  const k = 1 + Math.min(0.7, (sat - 0.2) * 2.2);
+  const kOld = sat < 0.2 ? 1 : 1 + Math.min(0.7, (sat - 0.2) * 2.2);
+  const kPale = 1 + 0.25 * smooth01(0.12, 0.3, sat);
+  const k = isGoldish(out) ? kOld : kPale + (kOld - kPale) * smooth01(0.4, 0.55, sat);
+  if (k === 1) return out;
   out.setRGB(Math.max(0.02, 1 - (1 - out.r) * k), Math.max(0.02, 1 - (1 - out.g) * k), Math.max(0.02, 1 - (1 - out.b) * k));
   return out;
 }
