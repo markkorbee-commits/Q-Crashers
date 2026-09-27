@@ -344,10 +344,10 @@ void main() {
 `;
 
 export const FLOOD_FRAG = /* glsl */ `
-uniform vec4 uBlobC[11];   // centre xyz, w = weight (11 = FLOOD_BLOBS in layers.ts)
-uniform vec3 uBlobS[11];   // sigma (m) per axis
-uniform vec3 uBlobCol[11]; // colour x intensity (0 = slot off)
-uniform float uBlobNear[11]; // share of the blob in the near pre-slice (lamps aimed at the lens)
+uniform vec4 uBlobC[12];   // centre xyz, w = weight (12 = FLOOD_BLOBS in layers.ts)
+uniform vec3 uBlobS[12];   // sigma (m) per axis
+uniform vec3 uBlobCol[12]; // colour x intensity (0 = slot off)
+uniform float uBlobNear[12]; // share of the blob in the near pre-slice (lamps aimed at the lens)
 uniform float uScale;     // camera haze scale (telephoto show shots see less haze)
 varying vec3 vView;
 varying float vRatio;
@@ -371,7 +371,7 @@ void main() {
   if (rd.y < -1e-3) t1 = min(t1, max(ro.y + 0.5, 0.0) / -rd.y);
   if (t1 <= t0) discard;
   vec3 acc = vec3(0.0);
-  for (int i = 0; i < 11; i++) {
+  for (int i = 0; i < 12; i++) {
     vec3 col = uBlobCol[i] * (vPre > 0.5 ? uBlobNear[i] : 1.0);
     if (col.r + col.g + col.b <= 0.0) continue;
     vec3 s = uBlobS[i];

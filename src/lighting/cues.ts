@@ -86,6 +86,11 @@ export interface LightCue {
   sway: number;
   /** gobo wheel: 0 open, 1 'dots' (glitter / breakup spots on the floor, rayed beams) */
   gobo: number;
+  /**
+   * look (round 11): lens veil gain (0..2, default 0) when a head of this look points its beam at the camera (a white
+   * head sweeping across a close lens: v673.30, 674.40, 683.38, 691.29, frame luma +0.1 for ~0.5 s)
+   */
+  flare: number;
   // hit / chase / blinder / strobe
   target: TargetFilter;
   /** hit / chase: 1 per matching fixture; blinder / strobe: 1 per matching emitter (built with the rig) */
@@ -303,6 +308,7 @@ function parse(c: Cue, show: ShowEngine): LightCue {
     aim: vec3(p.aim),
     sway: Math.max(0, num(p.sway, 0)),
     gobo: p.gobo === 'dots' || p.gobo === 'glitter' || p.gobo === 'breakup' ? 1 : 0,
+    flare: c.fx === 'look' ? Math.min(2, Math.max(0, num(p.flare, 0))) : 0,
     target: parseTargets(c.targets, p.groups, { tags: 0, side: 0, band: 0 }),
     mask: null,
     pattern: str(p.pattern) ?? 'lr',

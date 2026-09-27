@@ -44,6 +44,7 @@ import {
   FB_DECK,
   FB_FIELD,
   FB_FIELD_FAR,
+  FB_LENS,
   FB_LOWFOG,
   FB_SIDE_L,
   FB_SIDE_R,
@@ -116,6 +117,10 @@ const BACK_GLOW_K = 1.3;
  * field stays dark (was 0.55 with a second pool over the back of the field)
  */
 const FLOOD_GROUND = 0.3;
+/** lens veil per unit of beam light aimed at the lens (look `flare`, round 11) */
+const FLARE_K = 0.035;
+/** distance (m) of the lens-veil blob from the camera towards the flaring lamps */
+const FLARE_OFF = 2.6;
 /** local ground pools (flood area `aisle` / `front`, round 11): HDR per unit flood level */
 const POOL_FLOOD_K = 0.9;
 /** flood slices per quality level (depth-sliced haze integral) */
@@ -230,7 +235,7 @@ const LOWFOG_ENV_K = 0.05;
  *  round 11 (same doc): the spar lamp row (target `spar_lamps`), blinder attack / release / aim / spread, per-lantern
  *           colours (`colors`, `rowColors`, `shafts`, `rowShafts`) and pillar mode `strobe`, flood `gate` / `duty` /
  *           `offset` and the local pool areas `aisle` / `front`, the `storm` and `key` (dragon key) fx, the flat
- *           fan (`fan` + `aim`), and the calm (reduce flashing) state tracks without the authored stutters
+ *           fan (`fan` + `aim`), the lens veil (look `flare`), and the calm (reduce flashing) state tracks
  */
 export class LightingSystem implements System {
   readonly name = 'lights';
@@ -265,6 +270,13 @@ export class LightingSystem implements System {
   private sDim = new Float32Array(0);
   private sTan = new Float32Array(0);
   private sGobo = new Uint8Array(0);
+  /** round 11: lens-veil gain of each head's look (`flare`), 0 = none */
+  private sFlare = new Float32Array(0);
+  /** this frame's lens veil (premultiplied colour) from the heads aimed at the camera, and its gain */
+  private readonly lensVeil = new THREE.Color();
+  /** weighted direction from the camera to the flaring lamps (the veil leans that way: glare from the lamp's side) */
+  private readonly lensDir = new THREE.Vector3();
+  flareK = FLARE_K;
 
   // scratch (no per-frame allocation)
   private readonly A: AimOut = { x: 0, y: 1, z: 0, dim: 0, mix: 0, tan: 0, gobo: 0 };
@@ -401,6 +413,8 @@ export class LightingSystem implements System {
         const fl = this.stageFl[j];
         this.flood.cols[j === 0 ? FB_STAGE : FB_STAGE_HIGH].set(all.x - fl.x * s, all.y - fl.y * s, all.z - fl.z * s);
       }
+      // the lens veil sits at the camera that draws (round 11)
+      this.placeLensVeil(camera);
       // the backlight veil is forward scatter: only a camera in front of the lamps, facing them, sees it
       const f = backFacing(camera);
       const b = this.backBase;
@@ -474,6 +488,7 @@ export class LightingSystem implements System {
     this.sDim = new Float32Array(n);
     this.sTan = new Float32Array(n);
     this.sGobo = new Uint8Array(n);
+    this.sFlare = new Float32Array(n);
     this.chaseArr = new Array(rig.pillars.length).fill(1);
     this.pillarLamp = new Float32Array(rig.pillars.length);
     this.pillarBlends = rig.pillars.map(() => ({ from: null, to: null, k: 1 }));
@@ -614,6 +629,7 @@ export class LightingSystem implements System {
           sDim[i] = 0;
           sTan[i] = TAN_NARROW;
           this.sGobo[i] = 0;
+          this.sFlare[i] = 0;
           sDir[i * 3] = f.rest.x;
           sDir[i * 3 + 1] = f.rest.y;
           sDir[i * 3 + 2] = f.rest.z;
@@ -700,6 +716,8 @@ export class LightingSystem implements System {
       sTan[i] = tan;
       // gobo: the dominant state's wheel position
       this.sGobo[i] = k < 0.5 && bl.from ? B.gobo : A.gobo;
+      // lens veil gain (look `flare`), cross-faded with the look
+      this.sFlare[i] = (bl.to ? bl.to.flare * k : 0) + (k < 1 && bl.from ? bl.from.flare * (1 - k) : 0);
       sDir[i * 3] = dx;
       sDir[i * 3 + 1] = dy;
       sDir[i * 3 + 2] = dz;
@@ -716,6 +734,11 @@ export class LightingSystem implements System {
     this.lowAcc.set(0, 0, 0, 0);
     this.lowPos.set(0, 0, 0, 0);
     this.lowCol.setRGB(0, 0, 0);
+    this.lensVeil.setRGB(0, 0, 0);
+    this.lensDir.set(0, 0, 0);
+    const cpx = cam.position.x;
+    const cpy = cam.position.y;
+    const cpz = cam.position.z;
     this.beams.begin();
     this.pools.begin();
     this.sprites.begin();
@@ -777,6 +800,28 @@ export class LightingSystem implements System {
       }
       const lum = (r + g + b) * 0.333;
       if (fogOn) this.depositLowFog(lx, ly, lz, dx, dy, dz, len, r, g, b);
+      const fl = this.sFlare[i];
+      if (fl > 0) {
+        // round 11: a head of a `flare` look pointing its beam at the camera veils the lens (the hot factor of the lens
+        // sprite, a little wider; stronger the closer the lamp)
+        const vx = cpx - lx;
+        const vy = cpy - ly;
+        const vz = cpz - lz;
+        const dist = Math.hypot(vx, vy, vz) || 1;
+        const ca = Math.min(1, Math.max(-1, (dx * vx + dy * vy + dz * vz) / dist));
+        const ang = Math.acos(ca) / (Math.atan(tan) * 1.35 + 0.03);
+        const hot = Math.exp(-ang * ang);
+        if (hot > 0.01) {
+          const w = fl * hot / (1 + (dist / 40) * (dist / 40));
+          this.lensVeil.r += r * w;
+          this.lensVeil.g += g * w;
+          this.lensVeil.b += b * w;
+          const wl = (w * (r + g + b)) / dist;
+          this.lensDir.x -= vx * wl;
+          this.lensDir.y -= vy * wl;
+          this.lensDir.z -= vz * wl;
+        }
+      }
       sumDim += dim;
       cr += r;
       cg += g;
@@ -1463,6 +1508,14 @@ export class LightingSystem implements System {
       cols[FB_BACK_WIDE].set(b.x * f, b.y * f, b.z * f);
     }
     if (this.boothLevel > 0) add(FB_BOOTH, normalizeColor(this.boothCol, this.cF), LOCAL_GLOW_K * hk * this.boothLevel * 0.8);
+    // round 11: the lens veil of heads aimed at the camera (look `flare`), centred on the camera
+    {
+      const v = this.lensVeil;
+      if (v.r + v.g + v.b > 1e-4) {
+        add(FB_LENS, v, this.flareK);
+        this.placeLensVeil(this.app.camera);
+      }
+    }
     // the low fog bank lit by the beams that pass through it (round 8): a flat glowing layer over the lit part of
     // the bank, in the beams' colour x the smoke's albedo (v802.75: white floor beams -> a bright white band)
     {
@@ -1532,6 +1585,18 @@ export class LightingSystem implements System {
     }
   }
   private scatter = 0;
+  /**
+   * round 11: centre the lens-veil blob (FB_LENS) FLARE_OFF m from the camera towards the flaring lamps: the veil is
+   * densest on the lamp's side of the frame (the white glare from the upper left at v673.3), not a flat lift
+   */
+  private placeLensVeil(camera: THREE.Camera): void {
+    const lc = (this.flood.material.uniforms.uBlobC.value as THREE.Vector4[])[FB_LENS];
+    const cm = camera.matrixWorld.elements;
+    const d = this.lensDir;
+    const n = Math.hypot(d.x, d.y, d.z);
+    const k = n > 1e-6 ? FLARE_OFF / n : 0;
+    lc.set(cm[12] + d.x * k, cm[13] + d.y * k, cm[14] + d.z * k, 1);
+  }
   /** storm haze boost of this frame (`lights.storm`, round 11) and its colour (stormTint 0 = none) */
   private storm = 0;
   private stormTint = 0;

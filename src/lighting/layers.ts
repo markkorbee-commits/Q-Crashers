@@ -600,15 +600,20 @@ export const FB_DECK = 9;
  * size follow the lit part of the bank every frame)
  */
 export const FB_LOWFOG = 10;
+/**
+ * round 11: the lens veil of a beam sweeping across a close camera (look `flare`): a small blob centred on the camera
+ * (moved there right before drawing), glowing in the near pre-slices, so the whole frame lifts for the hit
+ */
+export const FB_LENS = 11;
 /** (FLOOD_FRAG sizes its uniform arrays to this: keep them equal) */
-export const FLOOD_BLOBS = 11;
+export const FLOOD_BLOBS = 12;
 /**
  * near edges (m) of the pre-slices in which only the local blobs glow (two, so a performer 2–3 m in front
  * of a close-up camera occludes the lit haze behind him and only carries the thin veil in front of him)
  */
 const FLOOD_PRE = [1.2, 3.2];
 /** per blob: share of its glow in the near pre-slice (only the lamps aimed at the lens: backlight, booth) */
-const FLOOD_NEAR = [0, 0, 0, 0, 0, 0, 1, 0.6, 1, 1, 0];
+const FLOOD_NEAR = [0, 0, 0, 0, 0, 0, 1, 0.6, 1, 1, 0, 1];
 
 /**
  * Light floods and dense lit haze ("the whole frame glows pink / red / teal / blue"): an analytic
@@ -665,6 +670,9 @@ export class FloodGlow {
     // (moved per frame by LightingSystem to the lit part of the bank)
     centres[FB_LOWFOG] = C(0, 1, 14, 1);
     sig[FB_LOWFOG] = S(30, 1.4, 14);
+    // (moved per frame to the camera by LightingSystem)
+    centres[FB_LENS] = C(0, 2, 10, 1);
+    sig[FB_LENS] = S(2, 2, 2);
     this.material = new THREE.ShaderMaterial({
       name: 'FloodGlow',
       vertexShader: FLOOD_VERT,

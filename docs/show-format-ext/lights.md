@@ -165,6 +165,11 @@ The cue changes that use them are in `$ENDSHOW_DATA/work/r11_lights/cue_patch.js
 * **Look `fan` with `aim`**: a flat fan aimed at a world point: every head aims at `aim`, turned about the vertical by
   its place in the row x `spread` / 2 (default 36°), elevation kept, `sway` swings it (v834.88: measured on the deck
   handheld, a white veil at the lens: not used there).
+* **Look `flare`** (0..2, default 0): while a head of this look points its beam at the camera (the lens sprite's hot
+  cone, a little wider; weaker with distance, 40 m half point), the lens veils from the lamp's side: a small haze blob
+  2.6 m from the camera towards the lamps, glowing in the near pre-slices of the flood volume (`flareK` 0.035). For
+  the white tower heads sweeping across the deck cameras (v673.30, 674.40, 683.38, 691.29): 6 moments +0.006 mean.
+  A flat, centred veil (the first try) lifted the shadows and lost 0.012.
 * **Reduce flashing: authored stutters** (no cue change): with `app.reduceFlashing` the look, wash, zone-wash,
   pillar and festoon tracks drop state cues shorter than 0.5 s that start within 0.35 s of the previous kept one (the
   kept one holds through them), bridge gaps under 0.35 s and cross-fade over at least 0.15 s: v160.8–171.4 went from
@@ -349,4 +354,4 @@ smoke, the beams and on the set. What changed:
   `rowShafts` (string lists), `every` (`quarter` | `halfbeat` | `beat` | `2beat` | `bar`); flood params `gate` (same
   names), `duty` (0.05..0.95), `offset` (0..1), `area` also `aisle` | `front` | `pools` or a list of areas; new fx
   `lights.storm` (`intensity`, `attack`, `fade`, `color`) and `lights.key` (`color`, `color2`, `intensity`, `fade`,
-  target `dragon` / `dragon_head`); look `fan` accepts `aim`.
+  target `dragon` / `dragon_head`); look `fan` accepts `aim`; look param `flare` (0..2).
