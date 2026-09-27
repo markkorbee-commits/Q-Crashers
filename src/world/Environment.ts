@@ -196,6 +196,9 @@ void main() {
 }
 
 const num = (v: unknown, d: number): number => (typeof v === 'number' && Number.isFinite(v) ? v : d);
+/** `atmos.glow` limits: `amount` (round 11: 2 -> 4, a very bright short fire) and `ground` (glow light on the grounds) */
+const GLOW_MAX = 4;
+const GLOW_GROUND_MAX = 8;
 
 const STAR_VERT = /* glsl */ `
 attribute float aMag;
@@ -350,6 +353,8 @@ export class EnvironmentSystem implements System {
   private readonly cueBuf: Cue[] = [];
   private readonly glowBuf: Cue[] = [];
   private readonly glowC = new THREE.Color();
+  /** the site glow as it lights the grounds (glows weighted by their `ground` param; = app.env.glowColor by default) */
+  private readonly groundGlow = new THREE.Color();
   private readonly bounceC = new THREE.Color();
   private readonly sidereal = new THREE.Matrix3();
   private readonly poleAxis = dirFromAzAlt(0, 52.44);
@@ -560,12 +565,21 @@ export class EnvironmentSystem implements System {
   /**
    * `atmos.glow` cues → site-wide coloured ambient light (premultiplied by amount), a pure function
    * of show time: the orange light of a flame wall, the red smoke cloud over the whole site.
-   * Params: `color`, `amount` 0..2 (default 0.6), `fade` s in (default 0.3), `out` s fade-out at the
+   * Params: `color`, `amount` 0..4 (default 0.6), `fade` s in (default 0.3), `out` s fade-out at the
    * end of dur (default 0.8), `flicker` 0..1 (fire light breathing, default 0), `smoke` 0..1 (the
-   * site fills with smoke: denser height fog in the glow colour, default 0). Returns the smoke level.
+   * site fills with smoke: denser height fog in the glow colour, default 0), `ground` 0..8 (default 1: how
+   * strongly the glow lights the grounds, trees and props; a smoke glow is a trace there, a very bright fire
+   * lights the whole site). Returns the smoke level.
+   * Round 11 (the v1565.3 eruption, in-page cue test, Mac GPU): timing to the video's envelope + `amount` 3 +
+   * `ground` 8: 1565.5 0.414 -> 0.466, 1565.75 0.373 -> 0.452, 1566 0.353 -> 0.479, 1566.25 0.427 -> 0.523; the
+   * fire-lit banks read [166-186, 31-36, 27-29] against the video's [176-183, 41, 11-42] (were [80-85, 23-31, 27]).
+   * Tried and dropped: an orange ground colour (-1), per-cue smoke build / linger (-0.5 to -2.5), a lit-smoke tint
+   * of the SceneGlare halos (their white-orange colour is the remaining G / B in the red sky, but tinting them
+   * cost the peach core of the frame: 1565.75 -2 to -3).
    */
   private glowAt(t: number, out: THREE.Color): number {
     out.setRGB(0, 0, 0);
+    const gg = this.groundGlow.setRGB(0, 0, 0);
     let smoke = 0;
     const cues = this.app.show.active('atmos', t, this.glowBuf);
     for (let i = 0; i < cues.length; i++) {
@@ -582,12 +596,21 @@ export class EnvironmentSystem implements System {
         k *= 1 - fl * 0.6 * clamp(n, 0, 1);
       }
       smoke = Math.max(smoke, clamp(num(c.p.smoke, 0), 0, 1) * k);
-      const a = clamp(num(c.p.amount, 0.6), 0, 2) * k;
+      // round 11: up to 4 (was 2) for a very bright short fire (the v1565.4 eruption); no cue went above 2 before
+      const a = clamp(num(c.p.amount, 0.6), 0, GLOW_MAX) * k;
       if (a <= 0) continue;
       resolveColor(c.p.color ?? 'primary', this.app.palette, this.glowC, 'primary');
       out.r += this.glowC.r * a;
       out.g += this.glowC.g * a;
       out.b += this.glowC.b * a;
+      // `ground`: how strongly this glow lights the grounds, trees and props (1 = the trace of a smoke glow); the
+      // photosensitivity setting halves the part above 1 (a whole-field fire light, like the flash response)
+      let ground = clamp(num(c.p.ground, 1), 0, GLOW_GROUND_MAX);
+      if (ground > 1 && this.app.reduceFlashing) ground = 1 + (ground - 1) * 0.5;
+      const gk = a * ground;
+      gg.r += this.glowC.r * gk;
+      gg.g += this.glowC.g * gk;
+      gg.b += this.glowC.b * gk;
     }
     this.smokeFog = this.smokeAt(t);
     return smoke;
@@ -633,7 +656,7 @@ export class EnvironmentSystem implements System {
   private lateUpdate(ctx: FrameContext): void {
     const env = this.app.env;
     // photosensitivity: the whole-field flash response is halved (the emitters scale their own share)
-    updateWorldLights(env, ctx.showTime, this.app.reduceFlashing ? 0.5 : 1, this.smokeFog);
+    updateWorldLights(env, ctx.showTime, this.app.reduceFlashing ? 0.5 : 1, this.smokeFog, this.groundGlow);
     if (!this.enabled) return;
     const t = ctx.showTime;
     const p = showProgress(t);
@@ -658,6 +681,8 @@ export class EnvironmentSystem implements System {
     let tintAmt = 0,
       starVis = 0,
       cover = 0.3,
+      skyLevel = 1,
+      airLevel = 1,
       lightningAmt = 0.35 + 0.45 * smoothstep(0.55, 1, p);
     this.tint.setRGB(1, 1, 1);
     const cues = this.app.show.active('atmos', t, this.cueBuf);
@@ -671,6 +696,14 @@ export class EnvironmentSystem implements System {
         }
         if (c.p.stars !== undefined) starVis = lerp(starVis, clamp(Number(c.p.stars), 0, 2), k);
         if (c.p.clouds !== undefined) cover = lerp(cover, clamp(Number(c.p.clouds), 0, 1), k);
+        // round 11: `level` = brightness of the sky dome as this camera films it (clear sky + the twilight-lit
+        // cloud deck; the moon, the show / flash / glow light in the air unchanged), `air` = the sky light in the
+        // haze over the distant land (height-fog colour, the land under the horizon). The side drone of v51-58.56
+        // films a near-black sky over a black horizon where the other cameras see the blue hour: level 0.35 +
+        // air 0.2 on that shot, 51.5 0.573 -> 0.643, 53 0.630 -> 0.768, 57 0.688 -> 0.861 (in-page cue test, Mac
+        // GPU); the v176-199.7 drone (level 0.45, air 0.5) 191.5 0.725 -> 0.783. Default 1 = unchanged
+        if (c.p.level !== undefined) skyLevel = lerp(skyLevel, clamp(num(c.p.level, 1), 0, 2), k);
+        if (c.p.air !== undefined) airLevel = lerp(airLevel, clamp(num(c.p.air, 1), 0, 2), k);
       } else if (c.fx === 'lightning') {
         lightningAmt = lerp(lightningAmt, clamp(Number(c.p.intensity ?? 1), 0, 2), k);
       } else if (c.fx === 'clouds') {
@@ -682,7 +715,7 @@ export class EnvironmentSystem implements System {
     const L = level;
     U.uCloudDark.value.copy(U.uZenith.value).multiplyScalar(0.6);
     U.uCloudLit.value.copy(U.uHorizonNW.value).multiplyScalar(0.85);
-    U.uLevel.value = 1;
+    U.uLevel.value = skyLevel;
     U.uCover.value = cover;
     U.uTime.value = t;
     U.uMoonI.value = 0.9 + 0.1 * smoothstep(7.5, 9, moonAlt);
@@ -739,7 +772,7 @@ export class EnvironmentSystem implements System {
     // --- fog colour: dark haze over the polder = the horizon over the stage, lit by flashes / strobes
     const se = U.uHorizonSE.value as THREE.Color;
     const frg = this.skyTune.fogRG;
-    this.fog.color.setRGB((se.r * 0.95 + 0.0003) * frg, (se.g * 0.95 + 0.0006) * frg, se.b * 0.95 + 0.0015);
+    this.fog.color.setRGB((se.r * 0.95 + 0.0003) * frg * airLevel, (se.g * 0.95 + 0.0006) * frg * airLevel, (se.b * 0.95 + 0.0015) * airLevel);
     if (fi > 0) {
       this.fog.color.r += env.flashColor.r * 0.0004 * fk * T.r;
       this.fog.color.g += env.flashColor.g * 0.0004 * fk * T.g;
@@ -794,9 +827,10 @@ export class EnvironmentSystem implements System {
     if (li > 0) this.hemi.color.addScalar(li * 0.05);
     // site glow on everything lit by the sky dome (set, props without the world-light patch): a trace —
     // the glow is the colour of the smoke in the air, the set and the grounds under it stay dark
-    this.hemi.color.r += glow.r * 0.12 + bc.r * 0.02;
-    this.hemi.color.g += glow.g * 0.12 + bc.g * 0.02;
-    this.hemi.color.b += glow.b * 0.12 + bc.b * 0.02;
+    const gg = this.groundGlow;
+    this.hemi.color.r += gg.r * 0.12 + bc.r * 0.02;
+    this.hemi.color.g += gg.g * 0.12 + bc.g * 0.02;
+    this.hemi.color.b += gg.b * 0.12 + bc.b * 0.02;
 
     // --- the dome as filmed (DOME_KEYS): everything above used the physical sky light
     if (this.domeGrade) {
