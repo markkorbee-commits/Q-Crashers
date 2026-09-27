@@ -109,6 +109,25 @@ export interface CrownUniforms {
    * (see THROAT_GLOW; tunable in the page: `__app.get('stage').crownTune.throat` / `throatRed`)
    */
   uThroat: THREE.IUniform<THREE.Vector2>;
+  /**
+   * round 12: show-driven fill of the printed wing membranes (CROWN_TUNE.wingFill*): x level (the look's LED level x
+   * CROWN_TUNE.wingFill; 0 = off), y level on the dark print (share of the flame lanes' level), z white-hot share
+   * of the flame cores, w share of the wing LED hue (the rest: the print's own flame colours)
+   */
+  uWingFill: THREE.IUniform<THREE.Vector4>;
+  /**
+   * round 12: night albedo of the printed sunbursts in the rosettes (fx tag SUN_FX 2.2; 1 = the painted yellow
+   * print): judges r12 saw bright orange discs over-pop at v20.25 / v589.25 / v1243 (the footage's rosettes read as
+   * dim gold / silver gears unless the show lights them)
+   */
+  uSunK: THREE.IUniform<number>;
+  /**
+   * `lights.key` (round 12, LightEnv.dragonKeyColor / dragonKeyColor2): a key light on the dragon sculpture (not the
+   * wings, not the castle) from the audience-left front (uKeyL) and the right front (uKeyR); colour x level x
+   * DRAGON_KEY_GAIN, black = none
+   */
+  uKeyL: THREE.IUniform<THREE.Color>;
+  uKeyR: THREE.IUniform<THREE.Color>;
 }
 
 export function createUniforms(): CrownUniforms {
@@ -166,6 +185,10 @@ export function createUniforms(): CrownUniforms {
     uPlateGlow: { value: 0 },
     uMembLit: { value: new THREE.Vector3(MEMBRANE_LIT.level, MEMBRANE_LIT.hue, MEMBRANE_LIT.uplight) },
     uThroat: { value: new THREE.Vector2(0.5, 0) },
+    uWingFill: { value: new THREE.Vector4(0, 0.2, 0.4, 0.6) },
+    uSunK: { value: 1 },
+    uKeyL: { value: new THREE.Color(0, 0, 0) },
+    uKeyR: { value: new THREE.Color(0, 0, 0) },
   };
 }
 
@@ -263,6 +286,9 @@ uniform float uDay;
 uniform vec4 uSFlash;
 uniform vec2 uSFlashReg;
 uniform vec3 uHeadC;
+uniform float uSunK;
+uniform vec3 uKeyL;
+uniform vec3 uKeyR;
 
 // soft light pools of the moving-head washes sweeping across the set (deterministic in show time)
 float crownPools(vec3 p) {
@@ -322,6 +348,13 @@ const WASH_APPLY = /* glsl */ `
     float nlf = saturate((dot(geometryNormal, Lf) + 0.6) / 1.6);
     reflectedLight.directDiffuse += sc * nlf * BRDF_Lambert(max(material.diffuseContribution, vec3(0.08)));
   }
+  // lights.key (round 12): the dragon's own key lights from the left / right front, never on the wings or the castle
+  // (the film floods the head red from one side and green from the other while the set stays dark, v944-1010)
+  if (uKeyL.r + uKeyL.g + uKeyL.b + uKeyR.r + uKeyR.g + uKeyR.b > 0.0) {
+    float kreg = 1.0 - step(1.5, vCrownFx);
+    crownLight(vec3(-0.62, 0.3, 0.72), uKeyL * kreg, geometryNormal, geometryViewDir, material, reflectedLight, 0.25);
+    crownLight(vec3(0.62, 0.3, 0.72), uKeyR * kreg, geometryNormal, geometryViewDir, material, reflectedLight, 0.25);
+  }
   #endif
   // glowing throat: a point light between the jaws
   vec3 dm = uMouthPos - vCrownPos;
@@ -350,6 +383,9 @@ export const PRINT_UPLIGHT = 0.28;
  * Tunable in the page: `__app.get('stage').crown.U.uMembLit.value` (x level, y hue, z uplight).
  */
 export const MEMBRANE_LIT = { level: 0.3, hue: 0.6, uplight: 0.5 };
+
+/** round 12: share of the LED pattern (chase / pulse / sparkle) in the membranes' show fill (the rest is steady) */
+export const WING_FILL_PATTERN = 0.3;
 
 export interface PatchOpts {
   /** cache key suffix */
@@ -412,7 +448,9 @@ transformed += objectNormal * (sin(uTime * 0.9 + position.x * 0.16 + position.y 
       '#include <color_fragment>',
       `#include <color_fragment>
 vec3 crownAlb = diffuseColor.rgb;
-diffuseColor.rgb *= mix(${nk}, 1.0, uDay);${
+diffuseColor.rgb *= mix(${nk}, 1.0, uDay);
+// (the printed rosette suns, fx 2.2: their own night albedo)
+diffuseColor.rgb *= mix(1.0, mix(uSunK, 1.0, uDay), step(2.15, vCrownFx) * step(vCrownFx, 2.25));${
         o.membrane
           ? `
 {
@@ -432,7 +470,7 @@ diffuseColor.rgb *= mix(${nk}, 1.0, uDay);${
       '#include <lights_physical_pars_fragment>',
       `#include <lights_physical_pars_fragment>
 ${WASH_PARS}
-${o.membrane ? LED_GLSL + 'uniform float uWings;\nuniform vec3 uPrintTint;\nuniform vec3 uPrintTintR;\nuniform vec3 uMembLit;' : ''}
+${o.membrane ? LED_GLSL + 'uniform float uWings;\nuniform vec3 uPrintTint;\nuniform vec3 uPrintTintR;\nuniform vec3 uMembLit;\nuniform vec4 uWingFill;' : ''}
 ${o.lava && !o.membrane ? 'uniform float uDragonG;\nuniform float uWingG;' : ''}
 ${o.plates && !o.membrane && !o.lava ? 'uniform vec3 uLedW;\nuniform vec3 uLedWR;\nuniform float uLedI;\nuniform float uWingG;\nuniform float uWings;\nuniform vec2 uSide;\nuniform float uEmber;\nuniform float uPlateGlow;' : ''}
 ${o.membrane ? 'varying vec3 vMemb;' : ''}`,
@@ -518,6 +556,29 @@ iblIrradiance *= uEnvTint * max(crownWashReg(), 0.03);`,
   totalEmissiveRadiance += print * (0.03 * uEmit + ${PRINT_UPLIGHT.toFixed(3)} * uMembLit.z * uWings) * em * mix(1.15, 0.4, smoothstep(3.0, 18.0, vMemb.y)) * (1.0 - uDay);
   // printed fabric lets some of the back light (sky, fireworks behind the stage) shine through
   totalEmissiveRadiance += crownAlb * uRim * ${(0.35 * (o.printGain ?? 1.9) / 1.9).toFixed(3)};
+  // round 12: the show FILLS the printed skin (pixel-mapped: the membranes are the stage's dominant light
+  // surfaces in the footage, video 176.5 / 288 / 592 / 1503-1507: saturated red / pink / blue sheets with white
+  // flame cores over a dim castle, where the LED lanes alone left dark membranes behind outlines). The fill follows
+  // the painted inferno's flame lanes (its luminance), takes the lanes' LED colour + pattern (chases / pulses run
+  // through it) and the look's LED level (uWingFill.x; a crown-isolating mask at LED 0 keeps its dark skin, 1320.75)
+  if (uWingFill.x > 0.0) {
+    float pl = dot(crownAlb, vec3(0.2126, 0.7152, 0.0722));
+    float fm = uWingFill.y + (1.0 - uWingFill.y) * smoothstep(0.03, 0.4, pl);
+    float li = max(uLedI, 1e-3);
+    // (mostly the steady wing colour: a chase's comets or a sparkle would leave the sheet dark between them;
+    // WING_FILL_PATTERN of the lanes' pattern runs through it)
+    vec3 fs = crownSteady(2.0) * (1.0 + 1.4 * uPulse);
+    vec3 fp = crownLed(vMemb.y, 2.0, side, abs(vMemb.z) + lane * 2.7027027) / li;
+    vec3 fc = mix(fs, fp, ${WING_FILL_PATTERN.toFixed(3)});
+    // the print keeps its own flame colours under the look's hue (video 582.75 / 589.25 / 338: red-orange
+    // flames glowing through a pink / red look), at the LED lines' scale
+    float am = max(crownAlb.r, max(crownAlb.g, crownAlb.b));
+    vec3 pc = crownAlb / max(am, 1e-4) * max(fc.r, max(fc.g, fc.b));
+    fc = mix(pc, fc, uWingFill.w);
+    float fcm = max(fc.r, max(fc.g, fc.b));
+    fc = mix(fc, vec3(fcm), uWingFill.z * smoothstep(0.3, 0.7, pl));
+    totalEmissiveRadiance += fc * fm * uWingFill.x * uWings * grow * em * (1.0 - uDay);
+  }
 }`;
     }
     if (emissive) fs = fs.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n${emissive}`);

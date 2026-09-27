@@ -382,6 +382,8 @@ export class DragonCrown {
     U.uSFlash.value.set(sf.r * SCULPT_FLASH_GAIN, sf.g * SCULPT_FLASH_GAIN, sf.b * SCULPT_FLASH_GAIN, look.sculptFlashHead);
     U.uSFlashReg.value.copy(look.sculptFlashReg);
     U.uPlateGlow.value = look.plateGlow;
+    U.uKeyL.value.copy(look.dragonKey).multiplyScalar(DRAGON_KEY_GAIN);
+    U.uKeyR.value.copy(look.dragonKey2).multiplyScalar(DRAGON_KEY_GAIN);
     U.uBeat.value = ctx.beat.beat;
     // (a crown-isolating mask keeps the crown's outlines lit without screen content: crownLedFloor)
     U.uLedI.value = Math.max(0, look.ledIntensity, look.crownLedFloor);
@@ -397,6 +399,8 @@ export class DragonCrown {
     U.uPhase.value = look.ledPhase;
     U.uPulse.value = Math.max(0, Math.min(1, look.pulse));
     U.uWings.value = look.wings;
+    // round 12: the membranes' show fill follows the look's LED level (not the crown mask's LED floor)
+    U.uWingFill.value.set(Math.max(0, look.ledIntensity) * CROWN_TUNE.wingFill, CROWN_TUNE.wingFillFloor, CROWN_TUNE.wingFillHot, CROWN_TUNE.wingFillHue);
     // the wing print's uplights take the wing LED hue (a warm share keeps the print legible)
     const wl = look.wingLed;
     const wm = Math.max(wl.r, wl.g, wl.b, 1e-4);
@@ -404,7 +408,8 @@ export class DragonCrown {
     const wr = look.wingLedR;
     const wmr = Math.max(wr.r, wr.g, wr.b, 1e-4);
     U.uPrintTintR.value.setRGB(wr.r / wmr, wr.g / wmr, wr.b / wmr).lerp(PRINT_WARM, PRINT_WARM_SHARE);
-    U.uRosette.value.copy(look.rosettes).multiplyScalar(E);
+    U.uRosette.value.copy(look.rosettes).multiplyScalar(E * CROWN_TUNE.rosette);
+    U.uSunK.value = CROWN_TUNE.sunPrint;
     U.uMouth.value = look.mouth;
     U.uEyes.value.copy(look.eyes).multiplyScalar(look.eyesIntensity);
 
@@ -478,6 +483,7 @@ export class DragonCrown {
     U.uEnvTint.value.setRGB(3.2, 3.3, 3.5);
     U.uLedI.value = 0;
     U.uWings.value = 0;
+    U.uWingFill.value.x = 0;
     U.uEmit.value = 0;
     U.uMouth.value = 0;
     U.uPulse.value = 0;
@@ -572,12 +578,33 @@ export const CROWN_TUNE = {
   throatRed: 0.85,
   /** round 9: level of the throat point light (x its old level) */
   throatLight: 0.8,
+  /**
+   * round 12: show fill of the printed wing membranes (shading.ts uWingFill): level at LED 1 x wings 1 (0 = off,
+   * the round-11 dark skin), its share on the dark print, the white-hot share of the flame cores and the share of
+   * the wing LED hue (the rest: the print's own flame colours). Tunable in the page: `__app.get('stage').crownTune.wingFill`.
+   */
+  wingFill: 6,
+  wingFillFloor: 0.2,
+  wingFillHot: 0.4,
+  wingFillHue: 0.6,
+  /**
+   * round 12: gain of the rosettes' additive sunburst glow (look.rosettes; the cue colour, kept: v582.75 shows bright
+   * blue-white gears under a blue `rosettes` look) and the night albedo of the yellow / orange printed suns under it
+   * (they caught every coloured flood: bright orange discs over-popped at v20.25 / v589.25 / v1243, judges r12)
+   */
+  rosette: 1,
+  sunPrint: 0.35,
 };
 /**
  * irradiance of a stage.flash at level 1 (round 11): the night-calibrated hide / steel read bone-white under it
  * (video 713.5 / 719.75), like the head of the 716.4 white look
  */
 const SCULPT_FLASH_GAIN = 6;
+/**
+ * irradiance of a `lights.key` at intensity 1 (round 12): about the crown's wash rig at a set wash of ~0.6 (wash x
+ * intensity x 9 per flood), so a key at 1-1.5 floods the head in its colour over any set wash
+ */
+const DRAGON_KEY_GAIN = 6;
 /** saturated red the throat light is pulled to by CROWN_TUNE.throatRed (round 9) */
 const THROAT_LIGHT_RED = new THREE.Color(1.0, 0.14, 0.1);
 
@@ -586,7 +613,7 @@ const FROST = new THREE.Color(0.55, 0.8, 1.0);
 const PRINT_WARM = new THREE.Color(1.0, 0.72, 0.5);
 const PRINT_WARM_SHARE = 0.2;
 /** colour uniforms of the wash rig / emitters switched off by the dev `?daylight` view */
-const DAY_OFF = ['uWashA', 'uWashB', 'uKey', 'uRim', 'uFlash', 'uAmbient', 'uMouthCol', 'uLava', 'uRosette', 'uEyes'] as const;
+const DAY_OFF = ['uWashA', 'uWashB', 'uKey', 'uRim', 'uFlash', 'uAmbient', 'uMouthCol', 'uLava', 'uRosette', 'uEyes', 'uKeyL', 'uKeyR'] as const;
 
 function addScaled(c: THREE.Color, o: THREE.Color, s: number): THREE.Color {
   c.r += o.r * s;

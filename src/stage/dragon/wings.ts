@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Polyline, basisZ, box, circle, frameY, gem, gradientY, plate, qbez, ring, sickleOutline, spike, surface, tube, v2, v3, withFx, type V3 } from './geom';
-import { wingLayout, type WingLayout } from './layout';
+import { fingerCtrl, fingerRadius, wingLayout, wingNormal, type WingLayout } from './layout';
 import { PAL, segs, type Kit } from './kit';
 import { BULB } from './shading';
 
@@ -91,8 +91,7 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
   const s = side;
   const radial = segs(k, 16, 8);
   // wing plane normal (towards the audience; the plane leans back ~30 deg: wrist low in front, finials high behind)
-  const nrm = v3().subVectors(L.tips[0], L.wrist).cross(v3().subVectors(L.tips[2], L.wrist)).normalize();
-  if (nrm.z < 0) nrm.negate();
+  const nrm = wingNormal(L);
 
   // ------------------------------------------------------------------ arm (shoulder -> wrist)
   const armAt = (t: number, o = v3()) => qbez(L.shoulder, L.armCtrl, L.wrist, t, o);
@@ -103,21 +102,16 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
   const armR = (t: number) => THREE.MathUtils.lerp(1.2, 0.78, t);
 
   // ------------------------------------------------------------------ fingers
-  const bows = [1.2, 0.3, -0.7];
+  // (the spar curve is shared with the strobes on the spars: dragon/layout.ts fingerCtrl)
   const fingers: Finger[] = L.tips.map((tip, i) => {
     const base = L.bases[i];
-    const mid = v3().lerpVectors(base, tip, 0.5);
-    const along = v3().subVectors(tip, base).normalize();
-    const perp = v3().crossVectors(nrm, along).normalize();
-    // perp points to the finger's left in the wing plane; make it point outward (+x*s)
-    if (perp.x * s < 0) perp.negate();
-    const ctrl = mid.clone().addScaledVector(perp, bows[i]).addScaledVector(nrm, -0.5);
+    const ctrl = fingerCtrl(L, i, nrm);
     const pts: V3[] = [];
     const n = segs(k, 30, 14);
     for (let j = 0; j <= n; j++) pts.push(qbez(base, ctrl, tip, j / n));
     return { line: new Polyline(pts), pts };
   });
-  const fingerR = (t: number) => THREE.MathUtils.lerp(0.66, 0.4, t);
+  const fingerR = fingerRadius;
   // heel bar tying the outer / middle spar roots together through the wrist knuckle
   W.copper.add(tube([L.bases[0].clone(), L.wrist.clone(), L.bases[1].clone()], () => 0.62, { radial, capStart: true, capEnd: true }), null, PAL.copperDeep);
   fingers.forEach((f, i) => {
@@ -618,7 +612,7 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
     const m = basisZ(nrm, v3(0, 1, 0), c);
     m.scale(v3(rScale[i], rScale[i], 1));
     rosetteFrames.push(m);
-    for (const [g, col] of sun) W.ivory.add(g.clone(), m.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0, -0.3)), col);
+    for (const [g, col] of sun) W.ivory.add(g.clone(), m.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0, -0.3)), col, SUN_FX);
     // static accent ring
     const rp: V3[] = [];
     for (let j = 0; j <= 40; j++) {
@@ -687,6 +681,11 @@ function sunburstParts(): [THREE.BufferGeometry, THREE.Color][] {
 
 /** fx tag of wing geometry (crown shading: step(1.5, fx) = wing) */
 export const WING_FX = 2;
+/**
+ * fx tag of the printed sunbursts inside the rosettes (round 12): a wing part (not a plate) whose night albedo the
+ * crown shading scales by uSunK (CROWN_TUNE.sunPrint)
+ */
+export const SUN_FX = 2.2;
 /**
  * fx tag of the white plates on the spars and finials (arrowheads, kunai blades, crescent fins; round 11): a wing
  * part (>= 1.5) that also catches the wing LEDs next to it (crown shading: step(2.5, fx), PLATE_GLOW)

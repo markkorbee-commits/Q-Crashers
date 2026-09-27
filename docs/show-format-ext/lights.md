@@ -116,6 +116,23 @@ level scales its lamp and its shaft together.
   floods at 60 % with an attack of at least 0.3 s, and light-bus flashes at 40 %. Round 9: every flash of
   the lights shares **one flash budget** (see "Round 9" below): at most 3 flashes in any second.
 
+## Round 12: spar strobes on the spars, the dragon key is lit (no cue change needed)
+* **Wing-spar strobes follow the built spars** (target `wings` / `wing_left` / `wing_right` / `wing_tips` and every
+  untargeted strobe: all 32 `strobe` cues of the show). The 40 spar strobes (per wing 8 / 7 / 5 on the outer / middle /
+  inner spar, t 0.15–0.95 of the spar) sit on the front of the finger spars, 0.36 m proud of the spar surface along the
+  wing normal (clear of the white arrowhead plates), facing the audience. Positions come from the wing layout
+  (`src/stage/dragon/layout.ts` `wingLayout` / `fingerAt`, the same curve the wing geometry is built from), so they can
+  no longer drift from the wings: the pre-round-3 table (roots (±6…12, 13…15) to tips on a plane Z −20 leaning back
+  10°) left them in diagonal rows across the membranes and in the sky above the scalloped edges (judges r12: daylight
+  wing close-up at t 700, the strobe hit at t 338.9). The fallback head rows (only without a registered
+  `fixtures_truss`) use the same spar curves.
+* **`lights.key` is now visible**: the crown reads `LightEnv.dragonKeyColor` / `dragonKeyColor2` (see round 11 below)
+  as two soft key lights on the dragon sculpture (head, neck, body, arms; never the wings or the castle) from the
+  audience-left front and the right front, irradiance 6 × colour × intensity (about the crown's wash rig at a set
+  wash of 0.6). No cue in the show uses it yet. Measured with trial keys (red `#ff2a3a` / pink `#ff4a8a` 1.2 over
+  v357.8–364.1, pink / violet 1.0 over v574–577.2): v362.5 +0.010, but v358.5 −0.009, v363.5 −0.011, v575 −0.015,
+  v576 −0.016 (the Show camera there frames the castle, not the head), so those keys were not proposed.
+
 ## Round 11: spar lamps, per-lantern colours, lantern strobe, flood gate, local pools, storm, dragon key
 Everything is opt-in: without the new params / fx / targets the show renders as before (64 moments unchanged).
 The cue changes that use them are in `$ENDSHOW_DATA/work/r11_lights/cue_patch.json` (with the measured effect).
@@ -163,8 +180,8 @@ The cue changes that use them are in `$ENDSHOW_DATA/work/r11_lights/cue_patch.js
 * **`lights.key`** (new fx, state semantics: latest cue wins, cross-fade over `fade` 0.5): a key light on the dragon
   sculpture independent of the set wash: `color` (audience left / front), `color2` (right, default `color`),
   `intensity` 0..2. Published as `LightEnv.dragonKeyColor` / `dragonKeyColor2` (premultiplied) and
-  `dragonKeyIntensity`; the stage's dragon / crown materials have to read them (v944–1010 red / green head,
-  v1043.9). Until they do, the cue has no visible effect.
+  `dragonKeyIntensity`; the stage's dragon / crown materials read them since round 12 (v944–1010 red / green head,
+  v1043.9).
 * **Look `fan` with `aim`**: a flat fan aimed at a world point: every head aims at `aim`, turned about the vertical by
   its place in the row x `spread` / 2 (default 36°), elevation kept, `sway` swings it (v834.88: measured on the deck
   handheld, a white veil at the lens: not used there).

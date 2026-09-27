@@ -325,7 +325,8 @@ export class MainStageSystem implements System {
       set('dragon_head', [c.dragonHead]);
       set('wing_tips', byX(c.wingTips));
       // "burning wings": the spar flames at ~60 % and ~90 % of every finger (crown points 7/8, 10/11, 13/14)
-      // (kept: the lighting rig places its wing fixtures at the mean depth of these points)
+      // (the lighting rig's spar strobes no longer read these: since round 12 they sit on the spar curves of
+      // dragon/layout.ts fingerAt, the source the wing geometry is built from)
       const sparFlames = (pts: THREE.Vector3[]) => (pts.length >= 15 ? [7, 8, 10, 11, 13, 14].map((i) => pts[i]) : pts);
       set('wing_left', sparFlames(c.wingLeft));
       set('wing_right', sparFlames(c.wingRight));
@@ -474,6 +475,8 @@ export class MainStageSystem implements System {
       look.washIntensity = app.env.stageWashIntensity;
       stageFlash(app.env, look.flash);
       look.strobe = Math.min(1, Math.max(0, app.env.strobe));
+      look.dragonKey.copy(app.env.dragonKeyColor);
+      look.dragonKey2.copy(app.env.dragonKeyColor2);
       look.pulse = Math.max(look.pulse, look.strobe * 0.6);
     }
     this.applyUniforms(ctx, look);

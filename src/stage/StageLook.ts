@@ -201,6 +201,12 @@ export interface StageLookEx extends StageLook {
    * stage.state `plates`, default 0): the spars read as broad candy-striped blades in the wing colour
    */
   plateGlow: number;
+  /**
+   * `lights.key` (round 12, from LightEnv.dragonKeyColor / dragonKeyColor2): premultiplied colour x level of the key
+   * light on the dragon from the audience-left front / the right front (black = none; the crown reads them)
+   */
+  dragonKey: THREE.Color;
+  dragonKey2: THREE.Color;
 }
 
 export function createStageLookEx(): StageLookEx {
@@ -259,5 +265,7 @@ export function createStageLookEx(): StageLookEx {
     sculptFlashReg: new THREE.Vector2(0, 0),
     sculptFlashHead: 0,
     plateGlow: 0,
+    dragonKey: new THREE.Color(0, 0, 0),
+    dragonKey2: new THREE.Color(0, 0, 0),
   };
 }

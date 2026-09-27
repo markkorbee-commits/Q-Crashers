@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Anchors, type AnchorName } from '../core/Anchors';
 import { hash32 } from '../core/rng';
 import { stageFloorAt } from '../world/stageWalk';
+import { fingerAt, fingerCtrl, fingerRadius, wingLayout, wingNormal } from '../stage/dragon/layout';
 
 /**
  * The 2026 RED show rig (moving heads, strobes, blinders) laid out in world metres.
@@ -313,13 +314,16 @@ export function isDefaultAnchor(anchors: Anchors, name: AnchorName): boolean {
 }
 
 // ---- design-bible §5 geometry ------------------------------------------------------------------
-/** wing finger spars (left wing; mirrored): root (x, y) -> tip (x, y); wing plane Z −20 leaning back 10° */
-const SPARS: [number, number, number, number][] = [
-  [-6, 15, -14.5, 26.5],
-  [-9, 14, -29, 28],
-  [-12, 13, -40.5, 26.5],
-];
-const WING_LEAN = Math.tan((10 * Math.PI) / 180);
+/**
+ * Wing finger spars (round 12): the curves of the built wings (src/stage/dragon/layout.ts wingLayout + fingerAt, the
+ * same source the wing geometry uses), so the spar strobes can never drift off the spars again. The pre-round-3
+ * table (roots (±6..12, 13..15) -> tips on a plane Z −20 leaning back 10°) left the 40 strobes hanging diagonally
+ * across the membranes and in the sky above the scalloped edges (judges r12: daylight wing close-up, t 338.9).
+ * Strobes per spar (outer, middle, inner; 20 per wing), along t 0.15..0.95 of the spar, and their offset (m) in
+ * front of the spar surface along the wing normal (clear of the white arrowhead plates on the spar front).
+ */
+const SPAR_STROBES = [8, 7, 5];
+const SPAR_STROBE_OFF = 0.36;
 /** castle core towers (x, top y) and side-section towers, facade Z −12 / −10 */
 const CASTLE_TOWERS: [number, number, number][] = [
   [14, 16, -12],
@@ -395,13 +399,11 @@ function archSpots(): THREE.Vector3[] {
 
 export const RIG_SOURCES: AnchorName[] = ['fixtures_truss', 'fixtures_floor', 'pillars_top', 'pillars_base', 'delay_towers', 'foh', 'wing_left', 'wing_right', 'towers_top', 'dragon_head'];
 
-/** z offset of the wing fixtures (in front of the membrane at the spar root height) */
-function wingBaseZ(anchors: Anchors): number {
-  const pts = [...anchors.get('wing_left'), ...anchors.get('wing_right')];
-  if (pts.length === 0 || (isDefaultAnchor(anchors, 'wing_left') && isDefaultAnchor(anchors, 'wing_right'))) return -19;
-  let z = 0;
-  for (const p of pts) z += p.z;
-  return Math.max(-28, Math.min(-3, z / pts.length + 1));
+/** a point on the front face of a wing finger spar (outer 0, middle 1, inner 2) at curve parameter t, `off` m proud */
+function sparFront(side: number, i: number, t: number, off: number): THREE.Vector3 {
+  const L = wingLayout(side);
+  const n = wingNormal(L);
+  return fingerAt(L, i, t, fingerCtrl(L, i, n)).addScaledVector(n, fingerRadius(t) + off);
 }
 
 /** castle tower tops: registered anchor, else the bible's castle + side-section towers */
@@ -486,9 +488,6 @@ export function buildRig(anchors: Anchors, density: number, own?: Map<string, TH
   const blinder = (tags: number, pos: THREE.Vector3, fwd: THREE.Vector3) =>
     emitters.push({ kind: 'blinder', tags, pos: pos.clone(), fwd: fwd.clone().normalize(), twoSided: false, seed: hash32(emitters.length * 131 + 5) / 4294967296, size: v3(0.62, 0.62, 0.2) });
 
-  const wz = wingBaseZ(anchors);
-  const wingZ = (y: number) => wz - (y - 14) * WING_LEAN;
-
   // ------------------------------------------------------------------------ stage structure (truss)
   /** dragon skull: 8 heads (FACT, teardown), on the registered head if any */
   const skullRow = () => {
@@ -510,19 +509,13 @@ export function buildRig(anchors: Anchors, density: number, own?: Map<string, TH
     cluster = addRegisteredTruss(anchors.get('fixtures_truss'), density, cluster, add);
     if (!fixtures.some((f) => f.tags === T_DRAGON)) skullRow();
   } else {
-    // wing leading edges: continuous rows along the 6 finger spars (bible: 2 x 60 at ~1.3 m pitch)
+    // (no registered wing geometry) rows along the 6 finger spars of the wing layout (bible: ~1.3 m pitch)
     for (const s of [-1, 1]) {
-      for (const [rx, ry, tx, ty] of SPARS) {
-        const p0 = v3(s < 0 ? rx : -rx, ry, 0);
-        const p1 = v3(s < 0 ? tx : -tx, ty, 0);
-        const len = p0.distanceTo(p1);
+      const L = wingLayout(s);
+      for (let i = 0; i < 3; i++) {
+        const len = L.bases[i].distanceTo(L.tips[i]);
         const n = cnt(len / 1.3, 3);
-        for (let k = 0; k < n; k++) {
-          const a = 0.08 + (0.86 * k) / Math.max(1, n - 1);
-          const x = p0.x + (p1.x - p0.x) * a;
-          const y = p0.y + (p1.y - p0.y) * a;
-          add(G_TRUSS, T_SPAR, v3(x, y, wingZ(y)), Z, false, k, n, cluster);
-        }
+        for (let k = 0; k < n; k++) add(G_TRUSS, T_SPAR, sparFront(s, i, 0.08 + (0.86 * k) / Math.max(1, n - 1), 0.5), Z, false, k, n, cluster);
         cluster++;
       }
     }
@@ -592,15 +585,9 @@ export function buildRig(anchors: Anchors, density: number, own?: Map<string, TH
   // deck lip 40
   for (let k = 0; k < 40; k++) strobe(T_DECK, v3(-36.2 + (72.4 * (k + 0.5)) / 40, 2.0, 0.05), Z);
   for (const s of [-1, 1]) {
-    // wing spars 20 per wing (between the moving heads)
-    const per = [5, 7, 8];
-    SPARS.forEach(([rx, ry, tx, ty], i) => {
-      for (let k = 0; k < per[i]; k++) {
-        const a = 0.15 + (0.8 * (k + 0.5)) / per[i];
-        const x = (s < 0 ? rx : -rx) + ((s < 0 ? tx : -tx) - (s < 0 ? rx : -rx)) * a;
-        const y = ry + (ty - ry) * a;
-        strobe(T_SPAR, v3(x, y - 0.4, wingZ(y) + 0.25), Z);
-      }
+    // wing spars 20 per wing: on the front of the 3 finger spars (outer, middle, inner), facing the audience
+    SPAR_STROBES.forEach((per, i) => {
+      for (let k = 0; k < per; k++) strobe(T_SPAR, sparFront(s, i, 0.15 + (0.8 * (k + 0.5)) / per, SPAR_STROBE_OFF), Z);
     });
     // castle roof 6 per side
     for (let k = 0; k < 6; k++) strobe(T_ROOF, v3(s * (9 + k * 5.4), 9.6, -12.1), Z);
