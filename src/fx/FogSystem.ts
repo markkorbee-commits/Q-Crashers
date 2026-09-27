@@ -115,8 +115,10 @@ export class FogSystem extends CueFxSystem {
       case 'burst':
         return cue.dur + Math.min(22, num(cue.p.life, 16, 1, 30) + 6);
       case 'lowfog': {
+        // (the cue stays active at least LightingSystem's own linger of the bank, 10 s: writeLowFog / deckSmoke find
+        // their bank through the active cues, so a short `release` must not cut their lit layer off)
         const rel = this.lowfogRelease(cue);
-        return cue.dur + (rel > 0 ? Math.min(19.5, rel + 0.5) : 16);
+        return cue.dur + (rel > 0 ? Math.min(19.5, Math.max(rel, LOWFOG_RELEASE) + 0.5) : 16);
       }
       default:
         return cue.dur;
