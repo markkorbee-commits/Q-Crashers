@@ -336,6 +336,7 @@ Zo 27 sep 2026, ± 00:40 (CEST), lokaal op de MacBook Pro (M4 Max, GPU-render).
   | + ronde 7 (8 groepen: show, camera, pyro, fx, lighting, lasers, env, stage) | 67,1 % | 50,2 % | 67,9 / 80,5 / 54,8 |
   | + ronde 8 deel 1 (show, camera, pyro, lighting, env, stage, flash) | 68,1 % | 51,7 % | 68,8 / 81,0 / 56,3 |
   | + perception (Show camera ongewijzigd) + ronde 9 (8 groepen) | 68,5 % | 52,3 % | 69,2 / 81,5 / 56,6 |
+  | + ronde 10 (video-match, alle 11 showdelen, exacte frames) | 69,3 % | 53,5 % | 70,3 / 82,2 / 57,1 |
 
 - Ronde 5 (findings `docs/handoff/findings/r5_*.md`): schermen tonen kasteelprint i.p.v. vlakke panelen; MC met
   gekleurde key + backlight, close-ups houden de haze, troupe-choreografie en -shots 641-740 s herzien; pyro met
@@ -371,6 +372,12 @@ Zo 27 sep 2026, ± 00:40 (CEST), lokaal op de MacBook Pro (M4 Max, GPU-render).
 - Ronde 9 (findings `r9_*.md`, 27 sep ± 04:25): +0,6 punt (onder de stopdrempel van 1,0): lantaarn-kleurenchase 508,
   oranje lucht 713, één gerbwaaier achter de kop 1510, statief-posefit terras (0,5; 7; 168,9), lasers langs de U-voorkant
   (front_line / ramparts), laaghangende mist verlicht door de beams en met release, witte vensterbalken.
+
+- Ronde 10 (27 sep ± 06:00): video-match op alle 11 showdelen tegen de exacte frames (25 fps waar nodig): o.a.
+  Vivaldi-climax (rode pulsen met blauw ertussen), stutter-edits groen/violet in Discorecord per frame, camera's per
+  shot met kleinste-kwadraten-posefit (terrasstatief, telelens, zijheuvel), cutlijst gecorrigeerd. Notities per deel in
+  `research/video-timeline/NN.md`. Showbestand nu 3365 cues (4068 geëxpandeerd: net boven de richtwaarde 4000,
+  mobiel budget PASS).
 
 Eerdere stand (cloud, vóór de overdracht):
 
