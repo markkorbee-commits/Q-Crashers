@@ -407,3 +407,23 @@ needs the new presets in `EXT_ENUM`.
 | 1124.428 `crossfire` (the cyan X) | tilt 12 → 4: the filmed beams cross just over the set and run out low to the frame edges | 1124.75 +1, 1125.5 +1.3 |
 | 803.734 split (show group, round 7) | the filmed figure changes every frame (12.5 fps): diagonal lines v803.80, wedges + web v803.88–804.0, X bow-ties v804.04–804.12, V fans v804.20–804.28, **Λ tents v804.36**, hourglass v804.44, V fans v804.52–804.60. The `trees` look belongs around show 804.30–804.45 (tents of about the V fans' width, apex ~1.6 × their height, i.e. `height` ≈ 10); the f4 frame of the 803.9 moment (v804.0) shows wedges + bow-ties, not tents | — |
 | tried, rejected | 1163.241 `sweep` on the towers only (count 2, intensity 0.5): 1165 +3, but 1169.5 −2; 1269.178 `grid` on the deck only: −15; 317.979 as a `zigzag`: −6; a roof `sheet` for the 206.69 roof fans: −14 … −44 | — |
+
+### Round 12: the Embers laser sea (v1128–1169.5), measured, no engine change
+
+Measured in-page with the tune hooks on the Show camera (exact-time frames, 12 moments v1120.5–1169.5, calibrated
+26.6 % for the committed look); none was kept, and the laser engine is unchanged:
+
+| tried | effect |
+|---|---|
+| `ceilGain` 12 → 19 (the lit cloud ceiling 1.6x) | the lantern close-ups gain (1120.5 +3.7, 1128.5 +1.3, 1130 +1.5, 1136 +3.4 points) but the far shots from the back lose as much (1145 −4.3, 1150 −4.5, 1160 −3.5): 25.9 % |
+| the same boost only within 70–140 m of the camera (a near-ceiling term) | 26.6 %: the far shots still see the ceiling within that range (1145 −2.2, 1150 −2.4) |
+| `ceilSmooth` 0 (fine smoke texture instead of broad clouds) | 24.1 % (1131–1136 −2 … −6) |
+| `seaGain` 1.6, `seaFloor` 0.12 / 0.35 | ±0.5 points: the sea saturates in the diode blue |
+| the 1131.366 roof `sheet` (tilt 10, intensity 0.5, dur 32) dimmed to 0.1 | 1145 +0.7, but 1160 −7 |
+
+What the video shows and a cue (camera / show group) can give: the brightness pulses of v1128–1136 (luma 22 ↔ 44,
+peaks at v1128.5, v1130.5–1131.0, v1134.25–1134.5) are the roof sheet sweeping through the view; they fit a `steps`
+list on the 1110.366 roof sheet (tilt 12) and the 1131.366 roof sheets (`{at, intensity}` about ±40 % around the
+cue level, peaks at the times above — show time = video − 0.036; not measured here). The far shots v1145–1150 have a
+dark sky over the set where ours shows that roof sheet's blue ceiling, but v1160 needs its light: a `steps` dip of
+that sheet over ~1141–1157 (untested) rather than a lower level for the whole cue.
