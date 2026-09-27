@@ -83,6 +83,20 @@ light on the ground in front of them. It does not change the set wash. Every oth
 `castle`, `deck` …) washes the whole set as before. Use zone washes for the amber side-deck glows at
 v48.1–49.3, 59–61.8 and 64.3–65.3.
 
+## wash: the set only, or a field share (round 9)
+A set wash lights **the set only**: the castle, the dragon, the wings, the deck and the haze glow right
+around them. It does not light the audience field, the air over the field or the paving. For a field that
+glows in the wash colour, either add a `flood` with area `field` / `all` (the pink fountain waves at
+1192.1 and 1198.1 do that), or give the wash a field share:
+
+| param | default | meaning |
+|---|---|---|
+| `fieldShare` | 0 | 0..1: the wash also floods the field (the lit air over it, the soft pool on the paving in front of the stage, the crowd and the world light bus) at `fieldShare` x its `intensity`, in its colour. It follows the wash's own fade and cross-fades, so it needs no extra cue |
+
+`fieldShare` 0.75 on the 1192.1 pink wash (0.8) gives about the field light of the 0.6 `field`/`all` flood
+without the flood's lift of the stage air (1194 s: flood 52.8 %, no flood 38.8 %, wash `fieldShare` 0.75
+52.8 %). Zone washes (side-section targets) ignore it.
+
 ## pillars: subset
 A `pillars` cue can address some of the lanterns. Use `target` `left` / `right`, `rows` (0 = the row
 nearest the stage, number or list) and / or `index` (order of `pillars_top`: 0 = L1, 1 = R1, 2 = L2,
@@ -98,9 +112,36 @@ level scales its lamp and its shaft together.
   shafts. This matches the blue storm at v1010.9 and the red smoke at v1510–1537.
 * The haze scale of the show camera and photo mode (`CameraRig.hazeScale`, lower for long lenses)
   is applied to the beams and to both glow volumes right before drawing.
-* Photosensitivity (`app.reduceFlashing`): strobe bursts are capped at 3 Hz and kick strobes fire on
-  every second kick with a softer decay. Strobes are at 40 %, blinders at 50 % with a 0.25 s rise,
-  floods at 60 % with an attack of at least 0.3 s, and light-bus flashes at 40 %.
+* Photosensitivity (`app.reduceFlashing`): strobes are at 40 %, blinders at 50 % with a 0.25 s rise,
+  floods at 60 % with an attack of at least 0.3 s, and light-bus flashes at 40 %. Round 9: every flash of
+  the lights shares **one flash budget** (see "Round 9" below): at most 3 flashes in any second.
+
+## Round 9: one flash budget with "Reduce flashing", saturated flood air (no cue change needed)
+* **Shared flash budget** (only with `app.reduceFlashing` on; with the option off nothing changes). Every flash
+  onset of the lights (blinder onsets, `lights.hit`, strobe hits, the pulses of strobe bursts, kick strobes on
+  every second kick, chase steps) goes into one schedule, built once per show compile from the cues and the tempo
+  grid (seek-safe). Two onsets that do not coincide (within 0.04 s: a stage hit and a strobe hit on the same
+  downbeat are one flash) lie at least 0.35 s apart, so any 1 s window holds at most 3 flashes
+  (`CALM_MAX_HZ`). Priority: blinder onsets (never dropped), then the accents (`lights.hit`, strobe hits, the
+  first pulse of a burst), then the repeated pulses, which give way around the accents. Before, the strobe cap
+  sat exactly at 3 Hz and a hit in the same second made 4 (v1265.3–1266.3); now the burst at 1264.68 fires
+  1264.68 / 1265.08 / 1265.48 and the hit at 1266.18, its pulses at 1265.88 and 1266.28 are dropped.
+* Strobe bursts: at most 2.5 pulses per second (was 3), on the budget.
+* **Chase** (`lights.chase`): at most one step per beat and never faster than 0.35 s (`every` `halfbeat` at
+  155 bpm steps every 0.387 s, was 5.2 Hz at v406.1–409.0), each step swells in over 0.12 s and decays slowly,
+  and the chase swings between 0.25 and 0.6 of its intensity (was dark to full) while the look underneath keeps
+  60 % (was 30 %). A step the budget drops holds the previous step.
+* `lights.hit`: 60 %, swelling in over 0.12 s, on the budget (a dropped hit does not fire).
+* Beat pumping is shallow: a look with `kick` swings 25 % (was 72 %), the `pulse` preset 0.7–1.0 (was
+  0.12–1.0), a flood with `kick` 15 % (was 50 %), pillar and festoon `pulse` 0.75–1.0.
+* **Saturated flood air** (option off too): the depth-sliced flood glow drops the white part of a saturated flood
+  colour (chroma above ~0.8; white and pastel floods such as `#A8D4FF` stay as they are), keeping its hue. The
+  violet flood at v509.25 made a lavender-grey veil round the castle base (probe region 69/32/144, film
+  72/10/178); now 65/24/142. Flood moments: 509.25 +3.0, 289.25 +1.9, 338 +1.8, 558.25 +1.2, 1511.75 +0.5,
+  1194 −0.6, 1047.25 −2.4 (the film's air there is amber-brown smoke, not the violet of the 1046.44 flood cue).
+  A luminance make-up (1.3 / 1.6) was measured and not kept (1047.25 −5.4 / −6.6). Hooks: `lights.floodGlowSat`
+  (1), `floodSatGain` (1), `floodHighK` (1, the stage flood's share in the upper air blob; 0.6 measured mixed:
+  509.25 +2.9, 338 +0.4, 1047.25 −4.5).
 
 ## Round 8: deck ends, blinder glare, the portal, lit low fog
 * **New target filters `outer` / `ends`** (all lights fx): positions with |X| ≥ 20 m, the outer truss segment of
@@ -248,3 +289,4 @@ smoke, the beams and on the set. What changed:
 * lights look `preset`: add `curtain`. Look params `aim`, `gobo` (`dots` \| `glitter` \|
   `breakup`), `sway`.
 * pillars params `rows`, `index`.
+* `lights.wash` param `fieldShare` (0..1, default 0; round 9).

@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import type { ShowEngine } from '../show/ShowEngine';
 import type { Cue } from '../show/ShowTypes';
+import { CALM_MAX_HZ } from '../fx/core/flashSafety';
+import type { TempoMap } from '../show/TempoMap';
 import { matchTarget, parseGroups, parseTargets, type Rig, type TargetFilter } from './rig';
 
 /**
@@ -105,6 +107,8 @@ export interface LightCue {
   area: number;
   /** flood: rise time (s) */
   attack: number;
+  /** set wash: share of its level that also floods the field (air + paving), 0 = the set only */
+  fieldShare: number;
   /** festoon: FS_* string mask (x2 for the sides) */
   strings: number;
 }
@@ -253,6 +257,7 @@ function parse(c: Cue, show: ShowEngine): LightCue {
     pmask: null,
     area: c.fx === 'flood' || c.fx === 'wash' ? floodArea(c, c.fx) : 0,
     attack: Math.max(0.01, num(p.attack, 0.08)),
+    fieldShare: c.fx === 'wash' ? Math.min(1, Math.max(0, num(p.fieldShare, 0))) : 0,
     strings: c.fx === 'festoon' ? festoonStrings(c.targets) : 0,
   };
   // floods and festoons release over `fade` (flood default 0.8 s, festoon 0.4 s)
@@ -414,6 +419,103 @@ export class EventTrack {
   }
 }
 
+// ------------------------------------------------------------------------------------ reduce flashing
+/**
+ * Photosensitivity option (App.reduceFlashing): ONE flash budget shared by every flash the lights make. With the
+ * option on, two flash onsets that do not coincide (within CALM_MERGE) lie at least CALM_GAP apart, so any 1 s
+ * window holds at most three (CALM_MAX_HZ), whatever mix of sources fires: a strobe burst next to a `lights.hit`
+ * (v1265.3–1266.3: capped strobe + hit = 4 flashes/s before), a chase next to a strobe. Built once per show
+ * compile from the cues + the tempo grid, so a seek gives the same flashes (pure function of show time).
+ * Tiers, highest first: blinder onsets (never dropped: they swell in over 0.25 s), then `lights.hit` / strobe
+ * hits / the first pulse of a burst (the musical accents), then the repeated pulses (burst pulses, kick strobes,
+ * chase steps), which give way to the accents around them.
+ */
+export const CALM_GAP = 1.05 / CALM_MAX_HZ;
+/** onsets closer than this are one flash (a stage hit + a strobe hit on the same downbeat) */
+export const CALM_MERGE = 0.04;
+/** strobe bursts with the option on: at most 2.5 pulses per second (was 3 Hz) */
+export const CALM_BURST_HZ = 2.5;
+/** calm burst pulse period (s) */
+export function calmBurstPeriod(c: LightCue): number {
+  return Math.max(1 / c.rate, 1 / CALM_BURST_HZ);
+}
+/** calm chase step (s): at most one step per beat, never faster than CALM_GAP */
+export function calmChaseStep(c: LightCue): number {
+  const beat = 60 / Math.max(40, c.bpm);
+  let b = Math.max(1, c.every);
+  while (b * beat < CALM_GAP && b < 64) b *= 2;
+  return b * beat;
+}
+
+const TIER_FIXED = 0;
+const TIER_ACCENT = 1;
+const TIER_PULSE = 2;
+
+/** the kept flash onsets of the calm budget (see CALM_GAP); queried with the onset time a source computes */
+export class CalmBudget {
+  /** sorted kept onset times (s) */
+  kept = new Float64Array(0);
+  /** onsets offered / dropped at the last build (dev stats) */
+  offered = 0;
+  dropped = 0;
+  private readonly tiers: number[][] = [[], [], []];
+
+  clear(): void {
+    for (const t of this.tiers) t.length = 0;
+  }
+
+  add(t: number, tier: number): void {
+    if (Number.isFinite(t)) this.tiers[tier].push(t);
+  }
+
+  /** greedy per tier in time order against every onset kept so far (compile time only: allocates) */
+  build(): void {
+    const anchors: number[] = [];
+    const kept: number[] = [];
+    this.offered = 0;
+    this.dropped = 0;
+    for (let tier = 0; tier < this.tiers.length; tier++) {
+      const list = this.tiers[tier].sort((a, b) => a - b);
+      for (const t of list) {
+        this.offered++;
+        let lo = 0;
+        let hi = anchors.length;
+        while (lo < hi) {
+          const mid = (lo + hi) >> 1;
+          if (anchors[mid] < t) lo = mid + 1;
+          else hi = mid;
+        }
+        const prev = lo > 0 ? anchors[lo - 1] : -Infinity;
+        const next = lo < anchors.length ? anchors[lo] : Infinity;
+        if (tier === TIER_FIXED) {
+          anchors.splice(lo, 0, t);
+          kept.push(t);
+        } else if (t - prev <= CALM_MERGE || next - t <= CALM_MERGE) {
+          kept.push(t); // the same flash as a kept onset
+        } else if (t - prev >= CALM_GAP && next - t >= CALM_GAP) {
+          anchors.splice(lo, 0, t);
+          kept.push(t);
+        } else this.dropped++;
+      }
+    }
+    kept.sort((a, b) => a - b);
+    this.kept = Float64Array.from(kept);
+  }
+
+  /** true when the flash with onset t may fire (allocation free) */
+  ok(t: number): boolean {
+    const a = this.kept;
+    let lo = 0;
+    let hi = a.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (a[mid] < t - 1e-4) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo < a.length && a[lo] <= t + 1e-4;
+  }
+}
+
 /** blinder tungsten afterglow (s) */
 export const BLINDER_TAIL = 1.1;
 /** strobe flash decay tail (s) */
@@ -435,6 +537,8 @@ export class LightCueIndex {
   readonly chases = new EventTrack(0);
   readonly blinders = new EventTrack(BLINDER_TAIL);
   readonly strobes = new EventTrack(STROBE_TAIL);
+  /** reduce flashing: the flash onsets that may fire (shared by strobes, hits, chases, blinders) */
+  readonly calm = new CalmBudget();
   revision = -1;
   count = 0;
   /** content signature of the lights + strobe cue lists the index was built from */
@@ -528,7 +632,39 @@ export class LightCueIndex {
     this.chases.finish();
     this.blinders.finish();
     this.strobes.finish();
+    this.buildCalm(show.tempo ?? null);
     this.revision = show.revision;
+  }
+
+  /** the reduce-flashing budget over every flash onset of the lights (see CalmBudget) */
+  private buildCalm(tempo: TempoMap | null): void {
+    const b = this.calm;
+    b.clear();
+    for (const c of this.blinders.items) b.add(c.t0, TIER_FIXED);
+    for (const c of this.hits.items) b.add(c.t0, TIER_ACCENT);
+    for (const c of this.chases.items) {
+      const step = calmChaseStep(c);
+      for (let k = 0; k * step < c.dur && k < 4096; k++) b.add(c.t0 + k * step, TIER_PULSE);
+    }
+    for (const c of this.strobes.items) {
+      if (c.cue.fx === 'burst') {
+        const period = calmBurstPeriod(c);
+        const last = Math.floor(Math.max(0, c.dur - 1e-3) / period);
+        for (let k = 0; k <= last && k < 4096; k++) b.add(c.t0 + k * period, k === 0 ? TIER_ACCENT : TIER_PULSE);
+      } else if (c.cue.fx === 'kick') {
+        // every second kick (the even beats), as the calm kick strobe fires them
+        if (!tempo) continue;
+        let tt = c.t0 - 0.03;
+        for (let guard = 0; guard < 4096; guard++) {
+          const beat = Math.ceil(tempo.beatAt(tt) - 1e-6);
+          const tb = tempo.timeOfBeat(tt, beat);
+          if (tb > c.t0 + c.dur) break;
+          if ((beat & 1) === 0) b.add(tb, TIER_PULSE);
+          tt = tb + 1e-3;
+        }
+      } else b.add(c.t0, TIER_ACCENT);
+    }
+    b.build();
   }
 }
 

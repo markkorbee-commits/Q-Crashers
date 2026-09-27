@@ -162,8 +162,8 @@ function setRest(f: Fixture, o: AimOut): void {
 const abs = Math.abs;
 const sin = Math.sin;
 
-/** Evaluate one look for one fixture at show time t. `c` null = dark. */
-export function evalLook(c: LightCue | null, f: Fixture, t: number, beat: BeatInfo, o: AimOut): void {
+/** Evaluate one look for one fixture at show time t. `c` null = dark. `calm`: App.reduceFlashing (shallow beat pumping). */
+export function evalLook(c: LightCue | null, f: Fixture, t: number, beat: BeatInfo, o: AimOut, calm = false): void {
   o.mix = 0;
   o.tan = c ? c.tan : TAN_NARROW;
   o.gobo = c ? c.gobo : 0;
@@ -298,7 +298,8 @@ export function evalLook(c: LightCue | null, f: Fixture, t: number, beat: BeatIn
     case P_PULSE: {
       setFan(f, f.fanOut * (10 + 30 * au) + f.cx * (c.spread ?? 30), c.tilt !== null ? 90 - c.tilt : 16, o);
       const since = (beat.phase * 60) / Math.max(40, beat.bpm);
-      dim = 0.12 + 0.88 * Math.exp(-since * 7);
+      // (reduce flashing: a shallow swell on the beat instead of an 88 % flash)
+      dim = calm ? 0.7 + 0.3 * Math.exp(-since * 4) : 0.12 + 0.88 * Math.exp(-since * 7);
       o.mix = Math.floor(beat.bar) & 1;
       break;
     }
@@ -348,7 +349,7 @@ export function evalLook(c: LightCue | null, f: Fixture, t: number, beat: BeatIn
     if (share < 1 && f.sel >= share) dim = 0;
   }
   dim *= c.level;
-  if (c.kick) dim *= 0.28 + 0.72 * beat.kick;
+  if (c.kick) dim *= calm ? 0.75 + 0.25 * beat.kick : 0.28 + 0.72 * beat.kick;
   o.dim = dim;
 }
 

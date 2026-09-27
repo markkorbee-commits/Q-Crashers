@@ -10,6 +10,8 @@ import {
   AREA_SIDES_R,
   AREA_STAGE,
   BLINDER_TAIL,
+  calmBurstPeriod,
+  calmChaseStep,
   FM_CHASE,
   FM_FLICKER,
   FM_OFF,
@@ -24,6 +26,7 @@ import {
   PRESETS,
   STROBE_TAIL,
   TAN_NARROW,
+  type CalmBudget,
   type LightCue,
   type StateBlend,
 } from './cues';
@@ -57,6 +60,14 @@ import {
 import { evalLook, lookIsDark, vnoise, type AimOut } from './looks';
 import { BACKLIGHT_Z, buildRig, GROUP_NAMES, isDefaultAnchor, RIG_SOURCES, T_BACK, T_BOOTH, T_EXPLICIT, type Rig } from './rig';
 
+/**
+ * Photosensitivity option (App.reduceFlashing): a budgeted `lights.hit` fires at this share and swells in over
+ * CALM_RISE (s); a calm chase swings between CALM_CHASE_FLOOR and FLOOR + SWING (was dark -> full)
+ */
+const CALM_HIT_K = 0.6;
+const CALM_RISE = 0.12;
+const CALM_CHASE_FLOOR = 0.25;
+const CALM_CHASE_SWING = 0.35;
 /** HDR scale of a beam's haze column (the shader adds geometry/phase terms) */
 const BEAM_GAIN = 2.8;
 /** HDR scale of a lit lens seen off-axis / on-axis (flare) */
@@ -105,6 +116,12 @@ const SCATTER_H1 = 0.92;
  * grey veil over the whole frame (ours was 154 / 170 / 185 with p10 luma 139). SCATTER_GAIN: its level.
  */
 const SCATTER_SAT = 4;
+/**
+ * flood glow saturation (LightingSystem.floodGlowSat: 1 = the white part of a saturated flood colour removed) and
+ * its luminance make-up cap (1 = none; 1.3 / 1.6 measured worse, see floodGlowSat)
+ */
+const FLOOD_GLOW_SAT = 1;
+const FLOOD_SAT_GAIN = 1;
 const SCATTER_GAIN = 0.5;
 /** storm haze: how far the beams bloom into soft shafts (was 0.85: wide milky shafts; the video's are crisp) */
 const STORM_SOFT = 0.45;
@@ -533,6 +550,10 @@ export class LightingSystem implements System {
     const sTan = this.sTan;
     const nHits = this.hits.length;
     const nChases = this.chases.length;
+    // photosensitivity option: every flash shares the calm budget (LightCueIndex.calm)
+    const rf = this.reduceFlashing();
+    this.rf = rf;
+    const calm = this.idx.calm;
     for (let i = 0; i < n; i++) {
       const f = fx[i];
       const bl = this.blends[f.cls];
@@ -552,7 +573,7 @@ export class LightingSystem implements System {
           continue;
         }
       }
-      evalLook(bl.to, f, t, beat, A);
+      evalLook(bl.to, f, t, beat, A, rf);
       if (bl.to) cA.copy(bl.to.c1).lerp(bl.to.c2, A.mix);
       else cA.setRGB(1, 1, 1);
       let dim = A.dim;
@@ -565,7 +586,7 @@ export class LightingSystem implements System {
       let b = cA.b;
       const k = bl.k;
       if (k < 1) {
-        evalLook(bl.from, f, t, beat, B);
+        evalLook(bl.from, f, t, beat, B, rf);
         if (bl.from) cB.copy(bl.from.c1).lerp(bl.from.c2, B.mix);
         else cB.setRGB(1, 1, 1);
         const wa = (1 - k) * B.dim;
@@ -604,7 +625,9 @@ export class LightingSystem implements System {
         if (c.mask![i] !== 1) continue;
         const u = (t - c.t0) / Math.max(0.05, c.dur);
         if (u < 0 || u >= 1) continue;
-        const e = c.intensity * (1 - u) * (1 - u);
+        let e = c.intensity * (1 - u) * (1 - u);
+        // calm: a budgeted hit swells in over CALM_RISE at 60 % (a dropped one does not fire)
+        if (rf) e = calm.ok(c.t0) ? e * CALM_HIT_K * smooth01((t - c.t0) / CALM_RISE) : 0;
         const m = dim + e > 1e-4 ? e / Math.max(dim, e) : 1;
         r += (c.c1.r - r) * m;
         g += (c.c1.g - g) * m;
@@ -615,8 +638,9 @@ export class LightingSystem implements System {
       for (let h = 0; h < nChases; h++) {
         const c = this.chases[h];
         if (t >= c.t0 + c.dur || c.mask![i] !== 1) continue;
-        const e = chaseEnv(c, f.u, f.cluster, t) * c.intensity;
-        dim = dim * 0.3 + e;
+        const e = (rf ? chaseEnvCalm(c, f.u, f.cluster, t, calm) : chaseEnv(c, f.u, f.cluster, t)) * c.intensity;
+        // (calm: the look underneath keeps more of its level, the chase swings over a third of the range)
+        dim = dim * (rf ? 0.6 : 0.3) + e;
         if (c.color) {
           const m = e > 0 ? Math.min(1, e) : 0;
           r += (c.c1.r - r) * m;
@@ -733,7 +757,6 @@ export class LightingSystem implements System {
     let strobeMax = 0;
     let strobeOn = 0;
     let blindMax = 0;
-    const rf = this.reduceFlashing();
     this.blindCol.setRGB(0, 0, 0);
     this.backCol.setRGB(0, 0, 0);
     this.boothCol.setRGB(0, 0, 0);
@@ -751,7 +774,7 @@ export class LightingSystem implements System {
         for (let h = 0; h < this.strobes.length; h++) {
           const c = this.strobes[h];
           if (c.mask![j] !== 1) continue;
-          const v = strobeEnv(c, t, beat, rf) * c.intensity * (rf ? 0.4 : 1);
+          const v = strobeEnv(c, t, beat, rf, calm) * c.intensity * (rf ? 0.4 : 1);
           if (v > level) {
             level = v;
             col.copy(c.c1);
@@ -927,7 +950,8 @@ export class LightingSystem implements System {
       const c = this.hits[i];
       const u = (t - c.t0) / Math.max(0.05, c.dur);
       if (u < 0 || u >= 1) continue;
-      const e = c.intensity * (1 - u) * (1 - u) * 0.7;
+      let e = c.intensity * (1 - u) * (1 - u) * 0.7;
+      if (this.rf) e = this.idx.calm.ok(c.t0) ? e * CALM_HIT_K * smooth01((t - c.t0) / CALM_RISE) : 0;
       W.r += c.c1.r * e;
       W.g += c.c1.g * e;
       W.b += c.c1.b * e;
@@ -1052,7 +1076,7 @@ export class LightingSystem implements System {
         li += l * w;
         si += sh * w;
         if (mode === PM_FLICKER || mode === PM_CHASE || mode === PM_PULSE) modulated = true;
-        num += (c ? pillarMult(c, mode, i, rig.pillars[i].row, rig.rows, t, beat) : 1) * w * (l > 0 ? l : 1);
+        num += (c ? pillarMult(c, mode, i, rig.pillars[i].row, rig.rows, t, beat, this.rf) : 1) * w * (l > 0 ? l : 1);
       }
       // mode multiplier of this pillar (intensity-weighted over the two states)
       arr[i] = li > 1e-4 ? num / li : 0;
@@ -1097,7 +1121,8 @@ export class LightingSystem implements System {
     for (let i = 0; i < this.floods.length; i++) {
       const c = this.floods[i];
       let e = floodEnv(c, t, rf);
-      if (c.kick) e *= 0.5 + 0.5 * beat.kick;
+      // (calm: the kick pumps the flood by 15 %, not 50 %)
+      if (c.kick) e *= rf ? 0.85 + 0.15 * beat.kick : 0.5 + 0.5 * beat.kick;
       if (rf) e *= 0.6;
       if (e <= 1e-4) continue;
       const col = c.c1;
@@ -1126,8 +1151,24 @@ export class LightingSystem implements System {
         o.sides += e * 0.5;
       }
     }
-    // zone washes on the side sections (a wash with target sides / side_front …): a local glow there
     const pal = this.app.palette;
+    // a set wash with `fieldShare` also floods the field (the air over it and the paving in front of the stage)
+    // at share x its level, in its colour, following its cross-fades: a field flood without an extra cue
+    {
+      const bl = this.idx.wash.resolve(t, this.washBlend);
+      for (let pass = 0; pass < 2; pass++) {
+        const c = pass === 0 ? bl.to : bl.from;
+        const w = pass === 0 ? bl.k : 1 - bl.k;
+        if (!c || w <= 0 || c.fieldShare <= 0) continue;
+        resolveColor(c.color ?? 'primary', pal, c.c1, 'primary');
+        const e = c.intensity * c.fieldShare * w;
+        this.floodField.r += c.c1.r * e;
+        this.floodField.g += c.c1.g * e;
+        this.floodField.b += c.c1.b * e;
+        o.field += e;
+      }
+    }
+    // zone washes on the side sections (a wash with target sides / side_front …): a local glow there
     for (let s = 0; s < 2; s++) {
       const bl = this.idx.washSides[s].resolve(t, this.washSideBlend[s]);
       const dst = s === 0 ? this.floodSideL : this.floodSideR;
@@ -1174,22 +1215,24 @@ export class LightingSystem implements System {
     const hk = 0.35 + 0.9 * haze;
     const add = this.addGlow;
     const fg = hk * this.floodGlowK;
-    add(FB_STAGE, this.floodStage, FLOOD_K_STAGE * fg);
-    add(FB_STAGE_HIGH, this.floodStage, FLOOD_K_STAGE * fg);
-    add(FB_FIELD, this.floodField, FLOOD_K_FIELD * fg);
-    add(FB_FIELD_FAR, this.floodField, FLOOD_K_FIELD * fg);
+    // the lit air glows in the flood's own saturated hue (see glowSaturate)
+    const fs = glowSaturate(this.floodStage, this.floodGlowSat, this.floodSatGain, this.cGS);
+    const ff = glowSaturate(this.floodField, this.floodGlowSat, this.floodSatGain, this.cGF);
+    const hi = this.floodHighK;
+    add(FB_STAGE, fs, FLOOD_K_STAGE * fg);
+    add(FB_STAGE_HIGH, fs, FLOOD_K_STAGE * fg * hi);
+    add(FB_FIELD, ff, FLOOD_K_FIELD * fg);
+    add(FB_FIELD_FAR, ff, FLOOD_K_FIELD * fg);
     // a field flood also lifts the air over the stage a little (one continuous cloud)
-    add(FB_STAGE, this.floodField, FLOOD_K_STAGE * fg * 0.35);
+    add(FB_STAGE, ff, FLOOD_K_STAGE * fg * 0.35);
     // (the flood share of the stage air, for the deck close-up weighting at draw time)
     {
       const k0 = FLOOD_K_STAGE * fg;
-      const fs = this.floodStage;
-      const ff = this.floodField;
       this.stageFl[0].set((fs.r + ff.r * 0.35) * k0, (fs.g + ff.g * 0.35) * k0, (fs.b + ff.b * 0.35) * k0);
-      this.stageFl[1].set(fs.r * k0, fs.g * k0, fs.b * k0);
+      this.stageFl[1].set(fs.r * k0 * hi, fs.g * k0 * hi, fs.b * k0 * hi);
     }
-    add(FB_SIDE_L, this.floodSideL, FLOOD_K_SIDES * hk);
-    add(FB_SIDE_R, this.floodSideR, FLOOD_K_SIDES * hk);
+    add(FB_SIDE_L, glowSaturate(this.floodSideL, this.floodGlowSat, this.floodSatGain, this.cGX), FLOOD_K_SIDES * hk);
+    add(FB_SIDE_R, glowSaturate(this.floodSideR, this.floodGlowSat, this.floodSatGain, this.cGX), FLOOD_K_SIDES * hk);
     // backlights and the booth spot glow in the haze around them (hue x the brightest lamp's level)
     if (this.backLevel > 0) {
       // lamps aimed at the viewer through haze: strong forward scatter, a milky veil in the lamp colour
@@ -1410,6 +1453,23 @@ export class LightingSystem implements System {
     this.lowCol.b += b * m;
   }
 
+  /**
+   * Round 9: the flooded air glows in the flood's saturated hue (0 = the cue colour as is, 1 = its white part
+   * removed, see glowSaturate). The violet flood at v509.25 reads deep violet round the castle base in the film
+   * (72/10/178 in our probe region), ours was lavender (69/32/144 -> 65/24/142): the glow carried the cue colour's
+   * small green share, which the dark air turns into a grey veil after the sRGB encode. Flood moments: 509.25
+   * +3.0, 289.25 +1.9, 338 +1.8, 558.25 +1.2, 1511.75 +0.5, 1194 −0.6, 1047.25 −2.4 (there the film's air is amber
+   * smoke, not the violet flood of the cue). Make-up gain 1.3 / 1.6: 509.25 the same, 1047.25 −5.4 / −6.6.
+   */
+  floodGlowSat = FLOOD_GLOW_SAT;
+  /** luminance make-up cap of the saturated glow (1 = none) */
+  floodSatGain = FLOOD_SAT_GAIN;
+  /** share of the stage flood in the upper air blob (FB_STAGE_HIGH) */
+  floodHighK = 1;
+  private readonly cGS = new THREE.Color();
+  private readonly cGF = new THREE.Color();
+  private readonly cGX = new THREE.Color();
+
   /** flood tuning: share of the flood light on the set (wash) and in the world flash bus */
   floodSetK = 1;
   floodFlashK = 1;
@@ -1504,7 +1564,7 @@ export class LightingSystem implements System {
         const c = pass === 0 ? bl.to : bl.from;
         const w = pass === 0 ? bl.k : 1 - bl.k;
         if (!c || w <= 0 || c.mode === FM_OFF) continue;
-        const e = c.intensity * w * festoonMult(c, b, t, beat);
+        const e = c.intensity * w * festoonMult(c, b, t, beat, this.rf);
         r += c.c1.r * e;
         g += c.c1.g * e;
         bb += c.c1.b * e;
@@ -1520,6 +1580,8 @@ export class LightingSystem implements System {
   private reduceFlashing(): boolean {
     return (this.app as unknown as { reduceFlashing?: boolean }).reduceFlashing === true;
   }
+  /** App.reduceFlashing as read at the start of this frame's fixture pass */
+  private rf = false;
 
   setEnabled(on: boolean): void {
     this.enabled = on;
@@ -1578,47 +1640,70 @@ function chaseEnv(c: LightCue, u: number, cluster: number, t: number): number {
   if (tt < 0) return 0;
   const step = Math.floor(tt / stepLen);
   const ph = tt / stepLen - step;
-  const env = Math.exp(-ph * 3.4);
-  let lit = false;
-  switch (c.pattern) {
+  return chaseLit(c.pattern, step, u, cluster) ? Math.exp(-ph * 3.4) : 0;
+}
+
+/**
+ * Photosensitivity option: a chase steps at most once per beat (calmChaseStep) on the calm budget, each step
+ * swells in over CALM_RISE and decays slowly, and it swings between a floor and a shallow peak (0.25 -> 0.6)
+ * instead of dark -> full. A step the budget drops holds the previous kept step (no new onset).
+ */
+function chaseEnvCalm(c: LightCue, u: number, cluster: number, t: number, calm: CalmBudget): number {
+  const step = calmChaseStep(c);
+  const tt = t - c.t0;
+  if (tt < 0) return 0;
+  const k = Math.floor(tt / step);
+  let kk = k;
+  while (kk >= 0 && k - kk < 4 && !calm.ok(c.t0 + kk * step)) kk--;
+  if (kk < 0 || k - kk >= 4) return CALM_CHASE_FLOOR;
+  const since = tt - kk * step;
+  if (!chaseLit(c.pattern, kk, u, cluster)) return CALM_CHASE_FLOOR;
+  return CALM_CHASE_FLOOR + CALM_CHASE_SWING * smooth01(since / CALM_RISE) * Math.exp((-since / step) * 1.2);
+}
+
+/** is the fixture at rig position u lit on chase step `step` */
+function chaseLit(pattern: string, step: number, u: number, cluster: number): boolean {
+  switch (pattern) {
     case 'rl': {
       const N = 8;
       const pos = 1 - (2 * ((step % N) + 0.5)) / N;
-      lit = Math.abs(u - pos) < 1 / N;
-      break;
+      return Math.abs(u - pos) < 1 / N;
     }
     case 'center_out': {
       const N = 5;
       const pos = ((step % N) + 0.5) / N;
-      lit = Math.abs(Math.abs(u) * 1.6 - pos) < 0.5 / N;
-      break;
+      return Math.abs(Math.abs(u) * 1.6 - pos) < 0.5 / N;
     }
     case 'out_center': {
       const N = 5;
       const pos = 1 - ((step % N) + 0.5) / N;
-      lit = Math.abs(Math.abs(u) * 1.6 - pos) < 0.5 / N;
-      break;
+      return Math.abs(Math.abs(u) * 1.6 - pos) < 0.5 / N;
     }
     case 'random':
-      lit = vnoise(step * 1.0, cluster * 131 + 7) > 0.35;
-      break;
+      return vnoise(step * 1.0, cluster * 131 + 7) > 0.35;
     default: {
       const N = 8;
       const pos = -1 + (2 * ((step % N) + 0.5)) / N;
-      lit = Math.abs(u - pos) < 1 / N;
+      return Math.abs(u - pos) < 1 / N;
     }
   }
-  return lit ? env : 0;
 }
 
-/** strobe flash envelope 0..1 */
-function strobeEnv(c: LightCue, t: number, beat: BeatInfo, rf = false): number {
+/** strobe flash envelope 0..1 (`calm`: the shared reduce-flashing budget, consulted only when rf) */
+function strobeEnv(c: LightCue, t: number, beat: BeatInfo, rf: boolean, calm: CalmBudget): number {
   const tt = t - c.t0;
   if (tt < 0) return 0;
   switch (c.cue.fx) {
     case 'burst': {
-      // photosensitivity option: at most 3 flashes per second
-      const period = 1 / (rf ? Math.min(3, c.rate) : c.rate);
+      if (rf) {
+        // photosensitivity option: at most CALM_BURST_HZ pulses, and only the ones the shared budget keeps
+        const period = calmBurstPeriod(c);
+        const k = Math.floor(Math.min(tt, Math.max(0, c.dur - 1e-3)) / period);
+        if (!calm.ok(c.t0 + k * period)) return 0;
+        const local = tt - k * period;
+        return local < 0 ? 0 : Math.exp(-local / 0.022);
+      }
+      const period = 1 / c.rate;
       const last = Math.floor(Math.min(tt, Math.max(0, c.dur - 1e-3)) / period) * period;
       const local = tt - last;
       return local < 0 ? 0 : Math.exp(-local / 0.022);
@@ -1627,17 +1712,19 @@ function strobeEnv(c: LightCue, t: number, beat: BeatInfo, rf = false): number {
       const since = (beat.phase * 60) / Math.max(40, beat.bpm);
       const start = t - since;
       if (start < c.t0 - 0.03 || start > c.t0 + c.dur) return 0;
-      // photosensitivity option: every second kick only (<= 3 Hz at hardstyle tempo), softer decay
-      if (rf && Math.floor(beat.beat) & 1) return 0;
+      // photosensitivity option: every second kick only (<= 3 Hz at hardstyle tempo), on the shared budget,
+      // softer decay
+      if (rf && (Math.floor(beat.beat) & 1 || !calm.ok(start))) return 0;
       return Math.exp(-since / (rf ? 0.09 : 0.035));
     }
     default:
+      if (rf && !calm.ok(c.t0)) return 0;
       return Math.exp(-tt / 0.04);
   }
 }
 
 /** per-pillar lamp multiplier for a pillar mode */
-function pillarMult(c: LightCue, mode: number, i: number, row: number, rows: number, t: number, beat: BeatInfo): number {
+function pillarMult(c: LightCue, mode: number, i: number, row: number, rows: number, t: number, beat: BeatInfo, rf: boolean): number {
   switch (mode) {
     case PM_FLICKER: {
       const v = 0.74 + 0.2 * vnoise(t * 6.5 + i * 3.1, i + 77) + 0.1 * vnoise(t * 17 + i * 1.7, i + 191);
@@ -1653,7 +1740,8 @@ function pillarMult(c: LightCue, mode: number, i: number, row: number, rows: num
     }
     case PM_PULSE: {
       const since = (beat.phase * 60) / Math.max(40, beat.bpm);
-      return 0.25 + 0.75 * Math.exp(-since * 6);
+      // (reduce flashing: a shallow breath on the beat instead of a 75 % pulse)
+      return rf ? 0.75 + 0.25 * Math.exp(-since * 4) : 0.25 + 0.75 * Math.exp(-since * 6);
     }
     case PM_OFF:
       return 0;
@@ -1674,7 +1762,7 @@ function floodEnv(c: LightCue, t: number, rf: boolean): number {
 }
 
 /** festoon bulb multiplier for its string's mode */
-function festoonMult(c: LightCue, b: Bulb, t: number, beat: BeatInfo): number {
+function festoonMult(c: LightCue, b: Bulb, t: number, beat: BeatInfo, rf: boolean): number {
   switch (c.mode) {
     case FM_FLICKER: {
       // candle / old filament: each bulb breathes on its own, with rare dips
@@ -1694,7 +1782,7 @@ function festoonMult(c: LightCue, b: Bulb, t: number, beat: BeatInfo): number {
     }
     case FM_PULSE: {
       const since = (beat.phase * 60) / Math.max(40, beat.bpm);
-      return 0.3 + 0.7 * Math.exp(-since * 6);
+      return rf ? 0.75 + 0.25 * Math.exp(-since * 4) : 0.3 + 0.7 * Math.exp(-since * 6);
     }
     default:
       return 1;
@@ -1720,6 +1808,24 @@ function saturateColor(c: THREE.Color, p: number, out: THREE.Color): THREE.Color
   const m = Math.max(c.r, c.g, c.b);
   if (m <= 1e-6) return out.setRGB(0, 0, 0);
   return out.setRGB(m * Math.pow(Math.max(0, c.r) / m, p), m * Math.pow(Math.max(0, c.g) / m, p), m * Math.pow(Math.max(0, c.b) / m, p));
+}
+
+/**
+ * Saturate a glow colour: remove `k` x its white part (the smallest channel), then make up the Rec.709 luminance
+ * by at most `gain` (1 = no make-up). Keeps the hue (HSV); only colours that are already saturated (chroma >=
+ * ~0.8) change, so a white or pastel flood (#A8D4FF at v411.5) stays as it is.
+ */
+function glowSaturate(c: THREE.Color, k: number, gain: number, out: THREE.Color): THREE.Color {
+  const m = Math.max(c.r, c.g, c.b);
+  if (k <= 0 || m <= 1e-6) return out.copy(c);
+  const lo = Math.min(c.r, c.g, c.b);
+  const chroma = 1 - lo / m;
+  const s = k * smoothstep(0.75, 0.9, chroma) * lo;
+  if (s <= 0) return out.copy(c);
+  const l0 = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+  out.setRGB(c.r - s, c.g - s, c.b - s);
+  const l1 = 0.2126 * out.r + 0.7152 * out.g + 0.0722 * out.b;
+  return out.multiplyScalar(l1 > 1e-6 ? Math.min(gain, l0 / l1) : 1);
 }
 
 /** out = c / max(c) (the hue at full value), black stays black */
