@@ -903,6 +903,20 @@ against the video's [0, 0, 25] and [0, 0, 18]); the late drone shots (t > 950) f
 they were. The sky FILL (hemisphere light) and the air colour now carry the blue of the physical keys (red + green
 × 0.15; the fill was a teal 0.25 : 0.47 : 1): the video's shadows and field read pure blue ([0, 0, 23–48] v20–534),
 ours were grey.
+**Round 11 (per camera, FACT measured on the exact frames):** the sky depends on the camera, so it is set per shot
+with `atmos.sky` cues rather than in the keys. The side drone of v51.0–58.56 (long lens, looking W–SW) films a
+navy-black sky ([1–13, 6–11, 22–26]) over a BLACK band of land, the v176–199.7 drone a darker sky ([0, 0, 18–28]),
+and the rear drone of v22.6–33.3 / v39.75–51 a teal one ([3–15, 35–44, 64–74]); the terrace telephoto of v10.5–22.6
+does not. `level` (dome), `air` (sky light in the haze over the land) and the existing `tint` carry this (cue patch of
+the round-11 env fixer). The video's blue-hour sky is also brighter / tealer towards the left of the stage-facing
+shots (NE) than towards the right (S–SW, the storm side): top-left vs top-right [0, 36, 96] vs [0, 0, 51] at v69.25,
+[0, 24, 79] vs [0, 0, 42] at v118, on ~20 of the 26 blue-sky moments of the 64. An azimuth gradient of the dome
+(darker towards az 235°) scored only +0.1–0.2 on those 26 moments (191.5 −1.5 to −3.7) and was not kept.
+No other stage ran a show that night: the off-site area beams (landmarks) are not in the film (contract request).
+**Fire light (v1565.4–1566.3 eruption):** the whole frame turns red-orange: sky [121, 5, 0], fire-lit banks and trees
+[176–183, 41, 11–42], the paving under the fountains peach [235, 184, 150]; the red air peaks v1565.7 and is gone
+by v1566.8, the sky is black again from v1566.75 while the grounds keep a dim red. `atmos.glow` `ground` lets a
+glow light the grounds like a fire (a smoke glow stays a trace there).
 
 Clouds: broken mid-level deck (coverage 0.5–0.6, base 2.5–3.5 km) with gaps (the moon stays visible, FACT);
 pale haze bands visible in the early sky (FACT f001–f031); cloud undersides pick up stage and pyro colour

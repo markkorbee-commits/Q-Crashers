@@ -227,9 +227,11 @@ export function pillarChase(env: LightEnv, i: number): number {
 /**
  * write this frame's show light state into the shared uniforms (call after all emitters ran).
  * `flashScale` < 1 softens the flash light on the grounds (photosensitivity setting); `smokeAir` = the site smoke in
- * the air (0..1, EnvironmentSystem smokeAt) for the coloured-smoke filter.
+ * the air (0..1, EnvironmentSystem smokeAt) for the coloured-smoke filter; `groundGlow` = the site glow as it lights
+ * the grounds (default env.glowColor; the EnvironmentSystem passes the glows weighted by their `ground` param, round 11:
+ * a very bright short fire lights the trees and the paving, a smoke glow only the air).
  */
-export function updateWorldLights(env: LightEnv, time: number, flashScale = 1, smokeAir = 0): void {
+export function updateWorldLights(env: LightEnv, time: number, flashScale = 1, smokeAir = 0, groundGlow?: THREE.Color): void {
   const u = worldUniforms;
   u.uWTime.value = time;
   for (let i = 0; i < N; i++) {
@@ -262,7 +264,7 @@ export function updateWorldLights(env: LightEnv, time: number, flashScale = 1, s
   const sp = env.flashSpread;
   const r = WORLD_BOUNCE_R + 0.6 * sp;
   u.uWAmbPos.value.set(env.flashPos.x, Math.max(8, env.flashPos.y), env.flashPos.z, 1 / (r * r));
-  const g = env.glowColor;
+  const g = groundGlow ?? env.glowColor;
   u.uWGlowCol.value.set(g.r * GLOW_GAIN, g.g * GLOW_GAIN, g.b * GLOW_GAIN);
 }
 
