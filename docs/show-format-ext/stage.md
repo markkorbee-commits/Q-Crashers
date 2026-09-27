@@ -228,6 +228,37 @@ no part down; every new param defaults to the round-10 behaviour. The patch lift
   poses were fitted to the current head, lose most), so the head is unchanged. `HEAD.snout` (length factor along the
   snout axis, jaw stretched along its own axis; 1 = round 3) is in place for a round that refits those cameras.
 
+### Round 12: lit wing membranes, dimmer rosette suns, the dragon key (engine change, no cue change needed)
+
+Judges r12: the wings are the dominant light surfaces of the footage (printed membranes glowing red / pink / blue with
+white spar plates over a dim castle), ours read as outlined wireframe wings; the rosettes over-popped as bright orange
+discs. Default 64 moments 69.5 / 53.8 % → 69.5 / 53.8 % (raw / calibrated; colour 70.5 → 70.4, light 82.6, shape
+57.3): metric-neutral (338 +0.011, 289.25 +0.004; 582.75 −0.014, 1047.25 −0.010, 264.75 −0.006, where the Show camera
+frames a wing panel our print fills orange-red, the film pink-red). The side by sides at v176.5 / 288 / 338.25 / 592 /
+1507 now show the film's hierarchy: glowing wings over a dim castle. Measured and not kept: a castle flood / FOH wash
+at 60 % (`calib.flood` 0.45, `front` 0.3: 16 castle moments −0.1, 411.5 −0.009, 705 −0.004), no neutral share in
+the set's reflections (neutral), a dragon-hide fill in the LED colour (16 moments −0.9 calibrated: 680.5 −0.037,
+575 −0.035, 656 −0.013).
+
+- **Wing membrane fill** (`CROWN_TUNE.wingFill` 6, shading.ts `uWingFill`): the printed skin is pixel-lit by the
+  show. Level = the look's LED level (`ledIntensity`, not the crown mask's LED floor: an isolated crown at LED 0 keeps
+  its dark skin, v1320.75) × `wings` × `wingLed` level × 6, following the painted inferno's flame lanes (the print's
+  luminance: flame tongues full, the dark ground at `wingFillFloor` 0.2), with a white-hot share on the flame cores
+  (`wingFillHot` 0.4). Colour: 60 % the wing LED colour (`wingFillHue`), 40 % the print's own flame colours at the same
+  brightness (v582.75 / 589.25 / 338: red-orange flames glowing through a pink / red look), mostly steady with 30 % of
+  the LED pattern (a chase's comets or a sparkle would leave the sheet dark between them). Ember / per-side masks and
+  the membranes' fade towards the wrist apply as for the feather strokes. Tunable in the page:
+  `__app.get('stage').crownTune.wingFill` (0 = the round-11 dark skin), `wingFillFloor`, `wingFillHot`, `wingFillHue`.
+- **Rosette suns**: the printed suns inside the rosettes (the yellow / orange sunburst geometry, fx tag 2.2) are at
+  35 % of their painted albedo at night (`CROWN_TUNE.sunPrint`; the daytime view keeps the print). They caught every
+  coloured flood and read as bright orange discs whatever the look (v20.25 / 589.25 / 1243); now the rosettes show
+  the cue's `rosettes` colour (the additive sunburst glow, gain `CROWN_TUNE.rosette` 1, unchanged: v582.75 wants its
+  bright blue-white gears) over a dim gold print.
+- **`lights.key`** (lights.md round 12) now lights the dragon: two soft keys from the audience-left / right front on
+  the dragon's non-wing parts (`StageLookEx.dragonKey` / `dragonKey2`, from `LightEnv.dragonKeyColor*`).
+- **Spar strobes** (lights.md round 12): on the finger spars, from `dragon/layout.ts` `fingerAt` / `fingerCtrl` /
+  `wingNormal` / `fingerRadius`, the same spar curve `dragon/wings.ts` builds (wing geometry unchanged).
+
 ## `stage.state`: new params
 
 Like every other `stage.state` value, the new params are cross-faded over the cue's `fade`. A param
@@ -346,7 +377,8 @@ name like `roof_plumes`; the validator already knows it as an extended anchor fo
 firewall can use `"target": ["wing_left", "wing_right"], "p": {"at": "wing_spars", …}` (the targets stay
 the contract fallback). Video 101: the fire covers the upper two thirds of the wings, while the 6 m flames
 from the ~60 / ~82 % heads of `wing_left` / `wing_right` stand mostly above the membranes. `wing_left` /
-`wing_right` themselves are unchanged (the lighting rig places its wing fixtures at their mean depth).
+`wing_right` themselves are unchanged (since round 12 the lighting rig's spar strobes do not read them: they sit on
+the spar curves of `src/stage/dragon/layout.ts` `fingerAt`).
 
 ## Anchor `wing_edge` (new, round 8)
 

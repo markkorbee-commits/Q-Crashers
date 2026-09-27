@@ -106,6 +106,45 @@ export function wingLayout(side: number): WingLayout {
   };
 }
 
+/**
+ * Wing plane normal (unit, towards the audience): the plane through the wrist and the outer / inner finger ends
+ * (it leans back ~30 deg: wrist low in front, finials high behind).
+ */
+export function wingNormal(L: WingLayout): THREE.Vector3 {
+  const n = new THREE.Vector3().subVectors(L.tips[0], L.wrist).cross(new THREE.Vector3().subVectors(L.tips[2], L.wrist)).normalize();
+  if (n.z < 0) n.negate();
+  return n;
+}
+
+/** sideways bow of the finger spars (m; outer, middle, inner): + bows outwards in the wing plane */
+export const FINGER_BOWS = [1.2, 0.3, -0.7];
+/** finger spar radius (m) at t 0 (base) .. 1 (finger end) */
+export const fingerRadius = (t: number) => 0.66 + (0.4 - 0.66) * t;
+
+/**
+ * Control point of finger spar i (0 outer, 1 middle, 2 inner): the spar is the quadratic Bezier
+ * bases[i] -> ctrl -> tips[i], bowed in the wing plane and 0.5 m behind it. The single source of the spar
+ * shape: the wing geometry (dragon/wings.ts) and the strobes on the spars (lighting/rig.ts) both use it.
+ */
+export function fingerCtrl(L: WingLayout, i: number, nrm = wingNormal(L)): THREE.Vector3 {
+  const base = L.bases[i];
+  const tip = L.tips[i];
+  const mid = new THREE.Vector3().lerpVectors(base, tip, 0.5);
+  const along = new THREE.Vector3().subVectors(tip, base).normalize();
+  const perp = new THREE.Vector3().crossVectors(nrm, along).normalize();
+  // perp points to the finger's left in the wing plane; make it point outward (+x*side)
+  if (perp.x * L.side < 0) perp.negate();
+  return mid.addScaledVector(perp, FINGER_BOWS[i]).addScaledVector(nrm, -0.5);
+}
+
+/** point on the centre line of finger spar i at curve parameter t (0 base .. 1 finger end) */
+export function fingerAt(L: WingLayout, i: number, t: number, ctrl = fingerCtrl(L, i), out = new THREE.Vector3()): THREE.Vector3 {
+  const a = L.bases[i];
+  const b = L.tips[i];
+  const u = 1 - t;
+  return out.set(u * u * a.x + 2 * u * t * ctrl.x + t * t * b.x, u * u * a.y + 2 * u * t * ctrl.y + t * t * b.y, u * u * a.z + 2 * u * t * ctrl.z + t * t * b.z);
+}
+
 function qb(a: THREE.Vector3, c: THREE.Vector3, b: THREE.Vector3, t: number): THREE.Vector3 {
   const u = 1 - t;
   return new THREE.Vector3(
