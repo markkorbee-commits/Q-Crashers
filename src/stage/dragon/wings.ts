@@ -27,6 +27,9 @@ export interface WingResult {
   garlands: V3[][];
 }
 
+/** spacing (m) of the 'wing_edge' anchor points along the membranes' scalloped top edges */
+const EDGE_ANCHOR_STEP = 2.0;
+
 interface Finger {
   line: Polyline;
   pts: V3[];
@@ -301,6 +304,17 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
       freeBottom: false,
     });
   }
+  // 'wing_edge' anchor path (round 8): the membranes' scalloped top edges, outer finger -> middle -> inner
+  // -> shoulder riser, one point every ~2 m (the join at a finger tip once), 0.6 m in front of the gold
+  // hem so a flame drawn there is never hidden by the (double-sided) membrane
+  const edgePts: V3[] = [];
+  panels.forEach((pn, pi) => {
+    const tmp: V3[] = [];
+    for (let i = 0; i <= 48; i++) tmp.push(pn.top(i / 48, v3()));
+    const line = new Polyline(tmp);
+    const n = Math.max(2, Math.round(line.length / EDGE_ANCHOR_STEP));
+    for (let i = pi === 0 ? 0 : 1; i <= n; i++) edgePts.push(line.at(i / n).addScaledVector(nrm, 0.6));
+  });
   const P00 = v3(), P10 = v3(), P01 = v3(), P11 = v3();
   const a1 = v3(), a2 = v3(), a3 = v3(), a4 = v3();
   panels.forEach((pn, pi) => {
@@ -576,6 +590,8 @@ function buildWing(k: Kit, side: number, membranes: MembraneBuilder): WingResult
   discProto.dispose();
   // wrist and arm join points (for flames along the slopes)
   for (const f of fingers) for (const t of [0.35, 0.6, 0.82]) points.push(f.line.at(t).addScaledVector(nrm, 0.8));
+  // points 15+: the 'wing_edge' path along the membrane scallops (see edgePts)
+  points.push(...edgePts);
 
   // ------------------------------------------------------------------ rosette frames + printed suns
   // (a yellow sunburst printed on the skin inside a dark red ring; the instanced white spiky rim

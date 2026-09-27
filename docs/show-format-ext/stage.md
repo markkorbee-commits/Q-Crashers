@@ -140,6 +140,30 @@ Checked side by side with the official video (Show camera, Mac GPU); default 64 
   `master`.
 - **Anchor `wing_spars`** (new, below): the burning-wing path on the wing surface.
 
+### Round 8: dark membranes, window bars, anchor `wing_edge` (engine change, no cue change needed)
+
+Checked side by side with the official video (Show camera, Mac GPU); default 64 moments 67.1 / 50.2 %
+→ 67.2 / 50.3 % (raw / calibrated; colour 67.9, light 80.5, shape 54.8: no part down).
+
+- **Membranes.** At night the wash rig (washes, key, rim, ambient, reflections) lights the printed skin
+  of the wing membranes at 30 % of before, the print's own uplight is at 50 % (0.28 → 0.14 × `wings`), and
+  the print (lit and self-lit) takes 60 % of the wing LED hue instead of its orange (`MEMBRANE_LIT` in
+  `src/stage/dragon/shading.ts`, uniform `uMembLit`, tunable in the page). The membranes read as a dark ground in the crown / wing colour under the LED feather strokes
+  (video 1320.75 / 1322.5: dark red membranes with red / pink strokes under the pink wash, where the orange
+  flame print read as a lit red-orange sheet; 509.25 violet). The strokes, spars, blades and suns are
+  unchanged; the daytime view keeps the painted inferno.
+- **Window bars.** Six dashed LED tubes per side stand in front of the ground floor (pairs at |X| 14.3 /
+  15.1 in the arcade, 16.75 / 17.25 beside the skull cube, 22.95 / 23.45 outboard of it; Y 2.35–5.7), lit as
+  windows: `windowColor` × `windows` (with the window patterns and lit share). Design bible §5.5 "vertical
+  white / cyan LED bars, ~6 per side"; video 509.25 blue bars beside the skull cubes, 338 cyan-white, 131.3
+  white. The window gain is 1.3 (was 0.8), and windows now also draw in the above-the-haze overlay pass
+  (at its near level), so the bars read through the haze.
+- **Castle base under haze (509.25, measured, no change).** In the Show camera the castle base is covered
+  by the haze in front of the set: tripling the castle floods moved the facade region by 0.3 L (ours rgb
+  74 / 35 / 147, L 26, chroma 70; video 99 / 18 / 190, L 33, chroma 95), and with every stage light off it
+  moved by ~1 L. The lavender-grey base is the violet haze glow, not the castle floods.
+- **Anchor `wing_edge`** (new, below): the burning-wing path along the membranes' scalloped top edges.
+
 ## `stage.state`: new params
 
 Like every other `stage.state` value, the new params are cross-faded over the cue's `fade`. A param
@@ -220,3 +244,16 @@ firewall can use `"target": ["wing_left", "wing_right"], "p": {"at": "wing_spars
 the contract fallback). Video 101: the fire covers the upper two thirds of the wings, while the 6 m flames
 from the ~60 / ~82 % heads of `wing_left` / `wing_right` stand mostly above the membranes. `wing_left` /
 `wing_right` themselves are unchanged (the lighting rig places its wing fixtures at their mean depth).
+
+## Anchor `wing_edge` (new, round 8)
+
+The burning-wing path along the membranes' scalloped top edges: per wing 20 points, one every ~2 m, from the
+outer finger tip over the middle and inner finger tips down to the riser over the dragon's shoulder (outer panel →
+middle panel → inner panel; a finger tip where two scallops meet appears once), left wing first (40 points). The
+edges attach at 93 % of each finger and sag 3.8 m (outer panel), 5.4 m (middle) and 3.4 m (inner) below the
+chord between their attachment points; the points sit on the gold hem, 0.6 m in front of the membrane, so a
+flame there is never hidden by the membrane. Registered by name like `wing_spars`, for `p.at` on a wing
+firewall: `"target": ["wing_left", "wing_right"], "p": {"at": "wing_edge", …}` (video 713.5: the fire runs
+along the top edges and over the membranes; combine with `wing_spars` for the upper two thirds of the wing).
+The validator's extended-anchor list (`EXT_ANCHORS` in `scripts/validate-show.mjs`) must list `wing_edge`
+before a cue can use it.

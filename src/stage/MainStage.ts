@@ -43,8 +43,11 @@ const CALIB = {
   pilaster: 0.9,
   /** horizontal cornice / eave / ledge battens relative to the content colour */
   outline: 0.3,
-  /** window tube gain (the pane itself is ~10 % of the tubes) */
-  window: 0.8,
+  /**
+   * window tube gain (the pane itself is ~10 % of the tubes); round 8: 0.8 -> 1.3 with the ground-floor
+   * window bars (the footage's bright white / cyan / blue bars, video 338 / 509.25; metric-neutral)
+   */
+  window: 1.3,
   arcade: 0.7,
   lamp: 2.8,
   lantern: 2.3,
@@ -312,6 +315,14 @@ export class MainStageSystem implements System {
       // wing_right stand mostly above the membranes. Use as `"at": "wing_spars"` on a wing firewall.
       const spars = (pts: THREE.Vector3[]) => (pts.length >= 15 ? pts.slice(6, 15) : pts);
       a.set('wing_spars' as AnchorName, [...spars(c.wingLeft), ...spars(c.wingRight)].map((p) => p.clone()));
+      // 'wing_edge' (round 8, registered by name like wing_spars): the membranes' scalloped top edges
+      // (crown points 15+: attached at 93 % of each finger, sagging 3.8 / 5.4 / 3.4 m below the chord of
+      // the outer / middle / inner panel), one point every ~2 m from the outer finger tip over the middle
+      // and inner tips down to the shoulder riser, 0.6 m in front of the hem; left wing, then right.
+      // The path a burning wing's fire runs along (video 713.5: the top edges and membranes ablaze).
+      const edge = (pts: THREE.Vector3[]) => (pts.length > 15 ? pts.slice(15) : []);
+      const edgePts = [...edge(c.wingLeft), ...edge(c.wingRight)];
+      if (edgePts.length) a.set('wing_edge' as AnchorName, edgePts.map((p) => p.clone()));
       // lasers on the dragon's shoulders and on the inner / outer fingers (bible: flanks + wing bases)
       for (const sh of c.shoulders) lasers.push(sh.clone().add(new THREE.Vector3(0, 2.0, 0.2)));
       for (const w of [c.wingLeft, c.wingRight]) if (w.length >= 15) lasers.push(w[8].clone(), w[14].clone());
