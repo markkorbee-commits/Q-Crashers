@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { CALM_UNIFORM } from '../fx/core/flashSafety';
 import type { QualitySettings } from '../core/types';
 import type { Emitter } from './LaserRig';
 import { makeHazeNoise3D } from './noise3d';
@@ -111,6 +112,9 @@ export class LaserRenderer {
       // stage -> field haze gradient (see shaders.ts)
       uFieldHaze: { value: 0.22 },
       uStageL: { value: 34 },
+      // photosensitivity option (fx/core/flashSafety.ts), shared object: 1 = beams aimed at the viewer
+      // brighten less, so a fan scanning across the lens no longer flickers
+      uCalm: CALM_UNIFORM,
     };
     const common = {
       transparent: true,

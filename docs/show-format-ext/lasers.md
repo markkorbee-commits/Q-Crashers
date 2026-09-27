@@ -177,6 +177,20 @@ up to |x| seaBankX on a dense bank), `ceilGain` / `ceilD0` / `ceilD1` / `ceilRoo
 their old behaviour (no gain on the Embers moments): a brighter / more even sea, wisps along x, the sea on
 the side banks (1169.5 +1 but 1165 −4), extra sheet light inside a dense bank.
 
+### Round 8: Reduce flashing (photosensitivity option, no cue change)
+
+With the viewer's option on (App.reduceFlashing, mirrored by fx/core/flashSafety.ts) the lasers never
+switch hard: looks, hits and offs ramp over 0.12 s (a look normally snaps on in 30 ms, an off cuts in 30 ms),
+so a chain of short cues cannot chop the beams, and kick-gated looks dip to half instead of 5 % between
+kicks (beat-locked, at most 2.9 Hz at the show's 170 bpm maximum). Hits come in over 0.1 s at 60 %. A beam
+aimed at the viewer brightens at most about 3x its side-on level (instead of about 27x), and a beam through
+the lens axis only glints (aperture flare and lens veil about a tenth as strong): a fan scanning across the
+camera no longer flashes once per beam (about 12 Hz, v1276.5), and the lens hit of v1492.8 is a glint, not a
+white frame. The show's laser
+cues never switch faster than about 3 Hz (the tightest run: the four hits of v1343.6-1345.8, 0.6-0.8 s
+apart), so no rate needs a cap. The scanned dashes move at 1.7 Hz. With the option off nothing changes
+(verified bit-identical over 9 windows / 1,640 frames of the Show camera and a spectator view).
+
 ## Proposed cue updates for public/show/endshow-2026.json (tested side by side with the video)
 
 Cue times are show times; `…` keeps the other params. Before these updates are made, the validator

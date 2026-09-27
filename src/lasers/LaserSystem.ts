@@ -4,6 +4,7 @@ import { hash32, rand01 } from '../core/rng';
 import type { FrameContext, QualitySettings, System } from '../core/types';
 import { resolveColor } from '../show/colors';
 import type { Cue } from '../show/ShowTypes';
+import { syncFlashCalm } from '../fx/core/flashSafety';
 import { LASER_BLUE, laserize } from './laserColor';
 import { LaserRenderer, SURF_CONE, SURF_FOG, SURF_SHEET } from './LaserRenderer';
 import { type Emitter, type EmitterGroup, LaserRig } from './LaserRig';
@@ -370,6 +371,15 @@ export class LaserSystem implements System {
   private lensE = -1;
   private camSys: { hazeScale?: unknown } | null | undefined = undefined;
   private beatGate = 1;
+  /**
+   * Photosensitivity option (App.reduceFlashing): looks / offs / hits ramp over >= 0.1 s instead of 30 ms
+   * (a chain of short cues can no longer chop the beams on and off hard), kick-gated looks dip to half
+   * instead of 5 %, hits come in at 60 %, and a beam into the lens (a `lens` hit, a fan sweeping across the
+   * camera) only glints: its aperture flare and lens veil are about a tenth as strong. The show's laser
+   * cues never switch faster than ~3 Hz (tightest: v1343.6-1345.8, four hits 0.6-0.8 s apart), so rates
+   * need no cap.
+   */
+  private calm = false;
   private kickEnv = 0;
   private hasKick = false;
   private budgetScale = 1;
@@ -526,6 +536,7 @@ export class LaserSystem implements System {
 
     const t = ctx.showTime;
     const cam = ctx.camera;
+    const calm = (this.calm = syncFlashCalm(app));
     // the camera rig updates later in the frame: use last frame's pose (flares only; shaders use the live one)
     this.camPos.copy(cam.position);
     this.updateUniforms(ctx);
@@ -564,7 +575,7 @@ export class LaserSystem implements System {
     const beat = ctx.beat;
     this.hasKick = beat.hasKick;
     this.kickEnv = beat.kick;
-    this.beatGate = beat.hasKick ? (beat.phase < 0.16 ? 1 : Math.max(0.05, Math.exp(-(beat.phase - 0.16) * 10))) : 1;
+    this.beatGate = beat.hasKick ? (beat.phase < 0.16 ? 1 : Math.max(calm ? 0.5 : 0.05, Math.exp(-(beat.phase - 0.16) * 10))) : 1;
 
     // ------------------------------------------------------------------ resolve active cues
     const act = app.show.active('lasers', t, this.act);
@@ -579,10 +590,11 @@ export class LaserSystem implements System {
       if (!this.resolveSlot(s, c, t)) continue;
       // `off` gates what was already running when it started; a look / hit started later overrides it
       let gate = 1;
+      const rOff = calm ? 0.12 : 0.03;
       for (let k = 0; k < offs.length; k++) {
         const o = offs[k];
         if (o.t < c.t - 1e-4) continue;
-        gate = Math.min(gate, 1 - clamp01((t - o.t) / 0.03) * clamp01((o.t + o.dur - t) / 0.03));
+        gate = Math.min(gate, 1 - clamp01((t - o.t) / rOff) * clamp01((o.t + o.dur - t) / rOff));
       }
       s.gate = gate;
       const si = this.slotCount++;
@@ -816,6 +828,7 @@ export class LaserSystem implements System {
       if (rel > hitDur + 0.4) return false;
       const hold = Math.max(0, hitDur - 0.32);
       s.env = rel < hold ? 1 : Math.exp(-(rel - hold) * 9);
+      if (this.calm) s.env *= 0.6 * clamp01(rel / 0.1);
       if (s.env < 0.01) return false;
     } else {
       // no preset -> fan; an unknown preset is ignored (contract: unknown values never break the show)
@@ -853,7 +866,7 @@ export class LaserSystem implements System {
       s.distance = num(p.distance, pr === 'x' ? 15 : pr === 'dashes' ? 14 : 70, pr === 'chevron' ? 20 : 2, 200);
       const a = t - c.t;
       const b = c.t + c.dur - t;
-      s.env = clamp01(a / 0.03) * clamp01(b / 0.05);
+      s.env = this.calm ? clamp01(a / 0.12) * clamp01(b / 0.12) : clamp01(a / 0.03) * clamp01(b / 0.05);
       if (s.env <= 0) return false;
     }
     // origin + target tokens
@@ -2123,11 +2136,14 @@ export class LaserSystem implements System {
     // haze glow around the aperture when the beam heads roughly towards the viewer (~10°): a fan of a
     // dozen beams must read as a bright point, not bloom into a blob over the deck (f137)
     const wide = c > 0.5 ? Math.exp((c - 1) * 35) : 0;
-    const f = power * (0.05 + 0.6 * wide + 60 * eye);
+    // calm (photosensitivity option): a beam sweeping through the lens axis only glints (a fan scanning
+    // across the camera flashed the aperture x60 once per beam, ~12 Hz at v1276.5)
+    const eyeK = this.calm ? 0.12 : 1;
+    const f = power * (0.05 + 0.6 * wide + 60 * eye * eyeK);
     this.flare[i4] += col.r * f;
     this.flare[i4 + 1] += col.g * f;
     this.flare[i4 + 2] += col.b * f;
-    this.flare[i4 + 3] += power * eye;
+    this.flare[i4 + 3] += power * eye * eyeK;
     this.envAdd(col, power);
     if (e.origin === 'stage' && dz > 0.3 && dy < 0.25) this.audienceWash += power;
   }
@@ -2178,7 +2194,7 @@ export class LaserSystem implements System {
       if (eye > (lens ? 0.05 : 0.35)) {
         const d = Math.hypot(this.camPos.x - x, this.camPos.y - e.pos.y, this.camPos.z - z);
         const k = Math.min(1, eye);
-        const v = (Math.min(2.5, eye * 1.6) / m) * (lens ? 1.2 : 0.4);
+        const v = (Math.min(2.5, eye * 1.6) / m) * (lens ? 1.2 : 0.4) * (this.calm ? (lens ? 0.4 : 0.5) : 1);
         this.gfx.pushSprite(x, e.pos.y, z, d * (lens ? 0.12 + 0.32 * k : 0.06 + 0.12 * k), r * v, g * v, b * v, 2);
       }
     }
