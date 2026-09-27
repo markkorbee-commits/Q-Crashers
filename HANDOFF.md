@@ -319,7 +319,7 @@ echo $CHROME_PATH
 
 ## Stand van zaken
 
-Zo 27 sep 2026, ± 11:15 (CEST): PROJECT AFGEROND (op verzoek van de gebruiker geen verdere QA-rondes). Lokaal op de
+Zo 27 sep 2026, ± 11:10 (CEST): PROJECT AFGEROND (op verzoek van de gebruiker geen verdere QA-rondes). Lokaal op de
 MacBook Pro (M4 Max, GPU-render). Eindstand gelijkenis (64 momenten): **69,6 % ruw / 53,9 % na ijking** (kleur 70,4,
 licht 83,0, vorm 57,2; `research/video-timeline/data/similarity-mac-final.json`), gestart op de Mac bij 52,1 / 25,6.
 Muzieksync: vaste tempo's 99 % binnen 20 ms van het grid, vrije tempo's 70 % binnen 100 ms van een onset. Mobiel
@@ -423,7 +423,8 @@ Eerdere stand (cloud, vóór de overdracht):
   `docs/handoff/findings/r4_contracts_*.txt` en het plan voor de volgende ronde in `docs/handoff/findings/r5_next.md`.
 - MC-close-ups 347-459 s volgen de MC via `camera.shot` `p.subject='mc'` (`docs/show-format-ext/core.md`).
 - Podium beloopbaar (spots `dj`, `dancers`), lege DJ-booth met CDJ-achtige set zonder merklogo's, geen DJ in de show.
-- Artifact: https://claude.ai/artifact/8ZTMp8XW6hczruUKoiJhDi — bijgewerkt za 26 sep ± 21:25 (versie 4, stand `eb182d9`, zonder de stage-patch)
+- Artifact: https://claude.ai/artifact/8ZTMp8XW6hczruUKoiJhDi — bijgewerkt zo 27 sep ± 11:10 (versie 5, eindstand; privé;
+  zonder vergelijkmodus, die werkt alleen lokaal; audio = de eerder gepubliceerde mp4/webm)
 - Meetkanttekening: dezelfde code gaf in de cloud op 1047,25 s eenmaal 27,3 % en eenmaal 12,1 % (zwaardere CPU-last,
   dus minder frames na de seek). Daarom bestaat `--min-frames` en begint stap 9 met een stabiliteitscheck.
 - Tools zijn overgezet: datamap via `ENDSHOW_DATA`, browserkeuze via `scripts/lib/browser.mjs` (Chrome + GPU op de
