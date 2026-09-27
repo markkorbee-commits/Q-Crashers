@@ -66,16 +66,23 @@ uniform float uHaze;
 uniform float uSmoke;
 uniform vec3 uCloudRel;    // camera position relative to the lit smoke volume over the site, in units of its radii
 uniform vec4 uCloudInv;    // xyz = 1 / radii of that volume, w = falloff outside it (0 = the glow fills the whole dome)
+uniform vec3 uFogGlow;     // the lit-smoke part of uFogColor (atmos.glow + flash bounce): it lives over the grounds
+uniform vec3 uGlowRel;     // camera position relative to the lit smoke over the grounds (groundsVol), in units of its radii
+uniform vec4 uGlowInv;     // xyz = 1 / radii of that volume, w = falloff outside it (0 = the site glow fills the whole dome)
 ${fogGlsl(fog)}
 
-// how much of the lit smoke over the site a sky ray passes through: 1 inside / through the volume (an ellipsoid over
-// the grounds), falling off for rays that pass above or beside it (seen from far away the glow is a lobe over the site)
+// how much of a lit smoke volume (an ellipsoid) a sky ray passes through: 1 inside / through it, falling off for rays
+// that pass above or beside it (seen from far away the glow is a lobe over the site)
+float volSmoke( vec3 d, vec3 rel, vec4 inv ) {
+  if ( inv.w <= 0.0 ) return 1.0;
+  vec3 ds = normalize( d * inv.xyz );
+  float tc = max( - dot( rel, ds ), 0.0 );
+  vec3 q = rel + ds * tc;
+  return exp( - inv.w * max( dot( q, q ) - 1.0, 0.0 ) );
+}
+// the flash bounce in the smoke over the site (round 9)
 float siteSmoke( vec3 d ) {
-  if ( uCloudInv.w <= 0.0 ) return 1.0;
-  vec3 ds = normalize( d * uCloudInv.xyz );
-  float tc = max( - dot( uCloudRel, ds ), 0.0 );
-  vec3 q = uCloudRel + ds * tc;
-  return exp( - uCloudInv.w * max( dot( q, q ) - 1.0, 0.0 ) );
+  return volSmoke( d, uCloudRel, uCloudInv );
 }
 
 float cloudField( vec2 p ) {
@@ -143,8 +150,13 @@ void main() {
   float cover = 0.0;
   vec3 cloudCol = vec3( 0.0 );   // twilight-lit part (scaled by the sky level)
   vec3 cloudAdd = vec3( 0.0 );   // light from the show / flashes / lightning / moon (absolute)
-  // the flash bounce lives in the smoke over the site: seen from outside it, only the rays through it glow
+  // the flash bounce and the site glow live in the smoke over the site: seen from outside it, only the rays
+  // through it glow (from inside, every ray passes through it: the whole dome glows). Round 12: the glow and the
+  // smoke veil too (v1518-1533, drone outside the smoke: a red field under a black sky and a black landscape)
+  float sG = volSmoke( d, uGlowRel, uGlowInv );
   vec3 bounce = uBounceCol * mix( siteSmoke( d ), 1.0, uBounceFill );
+  vec3 glowS = uGlowCol * sG;
+  vec3 fogS = uFogColor - uFogGlow * ( 1.0 - sG );
   if ( e > 0.004 ) {
     vec2 p = d.xz / ( e + 0.035 ) * 0.075 + vec2( uTime * 0.00022, - uTime * 0.00061 );
     float f = cloudField( p );
@@ -161,7 +173,7 @@ void main() {
     float nearMoon = exp( - ang / 0.05 );
     cloudAdd += moonCol * nearMoon * ( 1.0 - thick ) * 0.03 * uMoonI;
     cloudAdd += uFlashCol * pow( max( dot( d, uFlashDir ), 0.0 ), 3.0 ) * ( 0.6 + 0.8 * thick );
-    cloudAdd += ( uGlowCol + bounce ) * ( 0.5 + 0.9 * thick ) * ( 0.4 + 0.6 * exp( - eh / 0.3 ) );
+    cloudAdd += ( glowS + bounce ) * ( 0.5 + 0.9 * thick ) * ( 0.4 + 0.6 * exp( - eh / 0.3 ) );
     // distant lightning inside the storm clouds: a broad lobe + a hot core
     float lc = max( dot( d, uLightning.xyz ), 0.0 );
     cloudAdd += vec3( 0.72, 0.78, 1.0 ) * uLightning.w * ( pow( lc, 10.0 ) * 0.5 + pow( lc, 60.0 ) * 2.0 ) * ( 0.35 + thick );
@@ -173,7 +185,7 @@ void main() {
   vec3 add = uShowCol * pow( max( dot( d, uStageDir ), 0.0 ), 24.0 ) * 0.14 * hazeK * lowK;
   add += uFlashCol * pow( max( dot( d, uFlashDir ), 0.0 ), 10.0 ) * 0.2 * hazeK;
   // the whole smoke-filled air over the site glows in the fire / smoke colour, strongest low down
-  add += ( uGlowCol + bounce ) * ( 0.3 + 0.7 * exp( - eh / 0.2 ) ) * hazeK;
+  add += ( glowS + bounce ) * ( 0.3 + 0.7 * exp( - eh / 0.2 ) ) * hazeK;
   add += vec3( 0.7, 0.75, 1.0 ) * uLightning.w * pow( max( dot( d, uLightning.xyz ), 0.0 ), 16.0 ) * exp( - eh / 0.1 ) * 0.35;
 
   col = col * uLevel + add;
@@ -184,10 +196,10 @@ void main() {
   // atmos cue tint
   col = mix( col, col * uTint * 1.6, uTintAmt );
   // a smoke-filled site (atmos.glow smoke): the lit smoke veils the sky too, most of all low down
-  col = mix( col, uFogColor * ( 0.7 + 0.3 * exp( - eh / 0.25 ) ), uSmoke * ( 0.55 + 0.35 * exp( - eh / 0.3 ) ) );
+  col = mix( col, fogS * ( 0.7 + 0.3 * exp( - eh / 0.25 ) ), uSmoke * sG * ( 0.55 + 0.35 * exp( - eh / 0.3 ) ) );
 
   // below the horizon: the dark polder under haze (matches the height fog on distant terrain)
-  vec3 land = worldFogTintC( d, uFogColor );
+  vec3 land = worldFogTintC( d, fogS );
   col = mix( col, land, smoothstep( 0.012, -0.03, e ) );
 
   gl_FragColor = vec4( max( col, 0.0 ), 1.0 );
@@ -392,8 +404,12 @@ export class EnvironmentSystem implements System {
    * 20.25 +3.1, 191.5 +2.6, 264.75 +2.6, 484.75 +2.8; 436 / 1047.25 / 1194 -0.7, a darker set under the stage wash).
    * `bounce` / `bounceSkySmoke` = the flash bounce on the sky dome (round 9): it lives in the smoke over the site
    * (siteSmokeVol) and fills the whole dome only with site smoke >= bounceSkySmoke (an `atmos.glow smoke` scene).
+   * `fillOutside` (round 12, 1 -> 0): that whole-dome fill only for a far-reaching fire glow (glowReach, the v1565.3
+   * eruption); for a camera outside the smoke of a smoke scene the bounce stays a lobe over the site (the drone shots
+   * of the finale's red smoke, v1518-1533: black sky over the blazing U). From inside the smoke every ray passes
+   * through it: the dome still glows.
    */
-  readonly skyTune = { bounce: 1, bounceSkySmoke: 0.2, bounceFog: 1, bounceFogSmoke: 0.2, fillRG: 0.15, fogRG: 0.15 };
+  readonly skyTune = { bounce: 1, bounceSkySmoke: 0.2, bounceFog: 1, bounceFogSmoke: 0.2, fillRG: 0.15, fogRG: 0.15, fillOutside: 0 };
   /**
    * The lit smoke over the site as the sky shows it (round 9): an ellipsoid (centre x / y / z, horizontal / vertical
    * radius, m) the sky rays pass through; outside it the flash bounce on the sky falls off with exp(-k (q^2 - 1))
@@ -407,10 +423,24 @@ export class EnvironmentSystem implements System {
    * 1566.25 -3.3 (the eruption's `atmos.glow` fades out 0.3 s before the video's red sky does: show cue timing).
    */
   readonly siteSmokeVol = { x: 0, y: 25, z: 30, rh: 170, rv: 55, k: 2 };
+  /**
+   * The lit smoke over the GROUNDS (round 12): an ellipsoid (centre, radii along x / y / z, m) over the U of the
+   * RED field (stage rear z ≈ -45, side banks |x| ≈ 105, the field, the back plaza and terrace to z ≈ 175, the smoke
+   * bank up to ≈ 55 m). The site glow of `atmos.glow` (the sky dome's glow and smoke veil, the glow part of the fog
+   * colour, the glow light on the world materials) lives inside it and falls off with exp(-k (q^2 - 1)) outside it
+   * (k = 0: the whole landscape glows, as before round 12). The judges and the video: in the drone shots of the
+   * finale's red smoke (v1518-1533) the field glows red inside black tree belts and a black landscape under a black
+   * sky; ours tinted the whole dome and the land to the horizon (periphery 10-70x the video's). A camera inside the
+   * volume keeps the glowing dome (every sky ray passes through it) and the glow on the land around it (fading over
+   * ≈ 200 m, see worldLights wlSite).
+   */
+  readonly groundsVol = { x: 0, y: 5, z: 65, rx: 105, ry: 50, rz: 110, k: 3 };
   /** dome keys (in-page A/B of the sky as filmed) */
   readonly domeKeys = DOME_KEYS;
   /** smoke in the air for the height fog (0..1), see smokeAt */
   private smokeFog = 0;
+  /** share (0..1) of the current site glow that reaches beyond the grounds (glowAt: `ground` >= 4, a whole-site fire) */
+  private glowReach = 0;
   /** the `atmos.glow` cues that carry `smoke` (rebuilt when the show recompiles) */
   private readonly smokeCues: Cue[] = [];
   private smokeRev = -1;
@@ -485,6 +515,9 @@ export class EnvironmentSystem implements System {
       uSmoke: { value: 0 },
       uCloudRel: { value: new THREE.Vector3() },
       uCloudInv: { value: new THREE.Vector4(1, 1, 1, 0) },
+      uFogGlow: { value: new THREE.Color(0, 0, 0) },
+      uGlowRel: { value: new THREE.Vector3() },
+      uGlowInv: { value: new THREE.Vector4(1, 1, 1, 0) },
     };
     const mat = new THREE.ShaderMaterial({
       uniforms: this.skyU,
@@ -581,6 +614,8 @@ export class EnvironmentSystem implements System {
     out.setRGB(0, 0, 0);
     const gg = this.groundGlow.setRGB(0, 0, 0);
     let smoke = 0;
+    let aSum = 0,
+      reachSum = 0;
     const cues = this.app.show.active('atmos', t, this.glowBuf);
     for (let i = 0; i < cues.length; i++) {
       const c = cues[i];
@@ -606,12 +641,18 @@ export class EnvironmentSystem implements System {
       // `ground`: how strongly this glow lights the grounds, trees and props (1 = the trace of a smoke glow); the
       // photosensitivity setting halves the part above 1 (a whole-field fire light, like the flash response)
       let ground = clamp(num(c.p.ground, 1), 0, GLOW_GROUND_MAX);
+      // round 12: a glow that lights the grounds strongly (`ground` >= 4: the v1565.3 eruption, a whole-site fire)
+      // reaches the land and the sky around the site too; a smoke glow stays over the grounds (groundsVol)
+      aSum += a;
+      reachSum += a * clamp((ground - 1) / 3, 0, 1);
       if (ground > 1 && this.app.reduceFlashing) ground = 1 + (ground - 1) * 0.5;
       const gk = a * ground;
       gg.r += this.glowC.r * gk;
       gg.g += this.glowC.g * gk;
       gg.b += this.glowC.b * gk;
     }
+    // (fades with the glow itself below amount 0.5: no step in the bounded fog bounce when a fire glow ends)
+    this.glowReach = reachSum / Math.max(aSum, 0.5);
     this.smokeFog = this.smokeAt(t);
     return smoke;
   }
@@ -761,7 +802,7 @@ export class EnvironmentSystem implements System {
     const ST = this.skyTune;
     const sm = clamp(env.smoke, 0, 1);
     const bss = ST.bounceSkySmoke;
-    U.uBounceFill.value = bss > 0 ? clamp(sm / bss, 0, 1) : 1;
+    U.uBounceFill.value = (bss > 0 ? clamp(sm / bss, 0, 1) : 1) * Math.max(clamp(ST.fillOutside, 0, 1), this.glowReach);
     const bs = 0.012 * ST.bounce;
     U.uGlowCol.value.setRGB(glow.r * 0.05, glow.g * 0.05, glow.b * 0.05);
     U.uBounceCol.value.setRGB(bc.r * bs, bc.g * bs, bc.b * bs);
@@ -784,9 +825,11 @@ export class EnvironmentSystem implements System {
     const gk = 0.03 + (this.smokeTune.glow * sm) / (1 + this.smokeTune.shade * smF);
     const bs0 = this.skyTune.bounceFogSmoke;
     const bf = 0.006 * this.skyTune.bounceFog * (bs0 > 0 ? clamp(sm / bs0, 0, 1) : 1);
-    this.fog.color.r += glow.r * gk + bc.r * bf;
-    this.fog.color.g += glow.g * gk + bc.g * bf;
-    this.fog.color.b += glow.b * gk + bc.b * bf;
+    const fg = U.uFogGlow.value as THREE.Color;
+    fg.setRGB(glow.r * gk + bc.r * bf, glow.g * gk + bc.g * bf, glow.b * gk + bc.b * bf);
+    this.fog.color.r += fg.r;
+    this.fog.color.g += fg.g;
+    this.fog.color.b += fg.b;
     U.uSmoke.value = sm * this.smokeTune.sky;
     // the lit smoke volume over the site (for the flash bounce on the sky): camera relative, in units of its radii
     const V = this.siteSmokeVol;
@@ -795,6 +838,21 @@ export class EnvironmentSystem implements System {
       inv.set(1 / V.rh, 1 / V.rv, 1 / V.rh, V.k);
       (U.uCloudRel.value as THREE.Vector3).set((cam.x - V.x) / V.rh, (cam.y - V.y) / V.rv, (cam.z - V.z) / V.rh);
     } else inv.w = 0;
+    // the site glow and the lit-smoke part of the fog colour live in the smoke over the grounds (groundsVol): sky
+    // rays through it, world fragments inside it (worldLights wlSite)
+    const G = this.groundsVol;
+    const gInv = U.uGlowInv.value as THREE.Vector4;
+    const vk = G.rx > 0 && G.ry > 0 && G.rz > 0 ? Math.max(0, G.k) * (1 - this.glowReach) : 0;
+    if (vk > 0) {
+      gInv.set(1 / G.rx, 1 / G.ry, 1 / G.rz, vk);
+      (U.uGlowRel.value as THREE.Vector3).set((cam.x - G.x) / G.rx, (cam.y - G.y) / G.ry, (cam.z - G.z) / G.rz);
+      W.uWSmokeC.value.set(G.x, G.y, G.z, vk);
+      W.uWSmokeInv.value.set(1 / G.rx, 1 / G.ry, 1 / G.rz);
+    } else {
+      gInv.w = 0;
+      W.uWSmokeC.value.w = 0;
+    }
+    W.uWFogGlow.value.set(vk > 0 ? fg.r : 0, vk > 0 ? fg.g : 0, vk > 0 ? fg.b : 0);
     const sb = env.strobe * 0.01;
     this.fog.color.r += sb;
     this.fog.color.g += sb;

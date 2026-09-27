@@ -8,9 +8,18 @@ import type { QualityLevel, QualitySettings } from './types';
 export const QUALITY_PRESETS: Record<QualityLevel, QualitySettings> = {
   ultra: {
     level: 'ultra',
-    maxPixelRatio: 2,
+    /**
+     * Round 12: 2 -> 1.5. At DPR 2 ultra rendered 3024x1890 (5.7 MP, half-float MSAA target, 6 bloom levels):
+     * warm-GPU sweep on an M4 Max median 11.0 ms, 33 / 264 moments over 16.7 ms, the finale's red haze at 1514 s
+     * 37.9 ms (the additive beams / haze / pyro overdraw scales with the pixel count). At 1.5 the scene target is
+     * 2268x1417 (3.2 MP); ultra keeps its extra content (beams, lasers, bloom levels, trees, textures).
+     * MSAA 4 -> 2: at DPR 2 PostFX already capped ultra at 2 samples (HiDPI cap 1.75), below it 4 would come back.
+     * Unthrottled rAF on the M4 Max, 1512x945 CSS at DPR 2, paused (median ms): 1510 s 27.5 (DPR 2, MSAA 2) -> 17.9
+     * (1.5, MSAA 4) -> 14.5 (1.5, MSAA 2); 1514 s 21.7 -> 14.4 -> 12.0; 878 s 16 -> 12.2; 1040 s 13.4 -> 9.5.
+     */
+    maxPixelRatio: 1.5,
     renderScale: 1,
-    msaa: 4,
+    msaa: 2,
     shadows: false,
     shadowMapSize: 2048,
     crowdCount: 65000,
@@ -125,12 +134,16 @@ export function detectDevice(gl?: WebGL2RenderingContext | null): DeviceProfile 
   };
 }
 
-/** Initial preset guess. The runtime governor refines it using measured frame times. */
+/**
+ * Initial preset guess. The runtime governor refines it using measured frame times.
+ * Round 12: ultra only for Apple Max / Ultra chips (and the discrete desktop classes); a Pro chip has roughly a
+ * half to a third of an M4 Max's GPU and would sit at the lowest resolution step through the finale: high.
+ */
 export function pickQuality(d: DeviceProfile): QualityLevel {
   const g = d.gpu.toLowerCase();
   if (d.mobile) return 'mobile';
   if (/swiftshader|llvmpipe|software|basic render/.test(g)) return 'mobile';
-  if (/rtx|radeon rx [5-9]|rx 6|rx 7|rx 9|apple m[1-9] (pro|max|ultra)|arc a7/.test(g)) return 'ultra';
+  if (/rtx|radeon rx [5-9]|rx 6|rx 7|rx 9|apple m[1-9] (max|ultra)|arc a7/.test(g)) return 'ultra';
   if (/apple m[1-9]|geforce|radeon|arc/.test(g)) return 'high';
   if (/intel|uhd|iris|mali|adreno|powervr/.test(g)) return 'medium';
   return 'high';

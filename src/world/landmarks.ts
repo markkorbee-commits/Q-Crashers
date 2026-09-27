@@ -43,6 +43,8 @@ export class Landmarks {
   private wheel!: THREE.Group;
   private gondolas!: THREE.InstancedMesh;
   private lights!: THREE.Points;
+  /** the sweeping sky beams over the other areas (only while those areas are in business, see setAreaBeams) */
+  private areaBeams: THREE.Mesh | null = null;
   private readonly U = {
     uTime: { value: 0 },
     uPx: { value: 1 },
@@ -348,7 +350,8 @@ export class Landmarks {
    * The other festival areas (bible §6.1: "their lights are the coloured clusters on the right
    * horizon"): low open silhouettes — a truss roof on four towers over a dark deck, peaked tents,
    * PURPLE as white tensile sails by the lake — kept at 8–14 m so the tree belts hide most of them
-   * from the field, with clustered glows in the area hue and a few slow upward beams.
+   * from the field, with clustered glows in the area hue and a few slow upward beams (Tribe mode only, see
+   * setAreaBeams: the areas were dark on the night of the Endshow).
    */
   private buildAreas(mat: THREE.Material, lights: LightPoint[]): void {
     const b = new GeoBuilder();
@@ -525,6 +528,8 @@ export class Landmarks {
     const m = new THREE.Mesh(g, mat);
     m.name = 'area-beams';
     m.renderOrder = 4;
+    m.visible = false;
+    this.areaBeams = m;
     this.group.add(m);
     this.triangles += idx.length / 3;
   }
@@ -620,6 +625,16 @@ export class Landmarks {
     this.lights.renderOrder = 4;
     this.group.add(this.lights);
     this.lightCount = n;
+  }
+
+  /**
+   * The sky beams over the other areas belong to a running festival (Tribe mode, walking / flying): on the
+   * night itself the festival was cancelled and the other areas were dark. The official video's wide drone
+   * shots show only low coloured light clusters on the right horizon, no beams (v44.75, 55.5, 243.5, 550, 600,
+   * 1440, 1555: f4 00179 / 00222 / 02200 / 02460 / 05760 / 06220). Off "As filmed" and in the Show camera.
+   */
+  setAreaBeams(on: boolean): void {
+    if (this.areaBeams) this.areaBeams.visible = on;
   }
 
   update(t: number, pixelRatio: number, viewH: number, level: number): void {
