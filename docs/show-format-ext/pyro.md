@@ -296,12 +296,24 @@ GPU, `--settle 500 --min-frames 30`, pre-roll on; mean raw score of the listed m
   (50.3 %) and the three-armed pillar fans (`fan: 3`, rows 2–3: 51.2 %) did not help.
 * **The roof fan (1510.434).** `column: true, intensity: 2.2, height: 40, angle: 36, spread: 34, light: 1.5,
   lightColor: "#FF2A08"`: 1511.75–1514.5 56.7 → 59.7 % (1513.5 +5.6, 1514.5 +5.2, 1511.75 of the 64 +0.3).
-* **Arm cakes and U wall from the fitted drone poses** (1515.284: (0.9, 92.8, 232.8), 24° down, vfov 53;
-  1520.964 → 1534.964: (1.3, 101, 231) 27° → (1.1, 90, 234) 20° → (4.9, 71, 265) 11°): see the patch; bigger,
-  brighter (`column`, `intensity` 2–2.4, 40–42 m, `fan: 3` cakes leaning out 14°, the wall `lean: 26`) and lit
-  red. A gold light (`light` without `lightColor`) lost 5 points there (45.7 %): it lifts G and B over the red
-  site. At the CURRENT, closer Show camera the bigger arm cakes and U wall lose (48.3–50.5 % vs 51.8 %), so
-  that part of the patch goes only with the fitted camera.
+* **The U wall (1522.628), split at the cut of v1534.964.** Until the cut: `column: true, intensity: 2,
+  height: 42, lean: 26, spread: 14, light: 2, lightColor: "#FF2A08", glow: 0.8` (its orange-gold and white
+  windows); from 1535.028 a new cue carries the pink-white end as it was, so the front-left drone shot and the
+  64-moment 1536.25 are unchanged (the restart is hidden by the cut). Together with the fan edit, 16 moments
+  1511.75–1536.75 at the current camera: 51.6 → 53.2 % (1523.5 0.521 → 0.611, 1527 0.542 → 0.626; 1533 −0.085,
+  1534.5 −0.038). Lit red on the whole burn it lost at 1536.25 (−0.055); lit only (`light` / `lightColor` / `glow`)
+  without the size, or only bigger without the light, both lost (48.4 / 49.6 % vs 51.0 % on 1523.5–1536.75).
+* **Arm cakes from the fitted drone poses** (1515.284: (0.9, 92.8, 232.8), 24° down, vfov 53; 1520.964 →
+  1534.964: (1.3, 101, 231) 27° → (1.1, 90, 234) 20° at 1527 → (4.9, 71, 265) 11° at 1534.5): 1515.273 / 1520.886
+  as `fan: 3` cakes (`fanSpread` 30, `angle` 14, 40 m, `column`, `intensity` 2.4) lit red (`lightColor` per window
+  `["#FF2A08", "", "#FF2A08"]`: the magenta window keeps its own light), `glow: 0.8`. With the fan and wall edits,
+  16 moments from the fitted poses: 48.6 → 52.3 % (1516.5 0.480 → 0.588, 1521.5 0.515 → 0.583; 1522.25 −0.08). A
+  gold light (`light` without `lightColor`) lost 5 points (45.7 %): it lifts G and B over the red site. At the
+  CURRENT, closer camera the bigger cakes lose (1516.25 −0.10, 1521.5 −0.07): this part goes only with the fitted
+  poses (group `fitted-drone-camera` in the patch).
+* **Default 64 moments** (committed engine, no patch): 69.3 / 53.5 % (colour 70.3, light 82.2, shape 57.1), the
+  round-11 baseline; with the patch's current-camera edits applied in the page: 69.3 / 53.5 % (1511.75 +0.003,
+  1536.25 −0.001, the rest within ±0.002).
 * **Waterfall 1091.765.** `columns: 2.5` (the filmed tube columns): 1092.5–1094 46.9 → 47.1 %, neutral. A
   taller / denser curtain (`height` 24–30, `density` 1.5–2.5, `offset` up) lost 2–19 points from the current
   camera at (−46, 3, 8): the curtain hangs behind the castle battlements there, and its extra light lifts the
