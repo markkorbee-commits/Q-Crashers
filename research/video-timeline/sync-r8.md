@@ -16,8 +16,10 @@ Mac M4 Max GPU, `--settle 500 --min-frames 30`, pre-roll on.
 | 557.872 / 558.646 `fireworks.comet` | `glow` 1 | 558.25 +0.017, 558.75 +0.028 |
 | 1192.116 / 1198.116 `pyro.gerb` | `color` `#FFB0E0` → `#FFD8F0` (the engine pushes a pale colour with saturation ≥ 0.2 to magenta; the filmed columns have white cores) with `colors` `["#FFD8F0","#FFA0D8"]` switching at 1.55 / 1.75 s (the sparks turn pink at the end of the burn, v1193.75–1194.0 / v1199.75–1200.0); the 1192 wave `dur` 1.9 → 1.75 (columns gone by v1193.9) | see the flood row |
 | 1192.116 / 1198.116 (new) `lights.flood` all `#FF3090` 0.6, attack 0.5 | the field and the smoke under both fountain waves are pink in the drone shot (v1192.5–1194.1, v1198.5–1200.2); the set `wash` alone left the field black | 1193 0.26 → 0.54, 1193.5 0.28 → 0.55, 1194 0.51 → 0.60, 1199 0.22 → 0.42, 1199.5 0.25 → 0.44 |
+| 1198.116 flood end | `dur` 1.85, `fade` 0.2: with 2.0 / 0.3 the pink air still released past the cut to the blue laser lattice at v1200.25 | 1200.25 0.21 → 0.27 (= without the flood), 1200 unchanged |
+| 803.546 → 803.25 blackout (`lights.look` dark, `wash`, `pillars` off, `stage.state` master 0.06) | `fade` 0.1 → 0.3, same end time: the features show the set fading to black over v803.28–803.6 (luma 0.10 → 0.002), not at v803.6. Found while checking the new 797 smoke bank, which cost 803.5 −0.03 only because our set was still fully lit there | 803.5 0.63 → 0.80, 803.25 / 803.75 unchanged |
 | 1322.306 `lights.wash` black | `fade` 0.1 (the pink wash left the wings at once; video unlit from v1322.5) | 1322.5 0.76 → 0.80 |
-| 797.0 (new) `fog.lowfog` all, white, 1.5, 8 s | low white smoke bank over the field in the montage | 802.75 0.48 → 0.51, 797.5 / 800 unchanged |
+| 797.0 (new) `fog.lowfog` all, white, 1.5, 8 s | low white smoke bank over the field in the montage (the particles linger ~13 s, so a shorter `dur` does not clear it earlier) | 802.75 0.48 → 0.51, 797.5 / 800 unchanged, 803.5 fine with the earlier blackout (row above) |
 | 645.554 `lights.look` floor | `color2` `#FFF0C0` removed: the cream head drew a white column up into the fire-ritual frames | 656 +0.010, 680.5 +0.007, 690 / 705 unchanged |
 | 508.323 `lights.pillars` (steady and the beat chase) | `shaftIntensity` 0.9 → 0.2: v509.0–510.5 the pillar shafts are dark under lit lanterns | 509.25 +0.005, 510.25 +0.003 |
 | 1155.366 `lights.pillars` | `intensity` 1 → 0.4 (crystals dim in the laser sea) | 1163 −0.009, 1169.5 / 1175 unchanged (visual request; the FPV frames hardly show the lanterns) |
@@ -50,6 +52,7 @@ Mac M4 Max GPU, `--settle 500 --min-frames 30`, pre-roll on.
 
 Default 64 moments: 67.1 % raw / 50.2 % calibrated (colour 67.9, light 80.5, shape 54.8) → **67.4 % / 50.6 %**
 (colour 68.2, light 80.7, shape 55.0). Moments that moved: 142.5 +0.010, 558.25 +0.016, 656 +0.010, 802.75 +0.025,
-1194 +0.084; none dropped by 0.01 or more. 44 touched moments: 53.1 → 56.7 % raw. `check-sync` unchanged (steady
+1194 +0.084; none dropped by 0.01 or more (re-measured after the 803.25 / 1198 flood fixes: identical). 44
+touched moments: 53.1 → 56.7 % raw; edge moments on the saved file 803.5 0.80, 1200.25 0.27. `check-sync` unchanged (steady
 869 hits 98 %, free tempo 83 hits 71 %). Mobile budget at 558.3 / 803 / 804.33 / 1051.7 / 1193 / 1199 (+ 843 / 1515):
 ≤ 104 draw calls (PASS).
