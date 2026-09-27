@@ -67,6 +67,11 @@ export class FxShared {
       uSiteGlow: { value: new THREE.Color() },
       // 0..1 site smoke of `atmos.glow` (app.env.smoke)
       uSiteSmoke: { value: 0 },
+      // beam light held by the low fog bank (LightingSystem -> app.env.lowFogLight / lowFogPos / lowFogSpread)
+      uLowFogLight: { value: new THREE.Color() },
+      uLowFogPos: { value: new THREE.Vector3(0, 1, 14) },
+      uLowFogSpread: { value: new THREE.Vector2(30, 14) },
+      uLowFogGain: { value: 1 },
       // photosensitivity option (flashSafety.ts): 1 = strobing / flickering particles hold their average
       uCalm: CALM_UNIFORM,
     };
@@ -122,6 +127,13 @@ export class FxShared {
     else sg.setRGB(0, 0, 0);
     const sm = env.smoke;
     u.uSiteSmoke.value = typeof sm === 'number' && Number.isFinite(sm) ? Math.min(1, Math.max(0, sm)) : 0;
+    // the low fog bank lit by the beams passing through it (0 while no beam reaches a bank: it goes dark with the rig)
+    const lf = env.lowFogLight;
+    const lfu = u.uLowFogLight.value as THREE.Color;
+    if (lf && Number.isFinite(lf.r + lf.g + lf.b)) lfu.setRGB(Math.max(0, lf.r), Math.max(0, lf.g), Math.max(0, lf.b));
+    else lfu.setRGB(0, 0, 0);
+    if (env.lowFogPos && Number.isFinite(env.lowFogPos.x + env.lowFogPos.y + env.lowFogPos.z)) (u.uLowFogPos.value as THREE.Vector3).copy(env.lowFogPos);
+    if (env.lowFogSpread && Number.isFinite(env.lowFogSpread.x + env.lowFogSpread.y)) (u.uLowFogSpread.value as THREE.Vector2).copy(env.lowFogSpread);
     // pyro light field: the strongest lights of this frame (fewer on small presets)
     const lv = app.quality.level;
     this.lights.pack(lv === 'mobile' ? 4 : lv === 'medium' ? 8 : 12);
