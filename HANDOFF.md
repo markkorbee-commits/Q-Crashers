@@ -357,7 +357,7 @@ Zo 27 sep 2026, ± 00:40 (CEST), lokaal op de MacBook Pro (M4 Max, GPU-render).
   (geverfde kroonschaal, vinnen), troupe-verlichting ontdubbeld, lasers, wash-fallback-bug, grondflits, halo's.
   Showbestand op cue-niveau samengevoegd met `tools/video/merge-show-cues.py`.
 
-- Ronde 8 deel 1 (findings `r8_*.md`, 27 sep ± 03:10): lasercues (deck-grids, violet web 1503), roze gerbs +
+- Ronde 8 deel 1 (findings `r8_*.md`, 27 sep ± 02:50): lasercues (deck-grids, violet web 1503), roze gerbs +
   veldflood 1192/1198, witte rookbank 797, blackout 803, brandende vleugels op het vleugeloppervlak, zwart blok uit
   het DJ-portaal, blinders als gloed, lantaarnpilaren donker, rookhoogtemist per cue, kasteelbasis 509, "minder
   flitsen" nu ook voor vuurwerk-strobe, sterren, kroon-strobe, LED-pulsen en lasers (`src/fx/core/flashSafety.ts`).

@@ -49,7 +49,7 @@ const ANCHORS = new Set([
   ...unionOf(read('src/core/Anchors.ts'), 'AnchorName'),
   ...[...read('src/data/layout.gen.ts').matchAll(/^  ([a-z0-9_]+):/gm)].map((m) => m[1]),
 ]);
-const FILTERS = new Set(['all', 'left', 'right', 'center']);
+const FILTERS = new Set(['all', 'left', 'right', 'center', 'outer', 'ends']); // outer/ends: |x| >= 20 m (lights, round 8)
 const NAMED = new Set([...read('src/show/colors.ts').matchAll(/^\s*([a-z]+):\s*'#[0-9a-fA-F]{6}'/gm)].map((m) => m[1]));
 const PALETTE_REFS = new Set(['primary', 'secondary', 'accent']);
 /** viewing spots (src/player/spots.ts DEFAULT_SPOTS) — moments may recommend one */
@@ -227,7 +227,7 @@ const LASER_TOKENS = (() => {
  * (docs/show-format-ext/stage.md) */
 const RUNTIME_ANCHORS = new Set(['roof_plumes']);
 /** preferred extended anchors (p.at) — the cue's `target` is the contract fallback */
-const EXT_ANCHORS = new Set(['flare_pots', 'corner_towers', 'tower_torches', 'arms', 'arm_ends', 'side_fronts', 'wing_spars', 'hang_lines', 'piano']);
+const EXT_ANCHORS = new Set(['flare_pots', 'corner_towers', 'tower_torches', 'arms', 'arm_ends', 'side_fronts', 'wing_spars', 'wing_edge', 'hang_lines', 'piano']);
 const COLOR_PARAMS = new Set(['color', 'color2', 'eyes', 'rosettes', 'windowColor', 'tint', 'shaft']);
 const CAMERA_EASE = new Set(['linear', 'in', 'out', 'inout']);
 const DEFAULT_DUR = { pyro: 0.8, fireworks: 0.2, strobe: 0.25, lasers: 4, lights: 8, crowd: 2, stage: 4, screens: 8, fog: 6, camera: 6, atmos: 10 };
