@@ -130,7 +130,11 @@ export const ALCOHOL_FX: AlcoholFx = ALCOHOL_FX_REALISTIC;
 
 /**
  * XTC effect gains per preset (x = intensity, n = nausea, d = drained, dz = dazzle, kp = kick pulse).
- * `realistic` holds the round-6 values.
+ * `realistic` holds the round-6 values, except saturation, exposure and the kick gains (round 12): no preset
+ * makes the picture brighter or more colourful, or enhances the show on the kicks.
+ * Bible §12.1: impairing and uncomfortable, never rewarding. The plateau is glare that costs detail (veil on
+ * what is lit, halos, streaks, afterimages), lower acuity (blur, fringes, nystagmus bursts), jaw-clench shake
+ * and recurring nausea; it is not brighter, warmer or more saturated than the sober view.
  */
 export interface XtcGains {
   sat: number;
@@ -154,10 +158,16 @@ export interface XtcGains {
   nyst: number;
   /** jaw-clench shake (screen heights) */
   jaw: number;
+  /** kick pulse (0 in both presets: no beat-synced enhancement of the show) */
   kickExp: number;
   kickBloom: number;
   kickSat: number;
   kickZoom: number;
+  /** kick pulse as discomfort: the bass thump shakes the focus (blur), sensory overload */
+  kickBlur: number;
+  /** nystagmus bursts: every few seconds the eyes jerk harder (x nystagmus) and the picture blurs (blur) */
+  burstNyst: number;
+  burstBlur: number;
   jitter: number;
   sway: number;
   nSat: number;
@@ -179,6 +189,8 @@ export interface XtcGains {
   dExp: number;
   /** comedown tunnel (tired, narrowed view) */
   dTunnel: number;
+  /** comedown blur (tired eyes) */
+  dBlur: number;
   dWarmth: number;
   dSpeed: number;
   dLag: number;
@@ -197,9 +209,10 @@ export interface XtcGains {
 
 export const XTC_GAINS: Record<PerceptionStrength, XtcGains> = {
   realistic: {
-    sat: 0.12,
+    // round 12: no brighter, more colourful picture in this preset either (was sat 0.12, exp 0.06)
+    sat: 0.03,
     warmth: 0,
-    exp: 0.06,
+    exp: -0.06,
     lift: 0,
     expDazzle: 0.22,
     ls: 0.42,
@@ -215,10 +228,13 @@ export const XTC_GAINS: Record<PerceptionStrength, XtcGains> = {
     wobble: 0.05,
     nyst: 0.2,
     jaw: 0.0011,
-    kickExp: 0.03,
-    kickBloom: 0.3,
+    kickExp: 0,
+    kickBloom: 0,
     kickSat: 0,
     kickZoom: 0,
+    kickBlur: 0,
+    burstNyst: 0,
+    burstBlur: 0,
     jitter: 0.15,
     sway: 0.08,
     nSat: 0.4,
@@ -235,6 +251,7 @@ export const XTC_GAINS: Record<PerceptionStrength, XtcGains> = {
     dContrast: 0.08,
     dExp: 0.1,
     dTunnel: 0,
+    dBlur: 0,
     dWarmth: 0,
     dSpeed: 0.15,
     dLag: 0.06,
@@ -249,36 +266,42 @@ export const XTC_GAINS: Record<PerceptionStrength, XtcGains> = {
     aDistDrop: 0,
   },
   strong: {
-    sat: 0.4,
-    // 0.6 -> 0.85: at 0.6 the warm cast hardly showed in the blue-white fog at the front (B/R 1.33 -> 1.28)
-    warmth: 0.85,
-    // round-7 review: a flat x1.2 turned the lit fog at the front milky; most of the lift moved into the
-    // highlight-protected midtone lift (the dark crowd scene gets about the same, a bright scene far less)
-    exp: 0.05,
-    lift: 0.15,
-    expDazzle: 0.4,
-    ls: 0.7,
-    bloom: 0.9,
-    // streak energy ~20 % (0.7 lifted the lit fog field)
-    star: 0.55,
+    // round 12: the plateau read as rewarding (+23 % brighter, +40 % more chromatic than sober, beat-synced
+    // swells). No colour, warmth, midtone lift or glow any more; what remains is glare that costs detail
+    // (halos, streaks, the gated veil, afterimages) and lower acuity (blur, fringes). Glare and blur spread
+    // light into the dark parts, so the light-sensitive eye squints (exp < 0): measured against the sober
+    // view at t 416 / 650 / 1231 the mean luma stays within about ±5 % and the chroma drops 4-8 %
+    sat: 0,
+    warmth: 0,
+    exp: -0.18,
+    lift: 0,
+    // dilated pupils: strobes and flashes over-expose (photophobia), recovering slowly
+    expDazzle: 0.2,
+    ls: 0.45,
+    bloom: 0.3,
+    star: 0.25,
     veilBase: 0.1,
     veilDazzle: 0.9,
-    glow: 0.35,
-    trails: 0.9,
-    after: 0.8,
-    chroma: 0.2,
-    blur: 0.12,
-    wobble: 0.1,
-    nyst: 0.6,
-    jaw: 0.0025,
-    kickExp: 0.08,
-    kickBloom: 0.6,
-    kickSat: 0.08,
-    kickZoom: 0.008,
+    glow: 0,
+    trails: 0.6,
+    after: 0.7,
+    chroma: 0.24,
+    blur: 0.16,
+    wobble: 0.12,
+    nyst: 0.8,
+    jaw: 0.0035,
+    kickExp: 0,
+    kickBloom: 0,
+    kickSat: 0,
+    kickZoom: 0,
+    kickBlur: 0.05,
+    burstNyst: 1.6,
+    burstBlur: 0.14,
     jitter: 0.3,
     sway: 0.15,
-    nSat: 0.6,
-    nExp: 0.1,
+    // a nausea wave greys and darkens the view (a strong desaturation read as a brighter, milky picture)
+    nSat: 0.45,
+    nExp: 0.18,
     nDamp: 1,
     nTint: 1,
     nWobble: 0.7,
@@ -287,11 +310,13 @@ export const XTC_GAINS: Record<PerceptionStrength, XtcGains> = {
     nSway: 0.6,
     nMuffle: 0.3,
     nAudioWobble: 0.5,
-    dSat: 0.55,
-    dContrast: 0.25,
-    dExp: 0.2,
-    dTunnel: 0.15,
-    dWarmth: 0.5,
+    // the comedown must read at a glance: grey, dull, darker, narrowed and soft
+    dSat: 0.75,
+    dContrast: 0.3,
+    dExp: 0.3,
+    dTunnel: 0.3,
+    dBlur: 0.1,
+    dWarmth: 0.6,
     dSpeed: 0.25,
     dLag: 0.1,
     dMuffle: 0.3,
@@ -362,9 +387,11 @@ export const PERC_TUNE: Record<PerceptionStrength, PercTune> = {
     afterAdd: 0.16,
     starStride: 1,
     starStrideM: 1,
+    // round 12: the flat frame-wide share turned the whole night milky under strobes (XTC at t 1231: frame p1
+    // 0 -> 40, mean +35 %); like the strong preset, the scatter now shows on what is lit (dark stays dark)
     veilSpatial: 0.75,
-    veilFlat: 0.25,
-    veilGate: 0,
+    veilFlat: 0.05,
+    veilGate: 0.08,
     lsThreshold: 0.72,
   },
   strong: {
@@ -455,17 +482,31 @@ export function xtcDrained(t: number): number {
   return 1 - 0.4 * smooth01((t - c0 - comedown) / after);
 }
 
+/** amplitude of the recurring nausea waves through the plateau and the comedown (the onset peaks at 1) */
+const XTC_NAUSEA_LATE = 0.4;
+
 /**
- * 0..1 onset discomfort: nausea / restlessness waves of a few seconds (desaturation + sway), strongest
- * in the middle of the onset, fading into the plateau. Deterministic in `t`.
+ * 0..1 discomfort: nausea / restlessness waves of a few seconds (desaturation, green-grey tint, sway).
+ * Strongest in the middle of the onset (one wave every 11 s); then they keep coming back through the plateau
+ * and the comedown, weaker and slower (one every 19 s, XTC_NAUSEA_LATE). Deterministic in `t`.
  */
 export function xtcNausea(t: number): number {
-  const { onset } = XTC_TIMELINE;
-  if (t < 6 || t > onset + 25) return 0;
-  const env = smooth01((t - 6) / 10) * (1 - smooth01((t - onset + 5) / 30));
-  const p = ((t - 6) % 11) / 11; // one wave every 11 s
-  const wave = p < 0.4 ? Math.sin((p / 0.4) * Math.PI) : 0;
-  return env * wave * wave;
+  const { onset, plateau, comedown } = XTC_TIMELINE;
+  if (t < 6 || t >= onset + plateau + comedown) return 0;
+  let v = 0;
+  if (t <= onset + 25) {
+    const env = smooth01((t - 6) / 10) * (1 - smooth01((t - onset + 5) / 30));
+    const p = ((t - 6) % 11) / 11; // one wave every 11 s
+    const wave = p < 0.4 ? Math.sin((p / 0.4) * Math.PI) : 0;
+    v = env * wave * wave;
+  }
+  if (t > onset) {
+    const env = XTC_NAUSEA_LATE * smooth01((t - onset) / 20) * (1 - smooth01((t - onset - plateau - comedown + 15) / 15));
+    const p = ((t - onset) % 19) / 19;
+    const wave = p < 0.35 ? Math.sin((p / 0.35) * Math.PI) : 0;
+    v = Math.max(v, env * wave * wave);
+  }
+  return v;
 }
 
 // ---------------------------------------------------------------- ketamine timeline (real seconds)
@@ -774,8 +815,13 @@ export class RiskModel {
     if (this.recovering > 3 && s.bodyTemp > 37.6) w.push(i.cooling > 0.9 ? M.treated : i.cooling > 0.2 ? M.cooling : M.resting);
     if (s.hydration < 0.65) w.push(M.dehydration);
     if (xtcActive && (this.waterLoad > 650 || s.overhydration > 0.08) && s.overhydration < 0.5) w.push(M.hyponatraemia);
+    // what the alcohol level means at a festival (0.8 / 1.2 / 1.6‰), ahead of the general lines
+    if (i.bac >= 1.6 && i.bac < 2) w.push(M.alcoholTier16);
+    else if (i.bac >= 1.2 && i.bac < 1.6) w.push(M.alcoholTier12);
+    else if (i.bac >= 0.8 && i.bac < 1.2) w.push(M.alcoholTier08);
     if (this.scenario.id === 'heatwave') w.push(M.codeRed);
-    if (i.bac >= 0.3 && !xtcActive && (s.hydration < 0.9 || this.scenario.id === 'heatwave')) w.push(M.alcoholHeat);
+    // the Endshow night was humid (81 %) after a 31 °C day: from 0.5‰ always, below that once water runs low
+    if (i.bac >= 0.3 && !xtcActive && (i.bac >= 0.5 || s.hydration < 0.9 || this.scenario.id === 'heatwave')) w.push(M.alcoholHeat);
     if (i.bac >= 0.5 && i.bac < 2) w.push(M.drivingLimit);
     if (xtcActive && i.bac >= 0.2) w.push(M.mixing);
     if (i.phase === 'onset' && i.xtcTime > 12) w.push(M.anxiety);

@@ -113,6 +113,22 @@ const COMPARE_PREVIEW_BAC = 1.0;
 const XTC_STOP_FADE = 4;
 /** crowd micro-climate over the floor (°C by distance from the stage front, bible §12.3: +3 A, +1.5 B) */
 const ZONE_MICRO_C = [0, 3, 30, 3, 60, 1.5, 113, 0.6, 140, 0];
+/**
+ * crowd density around the player: the layout keeps a few metres around the player's spot clear, so the crowd
+ * is read on rings of 8 directions at 2, 4, 6 and 8 m (the bodies within ~8 m block the breeze and add their
+ * heat); the densest ring decides. Unit directions x, z.
+ */
+const RING_R = [2, 4, 6, 8] as const;
+const DIR8 = [1, 0, 0.7071, 0.7071, 0, 1, -0.7071, 0.7071, -1, 0, -0.7071, -0.7071, 0, -1, 0.7071, -0.7071] as const;
+/**
+ * head count the heat model is calibrated for (the default Tribe). A lighter graphics preset renders fewer
+ * people (medium 26,000, mobile 11,000), but thins the banks and the back first: the pit and the floor lose
+ * about the square root of the head-count ratio (measured: zone A mobile 2.0 / medium 3.1 / high 3.7 p/m²).
+ * The rendered density is scaled by that root, so the body state hardly depends on the graphics preset.
+ */
+const CROWD_REF_COUNT = 45000;
+/** real seconds a BAC preview holds its level before elimination resumes (the preview chip stays true) */
+const BAC_PREVIEW_HOLD = 20;
 /** a toast is repeated at most this often (s) */
 const NOTE_REPEAT_S = 90;
 /** localStorage key of the strength preset (per-viewer convenience) */
@@ -129,6 +145,11 @@ const REALISTIC_WOW = 0.004 / 0.009;
 const KET_REALISTIC = 0.6;
 
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
+/** crowd density at a ground point (p/m², finite, >= 0) */
+const sampleDensity = (c: { densityAt(x: number, z: number): number }, x: number, z: number) => {
+  const d = c.densityAt(x, z);
+  return Number.isFinite(d) ? Math.max(0, d) : 0;
+};
 const smooth01 = (v: number) => {
   const x = clamp01(v);
   return x * x * (3 - 2 * x);
@@ -151,9 +172,11 @@ function readStrength(): PerceptionStrength | null {
  *    -> tracking lag and smear, refocus blur after head turns, glare persistence, intermittent double
  *    vision and nystagmus, a narrowed field, sway, reaction lag, muffled audio; stumbles from 1.2‰,
  *    memory gaps from 1.6‰ and a forced "sit down / first aid" outcome from 2‰.
- *  - xtc: compressed timeline (onset / plateau / comedown / after) -> onset nausea waves, dazzle and a
- *    milky glare veil under strobes (dilated pupils), halos, trails, afterimages, fine nystagmus, jaw-clench
- *    shake, a drained comedown and the "dinsdagdip" epilogue, plus the risk layer.
+ *  - xtc: compressed timeline (onset / plateau / comedown / after) -> nausea waves (strong in the onset,
+ *    recurring through the plateau), dazzle and a glare veil under strobes (dilated pupils), halos, trails,
+ *    afterimages, blur, nystagmus with bursts, jaw-clench shake, a view that narrows as the body heats up, a
+ *    grey drained comedown and the "dinsdagdip" epilogue, plus the risk layer. Never brighter, warmer or more
+ *    colourful than sober, and nothing that pulses with the music (bible §12.1: never rewarding).
  *  - ketamine: one fixed compressed scenario (onset / peak / K-hole / return / after) -> the world recedes
  *    into a dark tunnel, drained cool colours, slow floating look, heavy sway, slowed and stopped walking,
  *    slumping down and an out-of-body drift in the K-hole, far-away muffled sound with an echo; the
@@ -225,6 +248,8 @@ export class PerceptionSystem implements System {
   private ketNoted = 0;
   private ketWarnTimer = 0;
   private splitX = 0.5;
+  /** real seconds left of a BAC preview hold (elimination paused) */
+  private bacHold = 0;
   private readonly riskModel = new RiskModel();
   private readonly riskInput: RiskInput = {
     activity: 0,
@@ -258,7 +283,7 @@ export class PerceptionSystem implements System {
   private reducedOverride: boolean | null = null;
   private reducedMedia = false;
   private flameHeat = 0;
-  private crowd: { densityAt(x: number, z: number): number } | null | undefined;
+  private crowd: { densityAt(x: number, z: number): number; maxCount?: unknown } | null | undefined;
   private player: { reducedMotion?: unknown; teleport?: unknown } | null | undefined;
   private cam: { mode?: string } | null | undefined;
   /** the view is the player's own (first / third person): perception applies */
@@ -359,8 +384,16 @@ export class PerceptionSystem implements System {
     return this.ketPhase !== 'off' ? 'ketamine' : this.xtcPhase !== 'off' ? 'xtc' : this.bac > 0.005 || this.stomach > 0.05 ? 'alcohol' : 'sober';
   }
 
-  /** player chose to rest / cool down (true) or back to automatic (false) */
+  /**
+   * the player chose to rest / cool down (true) or not (false). The automatic rest (standing still out of the
+   * crowd) is not a choice: it shows in `activityLabel` only, so a UI "stand up" button always works.
+   */
   get resting(): boolean {
+    return this.activityMode === 'rest';
+  }
+
+  /** the body is resting right now (chosen, automatic, seated, at first aid) */
+  get restingNow(): boolean {
     return this.riskInput.resting;
   }
 
@@ -428,13 +461,20 @@ export class PerceptionSystem implements System {
 
   /** a drink was consumed: grams of pure alcohol (e.g. beer 250 ml 5% = 9.9 g) */
   addAlcohol(grams: number): void {
-    if (grams > 0 && Number.isFinite(grams)) this.stomach += grams;
+    if (grams > 0 && Number.isFinite(grams)) {
+      this.stomach += grams;
+      this.bacHold = 0;
+    }
   }
 
-  /** jump straight to a BAC (previews / debug); clears unabsorbed alcohol */
+  /**
+   * jump straight to a BAC (previews / debug); clears unabsorbed alcohol. The level holds for
+   * BAC_PREVIEW_HOLD real seconds, so the previewed tier, its warnings and outcome show as chosen.
+   */
   setBac(promille: number): void {
     this.bac = Math.max(0, promille);
     this.stomach = 0;
+    this.bacHold = this.bac > 0 ? BAC_PREVIEW_HOLD : 0;
   }
 
   /** water drunk (ml) — hydration, and the over-drinking (hyponatraemia) branch under XTC */
@@ -445,6 +485,8 @@ export class PerceptionSystem implements System {
   setActivity(mode: ActivityMode): void {
     this.activityMode = mode;
     this.walkOffT = 0;
+    // "stand up": the automatic rest (standing still for 5 s) starts counting again
+    this.stillT = 0;
   }
 
   /** compat: true = rest / cool down, false = automatic */
@@ -467,6 +509,7 @@ export class PerceptionSystem implements System {
   soberUp(): void {
     this.bac = 0;
     this.stomach = 0;
+    this.bacHold = 0;
     this.xtc = this.xtcFx = 0;
     this.xtcOn = false;
     this.xtcPhase = 'off';
@@ -611,7 +654,8 @@ export class PerceptionSystem implements System {
     ri.xtc = this.xtcFx;
     ri.phase = this.xtcPhase;
     ri.xtcTime = this.xtcTime;
-    ri.bac = this.bac;
+    // the risk messages follow the BAC as displayed (2 decimals), so "2.00‰" always comes with its warning
+    ri.bac = Math.round(this.bac * 100) / 100;
     ri.overstimulation = this.shownXtc * ctx.beat.energy * (ctx.showPlaying ? 1 : 0.4);
     this.riskModel.update(dt, ri);
     if (this.aided) this.riskModel.treat(dt);
@@ -640,7 +684,7 @@ export class PerceptionSystem implements System {
       const ks = this.ketStop;
       ketVisual(t, mt, this.ketFx, this.ketHoleV, ketNumb(kt) * ks, ketNausea(kt) * ks, ketDrained(kt) * ks, ctx.time, this.reducedMotion, this.strength === 'strong' ? 1 : KET_REALISTIC);
     }
-    heatVisual(t, mt, this.heatDanger());
+    heatVisual(t, mt, this.heatDanger(), smoothstep(37.8, 38.5, this.risk.bodyTemp));
     sodiumVisual(t, mt, this.risk.overhydration, ctx.time);
     if (this.compare && this.mode === 'sober') alcoholVisual(t, COMPARE_PREVIEW_BAC, ctx.time, F);
     // comfort: half the smear of a head turn (the standing-still look is unchanged)
@@ -718,7 +762,8 @@ export class PerceptionSystem implements System {
       this.stomach -= absorbed;
       this.bac += absorbed / (BODY_MASS_KG * WIDMARK_R);
     }
-    if (this.bac > 0) this.bac = Math.max(0, this.bac - ELIMINATION_PER_H * h);
+    if (this.bacHold > 0) this.bacHold = Math.max(0, this.bacHold - dt);
+    else if (this.bac > 0) this.bac = Math.max(0, this.bac - ELIMINATION_PER_H * h);
   }
 
   private simulateXtc(dt: number): void {
@@ -822,8 +867,8 @@ export class PerceptionSystem implements System {
   private estimateActivity(ctx: FrameContext, dt: number): void {
     const p = this.app.playerPos;
     const ri = this.riskInput;
-    const density = this.densityAt(p.x, p.z);
-    const packed = smoothstep(0.3, 2.2, density);
+    const density = this.densityNear(p.x, p.z);
+    const packed = smoothstep(0.3, 1.8, density);
     const onField = Math.abs(p.x) < 95 && p.z > -3 && p.z < 175;
     // radiant heat from flames close by (bible: +2 °C within ~15 m of active flames)
     const env = this.app.env;
@@ -831,7 +876,7 @@ export class PerceptionSystem implements System {
     const flame = 2 * smoothstep(0.4, 3, env.flashIntensity) * (1 - smoothstep(15, 32, fd));
     this.flameHeat += (flame - this.flameHeat) * damp(flame > this.flameHeat ? 3 : 10, dt);
     ri.microC = (onField ? table(ZONE_MICRO_C, p.z) * packed : 0) + this.flameHeat;
-    ri.exposure = 1 - smoothstep(0.5, 2.5, density);
+    ri.exposure = 1 - smoothstep(0.4, 2.0, density);
 
     // dancing: the crowd around you dances; on the empty grounds you dance near the stage
     const nearStage = onField && Math.abs(p.x) < 70 ? 1 - smoothstep(80, 150, p.z) : 0;
@@ -873,14 +918,28 @@ export class PerceptionSystem implements System {
               : 'Standing';
   }
 
-  private densityAt(x: number, z: number): number {
+  /**
+   * people per m² around the player (see RING_R): the densest of the own cell and the mean of each
+   * ring, at the default Tribe size (CROWD_REF_COUNT). At the spot 'crowd' (6, 32) the own cell is empty but
+   * the 6-8 m rings read ~2 p/m² (zone B).
+   */
+  private densityNear(x: number, z: number): number {
     if (this.crowd === undefined) {
       const c = this.app.get('crowd') as unknown as { densityAt?: unknown } | undefined;
       this.crowd = c && typeof c.densityAt === 'function' ? (c as { densityAt(x: number, z: number): number }) : null;
     }
-    if (!this.crowd || !this.app.isSystemEnabled('crowd')) return 0;
-    const d = this.crowd.densityAt(x, z);
-    return Number.isFinite(d) ? Math.max(0, d) : 0;
+    const c = this.crowd;
+    if (!c || !this.app.isSystemEnabled('crowd')) return 0;
+    let best = sampleDensity(c, x, z);
+    for (let i = 0; i < RING_R.length; i++) {
+      const r = RING_R[i];
+      let sum = 0;
+      for (let k = 0; k < 16; k += 2) sum += sampleDensity(c, x + DIR8[k] * r, z + DIR8[k + 1] * r);
+      best = Math.max(best, sum / 8);
+    }
+    const cap = c.maxCount;
+    const scale = typeof cap === 'number' && cap > 0 ? Math.sqrt(Math.min(6, Math.max(1, CROWD_REF_COUNT / cap))) : 1;
+    return best * scale;
   }
 
   /** first / third person (or no camera rig at all): the view is the player's own */
@@ -1278,16 +1337,21 @@ export class PerceptionSystem implements System {
     // the spins and the look overshoot (strong preset)
     const fov = Math.max(20, ctx.camera.fov);
     const nystAlc = table(F.nystagmus, this.bac);
-    const nystDeg = (nystAlc * (0.3 + 0.7 * clamp01(this.refocus * 1.6)) + G.nyst * this.xtcFx) * (rf ? 0.5 : 1);
+    // XTC nystagmus bursts: every 9 s the eyes jerk harder for ~1.6 s and the picture blurs
+    const bp = this.xtcPhase !== 'off' ? (this.xtcTime % 9) / 9 : 1;
+    const burst = bp < 0.18 ? Math.sin((bp / 0.18) * Math.PI) * this.xtcFx : 0;
+    out.blur += G.burstBlur * burst;
+    const nystDeg = (nystAlc * (0.3 + 0.7 * clamp01(this.refocus * 1.6)) + G.nyst * this.xtcFx * (1 + G.burstNyst * burst)) * (rf ? 0.5 : 1);
     const ph = this.nystPhase;
     const saw = ph < 0.82 ? ph / 0.82 : 1 - (ph - 0.82) / 0.18;
-    const jaw = rf ? 0 : this.xtcFx * Math.max(0, Math.sin(ctx.time * 0.55) * Math.sin(ctx.time * 0.23 + 1));
+    // jaw clenching: present most of the plateau, in slow swells (reduce flashing: off)
+    const jaw = rf ? 0 : this.xtcFx * clamp01(0.35 + 0.65 * Math.sin(ctx.time * 0.55) * Math.sin(ctx.time * 0.23 + 1));
     const shake = jaw * G.jaw * Math.sin(ctx.time * Math.PI * 2 * 11);
     b.offX = reduced ? 0 : ((saw - 0.5) * nystDeg + this.spinDeg + this.osX) / fov;
     if (strong && !reduced) {
       // a steady zoom margin, so the view does not pump with the moving offset
       const osMax = Math.max(table(F.overshoot, this.bac), this.ketPhase !== 'off' ? 3.0 * this.ketFx : 0);
-      const nystMax = (nystAlc + G.nyst * this.xtcFx) * (rf ? 0.5 : 1);
+      const nystMax = (nystAlc + G.nyst * this.xtcFx * (1 + G.burstNyst)) * (rf ? 0.5 : 1);
       b.margin = Math.min(0.1, (0.5 * nystMax + 0.5 * table(F.spins, this.bac) + 1.35 * osMax) / fov);
     } else b.margin = 0;
     b.zoom = 0;
@@ -1321,11 +1385,11 @@ export class PerceptionSystem implements System {
   }
 
   /**
-   * Beat-synced overstimulation (XTC): a short exposure / bloom / saturation swell and a tiny view zoom on
-   * kicks. Photosensitivity: a local envelope (τ 0.12 s) that fires at most every 0.34 s and on every 2nd
-   * kick above 168 BPM (≤ 2.8 Hz), at most +8 % exposure (+2 % and bloom x0.25 with reduce flashing).
-   * No hue cycling or pattern breathing: MDMA is not a psychedelic, and the effect must not look like an
-   * attractive filter.
+   * Beat-synced overstimulation (XTC) as discomfort, never as an enhancement of the show (round 12): the
+   * bass thump shakes the focus (a short blur, kickBlur); the exposure / bloom / saturation / zoom gains are 0
+   * in both presets. Photosensitivity: a local envelope (τ 0.12 s) that fires at most every 0.34 s and on
+   * every 2nd kick above 168 BPM (≤ 2.8 Hz). No hue cycling or pattern breathing: MDMA is not a psychedelic,
+   * and the effect must not look like an attractive filter.
    */
   private pulses(ctx: FrameContext): void {
     const x = this.shownXtc;
@@ -1357,6 +1421,7 @@ export class PerceptionSystem implements System {
     out.exposure += (rf ? Math.min(G.kickExp, 0.02) : G.kickExp) * kp;
     out.bloomBoost += G.kickBloom * (rf ? 0.25 : 1) * kp;
     out.saturation *= 1 + G.kickSat * kp;
+    out.blur += G.kickBlur * kp * (rf ? 0.5 : 1);
     if (!this.reducedMotion) fx.body.zoom += G.kickZoom * kp;
   }
 
@@ -1464,9 +1529,10 @@ function alcoholMotor(m: MotorEffects, bac: number, F: AlcoholFx): void {
 
 /**
  * simulated MDMA perception at intensity x (0..1), design bible §12.3 (gains per preset, XTC_GAINS):
- * saturation up and warm, bloom threshold down with halos and a soft glow, light trails and afterimages,
- * over-exposure under strobes (`dazzle`, dilated pupils; halved with reduce flashing), slight blur; onset
- * nausea waves (desaturated, green-grey, swimming); a drained, grey, cool comedown.
+ * dilated pupils: bloom threshold down with halos, glare streaks, light trails and afterimages, over-exposure
+ * under strobes (`dazzle`; halved with reduce flashing); lower acuity (blur, colour fringes); no colour
+ * boost, and the light-sensitive eye squints (G.exp < 0). Nausea waves (desaturated, green-grey, swimming) in the onset and, weaker, through the
+ * plateau; a drained, grey, dark, narrowed comedown.
  */
 function xtcVisual(t: PerceptionParams, m: MotorEffects, x: number, drained: number, nausea: number, dazzle: number, G: XtcGains, rf: boolean): void {
   if (x > 0.001) {
@@ -1503,6 +1569,7 @@ function xtcVisual(t: PerceptionParams, m: MotorEffects, x: number, drained: num
     t.contrast *= 1 - G.dContrast * drained;
     t.exposure *= 1 - G.dExp * drained;
     t.tunnel = Math.max(t.tunnel, G.dTunnel * drained);
+    t.blur = Math.max(t.blur, G.dBlur * drained);
     t.warmth -= G.dWarmth * drained;
     m.speedScale *= 1 - G.dSpeed * drained;
     m.inputLag += G.dLag * drained;
@@ -1557,10 +1624,17 @@ function ketVisual(t: PerceptionParams, m: MotorEffects, k: number, h: number, n
   }
 }
 
-/** heat danger h (0 at 38.5 °C, 1 at 40 °C): tunnel vision, pale washed-out vision, unsteady */
-function heatVisual(t: PerceptionParams, m: MotorEffects, h: number): void {
+/**
+ * body heat: `warm` (0 at 37.8 °C, 1 at 38.5 °C) narrows the view a little as the core temperature climbs;
+ * heat danger h (0 at 38.5 °C, 1 at 40 °C): tunnel vision, pale washed-out vision, unsteady
+ */
+function heatVisual(t: PerceptionParams, m: MotorEffects, h: number, warm: number): void {
+  if (warm > 0.001) {
+    t.tunnel = Math.max(t.tunnel, 0.22 * warm);
+    t.saturation *= 1 - 0.08 * warm;
+  }
   if (h <= 0.001) return;
-  t.tunnel = Math.max(t.tunnel, 0.55 * h);
+  t.tunnel = Math.max(t.tunnel, 0.22 + 0.4 * h);
   t.saturation *= 1 - 0.25 * h;
   t.exposure *= 1 + 0.08 * h;
   t.contrast *= 1 - 0.1 * h;

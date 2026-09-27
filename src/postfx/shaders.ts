@@ -654,9 +654,13 @@ void main() {
   // ---- tone map + contrast (display linear)
   col = tonemap(col);
   if (abs(p1.z - 1.0) > 0.001) {
-    // log-space contrast about mid grey (keeps black), plus a slight veil when contrast drops
-    vec3 lc = 0.18 * pow(col / 0.18, vec3(p1.z));
-    col = mix(lc, mix(vec3(0.18), col, p1.z), 0.2);
+    // lower contrast sensitivity (alcohol, comedown, heat, ketamine): the luminance moves towards that of the
+    // wide surround (log space), so bright lights sink into their surroundings and dark detail next to them
+    // fades (glare). A dark night keeps its blacks: no flat veil (the former 0.18 mid-grey pivot lifted a
+    // night sky to dark grey)
+    float la = max(dot(tonemap(max(bicubic(tD3, suv, uD3Size), 0.0) * ex), LUMA), 1e-3);
+    float rr = clamp(max(dot(col, LUMA), 1e-6) / la, 1.0 / 32.0, 32.0);
+    col *= pow(rr, p1.z - 1.0);
   }
   col = clamp(col, 0.0, 1.0);
 
