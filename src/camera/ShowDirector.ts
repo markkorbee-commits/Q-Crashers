@@ -340,16 +340,36 @@ export class ShowDirector {
   }
 
   /**
-   * The photo terrace (deck 5 m, rails to 6.1 m, z 166–171.5): a show camera standing on or behind it
-   * below 8 m would film its own rails and glass. The official terrace shots are clean: the operator
-   * works from the front edge. Such a camera moves forward to just in front of the front rail (≤ 9 m,
-   * irrelevant for the long lenses used from there), keeping its height and aim.
+   * The photo terrace (deck 5 m, front balustrade + glass to 6.1 m at z 166.1, deck to z 171.5): a show
+   * camera standing on or just behind it must not film its own front rail. The official terrace tripod
+   * stands ~4–6 m behind our front rail and looks up 8–10° over the field (round 8: fitted from the
+   * lantern rows and the moon at v34.5, v69.25, v276, v309.5 and v793–805: (0, ~5–6, 170–172), fov 37–41),
+   * so its rail normally stays under the bottom edge of the frame. Only when the rail top reaches into
+   * the frame does the camera rise the few decimetres that put it ~1° under the bottom edge (aim kept).
+   * A camera that would have to rise more than 3 m (one looking down) moves along its sight line to
+   * just in front of the rail instead (≤ 9 m), keeping its height and aim.
    */
   private clearTerrace(o: ShotPose): void {
     const T = TERRACE;
     const p = o.pos;
     if (p.y >= T.deckY + 3 || p.y < T.deckY - 0.5 || Math.abs(p.x) > T.x1 + 1 || p.z < T.z0 - 0.6 || p.z > T.z1 + 5) return;
     if (o.look.z >= p.z - 5) return; // not looking towards the stage over the front rail
+    const dz = p.z - (T.z0 + 0.1); // metres behind the front rail
+    if (dz <= 0.05) return; // at or in front of the rail: nothing of the terrace in view
+    const railY = T.deckY + 1.15;
+    const edge = (o.fov * Math.PI) / 360 + 0.017; // half the vertical fov + ~1° clearance
+    const y0 = p.y;
+    // fixed-point iteration: rising with the aim kept tilts the camera down a little, so re-check
+    for (let i = 0; i < 5; i++) {
+      const pitch = Math.atan2(o.look.y - p.y, Math.hypot(o.look.x - p.x, o.look.z - p.z));
+      if (pitch - edge < -1.4) break; // bottom edge (nearly) straight down: the deck is in view anyway
+      const need = railY - dz * Math.tan(pitch - edge); // lowest height that keeps the rail out of frame
+      if (p.y >= need - 1e-3) return;
+      if (need - y0 > 3) break;
+      p.y = need;
+      if (i === 4) return; // converged to within millimetres
+    }
+    p.y = y0;
     const k = (T.z0 - 0.7 - p.z) / (o.look.z - p.z); // move along the sight line (aim and framing kept)
     p.lerp(o.look, Math.max(0, k));
   }

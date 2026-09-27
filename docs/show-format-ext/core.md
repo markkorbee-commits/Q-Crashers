@@ -39,15 +39,29 @@ Engine behaviour of the show camera (no cue change, all deterministic per shot):
 * PA hangs: when a flown line array (or its truss tower) in front of the subject covers the centre
   56 % of a framing, the shot is moved sideways by the smallest step (0.5 m steps, ≤ 8 m, aim kept)
   that clears it. The offset is computed once from the shot's start pose and held for the whole shot.
-* Photo terrace: a pose on or just behind the terrace below 8 m is moved along its sight line to just
-  in front of the front rail (≤ 9 m, framing unchanged), so the rails and glass never cross the frame.
+* Photo terrace (round 8): a pose on or just behind the terrace (4.5–8 m high) keeps its place as long
+  as the front rail (6.15 m at z 166.1) stays under the bottom edge of the frame; when the rail would
+  reach into the frame, the camera rises the few decimetres that put it ~1° under the bottom edge (aim
+  kept). Only a camera that would have to rise more than 3 m (one looking down) is moved along its sight
+  line to just in front of the rail (≤ 9 m, framing unchanged), as before. Until round 7 every such pose
+  was moved ~5 m forward, which pushed the near lantern pair out of the terrace framings.
 
 Authoring convention (round 7): a `camera.shot` starts on the exact first frame of its video shot,
 `t = cut − 0.036` with the cut from `$ENDSHOW_DATA/cuts.json` (exact since 27 Sep 2026), and the previous
 shot ends there. Not every entry of the cut list is a camera cut: white flashes, strobe hits and look
 changes inside one shot are listed too (e.g. v509.64, v510.2, v510.6, v1046.36, v1048.64, v1437.48,
-v1508.48, v1509.8, v1510.44), and a few real cuts are missing from it (v506.52, v1188.36, v1510.08,
-v1521.0): check a 25 fps sheet around the time before splitting or merging shots.
+v1508.48, v1509.8, v1510.44, and round 8: v802.32, v802.76, v1188.12, v1189.08), and a few real cuts are
+missing from it (v506.52, v1188.36, v1510.08, v1521.0): check a 25 fps sheet around the time before
+splitting or merging shots. Round 8: no camera.shot starts at a known false cut.
+
+Pose fitting (round 8): the official edit's ground camera is mostly one tripod on the photo terrace, at
+about (0, 5–6, 170–172) with the lens 7–11° up and a vertical fov of 36–43° ("terrace ground", the
+Discorecord "AISLE" shots and the jump cuts of v793.7–805 are all this tripod; authored at y 7 so it stands
+above the rail). Its telephoto is (−0.7, 6.7, 169.9) aimed at (0.96, 17, −11.6), fov 16.3: the lanterns sit
+at x 0.10/0.89 and 0.20/0.79 (v10.5, v280.7, v337.9, v508.3, v1435.96). Fit a pose from what the video
+shows rather than by eye: the lantern crystals (x ±20, z 36/69/102/135, glow ≈ 10.8 m), the arm-end lights
+(±94, 12.5, 58), the Ferris wheel hub (86.5, 18.5, 187.5) and the moon (site.ts EPHEM, which the fits
+confirm to within 0.005 of the frame) pin position, aim and lens in a least-squares fit.
 
 ## atmos
 
