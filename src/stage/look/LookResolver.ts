@@ -128,16 +128,19 @@ const GARLAND_PATTERN: Record<string, number> = { steady: 0, chase: 1, twinkle: 
  * porch swags, video 1268.12-1272.5); 'every' = all + base
  */
 const GARLAND_GROUP: Record<string, number> = { wings: 1, castle: 2, sides: 4, base: 8, all: 7, noFacade: 13, every: 15 };
-/** bitmask of a festoon target: a group name or an array of names (unknown / missing: 'all') */
+/**
+ * bitmask of a festoon target: a group name or an array of names (the union). Missing: 'all'; an unknown name
+ * lights nothing, as before round 11.
+ */
 function garlandMask(tg: unknown): number {
-  if (typeof tg === 'string') return GARLAND_GROUP[tg] ?? 7;
+  if (typeof tg === 'string') return GARLAND_GROUP[tg] ?? 0;
   if (Array.isArray(tg)) {
     let m = 0;
     for (let i = 0; i < tg.length; i++) {
       const g = tg[i];
       if (typeof g === 'string' && GARLAND_GROUP[g] !== undefined) m |= GARLAND_GROUP[g];
     }
-    return m || 7;
+    return m;
   }
   return 7;
 }
