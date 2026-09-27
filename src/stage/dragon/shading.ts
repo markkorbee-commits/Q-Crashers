@@ -88,6 +88,11 @@ export interface CrownUniforms {
    * uplight relative to PRINT_UPLIGHT (see MEMBRANE_LIT)
    */
   uMembLit: THREE.IUniform<THREE.Vector3>;
+  /**
+   * throat glow (round 9): x level at mouth 1 (was 0.5), y how far its pale pink is pulled to THROAT_RED
+   * (see THROAT_GLOW; tunable in the page: `__app.get('stage').crownTune.throat` / `throatRed`)
+   */
+  uThroat: THREE.IUniform<THREE.Vector2>;
 }
 
 export function createUniforms(): CrownUniforms {
@@ -136,6 +141,7 @@ export function createUniforms(): CrownUniforms {
     uJawMat: { value: new THREE.Matrix4() },
     uSide: { value: new THREE.Vector2(1, 1) },
     uMembLit: { value: new THREE.Vector3(MEMBRANE_LIT.level, MEMBRANE_LIT.hue, MEMBRANE_LIT.uplight) },
+    uThroat: { value: new THREE.Vector2(0.5, 0) },
   };
 }
 
@@ -933,6 +939,8 @@ export class Garlands {
 
 /** radius of the rosette glow disc (the throat glow instance is scaled from it) */
 export const ROSETTE_R = 2.35;
+/** saturated red-pink the throat glow is pulled to (round 9, uThroat.y) */
+const THROAT_RED = [1.0, 0.16, 0.24];
 
 /**
  * Throat glow: a soft, additive haze of pale pink / white light deep in the jaws with a hint of the
@@ -942,6 +950,7 @@ export const ROSETTE_R = 2.35;
  */
 const THROAT_GLSL = /* glsl */ `
 uniform float uMouth;
+uniform vec2 uThroat;
 vec3 throatGlow(vec2 d) {
   float r2 = dot(d, d);
   // soft falloff that reaches exactly 0 well before the disc edge
@@ -949,8 +958,12 @@ vec3 throatGlow(vec2 d) {
   // the glow rises from the tongue root instead of filling the whole opening evenly
   g *= mix(1.0, 0.3, smoothstep(0.35, 0.95, d.y * 0.5 + 0.5));
   float core = exp(-r2 * 16.0);
-  vec3 c = mix(vec3(1.0, 0.5, 0.62), vec3(0.4, 0.5, 1.0), core * 0.6);
-  return c * g * (0.05 * uEmit + 0.5 * uMouth);
+  // round 9: the pale pink haze is pulled to a saturated red-pink (the footage's mouth reads red under
+  // every look: 998.25 green look, 680.5 / 656 red, 362.5 close-up pink palate with white bulbs, never a
+  // pale pink-white ball glowing out of the jaws)
+  vec3 hz = mix(vec3(1.0, 0.5, 0.62), vec3(${THROAT_RED.map((v) => v.toFixed(3)).join(', ')}), uThroat.y);
+  vec3 c = mix(hz, vec3(0.4, 0.5, 1.0), core * 0.6 * (1.0 - 0.5 * uThroat.y));
+  return c * g * (0.05 * uEmit + uThroat.x * uMouth);
 }
 `;
 

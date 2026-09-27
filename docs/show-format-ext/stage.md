@@ -164,6 +164,33 @@ Checked side by side with the official video (Show camera, Mac GPU); default 64 
   moved by ~1 L. The lavender-grey base is the violet haze glow, not the castle floods.
 - **Anchor `wing_edge`** (new, below): the burning-wing path along the membranes' scalloped top edges.
 
+### Round 9: calm resolver, white-cored window bars, coloured set light, red throat (engine change, no cue change needed)
+
+Checked side by side with the official video (Show camera, Mac GPU); default 64 moments 68.1 / 51.7 %
+→ 68.3 / 52.0 % (raw / calibrated; colour 68.8 → 69.0, light 81.0 → 81.2, shape 56.3 → 56.5).
+
+- **Reduce flashing.** The stage takes `App.reduceFlashing` itself before every resolve (resolver `calm` + the
+  shared flag / the LED shader's `uCalm`, via `syncFlashCalm`). Before, it only saw the option as mirrored by
+  the fx / laser systems: a toggle reached the stage one frame late (587.23: gate level 0.45 for one frame,
+  0.725 after; now 0.725 on the first frame).
+- **Window bars** (LED kind `wbar`, `LedBuilder.windowTube`): the solid tubes are lit at 4 × the window colour
+  (a pane's tubes: 1.6; `calib.windowBar`) and clip to a white core at high window levels (`calib.windowCore`
+  0.9, fading in from `windows` 0.35 to 0.9: a pure blue `windowColor` gives white-cored blue bars, video
+  509.25; 338 / 339 / 167 cyan / lavender-white). They are line emitters of the above-the-haze overlay pass
+  like the battens (minimum on-screen width 1.5 × the overlay's, level floor 0.85; `calib.windowBarPx` /
+  `windowBarFloor`), so they no longer dissolve at the Show camera's resolution. No draw call added.
+- **Coloured set light (chroma).** The set takes more of the look's coloured light and no neutral fill:
+  virtual floods 0.24 → 0.72, FOH front wash 0.26 → 0.5, the set's share of the world's sky light 0.45 → 0,
+  the neutral grey-blue part of the crown's reflections 1 → 0 (`calib.flood` / `front` / `sky`,
+  `crownTune.envGrey`). Video 20.25 / 338 / 509.25 / 167: the castle print reads blue / lavender where the show
+  lights it; 656 deep red. Where the stage chroma deficit comes from (measured, see the round-9 report): in the
+  cells the stage dominates, the video is 6-9 Lab chroma more saturated at L 10-50, but our stage output
+  itself is as saturated as the video before the post chain (509.25 without post: chroma 87 / 92 at L 20-35 /
+  35-50, video 91 / 85; with post 68 / 62). The remaining loss is downstream of the stage.
+- **Throat.** The throat light and the throat glow are pulled to a saturated red (`crownTune.throatRed` 0.85,
+  light × 0.8, glow 0.5 → 0.3): the mouth reads red under every look (998.25 green look: a red mouth, where the
+  pink-white throat light bloomed into a pale ball; 680.5 / 656 red).
+
 ## `stage.state`: new params
 
 Like every other `stage.state` value, the new params are cross-faded over the cue's `fade`. A param

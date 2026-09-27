@@ -4,6 +4,7 @@ import type { App } from '../core/App';
 import type { AnchorName } from '../core/Anchors';
 import type { FrameContext, QualitySettings, System } from '../core/types';
 import { yawTowards } from '../player/spots';
+import { syncFlashCalm } from '../fx/core/flashSafety';
 import { registerStageWalk } from '../world/stageWalk';
 import { BOOTH, VAULT } from './booth/layout';
 import { VaultModule } from './booth/VaultModule';
@@ -48,21 +49,41 @@ const CALIB = {
    * window bars (the footage's bright white / cyan / blue bars, video 338 / 509.25; metric-neutral)
    */
   window: 1.3,
+  /**
+   * round 9: share of a window bar's core clipped to white at a full window level (a bright saturated LED
+   * tube on camera: white-cored blue bars at 509.25 under a pure blue windowColor); it fades in from the
+   * window level 0.35 to 0.9, so dim / dormant looks keep hue-pure bars
+   */
+  windowCore: 0.9,
+  /**
+   * round 9: window bars' HDR level relative to the window colour (a pane's tubes: 1.6). 4: the bars are among
+   * the brightest practicals of the set in the footage (video 167 / 339 / 509.25); metric-neutral (9 moments)
+   */
+  windowBar: 4,
+  /** round 9: window bars' far-field line: minimum width (x the overlay's uMinPx) and level floor */
+  windowBarPx: 1.5,
+  windowBarFloor: 0.85,
   arcade: 0.7,
   lamp: 2.8,
   lantern: 2.3,
   /** decor backlights (banners, skull eyes, emblem) */
   decor: 0.6,
-  /** virtual floods relative to the lighting wash (0.32 until round 3) */
-  flood: 0.24,
-  /** virtual FOH front wash relative to the lighting wash (0.42 until round 3) */
-  front: 0.26,
+  /**
+   * virtual floods relative to the lighting wash (0.32 until round 3, 0.24 until round 8). Round 9 (chroma):
+   * the footage's castle facade reads in the look's colour where the show lights it (20.25 / 338 / 509.25 /
+   * 167: a blue / lavender lit print; 656 deep red), so the set takes more coloured light and no neutral
+   * fill (see `sky`)
+   */
+  flood: 0.72,
+  /** virtual FOH front wash relative to the lighting wash (0.42 until round 3, 0.26 until round 8) */
+  front: 0.5,
   /**
    * share of the world's sky light (hemisphere incl. the site glow, moon, twilight) on the set: the
    * printed castle never reads by sky light in the footage (round 4: sky + env + FOH washes summed
-   * up into a grey-white castle and side houses in every wide shot)
+   * up into a grey-white castle and side houses in every wide shot). Round 9: 0.45 -> 0: the blue-grey
+   * sky fill was the set's main neutral (desaturating) light; the set now reads only by the show's light
    */
-  sky: 0.45,
+  sky: 0,
   /** env-reflection (IBL) share of the lighting wash */
   envWash: 0.55,
   /** how far a site-wide `atmos.glow` (red smoke, flame walls) pulls the floods towards its hue */
@@ -422,8 +443,18 @@ export class MainStageSystem implements System {
     if (!this.enabled) return;
     // cue-driven part of the look (env-dependent parts are refreshed in the frame hook)
     const app = this.app;
+    this.syncCalm();
     this.resolver.resolve(ctx.showTime, ctx.beat, app.palette, app.env, this.look);
     this.lastFrame = app.frame;
+  }
+
+  /**
+   * Photosensitivity option (App.reduceFlashing): the resolver takes it straight from the App before every
+   * resolve (round 9: through fx/core/flashSafety alone a toggle reached the stage one frame late, and not at
+   * all with the fx / laser systems off); the shared flag + the LED shader's uCalm are mirrored here as well.
+   */
+  private syncCalm(): void {
+    this.resolver.calm = syncFlashCalm(this.app);
   }
 
   /** runs after every system updated (env holds this frame's flash / strobe / wash) */
@@ -431,8 +462,10 @@ export class MainStageSystem implements System {
     if (!this.enabled || !this.hooked) return;
     const app = this.app;
     const look = this.look;
-    if (this.lastFrame !== app.frame) this.resolver.resolve(ctx.showTime, ctx.beat, app.palette, app.env, look);
-    else {
+    if (this.lastFrame !== app.frame) {
+      this.syncCalm();
+      this.resolver.resolve(ctx.showTime, ctx.beat, app.palette, app.env, look);
+    } else {
       // refresh the env-driven fields only
       look.wash.copy(app.env.stageWashColor);
       look.washIntensity = app.env.stageWashIntensity;
@@ -548,6 +581,8 @@ export class MainStageSystem implements System {
     (l.uSide.value as THREE.Vector2).set(look.sideL, look.sideR);
     (l.uWin.value as THREE.Color).copy(look.windowColor).multiplyScalar(CALIB.window * look.windows);
     l.uWinLvl.value = look.windows;
+    l.uWinCore.value = CALIB.windowCore * THREE.MathUtils.smoothstep(look.windows, 0.35, 0.9);
+    (l.uWinBar.value as THREE.Vector3).set(CALIB.windowBar, CALIB.windowBarPx, CALIB.windowBarFloor);
     l.uWinMode.value = look.windowMode;
     (l.uArcade.value as THREE.Color).copy(look.arcade).multiplyScalar(CALIB.arcade * (0.25 + 0.75 * look.windows) * castle);
     // front-line lamp row + crystal lanterns (ramparts, arm posts): they carry the U of the stage from

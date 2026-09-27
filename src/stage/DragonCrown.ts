@@ -420,8 +420,9 @@ export class DragonCrown {
     // throat light: pale pink-red (the mouth interior glows pink / white, not orange), lava stays fiery
     const fire = this.tmpC2.setRGB(1.0, 0.32, 0.06).lerp(look.eyes, 0.55);
     U.uLava.value.copy(fire).multiplyScalar(look.mouth * 0.5 + (look.mode === 'ember' || look.mode === 'rage' ? 0.22 : 0.03) * E);
-    const throat = this.tmpC2.setRGB(1.0, 0.45, 0.42).lerp(look.eyes, 0.3);
-    U.uMouthCol.value.copy(throat).multiplyScalar(look.mouth * 10 + 0.3 * E);
+    const throat = this.tmpC2.setRGB(1.0, 0.45, 0.42).lerp(look.eyes, 0.3).lerp(THROAT_LIGHT_RED, CROWN_TUNE.throatRed);
+    U.uMouthCol.value.copy(throat).multiplyScalar((look.mouth * 10 + 0.3 * E) * CROWN_TUNE.throatLight);
+    U.uThroat.value.set(CROWN_TUNE.throat, CROWN_TUNE.throatRed);
     if (look.mode === 'frozen') {
       // frozen: the inner fire dies, the metal takes a cold frosty sheen
       U.uLava.value.setRGB(0, 0, 0);
@@ -539,9 +540,23 @@ export const CROWN_TUNE = {
   contentFlood: 1.5,
   /** gain of the lighting wash on the crown */
   wash: 1,
-  /** level of the neutral (grey-blue) part of the crown's reflections */
-  envGrey: 1,
+  /**
+   * level of the neutral (grey-blue) part of the crown's reflections (round 9: 1 -> 0, with the set's sky share
+   * 0.45 -> 0 and floods x3: the crown's reflections take the wash colour only; 64 moments +0.3, chroma)
+   */
+  envGrey: 0,
+  /**
+   * round 9: throat glow level at mouth 1 (was 0.5) and how far the glow and the throat light are pulled to a
+   * saturated red (0 = the old pale pink); the mouth reads red under every look in the footage (998.25 green
+   * look: a red mouth, where the pink-white throat light bloomed into a pale ball; 680.5 / 656 red)
+   */
+  throat: 0.3,
+  throatRed: 0.85,
+  /** round 9: level of the throat point light (x its old level) */
+  throatLight: 0.8,
 };
+/** saturated red the throat light is pulled to by CROWN_TUNE.throatRed (round 9) */
+const THROAT_LIGHT_RED = new THREE.Color(1.0, 0.14, 0.1);
 
 const FROST = new THREE.Color(0.55, 0.8, 1.0);
 /** warm share of the wing print's uplights (tungsten-ish), mixed into the wing LED hue */
