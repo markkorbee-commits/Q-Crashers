@@ -77,6 +77,16 @@ export class LightEnv {
    */
   readonly archSpotColor = new THREE.Color(1, 0.7, 0.4);
   archSpotIntensity = 0;
+  /**
+   * Beam light held by the low fog this frame (written by LightingSystem, round 8): colour x level (premultiplied,
+   * ~0..3) of the moving-head beams passing through the `fog.lowfog` bank x the fog's albedo, centred at
+   * lowFogPos (world m) with the RMS spread lowFogSpread (x, z). 0 = no lit bank. The smoke puffs of the bank can
+   * take it as their light (the white band of v802.75); LightingSystem already draws the lit layer in its flood
+   * volume and the brighter beams inside the bank.
+   */
+  readonly lowFogLight = new THREE.Color(0, 0, 0);
+  readonly lowFogPos = new THREE.Vector3(0, 1, 14);
+  readonly lowFogSpread = new THREE.Vector2(30, 14);
   /** accumulated flash from pyro / fireworks / strobes (all sources) */
   flashColor = new THREE.Color(0, 0, 0);
   /** weighted centre of the current flash sources (all sources) */
@@ -109,6 +119,7 @@ export class LightEnv {
     this.stageIntensity = 0;
     this.audienceWash = 0;
     this.archSpotIntensity = 0;
+    this.lowFogLight.setRGB(0, 0, 0);
     this.flashColor.setRGB(0, 0, 0);
     this.flashWeight = 0;
     this.flashM2 = 0;

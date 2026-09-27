@@ -37,6 +37,7 @@ import {
   FB_DECK,
   FB_FIELD,
   FB_FIELD_FAR,
+  FB_LOWFOG,
   FB_SIDE_L,
   FB_SIDE_R,
   FB_STAGE,
@@ -151,6 +152,18 @@ const ARCH_BEAM_K = 0.12;
  * not a lit cloud (troupe close-ups 656 / 690 / 705 +2.5 / +2.2 / +1.1 points, none lower)
  */
 const ARCH_GLOW_K = 0;
+/**
+ * Round 8: a beam passing through the low fog (`fog.lowfog` on the deck / field) scatters this much more light
+ * per unit fog density there than in the haze alone: white floor beams through a white bank light it up as a
+ * bright band (v802.75), not a grey layer lit only by the soft-kneed rig term of the smoke shader.
+ */
+const LOWFOG_BEAM_K = 3;
+/** how far the fog's albedo leans to white (its cue colour is mostly the light it holds) */
+const LOWFOG_WHITE = 0.6;
+/** glow of the bank lit by the beams (flood volume FB_LOWFOG) per unit of beam light deposited in it */
+const LOWFOG_GLOW_K = 0.004;
+/** scale of LightEnv.lowFogLight per unit of deposited beam light (~1 for a dozen full white beams in a dense bank) */
+const LOWFOG_ENV_K = 0.05;
 
 /**
  * LightingSystem ('lights'): the RED show rig.
@@ -189,7 +202,13 @@ export class LightingSystem implements System {
   private enabled = true;
   private q!: QualitySettings;
   private readonly root = new THREE.Group();
-  private readonly shared: SharedUniforms = { tNoise: { value: null }, uTime: { value: 0 }, uPixelAngle: { value: 0.002 } };
+  private readonly shared: SharedUniforms = {
+    tNoise: { value: null },
+    uTime: { value: 0 },
+    uPixelAngle: { value: 0.002 },
+    uLowFog: { value: new THREE.Vector4(0, 0, 0, 0) },
+    uLowFogTint: { value: new THREE.Color(1, 1, 1) },
+  };
   private beams!: BeamLayer;
   private pools!: PoolLayer;
   private sprites!: SpriteLayer;
@@ -411,7 +430,11 @@ export class LightingSystem implements System {
     this.beams.build(Math.min(n, this.q.beamBudget + nExplicit), radial);
     this.pools.build(n + 4);
     this.sprites.build(n + rig.emitters.length + this.bulbs.length + 16);
-    const housings = rig.emitters.map((e) => {
+    // Round 8: no housing box for the explicit-only lamps in the DJ portal (booth spot, backlight arc). The booth
+    // spot's 0.62 m box at (0, 4.05, −6.47) stood in the portal mouth in front of the arch-crown cans: a black
+    // square in every close-up of the portal (v409–412, 656, 705, 739.75), where the film shows nothing. The
+    // lamps stay (flare / disc sprites, haze glow, light on the deck); only the box is gone.
+    const housings = rig.emitters.filter((e) => (e.tags & T_EXPLICIT) === 0).map((e) => {
       const m = new THREE.Matrix4();
       const z = e.fwd.clone().setY(0).normalize();
       const y = new THREE.Vector3(0, 1, 0);
@@ -615,6 +638,13 @@ export class LightingSystem implements System {
     }
 
     // ---------------------------------------------------------------- GPU: beams, lenses, pools, bodies
+    // (the low fog first: the beams passing through it light the bank)
+    this.writeLowFog(t);
+    const lfu = this.shared.uLowFog.value;
+    const fogOn = this.lowFogGlowK > 0 && lfu.x + lfu.y + lfu.z > 0.001;
+    this.lowAcc.set(0, 0, 0, 0);
+    this.lowPos.set(0, 0, 0, 0);
+    this.lowCol.setRGB(0, 0, 0);
     this.beams.begin();
     this.pools.begin();
     this.sprites.begin();
@@ -675,6 +705,7 @@ export class LightingSystem implements System {
         this.archCol.b += b;
       }
       const lum = (r + g + b) * 0.333;
+      if (fogOn) this.depositLowFog(lx, ly, lz, dx, dy, dz, len, r, g, b);
       sumDim += dim;
       cr += r;
       cg += g;
@@ -828,7 +859,7 @@ export class LightingSystem implements System {
       // the blinders' own colour (a cyan blinder must not light the set beige)
       normalizeColor(this.blindCol, this.cF);
       this.flashPos.set(0, 3, 2);
-      env.addFlash(this.cF, blindMax * 1.4 * flashK, this.flashPos);
+      if (this.blindFlashK > 0) env.addFlash(this.cF, blindMax * 1.4 * this.blindFlashK * flashK, this.flashPos);
     }
     // (backlights add no env flash: the stage set reads the flash colour, and the castle behind the
     // backlights must stay dark; they light the crowd through stageColor / audienceWash instead)
@@ -904,7 +935,7 @@ export class LightingSystem implements System {
     }
     if (this.blinderLevel > 0) {
       // the audience blinders' own colour splashes onto the set (cyan -> cyan, gold -> gold)
-      const e = this.blinderLevel * 0.5;
+      const e = this.blinderLevel * this.blindSetK;
       normalizeColor(this.blindCol, this.cF);
       W.r += this.cF.r * e;
       W.g += this.cF.g * e;
@@ -1038,7 +1069,7 @@ export class LightingSystem implements System {
     if (lampSum > 1e-4) env.pillarLampColor.setRGB(lamp.r / lampSum, lamp.g / lampSum, lamp.b / lampSum);
     if (shaftSum > 1e-4) env.pillarShaftColor.setRGB(shaft.r / shaftSum, shaft.g / shaftSum, shaft.b / shaftSum);
     env.pillarLampIntensity = lampMax;
-    env.pillarShaftIntensity = shaftMax;
+    env.pillarShaftIntensity = shaftMax * this.shaftK;
     if (!uniform && lampMax > 1e-4) {
       // pillars in different states: their lamp level relative to the brightest scales lamp + shaft
       for (let i = 0; i < np; i++) arr[i] *= lampOf[i] / lampMax;
@@ -1176,6 +1207,29 @@ export class LightingSystem implements System {
       cols[FB_BACK_WIDE].set(b.x * f, b.y * f, b.z * f);
     }
     if (this.boothLevel > 0) add(FB_BOOTH, normalizeColor(this.boothCol, this.cF), LOCAL_GLOW_K * hk * this.boothLevel * 0.8);
+    // the low fog bank lit by the beams that pass through it (round 8): a flat glowing layer over the lit part of
+    // the bank, in the beams' colour x the smoke's albedo (v802.75: white floor beams -> a bright white band)
+    {
+      const a = this.lowAcc;
+      if (a.x > 1e-5) {
+        const mx = a.y / a.x;
+        const mz = a.z / a.x;
+        const sx = Math.sqrt(Math.max(0, a.w / a.x - mx * mx));
+        const sz = Math.sqrt(Math.max(0, this.lowPos.x / a.x - mz * mz));
+        const c = (this.flood.material.uniforms.uBlobC.value as THREE.Vector4[])[FB_LOWFOG];
+        const sg = (this.flood.material.uniforms.uBlobS.value as THREE.Vector3[])[FB_LOWFOG];
+        c.set(mx, 1.1 + 1.5 * (1 - smoothstep(-2, 2, mz)), mz, 1);
+        sg.set(Math.min(50, sx + 14), 1.3, Math.min(40, sz + 9));
+        const tint = this.shared.uLowFogTint.value;
+        const kd = 1 / Math.max(0.3, this.density);
+        const k = this.lowFogGlowK * kd;
+        cols[FB_LOWFOG].set(this.lowCol.r * tint.r * k, this.lowCol.g * tint.g * k, this.lowCol.b * tint.b * k);
+        // (published for the smoke puffs of the bank: LightEnv.lowFogLight)
+        env.lowFogLight.setRGB(this.lowCol.r * tint.r * kd * LOWFOG_ENV_K, this.lowCol.g * tint.g * kd * LOWFOG_ENV_K, this.lowCol.b * tint.b * kd * LOWFOG_ENV_K);
+        env.lowFogPos.set(c.x, c.y, c.z);
+        env.lowFogSpread.set(sx, sz);
+      }
+    }
     // deck air: the smoke machines' fog over the deck (fog.lowfog on the deck) holds the wash and the rig's
     // light around the performers (deck close-ups)
     {
@@ -1253,6 +1307,109 @@ export class LightingSystem implements System {
     if (best > 0) normalizeColor(this.deckFogTint, this.deckFogTint);
     return best;
   }
+  /**
+   * Round 8: the low fog as the beams see it (SharedUniforms.uLowFog): per zone (deck, near field, far field) the
+   * densest `fog.lowfog` lying there at show time t, with FogSystem.lowfog's regions and shares (area `deck`: the
+   * deck + 55 % spill onto the near field; `field`: the near field + 65 % over the far field; `all`: every zone),
+   * in over 2.5 s, lingering 10 s after the cue while the bank flows out and settles. Pure function of t.
+   */
+  private writeLowFog(t: number): void {
+    const u = this.shared.uLowFog.value;
+    u.set(0, 0, 0, 0);
+    if (this.lowFogBeamK <= 0 && this.lowFogGlowK <= 0) return;
+    const cues = this.app.show.active('fog', t, this.fogBuf);
+    let best = 0;
+    for (let i = 0; i < cues.length; i++) {
+      const c = cues[i];
+      if (c.fx !== 'lowfog') continue;
+      const area = typeof c.p.area === 'string' ? c.p.area : 'deck';
+      const dens = typeof c.p.density === 'number' && Number.isFinite(c.p.density) ? Math.min(1.5, Math.max(0, c.p.density)) : 0.8;
+      const a = Math.min(1, Math.max(0, (t - c.t) / 2.5));
+      const b = Math.min(1, Math.max(0, 1 - (t - c.t - c.dur) / 10));
+      const v = dens * a * a * (3 - 2 * a) * b;
+      if (v <= 0.001) continue;
+      const deck = area === 'deck' || area === 'all' ? v : 0;
+      const near = area === 'deck' ? (c.p.spill === false ? 0 : v * 0.55) : v;
+      const far = area === 'field' || area === 'all' ? v * 0.65 : 0;
+      u.x = Math.max(u.x, deck);
+      u.y = Math.max(u.y, near);
+      u.z = Math.max(u.z, far);
+      if (v > best) {
+        best = v;
+        resolveColor(typeof c.p.color === 'string' ? c.p.color : 'white', this.app.palette, this.shared.uLowFogTint.value, 'primary');
+      }
+    }
+    if (best > 0) {
+      // albedo: the cue colour (max 1) leaned to white — the smoke is white, its colour is mostly the light it
+      // holds, so a white beam through a blue bank stays a (slightly blue) white
+      const tint = normalizeColor(this.shared.uLowFogTint.value, this.shared.uLowFogTint.value);
+      tint.lerp(this.cT.setRGB(1, 1, 1), LOWFOG_WHITE);
+      u.w = Math.max(0, this.lowFogBeamK);
+    }
+  }
+  /** in-scatter gain of a beam in the low fog per unit fog density (side-by-side calibration; 0 = off) */
+  lowFogBeamK = LOWFOG_BEAM_K;
+  /** glow of the bank lit by the beams (FB_LOWFOG) per unit of deposited beam light (calibration; 0 = off) */
+  lowFogGlowK = LOWFOG_GLOW_K;
+  /** this frame's beam light deposited in the low fog: Σ w, Σ w·x, Σ w·z, Σ w·x² (lowAcc) / Σ w·z² (lowPos.x) */
+  private readonly lowAcc = new THREE.Vector4();
+  private readonly lowPos = new THREE.Vector4();
+  private readonly lowCol = new THREE.Color();
+
+  /** low fog density (zones of uLowFog, as lowFogAt in the beam shader, without the height fall-off) at x, z */
+  private lowFogDensity(x: number, z: number): number {
+    const u = this.shared.uLowFog.value;
+    const zDeck = smoothstep(-21, -16, z) * (1 - smoothstep(-1.5, 1.5, z));
+    const zNear = smoothstep(-1.5, 1.5, z) * (1 - smoothstep(40, 60, z));
+    const zFar = smoothstep(28, 52, z) * (1 - smoothstep(140, 170, z));
+    const w = 1 - smoothstep(36, 50, Math.abs(x));
+    return (u.x * zDeck + Math.max(u.y * zNear, u.z * zFar)) * w;
+  }
+
+  /**
+   * A lit beam (lens l, unit direction d, length len, colour x dimmer rgb) deposits light in the low fog along the
+   * part of its path below the bank's top (3.2 m over the deck, 2.2 m over the field): weight = fog density
+   * (mean of 3 samples) x path length in the bank (saturating at 24 m). Accumulates colour, centroid and spread.
+   */
+  private depositLowFog(lx: number, ly: number, lz: number, dx: number, dy: number, dz: number, len: number, r: number, g: number, b: number): void {
+    const top = lz < 0 ? 3.2 : 2.2;
+    let t0 = 0;
+    let t1 = len;
+    if (dy < -1e-4) t0 = ly > top ? (ly - top) / -dy : 0;
+    else if (ly >= top) return;
+    else if (dy > 1e-4) t1 = Math.min(len, (top - ly) / dy);
+    // (a beam skimming the bank horizontally lights it only over the first stretch: cap the path)
+    t1 = Math.min(t1, t0 + 60);
+    const seg = t1 - t0;
+    if (seg <= 0.05) return;
+    let wsum = 0;
+    let wx = 0;
+    let wz = 0;
+    for (let k = 0; k < 3; k++) {
+      const tt = t0 + seg * (0.17 + 0.33 * k);
+      const x = lx + dx * tt;
+      const z = lz + dz * tt;
+      const w = this.lowFogDensity(x, z);
+      wsum += w;
+      wx += w * x;
+      wz += w * z;
+    }
+    if (wsum <= 1e-4) return;
+    const w = (wsum / 3) * Math.min(1, seg / 24) * ((r + g + b) * 0.333);
+    const cx = wx / wsum;
+    const cz = wz / wsum;
+    const a = this.lowAcc;
+    a.x += w;
+    a.y += w * cx;
+    a.z += w * cz;
+    a.w += w * cx * cx;
+    this.lowPos.x += w * cz * cz;
+    const m = (wsum / 3) * Math.min(1, seg / 24);
+    this.lowCol.r += r * m;
+    this.lowCol.g += g * m;
+    this.lowCol.b += b * m;
+  }
+
   /** flood tuning: share of the flood light on the set (wash) and in the world flash bus */
   floodSetK = 1;
   floodFlashK = 1;
@@ -1269,6 +1426,23 @@ export class LightingSystem implements System {
   archBeamK = ARCH_BEAM_K;
   archCanK = CAN_GAIN;
   archGlowK = ARCH_GLOW_K;
+  /**
+   * audience blinders: share of their colour splashed onto the set wash, and of their light-bus flash. Round 8:
+   * 0.5 / 1 -> 0 / 0.5. Blinders face the audience: they light the haze, the field and the crowd, never the facade
+   * behind them (a warm blinder row lit the castle grey-beige, facade ~RGB 50/41/50 with every stage key off). The
+   * flash still reaches the set through its share of the light bus (STAGE_FLASH_SHARE), hence the half flash.
+   * Blinder moments (16, mean): 48.4 -> 48.3 % with both 0 (1224.5 +5.3, 1189.25 +4.2, 1283–1285.75 −2…−2.6).
+   */
+  blindSetK = 0;
+  blindFlashK = 0.5;
+  /**
+   * lantern pillars: multiplier on the shaft uplight level written to app.env. Round 8: 1 -> 0.5. The film's
+   * pillars read as dark shafts under a lit crystal (v509.25, v1046.75: seen from the front the shaft is the dark
+   * delay array; v20.25 / v338: the uplight glows only at the foot); a cue's shaftIntensity 0.9 lit ours red over
+   * the whole height. The edge strips stay near their soft limit, the painted shaft's graze halves. 64 moments:
+   * 67.1 / 50.2 % unchanged, shape 54.8 -> 55.0 (974 +1.0, 240.25 +0.8, 191.5 +0.6, 753.75 −0.8).
+   */
+  shaftK = 0.5;
 
   /**
    * flood colours = this frame's floods + the laser light held by the smoke (LaserSystem.airLight, read
@@ -1530,6 +1704,11 @@ function festoonMult(c: LightCue, b: Bulb, t: number, beat: BeatInfo): number {
 function smooth01(x: number): number {
   const k = x < 0 ? 0 : x > 1 ? 1 : x;
   return k * k * (3 - 2 * k);
+}
+
+/** GLSL smoothstep */
+function smoothstep(e0: number, e1: number, x: number): number {
+  return smooth01((x - e0) / (e1 - e0));
 }
 
 function lum(c: THREE.Color): number {

@@ -100,21 +100,39 @@ const TARGET_TAGS: Record<string, number> = {
   booth: T_BOOTH,
 };
 
-/** Resolved cue target filter: tag mask + optional side filter (-1 left, 1 right, 2 centre, 0 none). */
+/** |x| (m) below which a position counts as `center` */
+export const CENTER_X = 14;
+/**
+ * |x| (m) from which a position counts as `outer` / `ends` (round 8). The deck lip's heads sit at |x| 0.9–18.9 and
+ * 20.7–35.1 (registered floor fixtures): 20 selects the outer truss segment of each side (the deck ends), where
+ * `center` (|x| < 14) left the heads at 14–19 lit into the telephoto of v1438.5.
+ */
+export const OUTER_X = 20;
+/** band filter bits (TargetFilter.band): a position passes when any set band contains it */
+export const BAND_CENTER = 1;
+export const BAND_OUTER = 2;
+
+/**
+ * Resolved cue target filter: tag mask + optional side filter (-1 left, 1 right, 0 none) + optional band mask
+ * (BAND_CENTER |x| < CENTER_X, BAND_OUTER |x| >= OUTER_X; both = either band; 0 = no band). Side and band
+ * combine: `left` + `outer` = the left deck end.
+ */
 export interface TargetFilter {
   tags: number;
   side: number;
+  band: number;
 }
 
 export function parseTargets(targets: readonly string[], groups: unknown, out: TargetFilter): TargetFilter {
   let tags = 0;
   let left = false;
   let right = false;
-  let center = false;
+  let band = 0;
   for (const t of targets) {
     if (t === 'left' || t === 'wing_left') left = true;
     if (t === 'right' || t === 'wing_right') right = true;
-    if (t === 'center') center = true;
+    if (t === 'center') band |= BAND_CENTER;
+    if (t === 'outer' || t === 'ends') band |= BAND_OUTER;
     const m = TARGET_TAGS[t];
     if (m) tags |= m;
   }
@@ -129,14 +147,19 @@ export function parseTargets(targets: readonly string[], groups: unknown, out: T
     if (gm) tags = tags && tags !== T_ALL ? (tags & gm) | (tags & T_EXPLICIT) : gm;
   }
   out.tags = tags || T_ALL;
-  out.side = center ? 2 : left && !right ? -1 : right && !left ? 1 : 0;
+  // (`center` alone is symmetric and, as before, ignores a side: the centre band keeps both of its halves)
+  out.side = band === BAND_CENTER ? 0 : left && !right ? -1 : right && !left ? 1 : 0;
+  out.band = band;
   return out;
 }
 
 export function matchTarget(f: TargetFilter, tags: number, x: number): boolean {
   if ((f.tags & tags) === 0) return false;
+  if (f.band !== 0) {
+    const ax = Math.abs(x);
+    if (!((f.band & BAND_CENTER && ax < CENTER_X) || (f.band & BAND_OUTER && ax >= OUTER_X))) return false;
+  }
   if (f.side === 0) return true;
-  if (f.side === 2) return Math.abs(x) < 14;
   return f.side < 0 ? x < -0.5 : x > 0.5;
 }
 
@@ -210,18 +233,23 @@ export interface FixtureClass {
   x: number;
 }
 
+/** representative x per class band (inside its band for every side / centre / outer test) */
+const CLASS_X = [-30, -(CENTER_X + OUTER_X) / 2, -6, 0, 6, (CENTER_X + OUTER_X) / 2, 30];
+
 /** Group fixtures into classes so looks with a `target` filter can be resolved per class. */
 export function classifyFixtures(fixtures: Fixture[]): FixtureClass[] {
   const keys = new Map<string, number>();
   const classes: FixtureClass[] = [];
   for (const f of fixtures) {
-    const band = f.pos.x < -14 ? -2 : f.pos.x < -0.5 ? -1 : f.pos.x <= 0.5 ? 0 : f.pos.x <= 14 ? 1 : 2;
+    // bands split at every boundary of the target filters: left / right (±0.5), CENTER_X, OUTER_X
+    const x = f.pos.x;
+    const band = x <= -OUTER_X ? -3 : x <= -CENTER_X ? -2 : x < -0.5 ? -1 : x <= 0.5 ? 0 : x < CENTER_X ? 1 : x < OUTER_X ? 2 : 3;
     const key = `${f.group}:${f.tags}:${band}`;
     let c = keys.get(key);
     if (c === undefined) {
       c = classes.length;
       keys.set(key, c);
-      classes.push({ group: f.group, tags: f.tags, x: [-30, -6, 0, 6, 30][band + 2] });
+      classes.push({ group: f.group, tags: f.tags, x: CLASS_X[band + 3] });
     }
     f.cls = c;
   }

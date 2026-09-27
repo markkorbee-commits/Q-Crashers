@@ -102,6 +102,45 @@ level scales its lamp and its shaft together.
   every second kick with a softer decay. Strobes are at 40 %, blinders at 50 % with a 0.25 s rise,
   floods at 60 % with an attack of at least 0.3 s, and light-bus flashes at 40 %.
 
+## Round 8: deck ends, blinder glare, the portal, lit low fog
+* **New target filters `outer` / `ends`** (all lights fx): positions with |X| ≥ 20 m, the outer truss segment of
+  each deck side (the registered deck heads sit at |X| 0.9–18.9 and 20.7–35.1). `center` stays |X| < 14. A band
+  combines with a side: `["deck_front", "left", "outer"]` = the left deck end; `center` + `outer` = either band.
+  Looks resolve per fixture class, and the classes now split at ±0.5, ±14 and ±20, so the filter works for looks
+  as well as for hits, chases, strobes and blinders. To light only the deck ends in a telephoto (v1436–1438.5),
+  put a dark look on all deck heads and the lit look with `outer` after it on the same `t` (the later line wins).
+  The validator's filter list (`scripts/validate-show.mjs` `FILTERS`) has to learn `outer` and `ends` before a
+  cue may use them.
+* **Blinders read as glare, not as lit squares, and do not light the set** (no cue change needed). Seen from
+  the field a blinder face of a few pixels is one round glare with a soft halo (its 2x2 lamps only resolve close
+  up), and every glare sprite except the moving-head lens flare fades out round, not at its square quad (the
+  deck row read as a row of lit squares). Blinders face the audience: their colour no longer splashes onto the
+  set wash (was 0.5 x level) and their light-bus flash is halved (the set only catches its share of the bus);
+  the haze glow in front of the deck, the field and the crowd keep their light. Hooks: `lights.blindSetK` (0),
+  `blindFlashK` (0.5).
+* **No housing box for the portal lamps**: the booth spot (`dj_booth` / `booth`) and the backlight arc
+  (`deck_back`) draw no 0.62 m box any more. The booth spot's box stood in the portal mouth at (0, 4.05, −6.47),
+  a black square in every close-up of the portal (v409–412, 656, 705, 739.75). The lamps themselves, their haze
+  glow and their light on the deck are unchanged.
+* **Low fog lit by the beams**: a moving-head beam passing through the `fog.lowfog` bank scatters more light
+  there (×(1 + 3 · fog density), in the beam colour × the fog's albedo leaned 60 % to white), and runs down into
+  the bank to its floor pool; the part of the bank the beams light glows as a flat layer in the flood volume
+  (centred on the lit part, colour = the beams' light deposited in it). White floor beams through a white bank
+  make a bright white band (v802.75), a red wash on red smoke stays red. The zones follow FogSystem's regions:
+  area `deck` = the deck (fog top ~3.2 m) + 55 % spill on the near field, `field` = the near field (top ~2.2 m)
+  + 65 % over the far field, `all` = every zone; in over 2.5 s, 10 s linger after the cue. `app.env.lowFogLight`
+  / `lowFogPos` / `lowFogSpread` publish the lit bank for the smoke puffs. Hooks: `lights.lowFogBeamK` (3),
+  `lowFogGlowK` (0.004). With a white `fog.lowfog` (density 0.9, area `all`) at 797, the six moments 799.5–803
+  score 62.4 → 62.9 % (0.008: 62.7, 0.015: 62.3); the 64 moments are unchanged.
+* **Pillar shafts**: the shaft uplight level written to `app.env` is half the cue's `shaftIntensity`
+  (`lights.shaftK` 0.5). The film's pillars are dark shafts under a lit crystal seen from the front (v509.25,
+  1046.75), the uplight glowing at the foot (v20.25, 338); the edge strips stay near their soft limit.
+* Measured with `scripts/similarity.mjs` on the Mac GPU (64 moments): 67.1 / 50.2 % raw / calibrated before and
+  after (colour 67.9 → 67.8, light 80.5, shape 54.8 → 55.0; no moment moved by more than 1 point, the lowfog
+  moments 656–705, 925, 1169.5, 1340.75, 1511.75 and 1536.25 included). None of the 64 holds a live blinder;
+  blinder moments (16, own set): 48.4 → 48.3 % with the set light off (1224.5 +5.3, 1189.25 +4.2,
+  1283–1285.75 −2…−2.6).
+
 ## Round 7: wash semantics, back-to-back cues, deck close-ups (no cue change needed)
 Measured with `scripts/similarity.mjs` on the Mac GPU against the exact-time frames (64 moments: 64.7 / 46.5 % →
 64.8 / 46.7 % raw / calibrated, colour 63.8, light 80.0, shape 53.8; mean of the 10 worst 39.6 → 40.5).
