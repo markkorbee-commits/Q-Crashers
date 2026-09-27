@@ -42,7 +42,13 @@ export const T_ALL = (1 << 13) - 1;
 export const T_BACK = 1 << 13; // backlight blinders on the porch front, behind the performers (face the audience)
 export const T_BOOTH = 1 << 14; // single spot / blinder on the DJ booth (deck centre)
 export const T_ARCH = 1 << 15; // narrow downlights in the DJ portal arch crown
-export const T_EXPLICIT = T_BACK | T_BOOTH | T_ARCH;
+/**
+ * round 11: the wing-spar heads as a LAMP ROW (blinder target `spar_lamps`): their lenses staring into the camera
+ * as glare stars with a small halo, no beam cones (v358–363.9, v374.2–377.4, v397–399.5, the starburst of
+ * v498.64–502.08). A look aimed at the lens drew a white veil over the whole frame instead.
+ */
+export const T_SPARLAMP = 1 << 16;
+export const T_EXPLICIT = T_BACK | T_BOOTH | T_ARCH | T_SPARLAMP;
 
 export const GROUP_TAGS = [T_SPAR | T_ARM | T_ROOF | T_TOWER | T_DRAGON | T_PA | T_SIDE | T_ARMEND | T_CORNER, T_DECK, T_PILLAR | T_PLINTH, T_FOH];
 
@@ -98,6 +104,10 @@ const TARGET_TAGS: Record<string, number> = {
   arch: T_ARCH,
   portal: T_ARCH,
   booth: T_BOOTH,
+  // the wing-spar lamp row (round 11, `lights.blinder` target; explicit only)
+  spar_lamps: T_SPARLAMP,
+  spar_lamp: T_SPARLAMP,
+  wing_lamps: T_SPARLAMP,
 };
 
 /** |x| (m) below which a position counts as `center` */
@@ -347,6 +357,11 @@ const BACKLIGHT_ARC: [number, number][] = [
   [1.9, 4.95],
 ];
 export const BACKLIGHT_Z = PORTAL.frontZ - PORTAL.depth + 0.6;
+/** spar lamp row (round 11): spacing along a spar (m) and the default aim point (the near field, head height) */
+const SPARLAMP_PITCH = 3.2;
+/** share of the spar span (from the centre) left without lamps */
+const SPARLAMP_INNER = 0.35;
+export const SPARLAMP_AIM: readonly [number, number, number] = [0, 2, 40];
 const ARCH_SPOTS = 7;
 
 /** downlight positions in the arch soffit: evenly spaced along the upper arch, 0.25 m inside the opening */
@@ -605,6 +620,52 @@ export function buildRig(anchors: Anchors, density: number, own?: Map<string, TH
   const boothZ = PORTAL.frontZ - 0.35;
   const boothFloor = stageFloorAt(0, boothZ);
   blinder(T_BOOTH, v3(0, (Number.isFinite(boothFloor) ? boothFloor : PORTAL.deckY + 0.8) + 1.35, boothZ), Z);
+
+  // the wing-spar lamp row (explicit `spar_lamps`, round 11): one straight row per wing along the line fitted through
+  // its spar heads (the film's rows are straight diagonals; the heads follow the scalloped edge), a lamp every
+  // SPARLAMP_PITCH m (the same row at every quality level, whatever the head density), aimed at SPARLAMP_AIM (the
+  // near field: the deck cameras of v374 / v397 see soft discs off the axis) unless a cue gives `aim` (a camera
+  // position: the glare star of v358–363 / v498.64)
+  for (const s of [-1, 1]) {
+    const pts = fixtures.filter((f) => f.tags === T_SPAR && f.pos.x * s > 0.5).map((f) => f.pos);
+    if (pts.length < 2) continue;
+    let n = 0;
+    let mx = 0;
+    let my = 0;
+    let mz = 0;
+    let x0 = Infinity;
+    let x1 = 0;
+    for (const p of pts) {
+      n++;
+      mx += p.x;
+      my += p.y;
+      mz += p.z;
+      x0 = Math.min(x0, Math.abs(p.x));
+      x1 = Math.max(x1, Math.abs(p.x));
+    }
+    mx /= n;
+    my /= n;
+    mz /= n;
+    let sxx = 0;
+    let sxy = 0;
+    let sxz = 0;
+    for (const p of pts) {
+      sxx += (p.x - mx) ** 2;
+      sxy += (p.x - mx) * (p.y - my);
+      sxz += (p.x - mx) * (p.z - mz);
+    }
+    const by = sxx > 1e-6 ? sxy / sxx : 0;
+    const bz = sxx > 1e-6 ? sxz / sxx : 0;
+    // (the film's rows run over the outer part of each wing, from beside the dragon's shoulders to the tips)
+    const xa = x0 + (x1 - x0) * SPARLAMP_INNER;
+    const len = (x1 - xa) * Math.sqrt(1 + by * by);
+    const count = Math.max(2, Math.round(len / SPARLAMP_PITCH) + 1);
+    for (let k = 0; k < count; k++) {
+      const x = s * (xa + ((x1 - xa) * k) / (count - 1));
+      const pos = v3(x, my + by * (x - mx) - 0.1, mz + bz * (x - mx) + 0.3);
+      blinder(T_SPARLAMP, pos, v3(SPARLAMP_AIM[0] - pos.x, SPARLAMP_AIM[1] - pos.y, SPARLAMP_AIM[2] - pos.z));
+    }
+  }
 
   // fan "diverge" coordinate per cluster: position along the fan axis relative to the cluster centre
   computeDiverge(fixtures);

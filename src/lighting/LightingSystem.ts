@@ -5,11 +5,14 @@ import type { BeatInfo, FrameContext, QualitySettings, System } from '../core/ty
 import { resolveColor } from '../show/colors';
 import type { Cue } from '../show/ShowTypes';
 import {
+  AREA_AISLE,
   AREA_FIELD,
+  AREA_FRONT,
   AREA_SIDES_L,
   AREA_SIDES_R,
   AREA_STAGE,
   BLINDER_TAIL,
+  CALM_GAP,
   calmBurstPeriod,
   calmChaseStep,
   FM_CHASE,
@@ -23,6 +26,7 @@ import {
   PM_FLICKER,
   PM_OFF,
   PM_PULSE,
+  PM_STROBE,
   PRESETS,
   STROBE_TAIL,
   TAN_NARROW,
@@ -40,6 +44,7 @@ import {
   FB_DECK,
   FB_FIELD,
   FB_FIELD_FAR,
+  FB_LENS,
   FB_LOWFOG,
   FB_SIDE_L,
   FB_SIDE_R,
@@ -58,7 +63,7 @@ import {
   type SharedUniforms,
 } from './layers';
 import { evalLook, lookIsDark, vnoise, type AimOut } from './looks';
-import { BACKLIGHT_Z, buildRig, GROUP_NAMES, isDefaultAnchor, RIG_SOURCES, T_BACK, T_BOOTH, T_EXPLICIT, type Rig } from './rig';
+import { BACKLIGHT_Z, buildRig, GROUP_NAMES, isDefaultAnchor, RIG_SOURCES, T_BACK, T_BOOTH, T_EXPLICIT, T_SPARLAMP, type Rig } from './rig';
 
 /**
  * Photosensitivity option (App.reduceFlashing): a budgeted `lights.hit` fires at this share and swells in over
@@ -83,6 +88,15 @@ const BASE_FIXTURES = 316;
 const DEFAULT_LAMP = new THREE.Color('#4a86d8');
 const DEFAULT_SHAFT = new THREE.Color('#c56e46');
 const TUNGSTEN = new THREE.Color(1, 0.26, 0.035);
+/** spar lamp row (round 11): release after dur (s), lens gain, glare half angle (rad), halo size (m) */
+const SPARLAMP_RELEASE = 0.12;
+const SPARLAMP_K = 1.2;
+const SPARLAMP_HALF = 0.12;
+const SPARLAMP_SIZE = 0.3;
+/** per-lantern colour glow (round 11): gain (x BULB_GAIN), size (m), height over the pillar base (lower glass) */
+const PILLAR_GLOW_K = 0.6;
+const PILLAR_GLOW_SIZE = 1.4;
+const PILLAR_GLOW_Y = 10.7;
 /** festoon bulb HDR gain (a warm dot that reads from the far field, not a flare) */
 const BULB_GAIN = 11;
 /** flood haze glow gain per unit density-metre (stage / sides / field volumes) */
@@ -103,6 +117,12 @@ const BACK_GLOW_K = 1.3;
  * field stays dark (was 0.55 with a second pool over the back of the field)
  */
 const FLOOD_GROUND = 0.3;
+/** lens veil per unit of beam light aimed at the lens (look `flare`, round 11) */
+const FLARE_K = 0.035;
+/** distance (m) of the lens-veil blob from the camera towards the flaring lamps */
+const FLARE_OFF = 2.6;
+/** local ground pools (flood area `aisle` / `front`, round 11): HDR per unit flood level */
+const POOL_FLOOD_K = 0.9;
 /** flood slices per quality level (depth-sliced haze integral) */
 const FLOOD_SLICES: Record<string, number> = { ultra: 10, high: 9, medium: 7, mobile: 4 };
 /** dense-haze scatter ("storm haze"): env.haze range over which the lit haze turns into a glowing cloud */
@@ -212,6 +232,10 @@ const LOWFOG_ENV_K = 0.05;
  *           subset: target left/right, rows (0 = nearest the stage), index (pillars_top order)
  *  hit / chase / blinder / strobe: target (anchor names, group names, left/right/center), groups
  *  flood / festoon / wash zones / curtain / aim: see docs/show-format-ext/lights.md
+ *  round 11 (same doc): the spar lamp row (target `spar_lamps`), blinder attack / release / aim / spread, per-lantern
+ *           colours (`colors`, `rowColors`, `shafts`, `rowShafts`) and pillar mode `strobe`, flood `gate` / `duty` /
+ *           `offset` and the local pool areas `aisle` / `front`, the `storm` and `key` (dragon key) fx, the flat
+ *           fan (`fan` + `aim`), the lens veil (look `flare`), and the calm (reduce flashing) state tracks
  */
 export class LightingSystem implements System {
   readonly name = 'lights';
@@ -246,6 +270,13 @@ export class LightingSystem implements System {
   private sDim = new Float32Array(0);
   private sTan = new Float32Array(0);
   private sGobo = new Uint8Array(0);
+  /** round 11: lens-veil gain of each head's look (`flare`), 0 = none */
+  private sFlare = new Float32Array(0);
+  /** this frame's lens veil (premultiplied colour) from the heads aimed at the camera, and its gain */
+  private readonly lensVeil = new THREE.Color();
+  /** weighted direction from the camera to the flaring lamps (the veil leans that way: glare from the lamp's side) */
+  private readonly lensDir = new THREE.Vector3();
+  flareK = FLARE_K;
 
   // scratch (no per-frame allocation)
   private readonly A: AimOut = { x: 0, y: 1, z: 0, dim: 0, mix: 0, tan: 0, gobo: 0 };
@@ -261,6 +292,12 @@ export class LightingSystem implements System {
   private readonly floods: LightCue[] = [];
   /** per-pillar lamp level / multiplier scratch */
   private pillarLamp = new Float32Array(0);
+  /** per-pillar lamp / shaft colour this frame (LightEnv.pillarLampColors / pillarShaftColors while they differ) */
+  private pLampCols: THREE.Color[] = [];
+  private pShaftCols: THREE.Color[] = [];
+  private readonly emptyCols: THREE.Color[] = [];
+  /** spar lamps in the rig (explicit `spar_lamps` emitters; not counted in the strobe coverage) */
+  private nSparLamps = 0;
   // this frame's blinder / backlight / booth output (colour premultiplied by level)
   private readonly blindCol = new THREE.Color();
   private readonly backCol = new THREE.Color();
@@ -276,6 +313,12 @@ export class LightingSystem implements System {
   private readonly floodField = new THREE.Color();
   private readonly floodSideL = new THREE.Color();
   private readonly floodSideR = new THREE.Color();
+  /** round 11: this frame's local ground-pool floods (premultiplied): the aisle between the lanterns, the deck front */
+  private readonly floodAisle = new THREE.Color();
+  private readonly floodFront = new THREE.Color();
+  /** local ground pools: HDR gain of the pool and share of their light-bus flash (side-by-side calibration) */
+  poolK = POOL_FLOOD_K;
+  poolFlashK = 0.8;
   private readonly cF = new THREE.Color();
   /** saturated wash / rig colour of the storm-haze scatter (scratch) */
   private readonly cSW = new THREE.Color();
@@ -286,6 +329,13 @@ export class LightingSystem implements System {
   /** laser air gain (LASER_AIR_K), exposed for side-by-side calibration */
   laserAirK = LASER_AIR_K;
   laserAirSat = LASER_AIR_SAT;
+  /** spar lamp row: lens gain multiplier, glare half angle (rad) and size (m) (side-by-side calibration) */
+  sparLampK = SPARLAMP_K;
+  sparLampHalf = SPARLAMP_HALF;
+  sparLampSize = SPARLAMP_SIZE;
+  /** spar lamp disc: gain (x BULB_GAIN) and size (m) of the soft lens disc under the star */
+  sparLampDiscK = 1;
+  sparLampDisc = 1.2;
   /** backlight haze glow / lens gain multipliers (side-by-side calibration) */
   backGlowK = 1;
   backLensK = 2.5;
@@ -363,6 +413,8 @@ export class LightingSystem implements System {
         const fl = this.stageFl[j];
         this.flood.cols[j === 0 ? FB_STAGE : FB_STAGE_HIGH].set(all.x - fl.x * s, all.y - fl.y * s, all.z - fl.z * s);
       }
+      // the lens veil sits at the camera that draws (round 11)
+      this.placeLensVeil(camera);
       // the backlight veil is forward scatter: only a camera in front of the lamps, facing them, sees it
       const f = backFacing(camera);
       const b = this.backBase;
@@ -377,7 +429,9 @@ export class LightingSystem implements System {
     app.show.registerLifetime('lights', (c) => {
       const fade = typeof c.p?.fade === 'number' ? c.p.fade : 0.5;
       if (c.fx === 'look' || c.fx === 'wash' || c.fx === 'pillars') return c.dur + Math.max(0, fade);
-      if (c.fx === 'blinder') return c.dur + BLINDER_TAIL;
+      if (c.fx === 'blinder') return c.dur + (typeof c.p?.release === 'number' ? Math.max(0.05, c.p.release * 3.5) : BLINDER_TAIL);
+      if (c.fx === 'storm') return c.dur + (typeof c.p?.fade === 'number' ? Math.max(0, c.p.fade) : 1.2);
+      if (c.fx === 'key') return c.dur + Math.max(0, typeof c.p?.fade === 'number' ? c.p.fade : 0.5);
       return c.dur;
     });
     app.show.registerLifetime('strobe', (c) => c.dur + STROBE_TAIL);
@@ -434,9 +488,13 @@ export class LightingSystem implements System {
     this.sDim = new Float32Array(n);
     this.sTan = new Float32Array(n);
     this.sGobo = new Uint8Array(n);
+    this.sFlare = new Float32Array(n);
     this.chaseArr = new Array(rig.pillars.length).fill(1);
     this.pillarLamp = new Float32Array(rig.pillars.length);
     this.pillarBlends = rig.pillars.map(() => ({ from: null, to: null, k: 1 }));
+    this.pLampCols = rig.pillars.map(() => new THREE.Color());
+    this.pShaftCols = rig.pillars.map(() => new THREE.Color());
+    this.nSparLamps = rig.emitters.reduce((m, e) => m + (e.tags & T_SPARLAMP ? 1 : 0), 0);
     this.blends = rig.classes.map(() => ({ from: null, to: null, k: 1 }));
     this.bulbs = buildFestoon(anchors);
     // look tracks are per fixture class, hit / strobe masks per fixture / emitter: rebuild now (during
@@ -445,8 +503,8 @@ export class LightingSystem implements System {
     else this.idx.revision = -1;
     const radial = this.q.level === 'mobile' ? 8 : this.q.level === 'medium' ? 10 : 12;
     this.beams.build(Math.min(n, this.q.beamBudget + nExplicit), radial);
-    this.pools.build(n + 4);
-    this.sprites.build(n + rig.emitters.length + this.bulbs.length + 16);
+    this.pools.build(n + 6);
+    this.sprites.build(n + rig.emitters.length + this.bulbs.length + rig.pillars.length + 16);
     // Round 8: no housing box for the explicit-only lamps in the DJ portal (booth spot, backlight arc). The booth
     // spot's 0.62 m box at (0, 4.05, −6.47) stood in the portal mouth in front of the arch-crown cans: a black
     // square in every close-up of the portal (v409–412, 656, 705, 739.75), where the film shows nothing. The
@@ -517,12 +575,19 @@ export class LightingSystem implements System {
     this.beams.material.uniforms.uExtinct.value = 0.055 - 0.035 * haze;
     this.beams.material.uniforms.uGain.value = 1;
     this.beams.material.uniforms.uNoise.value = 0.85;
+    // storm haze (round 11: also a `lights.storm` cue, whatever the fog level): the lit cloud's level, 0..1.5
+    this.storm = this.evalStorm(t);
     // storm haze: beams bloom into soft shafts (energy spread over a wider cone)
-    this.beams.material.uniforms.uSoft.value = STORM_SOFT * smooth01((haze - 0.7) / 0.22);
+    this.beams.material.uniforms.uSoft.value = STORM_SOFT * Math.max(smooth01((haze - 0.7) / 0.22), Math.min(1, this.storm));
 
     // ---------------------------------------------------------------- cue state
+    // photosensitivity option: every flash shares the calm budget (LightCueIndex.calm), the state tracks drop
+    // their authored stutters (LightCueIndex.calm*)
+    const rf = this.reduceFlashing();
+    this.rf = rf;
+    const lookTracks = rf ? this.idx.calmLooks : this.idx.looks;
     for (let g = 0; g < this.blends.length; g++) {
-      const b = this.idx.looks[g].resolve(t, this.blends[g]);
+      const b = lookTracks[g].resolve(t, this.blends[g]);
       this.resolveCueColors(b.from);
       this.resolveCueColors(b.to);
     }
@@ -550,9 +615,6 @@ export class LightingSystem implements System {
     const sTan = this.sTan;
     const nHits = this.hits.length;
     const nChases = this.chases.length;
-    // photosensitivity option: every flash shares the calm budget (LightCueIndex.calm)
-    const rf = this.reduceFlashing();
-    this.rf = rf;
     const calm = this.idx.calm;
     for (let i = 0; i < n; i++) {
       const f = fx[i];
@@ -567,6 +629,7 @@ export class LightingSystem implements System {
           sDim[i] = 0;
           sTan[i] = TAN_NARROW;
           this.sGobo[i] = 0;
+          this.sFlare[i] = 0;
           sDir[i * 3] = f.rest.x;
           sDir[i * 3 + 1] = f.rest.y;
           sDir[i * 3 + 2] = f.rest.z;
@@ -653,6 +716,8 @@ export class LightingSystem implements System {
       sTan[i] = tan;
       // gobo: the dominant state's wheel position
       this.sGobo[i] = k < 0.5 && bl.from ? B.gobo : A.gobo;
+      // lens veil gain (look `flare`), cross-faded with the look
+      this.sFlare[i] = (bl.to ? bl.to.flare * k : 0) + (k < 1 && bl.from ? bl.from.flare * (1 - k) : 0);
       sDir[i * 3] = dx;
       sDir[i * 3 + 1] = dy;
       sDir[i * 3 + 2] = dz;
@@ -669,6 +734,11 @@ export class LightingSystem implements System {
     this.lowAcc.set(0, 0, 0, 0);
     this.lowPos.set(0, 0, 0, 0);
     this.lowCol.setRGB(0, 0, 0);
+    this.lensVeil.setRGB(0, 0, 0);
+    this.lensDir.set(0, 0, 0);
+    const cpx = cam.position.x;
+    const cpy = cam.position.y;
+    const cpz = cam.position.z;
     this.beams.begin();
     this.pools.begin();
     this.sprites.begin();
@@ -730,6 +800,28 @@ export class LightingSystem implements System {
       }
       const lum = (r + g + b) * 0.333;
       if (fogOn) this.depositLowFog(lx, ly, lz, dx, dy, dz, len, r, g, b);
+      const fl = this.sFlare[i];
+      if (fl > 0) {
+        // round 11: a head of a `flare` look pointing its beam at the camera veils the lens (the hot factor of the lens
+        // sprite, a little wider; stronger the closer the lamp)
+        const vx = cpx - lx;
+        const vy = cpy - ly;
+        const vz = cpz - lz;
+        const dist = Math.hypot(vx, vy, vz) || 1;
+        const ca = Math.min(1, Math.max(-1, (dx * vx + dy * vy + dz * vz) / dist));
+        const ang = Math.acos(ca) / (Math.atan(tan) * 1.35 + 0.03);
+        const hot = Math.exp(-ang * ang);
+        if (hot > 0.01) {
+          const w = fl * hot / (1 + (dist / 40) * (dist / 40));
+          this.lensVeil.r += r * w;
+          this.lensVeil.g += g * w;
+          this.lensVeil.b += b * w;
+          const wl = (w * (r + g + b)) / dist;
+          this.lensDir.x -= vx * wl;
+          this.lensDir.y -= vy * wl;
+          this.lensDir.z -= vz * wl;
+        }
+      }
       sumDim += dim;
       cr += r;
       cg += g;
@@ -762,6 +854,7 @@ export class LightingSystem implements System {
     this.boothCol.setRGB(0, 0, 0);
     let backMax = 0;
     let boothMax = 0;
+    let sparMax = 0;
     const acc = this.acc.setRGB(0, 0, 0);
     this.flashPos.set(0, 0, 0);
     let flashW = 0;
@@ -791,19 +884,57 @@ export class LightingSystem implements System {
           flashW += level;
         }
       } else {
+        const spar = (e.tags & T_SPARLAMP) !== 0;
+        let aimC: LightCue | null = null;
         for (let h = 0; h < this.blinders.length; h++) {
           const c = this.blinders[h];
           if (c.mask![j] !== 1) continue;
           const u = t - c.t0;
-          const v = (u <= c.dur ? Math.min(1, u / (rf ? 0.25 : 0.03)) : Math.exp(-(u - c.dur) / 0.32)) * c.intensity * (rf ? 0.5 : 1);
+          // rise over `attack` (default 0.03 s; calm: at least 0.25 s), release over `release` after dur (default the
+          // 0.32 s tungsten afterglow; the spar lamps are discharge lamps: SPARLAMP_RELEASE, no cooling)
+          const att = c.blAttack >= 0 ? c.blAttack : 0.03;
+          const rel = c.release >= 0 ? c.release : spar ? SPARLAMP_RELEASE : 0.32;
+          const v = (u <= c.dur ? Math.min(1, u / (rf ? Math.max(0.25, att) : att)) : Math.exp(-(u - c.dur) / rel)) * c.intensity * (rf ? 0.5 : 1);
           if (v > level) {
             level = v;
-            // tungsten filament: cools towards deep orange as it decays
-            const cool = u <= c.dur ? 0 : Math.pow(1 - Math.min(1, v / Math.max(0.01, c.intensity)), 0.7) * 0.9;
+            aimC = c;
+            // tungsten filament: cools towards deep orange as it decays (not with an explicit release, nor the spar lamps)
+            const cool = u <= c.dur || spar || c.release >= 0 ? 0 : Math.pow(1 - Math.min(1, v / Math.max(0.01, c.intensity)), 0.7) * 0.9;
             col.copy(c.c1).lerp(TUNGSTEN, cool);
           }
         }
         if (level > 0.003) {
+          if (spar) {
+            // a moving head's lens staring into the camera (round 11): a glare star with a small halo, no beam cone.
+            // Aimed at the deck front (SPARLAMP_AIM) or the cue's `aim`; the wide half angle keeps the star for the
+            // deck cameras around the aim point
+            let fx = e.fwd.x;
+            let fy = e.fwd.y;
+            let fz = e.fwd.z;
+            const a = aimC?.aim;
+            if (a) {
+              fx = a.x - e.pos.x;
+              fy = a.y - e.pos.y;
+              fz = a.z - e.pos.z;
+              const ln = Math.hypot(fx, fy, fz) || 1;
+              fx /= ln;
+              fy /= ln;
+              fz /= ln;
+            }
+            const k = level * LENS_GAIN * this.sparLampK;
+            // the glare star shows within about the lamp's half angle of its axis (`spread`, deg; default SPARLAMP_HALF)
+            const half = aimC && aimC.spread !== null ? Math.min(1.2, Math.max(0.01, (aimC.spread * Math.PI) / 180)) : this.sparLampHalf;
+            this.sprites.push(SPR_LENS, e.pos.x, e.pos.y, e.pos.z, fx, fy, fz, half, col.r * k, col.g * k, col.b * k, this.sparLampSize);
+            // the over-exposed lens disc blooming in the haze around the star (v358–363: soft cyan-white discs)
+            const kd = level * BULB_GAIN * this.sparLampDiscK;
+            if (kd > 0) this.sprites.push(SPR_BULB, e.pos.x, e.pos.y, e.pos.z, fx, fy, fz, 0, col.r * kd, col.g * kd, col.b * kd, this.sparLampDisc);
+            sparMax = Math.max(sparMax, level);
+            // their light reaches the air and the crowd in front of the wings a little (not the set)
+            cr += col.r * level * 0.4;
+            cg += col.g * level * 0.4;
+            cb += col.b * level * 0.4;
+            continue;
+          }
           if (e.tags & T_BACK) {
             // round PAR-style backlight lamp aimed at the audience (the camera): a big soft hot disc blooming
             // through the haze (v409–412)
@@ -854,6 +985,15 @@ export class LightingSystem implements System {
     this.writeFestoon(t, beat);
     // ---------------------------------------------------------------- floods (+ their light on the field)
     const flood = this.evalFloods(t, beat, rf);
+    {
+      // round 11: local pools (flood area `aisle` / `front`): the aisle between the lantern rows (x ±13, z 30–146)
+      // and the paving in front of the deck (x ±34, z 1–19), soft edges, no lit air
+      const kp = this.poolK * (rf ? 0.6 : 1);
+      const a = this.floodAisle;
+      if (a.r + a.g + a.b > 1e-4) this.pools.push(0, 0.07, 88, 58, 0, 1, 13, 0.9, a.r * kp, a.g * kp, a.b * kp, 0);
+      const f = this.floodFront;
+      if (f.r + f.g + f.b > 1e-4) this.pools.push(0, 0.07, 10, 34, 1, 0, 9, 2.3, f.r * kp, f.g * kp, f.b * kp, 0);
+    }
     if (flood.field > 0) {
       // the flooded air lights the paved field: a broad soft pool, brightest in front of the stage
       const fc = this.floodField;
@@ -861,6 +1001,8 @@ export class LightingSystem implements System {
       this.pools.push(0, 0.07, 26, 56, 1, 0, 36, 0.3, fc.r * kf, fc.g * kf, fc.b * kf, 0);
       this.pools.push(0, 0.07, 100, 52, 1, 0, 50, 1.7, fc.r * kf * 0.2, fc.g * kf * 0.2, fc.b * kf * 0.2, 0);
     }
+    // lantern pillar lamps (before the sprites close: lanterns in different colours add their glow sprites)
+    this.writePillars(t, beat, env);
     this.nSprites = this.sprites.count;
     this.beams.end();
     this.pools.end();
@@ -869,7 +1011,8 @@ export class LightingSystem implements System {
     this.blinderLevel = blindMax;
 
     // ---------------------------------------------------------------- env outputs
-    const nStrobes = Math.max(1, em.length);
+    // (the spar lamp row, round 11, stays out of the coverage count: the strobe level of a cue is unchanged by it)
+    const nStrobes = Math.max(1, em.length - this.nSparLamps);
     const strobe = strobeMax * Math.min(1, 0.45 + (strobeOn / nStrobes) * 1.6);
     env.strobe = Math.max(env.strobe, strobe);
     const flashK = rf ? 0.4 : 1;
@@ -890,14 +1033,14 @@ export class LightingSystem implements System {
     cg += this.floodStage.g * 2 + this.floodField.g * 3 + (this.floodSideL.g + this.floodSideR.g);
     cb += this.floodStage.b * 2 + this.floodField.b * 3 + (this.floodSideL.b + this.floodSideR.b);
     const nf = Math.max(1, n);
-    env.stageIntensity = Math.min(3, env.stageIntensity + (2.6 * sumDim) / nf + blindMax * 1.2 + strobe * 0.8 + backMax * 0.5 + boothMax * 0.2 + flood.stage * 0.5 + flood.field * 0.7);
+    env.stageIntensity = Math.min(3, env.stageIntensity + (2.6 * sumDim) / nf + blindMax * 1.2 + strobe * 0.8 + backMax * 0.5 + boothMax * 0.2 + sparMax * 0.2 + flood.stage * 0.5 + flood.field * 0.7);
     env.audienceWash = Math.min(1, env.audienceWash + aud / (nf * 0.28) + blindMax * 0.9 + backMax * 0.45 + flood.field * 0.5);
     const cm = Math.max(cr, cg, cb);
     if (cm > 1e-4) env.stageColor.setRGB(cr / cm, cg / cm, cb / cm);
     else env.stageColor.copy(pal.primary).multiplyScalar(0.25);
 
     this.writeWash(t, env);
-    this.writePillars(t, beat, env);
+    this.writeKey(t, env);
 
     // haze glow around the set: floods in the wash colour + the rig's own spill low in front
     const hz = 0.25 + 0.75 * haze;
@@ -937,7 +1080,7 @@ export class LightingSystem implements System {
 
   // ------------------------------------------------------------------------------------ stage wash
   private writeWash(t: number, env: App['env']): void {
-    const bl = this.idx.wash.resolve(t, this.washBlend);
+    const bl = (this.rf ? this.idx.calmWash : this.idx.wash).resolve(t, this.washBlend);
     const pal = this.app.palette;
     // premultiplied blend of the two wash states (none = dark; palette primary at 0.35 only in a show without washes)
     const W = this.acc.setRGB(0, 0, 0);
@@ -988,6 +1131,40 @@ export class LightingSystem implements System {
     env.stageWashIntensity = Math.min(2, I);
   }
 
+  /**
+   * `lights.key` (round 11): a key light on the dragon sculpture, independent of the set wash (LightEnv.dragonKey*):
+   * `color` from the audience-left / front, `color2` (default `color`) from the right, `intensity` 0..2, cross-faded
+   * over `fade` (latest cue wins). The film floods the head red and green at v944–1010 and v1043.9 while the castle
+   * stays dark. The stage's dragon / crown materials read it (contract); the rig itself draws nothing for it.
+   */
+  private writeKey(t: number, env: App['env']): void {
+    const bl = this.idx.key.resolve(t, this.keyBlend);
+    const a = env.dragonKeyColor;
+    const b = env.dragonKeyColor2;
+    a.setRGB(0, 0, 0);
+    b.setRGB(0, 0, 0);
+    let lv = 0;
+    const pal = this.app.palette;
+    for (let pass = 0; pass < 2; pass++) {
+      const c = pass === 0 ? bl.to : bl.from;
+      const w = pass === 0 ? bl.k : 1 - bl.k;
+      if (!c || w <= 0) continue;
+      const e = Math.min(2, c.intensity) * w;
+      resolveColor(c.color ?? 'primary', pal, c.c1, 'primary');
+      if (c.color2) resolveColor(c.color2, pal, c.c2, 'secondary');
+      else c.c2.copy(c.c1);
+      a.r += c.c1.r * e;
+      a.g += c.c1.g * e;
+      a.b += c.c1.b * e;
+      b.r += c.c2.r * e;
+      b.g += c.c2.g * e;
+      b.b += c.c2.b * e;
+      lv += e;
+    }
+    env.dragonKeyIntensity = lv;
+  }
+  private readonly keyBlend: StateBlend = { from: null, to: null, k: 1 };
+
   private washI = 0;
   private addWash(c: LightCue | null, w: number): void {
     if (w <= 0) return;
@@ -1030,9 +1207,15 @@ export class LightingSystem implements System {
     let shaftSum = 0;
     let first = Number.NaN;
     let uniform = true;
+    let sameColor = true;
+    let ref = -1;
     const pal = this.app.palette;
-    const tracks = this.idx.pillars;
+    // (reduce flashing: the tracks without the authored stutters)
+    const tracks = this.rf ? this.idx.calmPillars : this.idx.pillars;
+    const pc = this.pcL;
+    const ps = this.pcS;
     for (let i = 0; i < np; i++) {
+      const pl = rig.pillars[i];
       const bl = this.pillarBlends[i];
       if (tracks[i]) tracks[i].resolve(t, bl);
       else {
@@ -1044,6 +1227,11 @@ export class LightingSystem implements System {
       let li = 0;
       let si = 0;
       let num = 0;
+      // this pillar's own lamp / shaft colour (intensity-weighted over the two states)
+      const own = this.pLampCols[i].setRGB(0, 0, 0);
+      const ownS = this.pShaftCols[i].setRGB(0, 0, 0);
+      let ow = 0;
+      let osw = 0;
       // two passes: target state (weight k) and previous state (weight 1-k)
       for (let pass = 0; pass < 2; pass++) {
         const c = pass === 0 ? bl.to : bl.from;
@@ -1053,30 +1241,51 @@ export class LightingSystem implements System {
         let sh = 0.8;
         let mode = 0;
         if (c) {
-          resolveColor(c.color ?? '#4a86d8', pal, c.c1, 'primary');
-          if (c.shaft) resolveColor(c.shaft, pal, c.c3, 'secondary');
-          else c.c3.copy(DEFAULT_SHAFT);
+          // round 11: `colors` (per pillar, cycled) / `rowColors` (per row) before the cue colour
+          const lc = c.colors ? c.colors[pl.index % c.colors.length] : c.rowColors ? c.rowColors[Math.max(0, pl.row) % c.rowColors.length] : c.color;
+          resolveColor(lc ?? '#4a86d8', pal, pc, 'primary');
+          const sc = c.shafts ? c.shafts[pl.index % c.shafts.length] : c.rowShafts ? c.rowShafts[Math.max(0, pl.row) % c.rowShafts.length] : c.shaft;
+          if (sc) resolveColor(sc, pal, ps, 'secondary');
+          else ps.copy(DEFAULT_SHAFT);
           mode = c.mode;
           l = mode === PM_OFF ? 0 : c.intensity;
           sh = mode === PM_OFF ? 0 : c.shaftIntensity;
-          lamp.r += c.c1.r * l * w;
-          lamp.g += c.c1.g * l * w;
-          lamp.b += c.c1.b * l * w;
-          shaft.r += c.c3.r * sh * w;
-          shaft.g += c.c3.g * sh * w;
-          shaft.b += c.c3.b * sh * w;
         } else {
-          lamp.r += DEFAULT_LAMP.r * w;
-          lamp.g += DEFAULT_LAMP.g * w;
-          lamp.b += DEFAULT_LAMP.b * w;
-          shaft.r += DEFAULT_SHAFT.r * 0.8 * w;
-          shaft.g += DEFAULT_SHAFT.g * 0.8 * w;
-          shaft.b += DEFAULT_SHAFT.b * 0.8 * w;
+          pc.copy(DEFAULT_LAMP);
+          ps.copy(DEFAULT_SHAFT);
         }
+        lamp.r += pc.r * l * w;
+        lamp.g += pc.g * l * w;
+        lamp.b += pc.b * l * w;
+        shaft.r += ps.r * sh * w;
+        shaft.g += ps.g * sh * w;
+        shaft.b += ps.b * sh * w;
+        // (a dark state still names its colour: a lantern fading in from off takes its new colour at once)
+        const wl = w * Math.max(l, 1e-3);
+        own.r += pc.r * wl;
+        own.g += pc.g * wl;
+        own.b += pc.b * wl;
+        ow += wl;
+        const wsh = w * Math.max(sh, 1e-3);
+        ownS.r += ps.r * wsh;
+        ownS.g += ps.g * wsh;
+        ownS.b += ps.b * wsh;
+        osw += wsh;
         li += l * w;
         si += sh * w;
-        if (mode === PM_FLICKER || mode === PM_CHASE || mode === PM_PULSE) modulated = true;
-        num += (c ? pillarMult(c, mode, i, rig.pillars[i].row, rig.rows, t, beat, this.rf) : 1) * w * (l > 0 ? l : 1);
+        if (mode === PM_FLICKER || mode === PM_CHASE || mode === PM_PULSE || mode === PM_STROBE) modulated = true;
+        num += (c ? pillarMult(c, mode, i, pl.row, rig.rows, t, beat, this.rf) : 1) * w * (l > 0 ? l : 1);
+      }
+      if (ow > 0) own.multiplyScalar(1 / ow);
+      if (osw > 0) ownS.multiplyScalar(1 / osw);
+      // (only lit lanterns count: a dark lantern shows no colour)
+      if (li > 0.01 && sameColor) {
+        if (ref < 0) ref = i;
+        else {
+          const o = this.pLampCols[ref];
+          const so = this.pShaftCols[ref];
+          sameColor = Math.abs(own.r - o.r) + Math.abs(own.g - o.g) + Math.abs(own.b - o.b) < 2e-3 && Math.abs(ownS.r - so.r) + Math.abs(ownS.g - so.g) + Math.abs(ownS.b - so.b) < 2e-3;
+        }
       }
       // mode multiplier of this pillar (intensity-weighted over the two states)
       arr[i] = li > 1e-4 ? num / li : 0;
@@ -1100,7 +1309,31 @@ export class LightingSystem implements System {
       modulated = true;
     }
     env.pillarChase = modulated ? arr : this.emptyArr;
+    // round 11: per-pillar colours while the lanterns differ (LightEnv.pillarLampColors; empty = all the same)
+    env.pillarLampColors = sameColor ? this.emptyCols : this.pLampCols;
+    env.pillarShaftColors = sameColor ? this.emptyCols : this.pShaftCols;
+    this.pillarColored = !sameColor;
+    if (!sameColor && this.pillarGlowK > 0 && lampMax > 1e-4) {
+      // Until the lantern renderer (src/world/pillars.ts) reads the per-pillar colours, its crystals show the mean
+      // colour: every lit lantern also carries a glow in its OWN colour at the lower glass (the magenta near lantern
+      // among blue ones at v190). Nothing is drawn while all lanterns share one colour (the default look).
+      for (let i = 0; i < np; i++) {
+        const lv = (modulated ? arr[i] : 1) * lampMax * this.pillarGlowK * BULB_GAIN;
+        if (lv < 0.01) continue;
+        const pl = rig.pillars[i];
+        const c = this.pLampCols[i];
+        this.sprites.push(SPR_BULB, pl.top.x, pl.base.y + PILLAR_GLOW_Y, pl.top.z, 0, 0, 1, 0, c.r * lv, c.g * lv, c.b * lv, this.pillarGlowSize);
+      }
+    }
   }
+  /** lanterns in different colours this frame (their glow sprites are drawn) */
+  private pillarColored = false;
+  /** scratch: a pillar's lamp / shaft colour of one state */
+  private readonly pcL = new THREE.Color();
+  private readonly pcS = new THREE.Color();
+  /** per-lantern glow while the lanterns differ in colour (x BULB_GAIN; 0 = off) and its size (m) */
+  pillarGlowK = PILLAR_GLOW_K;
+  pillarGlowSize = PILLAR_GLOW_SIZE;
 
   // ------------------------------------------------------------------------------------ floods
   private readonly floodOut = { stage: 0, field: 0, sides: 0 };
@@ -1118,14 +1351,29 @@ export class LightingSystem implements System {
     this.floodField.setRGB(0, 0, 0);
     this.floodSideL.setRGB(0, 0, 0);
     this.floodSideR.setRGB(0, 0, 0);
+    this.floodAisle.setRGB(0, 0, 0);
+    this.floodFront.setRGB(0, 0, 0);
     for (let i = 0; i < this.floods.length; i++) {
       const c = this.floods[i];
       let e = floodEnv(c, t, rf);
       // (calm: the kick pumps the flood by 15 %, not 50 %)
       if (c.kick) e *= rf ? 0.85 + 0.15 * beat.kick : 0.5 + 0.5 * beat.kick;
+      // round 11: `gate` on the beat grid (the LED gate of v588.6–589.9 dims the lit haze with it)
+      if (c.gate > 0) e *= floodGate(c, beat, rf);
       if (rf) e *= 0.6;
       if (e <= 1e-4) continue;
       const col = c.c1;
+      // round 11: local ground pools (area `aisle` / `front`): light on the paving only, no lit air
+      if (c.area & AREA_AISLE) {
+        this.floodAisle.r += col.r * e;
+        this.floodAisle.g += col.g * e;
+        this.floodAisle.b += col.b * e;
+      }
+      if (c.area & AREA_FRONT) {
+        this.floodFront.r += col.r * e;
+        this.floodFront.g += col.g * e;
+        this.floodFront.b += col.b * e;
+      }
       if (c.area & AREA_STAGE) {
         this.floodStage.r += col.r * e;
         this.floodStage.g += col.g * e;
@@ -1155,7 +1403,7 @@ export class LightingSystem implements System {
     // a set wash with `fieldShare` also floods the field (the air over it and the paving in front of the stage)
     // at share x its level, in its colour, following its cross-fades: a field flood without an extra cue
     {
-      const bl = this.idx.wash.resolve(t, this.washBlend);
+      const bl = (this.rf ? this.idx.calmWash : this.idx.wash).resolve(t, this.washBlend);
       for (let pass = 0; pass < 2; pass++) {
         const c = pass === 0 ? bl.to : bl.from;
         const w = pass === 0 ? bl.k : 1 - bl.k;
@@ -1170,7 +1418,7 @@ export class LightingSystem implements System {
     }
     // zone washes on the side sections (a wash with target sides / side_front …): a local glow there
     for (let s = 0; s < 2; s++) {
-      const bl = this.idx.washSides[s].resolve(t, this.washSideBlend[s]);
+      const bl = (this.rf ? this.idx.calmWashSides : this.idx.washSides)[s].resolve(t, this.washSideBlend[s]);
       const dst = s === 0 ? this.floodSideL : this.floodSideR;
       for (let pass = 0; pass < 2; pass++) {
         const c = pass === 0 ? bl.to : bl.from;
@@ -1203,6 +1451,16 @@ export class LightingSystem implements System {
       normalizeColor(src, this.cF);
       this.flashPos.set(s === 0 ? -64 : 64, 6, 6);
       env.addFlash(this.cF, Math.min(2.5, l * 1.2) * fk, this.flashPos);
+    }
+    // local pools: a low, local flash (the lantern plinths and the crowd there catch it; the far field stays dark)
+    for (let s = 0; s < 2; s++) {
+      const src = s === 0 ? this.floodAisle : this.floodFront;
+      const l = lum(src);
+      if (l <= 1e-4) continue;
+      normalizeColor(src, this.cF);
+      if (s === 0) this.flashPos.set(0, 3, 80);
+      else this.flashPos.set(0, 3, 10);
+      env.addFlash(this.cF, Math.min(2, l * this.poolFlashK) * fk, this.flashPos);
     }
     return o;
   }
@@ -1250,6 +1508,14 @@ export class LightingSystem implements System {
       cols[FB_BACK_WIDE].set(b.x * f, b.y * f, b.z * f);
     }
     if (this.boothLevel > 0) add(FB_BOOTH, normalizeColor(this.boothCol, this.cF), LOCAL_GLOW_K * hk * this.boothLevel * 0.8);
+    // round 11: the lens veil of heads aimed at the camera (look `flare`), centred on the camera
+    {
+      const v = this.lensVeil;
+      if (v.r + v.g + v.b > 1e-4) {
+        add(FB_LENS, v, this.flareK);
+        this.placeLensVeil(this.app.camera);
+      }
+    }
     // the low fog bank lit by the beams that pass through it (round 8): a flat glowing layer over the lit part of
     // the bank, in the beams' colour x the smoke's albedo (v802.75: white floor beams -> a bright white band)
     {
@@ -1293,7 +1559,8 @@ export class LightingSystem implements System {
     // the arch downlights light the smoke in and in front of the portal (their cones are faint, see ARCH_BEAM_K)
     if (this.archLevel > 0 && this.archGlowK > 0) add(FB_BOOTH, this.app.env.archSpotColor, this.archGlowK * hk * this.archLevel);
     // storm haze: in very dense haze / smoke the whole rig + wash light scatters into a lit cloud
-    const sc = smooth01((haze - SCATTER_H0) / (SCATTER_H1 - SCATTER_H0));
+    // (round 11: a `lights.storm` cue sets the cloud's level directly, up to 1.5, whatever the fog level)
+    const sc = Math.max(smooth01((haze - SCATTER_H0) / (SCATTER_H1 - SCATTER_H0)), this.storm);
     this.scatter = sc;
     if (sc > 0) {
       const washI = Math.min(1.5, env.stageWashIntensity);
@@ -1301,6 +1568,11 @@ export class LightingSystem implements System {
       // multiple scattering saturates the cloud's light (see SCATTER_SAT)
       const wash = saturateColor(env.stageWashColor, SCATTER_SAT, this.cSW);
       const rigC = saturateColor(env.stageColor, SCATTER_SAT, this.cSR);
+      if (this.stormTint > 0) {
+        // a storm cue with its own `color`: the cloud leans to it (the ice-white storm of v1230.7–1249)
+        wash.lerp(this.stormCol, this.stormTint);
+        rigC.lerp(this.stormCol, this.stormTint);
+      }
       const g = sc * SCATTER_GAIN * this.scatterK;
       const kw = FLOOD_K_STAGE * g * 0.42 * washI;
       add(FB_STAGE, wash, kw);
@@ -1313,6 +1585,50 @@ export class LightingSystem implements System {
     }
   }
   private scatter = 0;
+  /**
+   * round 11: centre the lens-veil blob (FB_LENS) FLARE_OFF m from the camera towards the flaring lamps: the veil is
+   * densest on the lamp's side of the frame (the white glare from the upper left at v673.3), not a flat lift
+   */
+  private placeLensVeil(camera: THREE.Camera): void {
+    const lc = (this.flood.material.uniforms.uBlobC.value as THREE.Vector4[])[FB_LENS];
+    const cm = camera.matrixWorld.elements;
+    const d = this.lensDir;
+    const n = Math.hypot(d.x, d.y, d.z);
+    const k = n > 1e-6 ? FLARE_OFF / n : 0;
+    lc.set(cm[12] + d.x * k, cm[13] + d.y * k, cm[14] + d.z * k, 1);
+  }
+  /** storm haze boost of this frame (`lights.storm`, round 11) and its colour (stormTint 0 = none) */
+  private storm = 0;
+  private stormTint = 0;
+  private readonly stormCol = new THREE.Color();
+  private readonly stormArr: LightCue[] = [];
+  /** share a coloured storm cue pulls the cloud's colour towards its own */
+  stormTintK = 0.7;
+
+  /**
+   * `lights.storm` (round 11): the storm scatter (the lit cloud of the rig + wash light, see SCATTER_SAT) at the
+   * cue's level (intensity 0..1.5) with attack / fade, independent of `fog.level`: v1230.7–1249 hundreds of beams
+   * in a near-white cloud that hides the set. Pure function of t.
+   */
+  private evalStorm(t: number): number {
+    const a = this.idx.storms.alive(t, this.stormArr);
+    let best = 0;
+    let tint = 0;
+    for (let i = 0; i < a.length; i++) {
+      const c = a[i];
+      const e = Math.min(1.5, floodEnv(c, t, false));
+      if (e > best) {
+        best = e;
+        if (c.color) {
+          resolveColor(c.color, this.app.palette, this.stormCol, 'accent');
+          normalizeColor(this.stormCol, this.stormCol);
+          tint = this.stormTintK;
+        } else tint = 0;
+      }
+    }
+    this.stormTint = best > 0 ? tint : 0;
+    return best;
+  }
   /** deck-air glow colour before the close-up weight (FB_DECK) */
   private readonly deckBase = new THREE.Vector3();
   /** stage air (FB_STAGE, FB_STAGE_HIGH) of this frame, and the flood cues' share of it (close-up weighting) */
@@ -1543,7 +1859,7 @@ export class LightingSystem implements System {
     const bulbs = this.bulbs;
     // in thick haze every bulb carries a bigger glow around it
     const halo = 0.8 + 0.7 * Math.min(1, Math.max(0, this.app.env.haze));
-    const tracks = this.idx.festoon;
+    const tracks = this.rf ? this.idx.calmFestoon : this.idx.festoon;
     const blends = this.festoonBlends;
     const pal = this.app.palette;
     let lit = 0;
@@ -1616,6 +1932,7 @@ export class LightingSystem implements System {
       floods: this.floods.length,
       floodSlices: this.flood?.mesh.visible ? this.flood.slices : 0,
       scatter: Number(this.scatter.toFixed(2)),
+      storm: Number(this.storm.toFixed(2)),
       cpuMs: Number(this.cpuMs.toFixed(3)),
     };
   }
@@ -1731,7 +2048,8 @@ function pillarMult(c: LightCue, mode: number, i: number, row: number, rows: num
       return v < 0 ? 0 : v > 1 ? 1 : v;
     }
     case PM_CHASE: {
-      const beats = ((t - c.t0) * c.bpm) / 60;
+      // one row per `every` step (default a beat)
+      const beats = ((t - c.t0) * c.bpm) / 60 / (c.everySet ? Math.max(0.25, c.every) : 1);
       const R = Math.max(1, rows);
       const head = (beats % R) + 0.0;
       let d = head - row;
@@ -1743,11 +2061,34 @@ function pillarMult(c: LightCue, mode: number, i: number, row: number, rows: num
       // (reduce flashing: a shallow breath on the beat instead of a 75 % pulse)
       return rf ? 0.75 + 0.25 * Math.exp(-since * 4) : 0.25 + 0.75 * Math.exp(-since * 6);
     }
+    case PM_STROBE: {
+      // round 11: a flash on every `every` step of the beat grid (default a half beat; v1223.5–1226, v1267.9–1269.2).
+      // Reduce flashing: never faster than CALM_GAP, and a shallow swell instead of dark -> full
+      let step = c.everySet ? Math.max(0.25, c.every) : 0.5;
+      const spb = 60 / Math.max(40, beat.bpm);
+      if (rf) while (step * spb < CALM_GAP && step < 16) step *= 2;
+      const ph = beat.beat / step;
+      const since = (ph - Math.floor(ph)) * step * spb;
+      return rf ? 0.7 + 0.3 * Math.exp(-since * 4) : 0.06 + 0.94 * Math.exp(-since / 0.07);
+    }
     case PM_OFF:
       return 0;
     default:
       return 1;
   }
+}
+
+/**
+ * flood `gate` (round 11): lit for `duty` of every gate step on the beat grid (quarter / half beat / beat / 2 beats /
+ * bar), from `offset` (share of the step) on, 20–30 ms edges. Reduce flashing: a shallow 25 % swing, not on / off.
+ */
+function floodGate(c: LightCue, beat: BeatInfo, rf: boolean): number {
+  const spb = 60 / Math.max(40, beat.bpm);
+  const stepS = c.gate * spb;
+  const ph = beat.beat / c.gate - c.gateOffset;
+  const x = (ph - Math.floor(ph)) * stepS;
+  const g = smooth01(x / 0.02) * (1 - smooth01((x - c.duty * stepS) / 0.03));
+  return rf ? 0.75 + 0.25 * g : g;
 }
 
 /** flood envelope: rises over `attack`, holds for dur, releases over `fade` (smooth) */
