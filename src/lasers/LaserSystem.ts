@@ -909,17 +909,13 @@ export class LaserSystem implements System {
       });
       this.stepCache.set(c, merged);
     }
-    let rel = t - c.t;
+    const rel = t - c.t;
     const loop = num(c.p.loop, 0, 0, 120);
-    if (loop > 0.05 && rel > 0) rel -= Math.floor(rel / loop) * loop;
-    let relQ = rel;
-    if (this.calm) relQ = Math.floor(rel / CALM_STEP) * CALM_STEP;
-    let k = -1;
-    for (let i = 0; i < st.length; i++) {
-      const at = st[i] && typeof st[i] === 'object' ? (st[i] as { at?: unknown }).at : undefined;
-      if ((typeof at === 'number' && Number.isFinite(at) ? at : 0) <= relQ + 1e-6) k = i;
-    }
-    if (this.calm && k > 0 && rel > 0.001) this.stepDip = 0.5 + 0.5 * clamp01((rel - relQ) / 0.12);
+    // (calm: the absolute step clock is quantised first, so the loop seam cannot make a shorter interval)
+    const relQ = this.calm ? Math.floor(rel / CALM_STEP) * CALM_STEP : rel;
+    const k = stepIndex(st, relQ, loop);
+    // calm: a change of figure at a tick dips to half over 0.12 s (a tick without a change does not dip)
+    if (this.calm && rel >= CALM_STEP && k !== stepIndex(st, relQ - CALM_STEP, loop)) this.stepDip = 0.5 + 0.5 * clamp01((rel - relQ) / 0.12);
     return k < 0 ? c.p : merged[k];
   }
 
@@ -2487,6 +2483,19 @@ export class LaserSystem implements System {
     this.app?.scene.remove(this.gfx.group);
     this.gfx.dispose();
   }
+}
+
+/** `steps`: index of the step active at `rel` s into the cue (looped every `loop` s when > 0.05; -1 = before the first) */
+function stepIndex(st: readonly unknown[], rel: number, loop: number): number {
+  let r = rel;
+  if (loop > 0.05 && r > 0) r -= Math.floor(r / loop) * loop;
+  let k = -1;
+  for (let i = 0; i < st.length; i++) {
+    const s = st[i];
+    const at = s && typeof s === 'object' ? (s as { at?: unknown }).at : undefined;
+    if ((typeof at === 'number' && Number.isFinite(at) ? at : 0) <= r + 1e-6) k = i;
+  }
+  return k;
 }
 
 /**

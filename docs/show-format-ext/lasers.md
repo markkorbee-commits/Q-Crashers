@@ -336,10 +336,13 @@ repeats the list. Merged params are built once per cue and show revision (no per
 v1056.0–1057.3 alternate tents and sky bursts (bursts at v1056.10–1056.18, 1056.42, 1056.66–1056.70), then the violet X
 (v1056.94–1057.06): one `steps` cue replaces the 1055.964 trees and the 1056.924 X (the 1056.665 hit stays). On the 4 fps
 frames it is neutral (six moments 62.8 → 62.9); the alternation lives between them.
-**Reduce flashing:** with the option on the step clock runs in 0.34 s ticks, so the figure changes at most ~2.9 Hz
-(steps shorter than a tick may be skipped: the bursts of v1056 vanish), and every change dips to half over 0.12 s
-instead of switching hard. Verified: normal changes at 1056.07 / .17 / .39 / .43 / .89 / 1057.05, calm only at the
-cue's own boundaries and 1056.99.
+**Reduce flashing:** with the option on the step clock runs in 0.34 s ticks of the cue's own time (quantised before the
+`loop` is applied, so a loop seam cannot make a shorter interval), so the figure changes at most ~2.9 Hz (steps
+shorter than a tick may be skipped: the bursts of v1056 vanish), and a tick that changes the figure dips to half over
+0.12 s instead of switching hard (a tick without a change does not dip). Verified: the v1056 cue changes at 1056.07 /
+.17 / .39 / .43 / .89 / 1057.05 normally, with the option only at 1056.99 (plus the neighbouring cues' own
+boundaries); a test cue with `loop` 0.5 (fan 0–0.25, tents 0.25–0.5) changes every 0.25 s normally and at 600.34 /
+600.68 / 601.36 with the option (checked at mobile quality, no console errors).
 
 ### Floor units: `side_floor`, `front_floor` (v317.3–320.8, v810.24–810.9)
 
