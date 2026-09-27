@@ -107,7 +107,8 @@ the arch at the top of the grey steps (0, 3.2, −5.3 top), the bearers in a hor
 facing her; the contortion v658–666 (bearers kneel round her, filmed from the portal behind her);
 the kneel before the burning wings is short (v706.6–709.2); she steps off at 720.6 and heads the
 lantern procession down the deck (v723.8–729, half the bearers in file behind her with their lanterns
-fanned out); the human pyramid in the arch (v738.8, four at the base, two on their shoulders, the lead
+fanned out; round 11: one even walk from the foot of the steps at 722.2 all the way to the deck lip at
+729.3, ahead of the whole troupe, as the film's wide steadicam frames her); the human pyramid in the arch (v738.8, four at the base, two on their shoulders, the lead
 on top, four kneeling in front); off into the portal 742.6–746. The lead waits in the vault while the
 aerialist is on her strap.
 
@@ -115,6 +116,9 @@ Deck performers are lit like the film's close-ups: a key in the rig's colour fro
 `uPerfKey`, no white follow spot; only a little of the red set wash reaches him), a backlight from the
 set behind the deck (`uPerfBack`: rig, backlight blinders, strobes, stage-side flashes) that draws
 coloured edges around a darker front, and for the troupe (glow > 0) the thick red wash of the section.
+
+Show-camera subjects: `CrowdSystem.subjectAt(who, t, out)` (feet) and `facingAt(who, t)` (yaw, 0 = towards the
+field; the same value the body is drawn with) serve `camera.shot` `subject` / `facing` (docs/show-format-ext/core.md).
 
 Performers read their windows from the show file: `crowd` / `performer` cues with `p.who` = `mc` |
 `troupe` | `lead` | `aerialist` | `strap` | `pedestal` | `pianist` | `tube` (`p.level` < 0.5 = the dim

@@ -214,6 +214,11 @@ export class CrowdSystem implements System {
     return this.perf ? this.perf.subjectAt(who, t, out) : false;
   }
 
+  /** a performer's facing at show time t (yaw, 0 = towards the field); NaN when off stage (camera.shot `facing`) */
+  facingAt(who: string, t: number): number {
+    return this.perf ? this.perf.facingAt(who, t) : NaN;
+  }
+
   /** Tribe mode (true) or the empty grounds as filmed in 2026 (false). */
   setPopulated(on: boolean): void {
     this.populated = on;
