@@ -17,6 +17,8 @@ const DEFAULT_HAZE = 0.55;
  * view of the bank does (LightingSystem.writeLowFog: 10 s linear linger)
  */
 const LOWFOG_RELEASE = 10;
+/** default `fadeIn` (s) of a `fog.lowfog` bank: the pre-warmed bank comes in over it from its cue time */
+const LOWFOG_FADE_IN = 3;
 
 interface LevelSeg {
   t: number;
@@ -38,7 +40,8 @@ interface LevelSeg {
  *  - `fog.burst` (smoke clouds at targets) and `fog.lowfog` (ground fog on the deck flowing onto the
  *    field) are analytic puff particles like the pyro smoke. A low fog bank is lit by the light bus like
  *    all smoke plus the beam light it holds (LightEnv.lowFogLight), so it goes dark with the rig; it is
- *    out at its cue time and thins out over `release` s (default 10) after its cue.
+ *    out at its cue time, comes in over `fadeIn` s (default 3) and thins out over `release` s (default 10) after
+ *    its cue. A `fog.burst` with `roll` throws a smoke wall out over the deck and the field (docs/show-format-ext/fog.md).
  */
 export class FogSystem extends CueFxSystem {
   readonly name = 'fog';
@@ -113,6 +116,7 @@ export class FogSystem extends CueFxSystem {
   protected lifetime(cue: Omit<Cue, 'life' | 'end'>): number {
     switch (cue.fx) {
       case 'burst':
+        if (num(cue.p.roll, 0, 0, 150) > 0) return cue.dur + num(cue.p.life, 6, 1, 30) + 1;
         return cue.dur + Math.min(22, num(cue.p.life, 16, 1, 30) + 6);
       case 'lowfog': {
         // (the cue stays active at least LightingSystem's own linger of the bank, 10 s: writeLowFog / deckSmoke find
@@ -135,7 +139,8 @@ export class FogSystem extends CueFxSystem {
    * self-lit in its colour — a lit CO2 / smoke whiteout, cyan-lit plumes — and lights the haze and
    * floor around it), `density` (0.2..4 opacity multiplier: a thick bank that hides the set),
    * `life` (s), `rise` (speed multiplier), `rate` (puffs per second over dur: lantern crystals
-   * puffing smoke; without it one burst over min(dur, 4) s).
+   * puffing smoke; without it one burst over min(dur, 4) s). Round 11 (docs/show-format-ext/fog.md): `roll` (m):
+   * a smoke roll-out over the deck and the field instead of a rising plume (rollOut).
    */
   private burst(cue: Cue, out: EmitterSet): void {
     const p = cue.p;
@@ -149,6 +154,12 @@ export class FogSystem extends CueFxSystem {
     const rate = num(p.rate, 0, 0, 8);
     // `lift` (m) raises the nozzle above the anchor; the lantern crystals puff from the top of their hood
     const lift = num(p.lift, cue.targets.includes('pillars_top') ? 1.8 : 0, -10, 30);
+    // `roll` (m): the cannons throw their smoke out as a low wall rolling over the deck and the field (v1416.84)
+    const roll = num(p.roll, 0, 0, 150);
+    if (roll > 0 && pts.length) {
+      this.rollOut(cue, out, pts, roll, tint, glow, density, num(p.life, 6, 1, 30), lift);
+      return;
+    }
     // a smoke cannon's plume grows sub-linearly with its size class, and many targets share the
     // volume (12 wing heads must not stack into one opaque cloud that hides the fire it frames)
     const sq = Math.sqrt(size);
@@ -226,6 +237,79 @@ export class FogSystem extends CueFxSystem {
     }
   }
 
+  /**
+   * `fog.burst` with `roll` (m): a smoke roll-out. The cannons along the targets throw a wall of smoke forward (towards
+   * the field, +z) and sideways over the deck and `roll` m out over the field; the cloud is big from its first frames
+   * (half of its reach within ~0.25 s, the rest within ~1 s) and stays low (its top ~0.35 x its reach), then hangs and
+   * spreads over its `life` (default 6 s). With `glow` it is lit from inside in its colour while the cue lasts (the
+   * flash that lights it: v1416.84-1417.28, the terrace frame full of white-lit smoke) and goes dark within ~0.3 s
+   * after the cue; its light (a lit-smoke line light over the rolled-out cloud) fills the haze around it.
+   * One emitter per group of targets that lie together.
+   */
+  private rollOut(cue: Cue, out: EmitterSet, pts: THREE.Vector3[], roll: number, tint: THREE.Color, glow: number, density: number, lifeS: number, lift: number): void {
+    const groups = clusters(pts, 30);
+    const psc = Math.min(1, this.quality.particleScale * 1.5);
+    // reach of the wall: drag k, the fastest puffs travel `roll` m (distance = v0 / k (1 - e^-kt))
+    const k = 2.6;
+    const R0 = 5 + 0.2 * roll;
+    const emitDur = 0.12;
+    const alpha = Math.min(0.95, 0.34 * density);
+    const self = glow > 0 ? tint.clone().multiplyScalar(glow * 2.2) : null;
+    // (the flash that lights it goes out at the cue end: the self-light is gone ~0.15 s after it, so the next shot
+    // does not inherit a glowing cloud, v1417.28)
+    const lit = cue.t + Math.max(0.15, cue.dur - 0.15);
+    const share = 1 / Math.sqrt(groups.length);
+    let w2 = 0;
+    for (const grp of groups) w2 += Math.min(4, grp.length);
+    const wSum = Math.sqrt(w2);
+    groups.forEach((grp, gi) => {
+      const mn = new THREE.Vector3(Infinity, Infinity, Infinity);
+      const mx = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+      for (const q of grp) {
+        mn.min(q);
+        mx.max(q);
+      }
+      const c = mn.clone().add(mx).multiplyScalar(0.5);
+      const wide = mx.x - mn.x;
+      const n = Math.max(8, Math.round((20 + 0.9 * roll + 0.12 * wide) * share * psc * Math.sqrt(density)));
+      const e = new Emitter(DIST.BOX, self ? F.SELFLIT : 0)
+        .on(L_FOG)
+        .origin(c.x, c.y + lift + 1, c.z + 2)
+        .axis(wide + 8, 2, mx.z - mn.z + 4)
+        .time(cue.t)
+        // out over the field (+z), fanned sideways, a little upwards
+        .dir(0, 0.32, 1, 1.05)
+        .speed(0.12 * roll * k, roll * k)
+        .physics(k, 0.35)
+        .color(tint, alpha)
+        .life(lifeS * 0.7, lifeS)
+        .emit(n, 0, emitDur / n)
+        .size(0.45 * R0, R0)
+        .trail(0.35, 0.3)
+        .seed(this.sub(cue, 7300 + gi))
+        .set(R.X1, 0.1)
+        .set(R.X2, 0.8)
+        .set(R.Y0, 0.85)
+        .set(R.Y2, Math.min(0.2, 0.15 / lifeS))
+        .set(R.Y3, 0.6)
+        .set(R.Z0, 1.25)
+        .set(R.Z3, PUFF.SMOKE)
+        .window(cue.t, cue.t + emitDur + lifeS + 0.5);
+      if (self) e.color2(self, 0).set(R.X0, Math.max(0.5, Math.min(3, cue.dur * 1.5))).litUntil(lit);
+      out.add(e);
+      if (self) {
+        // the lit cloud lights the air around it: a lit-smoke line light over the rolled-out wall
+        const zc = c.z + 0.45 * roll;
+        const y = c.y + lift + 0.2 * roll;
+        const a = new THREE.Vector3(mn.x - 0.3 * roll, y, zc);
+        const b = new THREE.Vector3(mx.x + 0.3 * roll, y, zc);
+        const peak = (glow * 0.7 * Math.sqrt(R0 / 5) * Math.min(2, Math.sqrt(grp.length))) / wSum;
+        const d = Math.max(0.3, cue.dur);
+        out.lights.push({ kind: 1, t0: cue.t, t1: lit + 0.3, decay: d * 0.6, strobe: 0, color: tint.clone(), peak, pos: c.clone().setZ(zc).setY(y), a, b, radius: 8 + 0.35 * roll, haze: 1 });
+      }
+    });
+  }
+
   private lowfog(cue: Cue, out: EmitterSet): void {
     const p = cue.p;
     const density = num(p.density, 0.8, 0, 1.5);
@@ -259,6 +343,9 @@ export class FogSystem extends CueFxSystem {
     // puffs runs from one life before the cue (every puff already out, at its own age) and the bank fades in over
     // the ramp time — without it only 1 / 13 of the puffs were born per second and a 5-8 s cue never got its bank
     const pre = this.tune.prewarm ? life : 0;
+    // `fadeIn` (s): how fast the (pre-warmed) bank comes in (default 3; a short bank of 1.5-2 s needs ~0.3 so it is
+    // there in full while it lasts, v602.25-603.75). Without prewarm it is the ramp of the machines' emission.
+    const fadeIn = num(p.fadeIn, LOWFOG_FADE_IN, 0.05, 10);
     // saturated smoke (the red finale bank) keeps its colour; white / pale fog stays neutral. The
     // colours are linear: even 10 % of white turns a deep red bank salmon on screen, so a saturated
     // colour only gets a trace of it
@@ -300,7 +387,7 @@ export class FogSystem extends CueFxSystem {
           .seed(this.sub(cue, i))
           .set(R.X1, 0.03)
           .set(R.X2, 0.7)
-          .set(R.X3, 3)
+          .set(R.X3, fadeIn)
           .set(R.Y0, 0.9)
           .set(R.Y1, floorY - 0.2)
           .set(R.Y2, 0.25)
