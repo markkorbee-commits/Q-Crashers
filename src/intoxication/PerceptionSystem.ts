@@ -3,6 +3,7 @@ import type { App } from '../core/App';
 import type { FrameContext, NamedSpot, PerceptionParams, QualitySettings, System } from '../core/types';
 import { PostFX, type BodyParams } from '../postfx/PostFX';
 import { KETAMINE_CARDS, KETAMINE_MESSAGES, KETAMINE_NOTES, OUTCOME_CARDS, OUTCOME_NOTES, type OutcomeCardText } from './education';
+import { comfortFromParams } from './comfort';
 import { Facilities } from './facilities';
 import {
   ABSORPTION_PER_H,
@@ -338,9 +339,8 @@ export class PerceptionSystem implements System {
     const P = app.params;
     const heat = P.get('heat');
     if (heat === 'heatwave' || heat === 'endshow') this.setHeatScenario(heat);
-    // comfort: ?reducedmotion (perception), ?reducemotion / ?comfort (the player's names)
-    const rm = P.get('reducedmotion') ?? P.get('reducemotion') ?? P.get('comfort');
-    if (rm !== null) this.reducedOverride = rm !== '0' && rm !== 'false' && rm !== 'off';
+    // comfort: ?reducedmotion, ?reducemotion, ?comfort (any of them on = on; the player reads them the same way)
+    this.reducedOverride = comfortFromParams(P);
     try {
       const mq = window.matchMedia?.('(prefers-reduced-motion: reduce)');
       if (mq) {
@@ -643,6 +643,8 @@ export class PerceptionSystem implements System {
     heatVisual(t, mt, this.heatDanger());
     sodiumVisual(t, mt, this.risk.overhydration, ctx.time);
     if (this.compare && this.mode === 'sober') alcoholVisual(t, COMPARE_PREVIEW_BAC, ctx.time, F);
+    // comfort: half the smear of a head turn (the standing-still look is unchanged)
+    if (this.reducedMotion) t.motionBlur *= 0.5;
 
     // smooth build-up (slow, gentle), then transients and beat-driven pulses on top
     const k = this.snap ? 1 : damp(0.9, dt);
@@ -764,10 +766,15 @@ export class PerceptionSystem implements System {
     this.ket = Math.max(this.ketFx, 0.002);
   }
 
-  /** dev / preview URL parameters, applied once after start: ?bac=<‰>, ?xtc=<s>, ?ket=<s>, ?perception=xtc|ketamine */
+  /**
+   * dev / preview URL parameters, applied once after start: ?bac=<‰>, ?xtc=<s>, ?ket=<s>, ?perception=xtc|ketamine.
+   * Development builds (or ?debug) only: in production a shared link must never skip the information card,
+   * the "I have read this" check, the disclaimer or the combination warning.
+   */
   private applyUrlParams(): void {
     this.pendingParams = false;
     const P = this.app.params;
+    if (import.meta.env.PROD && !P.has('debug')) return;
     const num = (key: string) => {
       const v = P.get(key);
       return v === null || v.trim() === '' ? NaN : Number(v);
@@ -966,6 +973,10 @@ export class PerceptionSystem implements System {
         // resolved elsewhere without an action
         this.seq = 'waking';
         this.seqT = 0;
+      } else if (this.seqKind === 'khole' && this.outcome === 'khole' && this.ketHoleV < 0.3) {
+        // the K-hole has passed: an unanswered card closes as "stay here with your friend", so the view is
+        // not left under a stale card and the ketamine epilogue (or the XTC one) can follow
+        this.resolveOutcome('close');
       }
     } else if (this.seq === 'waking') {
       this.seqT += dt;
@@ -1020,7 +1031,9 @@ export class PerceptionSystem implements System {
       }
       if (!(this.ketNoted & 2) && this.ketHoleV > 0.3) {
         this.ketNoted |= 2;
-        this.ketNote('hole', 5000);
+        // the "cannot get up" card says the same and opens a moment later: no toast over it (on a phone the
+        // toast covered the card's title)
+        if (this.ketCardShown || this.aided) this.ketNote('hole', 5000);
       }
       if (!(this.ketNoted & 4) && this.ketPhase === 'return') {
         this.ketNoted |= 4;
@@ -1135,7 +1148,8 @@ export class PerceptionSystem implements System {
     const reduced = this.reducedMotion;
     // refocus blur after fast head turns: accommodation / pursuit lag grows with BAC
     const impair = Math.min(1, this.bac / (strong ? 1.0 : 1.4)) + 0.35 * this.xtcFx;
-    const want = impair * (strong ? smoothstep(0.6, 2.4, turn) : smoothstep(0.9, 3.2, turn));
+    // comfort: a head turn dissolves the frame only half as much (vestibular-sensitive viewers)
+    const want = impair * (strong ? smoothstep(0.6, 2.4, turn) : smoothstep(0.9, 3.2, turn)) * (reduced ? 0.5 : 1);
     this.refocus += (want - this.refocus) * damp(want > this.refocus ? 0.06 : 0.35 + 0.3 * Math.min(2, this.bac), dt);
 
     // dilated pupils: strobes and flashes dazzle instantly, recovery is slow

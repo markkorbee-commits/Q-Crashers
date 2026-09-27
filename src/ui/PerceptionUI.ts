@@ -70,8 +70,8 @@ function meter(labels = false): { el: HTMLElement; fill: HTMLElement } {
   return { el, fill };
 }
 
-/** the most severe messages (pinned, never rotated away) */
-const DANGER = new Set([RISK.hyperthermia, RISK.alcoholDanger, RISK.heart].filter(Boolean));
+/** the most severe messages (pinned, never rotated away; they show the first-aid action) */
+const DANGER = new Set([RISK.hyperthermia, RISK.alcoholDanger, RISK.heart, RISK.hyponatraemiaDanger, EDU.KETAMINE_MESSAGES.hole].filter(Boolean));
 const HELP = RISK.help ?? 'First aid posts and staff help without judgement.';
 
 /** trusted help links (rendered as real links) */
@@ -137,13 +137,14 @@ export class PerceptionUI {
   private lastPhase = 'off';
   /** the XTC run was ended by the reset button (no epilogue) */
   private xtcReset = false;
+  /** the XTC epilogue waits until no outcome card is up and no ketamine run is going on */
+  private xtcEpiloguePending = false;
   /** outcome cards shown once per episode (re-armed when the value falls back) */
   private aidShown = false;
   /** seconds continuously at >= 2.0‰ (the modal opens after AID_DELAY_S) */
   private highBacFor = 0;
   /** the "effects pause in the Show camera" toast was shown (once per session) */
   private showcamNoted = false;
-  private lastCam = '';
   /** ketamine risk monitor (status widget) */
   private ketBox!: HTMLElement;
   private ketKicker!: HTMLElement;
@@ -261,7 +262,7 @@ export class PerceptionUI {
     tryCall(p, 'setCompare', false);
     tryCall(p, 'soberUp');
     tryCall(p, 'setResting', false);
-    this.aidShown = this.heatShown = false;
+    this.aidShown = this.heatShown = this.xtcEpiloguePending = false;
     this.ui.app.events.emit('perception:changed', { mode: 'sober' });
     this.ui.toast('Back to sober perception', 1800, 'reset');
   }
@@ -611,8 +612,9 @@ export class PerceptionUI {
     start.addEventListener('click', () => {
       ui.layers.close('ketamine');
       const p = this.p;
-      // not sober: the combination risks first (the simulation does not model the combination)
-      if ((p?.bac ?? 0) > 0.2 || (p?.xtcPhase ?? 'off') !== 'off') this.openKetCombination();
+      // not sober (alcohol in the blood or still being absorbed, or an XTC run): the combination risks first
+      // (the simulation does not model the combination)
+      if ((p?.bac ?? 0) > 0.2 || (p?.stomach ?? 0) > 5 || (p?.xtcPhase ?? 'off') !== 'off') this.openKetCombination();
       else this.startKetamine();
     });
     const cancel = h('button', { class: 'btn ghost', type: 'button' }, 'Cancel');
@@ -737,23 +739,27 @@ export class PerceptionUI {
     // perception applies to the player's own view only: no compare divider in the Show camera & co.
     const cam = this.ui.camMode();
     const ownView = cam === 'first' || cam === 'third';
-    if (cam !== this.lastCam) {
-      if (cam === 'showcam' && this.lastCam !== '' && !this.showcamNoted && (p?.mode ?? 'sober') !== 'sober') {
-        this.showcamNoted = true;
-        this.ui.toast('Perception effects pause in the Show camera — your body state keeps running.', 4200, 'film');
-      }
-      this.lastCam = cam;
+    // once per session: in the Show camera while a simulation runs (entering it, starting one in it, or a
+    // session that starts in it)
+    if (cam === 'showcam' && !this.showcamNoted && this.ui.entered && (p?.mode ?? 'sober') !== 'sober') {
+      this.showcamNoted = true;
+      this.ui.toast('Perception effects pause in the Show camera — your body state keeps running.', 4200, 'film');
     }
     const risk = p?.risk;
     const temp = risk?.bodyTemp;
     const hr = risk?.heartRate;
 
-    // XTC timeline ended by itself -> epilogue card; the monitor stays while the body cools down
+    // XTC timeline ended by itself -> epilogue card; the monitor stays while the body cools down. The card
+    // waits while an outcome card (K-hole, sit-down ...) is up or a ketamine run goes on, so cards never stack
     if (phase === 'off' && this.lastPhase !== 'off') {
-      if (!this.xtcReset && this.ui.entered) this.openEpilogue();
+      if (!this.xtcReset && this.ui.entered) this.xtcEpiloguePending = true;
       this.recoverLeft = this.xtcReset ? 0 : 150;
     }
-    if (phase !== 'off') this.xtcReset = false;
+    if (phase !== 'off') this.xtcReset = this.xtcEpiloguePending = false;
+    if (this.xtcEpiloguePending && (p?.outcome ?? 'none') === 'none' && !ketOn && !this.ui.layers.isOpen('outcome')) {
+      this.xtcEpiloguePending = false;
+      this.openEpilogue();
+    }
     this.lastPhase = phase;
     this.recoverLeft = Math.max(0, this.recoverLeft - 0.25);
 
@@ -843,8 +849,11 @@ export class PerceptionUI {
     const warnings = list(risk?.warnings).map(asText).filter(Boolean);
     if (ketOn) {
       const kw = list(p?.ketWarnings).map(asText).filter(Boolean);
-      // "cannot move" leads; the other ketamine lines come before the general ones
-      warnings.unshift(...kw);
+      // the ketamine lines come after the life-threatening ones (overheating, alcohol poisoning, heart rate:
+      // exactly the mixing cases) and before the general ones; "cannot move" is a danger line itself
+      let i = 0;
+      while (i < warnings.length && DANGER.has(warnings[i])) i++;
+      warnings.splice(i, 0, ...kw);
     }
     const first = warnings[0];
     const danger = !!first && DANGER.has(first);
@@ -869,9 +878,15 @@ export class PerceptionUI {
     const restVisible = showX || heatRisk || resting || ketOn;
     this.restBtn.style.display = restVisible ? '' : 'none';
     toggleClass(this.restBtn, 'on', resting);
-    const restLabel = resting ? 'Resting · stand up' : 'Rest & cool down';
+    // in the K-hole the body does not respond: no "stand up" that silently does nothing
+    const hole = ketPhase === 'hole';
+    const restLabel = hole ? 'You cannot get up' : resting ? 'Resting · stand up' : 'Rest & cool down';
     const rl = this.restBtn.lastElementChild as HTMLElement;
     if (rl.textContent !== restLabel) rl.textContent = restLabel;
+    if (this.restBtn.disabled !== hole) {
+      this.restBtn.disabled = hole;
+      this.restBtn.setAttribute('aria-disabled', String(hole));
+    }
     this.aidBtn.style.display = danger || bac >= 2.0 || heatRisk ? '' : 'none';
     this.actions.style.display = restVisible || danger || bac >= 2.0 || heatRisk ? '' : 'none';
 

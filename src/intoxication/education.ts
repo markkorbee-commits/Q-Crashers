@@ -126,8 +126,9 @@ export const KETAMINE_INFO = {
     'from your body and from your surroundings.',
   disclaimer:
     'An educational approximation of commonly reported effects on perception and the body — never an encouragement. It ' +
-    'contains no usage information. Effects and risks differ strongly between people, and the strength of what is sold is ' +
-    'unknown; not using is the only way to avoid the risks. ' +
+    'contains no usage information. Possessing or selling ketamine without a licence is illegal in the Netherlands. Effects ' +
+    'and risks differ strongly between people, and the strength of what is sold is unknown; not using is the only way to ' +
+    'avoid the risks. ' +
     EXAGGERATED_NOTE,
   effects: [
     'Numbness and a heavy body: pain is hardly felt',
@@ -146,11 +147,12 @@ export const KETAMINE_INFO = {
     'The strength and content of what is sold are unknown',
   ],
   repeated: [
-    'Serious bladder damage (“ketamine bladder”): pain and blood when urinating, having to go very often, cramps. The more and the longer, the worse; in severe cases the damage is lasting and the bladder has to be removed.',
-    'Dependence: with regular use tolerance builds up quickly',
+    'Serious bladder damage (“ketamine bladder”): pain and blood when urinating, having to go very often, cramps. The more and the longer, the worse; in severe cases the damage is lasting and the bladder has to be replaced by surgery.',
+    'Dependence: with regular use tolerance builds up and dependence is possible',
     'Memory and concentration problems with frequent, heavy use',
   ],
   help: [
+    'Never be on your own: stay with friends who know what was taken, and sit down in a quiet, safe place if you feel unwell.',
     'Someone who cannot move or speak must never be left alone: stay with them in a quiet, safe place, out of the crush of the crowd.',
     'Someone does not respond? Turn them on their side (recovery position), stay with them and get the first-aid post or call 112.',
     'Tell first aid honestly what was taken — they help without judgement and without consequences.',
@@ -224,7 +226,7 @@ export const KETAMINE_CARDS: Record<'khole' | 'ketEpilogue', OutcomeCardText> = 
     title: 'What repeated use does',
     body: [
       'The simulation ends here. Repeated ketamine use can seriously damage the bladder (“ketamine bladder”): pain and blood when urinating and having to go very often. The more and the longer, the worse; in severe cases the damage is lasting.',
-      'With regular use tolerance builds up quickly and dependence is possible; frequent, heavy use harms memory and concentration.',
+      'With regular use tolerance builds up and dependence is possible; frequent, heavy use harms memory and concentration.',
     ],
     help: [
       'Bladder complaints? See a doctor and tell them about the ketamine.',
@@ -245,7 +247,7 @@ export const COMPARE_INFO = {
 export const TIME_COMPRESSION_NOTE =
   'Time is compressed. Alcohol: 1 real minute = 10 simulated minutes — the body breaks down only about 0.15‰ per hour, ' +
   'so 1‰ still takes 6–7 simulated hours (about 40 real minutes) to disappear; only time sobers you up. ' +
-  'The XTC simulation compresses several hours into about 5 minutes; the ketamine simulation is compressed in the same way.';
+  'The XTC simulation compresses several hours into about 5 minutes; the ketamine simulation is also compressed into about 5 minutes.';
 
 /** Short risk messages shown live by the risk model (constant strings: no per-frame allocation). */
 export const RISK_MESSAGES = {

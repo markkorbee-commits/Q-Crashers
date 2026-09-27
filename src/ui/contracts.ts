@@ -70,6 +70,8 @@ export interface PerceptionLike extends System {
   setStrength?(s: 'strong' | 'realistic', remember?: boolean): void;
   /** false while the view is not the player's own (Show camera, fly-over, free, photo): effects paused */
   viewActive?: boolean;
+  /** outcome card currently shown: 'none' | 'sitdown' | 'collapse' | 'epilogue' | 'khole' | 'ketEpilogue' */
+  outcome?: string;
 }
 
 export interface CameraLike extends System {

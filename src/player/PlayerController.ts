@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { App } from '../core/App';
 import { clamp, lerp, smoothstep } from '../core/rng';
 import type { FrameContext, Interactable, NamedSpot, System } from '../core/types';
+import { comfortFromParams } from '../intoxication/comfort';
 import type { MotorEffects } from '../intoxication/PerceptionSystem';
 import { stageWalk, surfaceTop, type StageWalk } from '../world/stageWalk';
 import { damp, wobble } from './motion';
@@ -200,7 +201,7 @@ export class PlayerController implements System {
   private dipV = 0;
   private current: Interactable | null = null;
   private currentLabel: string | null = null;
-  private perception: { motor?: MotorEffects; strength?: string } | null | undefined;
+  private perception: { motor?: MotorEffects; strength?: string; reducedMotion?: boolean } | null | undefined;
   private terrain: HeightProvider | null | undefined;
   private crowd: DensityProvider | null | undefined;
 
@@ -217,9 +218,10 @@ export class PlayerController implements System {
     app.onFrame(() => this.clampCameraUnderRoof());
     for (const s of DEFAULT_SPOTS) if (!app.spots.some((x) => x.id === s.id)) app.addSpot(s);
     const P = app.params;
-    const rm = P.get('reducemotion') ?? P.get('comfort');
+    // ?reducemotion / ?comfort / ?reducedmotion (any of them on = on, like the perception system)
+    const rm = comfortFromParams(P);
     const stored = readStorage(LS_REDUCE_MOTION);
-    this.reduced = rm !== null ? rm !== '0' && rm !== 'off' : stored !== null ? stored === '1' : prefersReducedMotion();
+    this.reduced = rm !== null ? rm : stored !== null ? stored === '1' : prefersReducedMotion();
     // start: ?spot= > the viewer's last chosen viewing position > the middle of the field
     const remembered = readStorage(LS_START_SPOT);
     const want = P.get('spot') ?? (remembered && START_CHOICES.some((c) => c.id === remembered) ? remembered : DEFAULT_START_SPOT);
@@ -418,13 +420,17 @@ export class PlayerController implements System {
   // ------------------------------------------------------------------------------------------
 
   private motor(): MotorEffects {
-    if (this.perception === undefined) this.perception = (this.app.get('perception') as { motor?: MotorEffects; strength?: string } | undefined) ?? null;
+    if (this.perception === undefined) this.perception = (this.app.get('perception') as { motor?: MotorEffects; strength?: string; reducedMotion?: boolean } | undefined) ?? null;
     return this.perception?.motor ?? SOBER;
   }
 
-  /** the perception system's exaggerated preset (larger, faster sway and head motion) */
+  /**
+   * the perception system's exaggerated preset (larger, faster sway and head motion); never while the
+   * perception side runs in comfort mode (reduced motion keeps the 1° roll cap)
+   */
   private strongPerception(): boolean {
-    return this.perception?.strength === 'strong';
+    const p = this.perception;
+    return p?.strength === 'strong' && p.reducedMotion !== true;
   }
 
   private densityAt(x: number, z: number): number {

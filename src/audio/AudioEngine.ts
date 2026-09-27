@@ -4,7 +4,8 @@
  *   music source -> musicIn -> perception lowpass -> perception low / high shelf -> wobble delay
  *        -> distance air-absorption lowpass -> rear high-shelf -> stereo width (M/S) -> direction pan
  *        -> distance gain -> musicGain -> master
- *   wobble delay -> perception echo send (two cross-fed delays, off by default) -> musicGain
+ *   wobble delay -> perception echo send (two cross-fed delays, off by default) -> stereo width (M/S)
+ *        (so the echo follows the width, direction pan and distance / perception level like the dry music)
  *   heartbeat (one persistent 48 Hz oscillator -> envelope gain, silent by default) -> master
  *   ambience (AmbienceSystem) -> ambienceIn -> perception lowpass -> ambienceGain -> master
  *   sfx -> sfxGain -> master
@@ -146,7 +147,9 @@ export class AudioEngine {
     echoR.connect(fbR).connect(echoL);
     echoL.connect(echoMerge, 0, 0);
     echoR.connect(echoMerge, 0, 1);
-    echoMerge.connect(this.musicGain);
+    // into the width stage: far from the PA the echo drops with the distance model like the dry sound, and
+    // the perception level (-4 dB for ketamine) applies to it too
+    echoMerge.connect(split);
 
     // heartbeat: one persistent 48 Hz oscillator, beats are gain envelopes scheduled on the audio clock
     const heartOsc = ctx.createOscillator();
