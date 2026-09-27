@@ -83,6 +83,8 @@ export interface CameraLike extends System {
 
 export interface PlayerLike extends System {
   teleport?(spot: NamedSpot): void;
+  /** act on the interactable the player targets (the prompt it announced) */
+  interact?(): void;
   yaw?: number;
   pitch?: number;
   reduceMotion?: boolean;

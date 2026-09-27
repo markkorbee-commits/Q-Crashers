@@ -12,7 +12,9 @@ export interface AppEvents {
   'interact:prompt': { label: string | null };
   'bar:open': { barId: string };
   'bar:close': Record<string, never>;
-  'toast': { text: string; ms?: number };
+  'toast': { text: string; ms?: number; icon?: string };
+  /** Ferris wheel ride phase changed ('off' | 'walk' | 'board' | 'ride' | 'alight' | 'leave') */
+  'ride:state': { phase: string };
   'perception:changed': { mode: string };
   'crowd:populated': { on: boolean; count: number };
   /**

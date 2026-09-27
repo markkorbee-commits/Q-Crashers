@@ -5,7 +5,8 @@ import type { FrameContext, Interactable, NamedSpot, System } from '../core/type
 import { comfortFromParams } from '../intoxication/comfort';
 import type { MotorEffects } from '../intoxication/PerceptionSystem';
 import { stageWalk, surfaceTop, type StageWalk } from '../world/stageWalk';
-import { damp, wobble } from './motion';
+import { FerrisRide, SEAT_EYE } from './FerrisRide';
+import { approachAngle, damp, wobble } from './motion';
 import { DEFAULT_SPOTS, DEFAULT_START_PITCH, DEFAULT_START_SPOT, START_CHOICES, type StartChoice } from './spots';
 
 /**
@@ -36,6 +37,8 @@ const STRONG_ROLL_PER_SWAY = 0.035;
 /** out-of-body drift (ketamine K-hole, motor.detach = 1): the eye floats this far up and back (~1.5 m) */
 const DETACH_UP = 0.9;
 const DETACH_BACK = 1.2;
+/** look pitch a Ferris wheel rider settles to while sitting down (just below the horizon) */
+const RIDE_PITCH = -0.04;
 /** eye height (m) when sitting / slumped on the ground (perception motor.seated) */
 const SEATED_EYE = 1.0;
 /** localStorage keys (per-viewer conveniences, never required) */
@@ -182,6 +185,11 @@ export class PlayerController implements System {
   readonly bounds = { minX: -280, maxX: 280, minZ: -40, maxZ: 460 };
   /** optional hook for footstep sounds (called on every heel strike) */
   onFootstep: ((running: boolean) => void) | null = null;
+  /**
+   * The Ferris wheel ride: while it is active (boarding, riding, getting off) it moves the body along
+   * its path / with the gondola from show time; walking, collision and gravity are skipped.
+   */
+  readonly ride = new FerrisRide();
 
   private app!: App;
   private jumpV = 0;
@@ -217,6 +225,7 @@ export class PlayerController implements System {
     // third-person camera: never through the vault roof (runs after the camera rig placed the camera)
     app.onFrame(() => this.clampCameraUnderRoof());
     for (const s of DEFAULT_SPOTS) if (!app.spots.some((x) => x.id === s.id)) app.addSpot(s);
+    this.ride.init(app);
     const P = app.params;
     // ?reducemotion / ?comfort / ?reducedmotion (any of them on = on, like the perception system)
     const rm = comfortFromParams(P);
@@ -274,6 +283,8 @@ export class PlayerController implements System {
   }
 
   teleport(spot: NamedSpot, remember = true): void {
+    // a teleport always leaves the Ferris wheel at once
+    this.ride.cancel();
     if (remember && START_CHOICES.some((c) => c.id === spot.id)) writeStorage(LS_START_SPOT, spot.id);
     const p = this.app.playerPos;
     p.copy(spot.position);
@@ -301,7 +312,11 @@ export class PlayerController implements System {
 
   /** interact with the currently targeted interactable (KeyE / touch button) */
   interact(): void {
-    if (!this.current) return;
+    if (!this.current) {
+      // on the Ferris wheel between stops: tell when getting off is possible
+      if (this.ride.active) this.ride.hint(performance.now() / 1000);
+      return;
+    }
     try {
       this.current.onInteract();
     } catch (e) {
@@ -317,6 +332,23 @@ export class PlayerController implements System {
   /** true while standing on the stage (deck, stairs, podium, vault, castle platform) */
   get onPlatform(): boolean {
     return this.onStage;
+  }
+
+  /** in / at a Ferris wheel gondola (the camera rig lets the third-person arm swing freely) */
+  get mounted(): boolean {
+    return this.ride.mounted;
+  }
+
+  /** 0 standing … 1 seated in a gondola (eye height, avatar pose) */
+  get seated(): number {
+    return this.ride.seat;
+  }
+
+  /** Board the Ferris wheel from where you stand (`instant`: sit down at once, for tools / deep links). */
+  boardWheel(instant = false): void {
+    if (this.ride.active) return;
+    this.ride.board(this.app.playerPos, instant);
+    if (instant) this.app.playerPos.copy(this.ride.pos);
   }
 
   /** feet height of the walkable surface under (x, z): the stage walk map, else the terrain */
@@ -347,6 +379,12 @@ export class PlayerController implements System {
     } else {
       this.jumpQueued = false;
       this.delay.clear();
+    }
+
+    // --- on the Ferris wheel: the ride moves the body
+    if (this.ride.active) {
+      this.updateRide(ctx, motor);
+      return;
     }
 
     // --- crowd density: exact when standing (seek / restart reproduce the same view), smoothed
@@ -418,6 +456,45 @@ export class PlayerController implements System {
   }
 
   // ------------------------------------------------------------------------------------------
+
+  /**
+   * Ferris wheel: the body follows the ride's path (boarding / getting off) or the gondola seat, no
+   * walking, collision or gravity. The only interaction offered is "Get off" while the gondola passes
+   * the platform (the general cone test would miss it: the rider faces the stage, the edge is beside them).
+   */
+  private updateRide(ctx: FrameContext, motor: MotorEffects): void {
+    const p = this.app.playerPos;
+    const r = this.ride;
+    const was = r.phase;
+    const on = r.update(ctx, this.reduced);
+    // settling onto the bench: a soft bump through the knees (the landing-dip spring)
+    if (was === 'board' && r.phase === 'ride') this.dipV -= 0.3;
+    p.copy(r.pos);
+    this.velocity.copy(r.vel);
+    this.speed = Math.hypot(r.vel.x, r.vel.z);
+    this.running = false;
+    this.grounded = true;
+    this.jumpY = this.jumpV = this.fallV = 0;
+    this.onStage = false;
+    this.crowdDensity = 0;
+    // sitting down: the body turns to face the stage, eyes level (never under reduced motion; the mouse
+    // still adds on top)
+    if (r.turnTo !== null && this.controlsActive && !this.reduced) {
+      const k = damp(2.2, ctx.dt);
+      this.yaw = approachAngle(this.yaw, r.turnTo, k);
+      this.pitch += (RIDE_PITCH - this.pitch) * k;
+    }
+    this.filterPlatforms(p.y);
+    this.updateEyes(ctx, motor, 0);
+    if (!on) {
+      // back on the platform: walking resumes next frame
+      this.densityValid = false;
+      this.delay.clear();
+      this.updateInteraction(p);
+      return;
+    }
+    this.setTarget(this.controlsActive && r.canAlight ? r.point : null);
+  }
 
   private motor(): MotorEffects {
     if (this.perception === undefined) this.perception = (this.app.get('perception') as { motor?: MotorEffects; strength?: string; reducedMotion?: boolean } | undefined) ?? null;
@@ -652,26 +729,30 @@ export class PlayerController implements System {
     // sitting / slumping down lowers the eyes towards ~1 m (walking is frozen by speedScale)
     const trip = smoothstep(0.5, 1, motor.stumble ?? 0) * (this.reduced ? 0.4 : 1);
     const seated = smoothstep(0, 1, motor.seated ?? 0);
+    // in a Ferris wheel gondola: seated on the bench; an unsteady rider swings along with the car
+    const ride = this.ride.seat;
+    const drop = Math.max((PlayerController.EYE_HEIGHT - SEATED_EYE) * seated, (PlayerController.EYE_HEIGHT - SEAT_EYE) * ride);
+    const swing = ride * sway * Math.sin(t * 2.5 + 0.6);
     o.y =
       -ampV * Math.cos(2 * ph) +
       this.dip * (this.reduced ? 0.5 : 1) +
       sway * 0.02 * wobble(t * 0.29, 2) +
       idle * 0.0025 * Math.sin(t * 1.45) -
       0.06 * trip -
-      (PlayerController.EYE_HEIGHT - SEATED_EYE) * seated +
+      drop +
       // out-of-body (ketamine K-hole): the eye floats up and back behind the head (perception scales it
       // down to 0.3 m under reduced motion)
       DETACH_UP * detach;
-    o.z = press * 0.045 * wobble(t * 1.3, 5) + DETACH_BACK * detach;
+    o.z = press * 0.045 * wobble(t * 1.3, 5) + DETACH_BACK * detach + 0.06 * swing;
     const r = this.eyeRot;
     if (strong) {
-      r.x = 0.0015 * Math.sin(2 * ph) * bob + sway * 0.02 * wobble(t * 0.9, 5) + jit * 0.006 * wobble(t * 6.1, 8) + idle * 0.0006 * wobble(t * 0.33, 14) - 0.052 * trip;
+      r.x = 0.0015 * Math.sin(2 * ph) * bob + sway * 0.02 * wobble(t * 0.9, 5) + jit * 0.006 * wobble(t * 6.1, 8) + idle * 0.0006 * wobble(t * 0.33, 14) - 0.052 * trip + 0.02 * swing;
       r.y = sway * 0.045 * wobble(t * 0.6, 4) + jit * 0.008 * wobble(t * 5.3, 9) + idle * 0.0008 * wobble(t * 0.17, 15);
       // the roll cap grows with the sway (about 3° at full sway); reduced motion keeps 1°
       const cap = MAX_ROLL + STRONG_ROLL_PER_SWAY * sway;
       r.z = clamp(0.0022 * Math.sin(ph) * bob + sway * 0.04 * wobble(t * 0.8, 3) + crowd01 * m * 0.004 * wobble(t * 1.9, 12), -cap, cap);
     } else {
-      r.x = 0.0015 * Math.sin(2 * ph) * bob + sway * 0.012 * wobble(t * 0.31, 5) + jit * 0.004 * wobble(t * 6.1, 8) + idle * 0.0006 * wobble(t * 0.33, 14) - 0.052 * trip;
+      r.x = 0.0015 * Math.sin(2 * ph) * bob + sway * 0.012 * wobble(t * 0.31, 5) + jit * 0.004 * wobble(t * 6.1, 8) + idle * 0.0006 * wobble(t * 0.33, 14) - 0.052 * trip + 0.012 * swing;
       r.y = sway * 0.02 * wobble(t * 0.19, 4) + jit * 0.005 * wobble(t * 5.3, 9) + idle * 0.0008 * wobble(t * 0.17, 15);
       // roll is the most nauseating component: never more than 1°
       r.z = clamp(0.0022 * Math.sin(ph) * bob + sway * 0.012 * wobble(t * 0.23, 3) + crowd01 * m * 0.004 * wobble(t * 1.9, 12), -MAX_ROLL, MAX_ROLL);
@@ -702,6 +783,11 @@ export class PlayerController implements System {
         }
       }
     }
+    this.setTarget(best);
+  }
+
+  /** set the targeted interactable; announces the prompt when it (or its label) changed */
+  private setTarget(best: Interactable | null): void {
     const label = best ? best.label : null;
     if (best !== this.current || label !== this.currentLabel) {
       this.current = best;
@@ -717,6 +803,7 @@ export class PlayerController implements System {
       speed: this.speed.toFixed(2),
       density: this.crowdDensity.toFixed(2),
       target: this.currentLabel ?? '-',
+      ride: this.ride.active ? `${this.ride.phase} #${this.ride.gondola}` : '-',
       comfort: this.reduced ? 'reduced motion' : 'full',
     };
   }

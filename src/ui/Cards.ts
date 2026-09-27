@@ -28,7 +28,7 @@ const KEY_GROUPS: [title: string, rows: Row[]][] = [
       [['Shift'], 'Run'],
       [['Space'], 'Jump'],
       [['V'], 'First / third person'],
-      [['E'], 'Interact · order · drink'],
+      [['E'], 'Interact · order · drink · ride the Ferris wheel'],
       [['Esc'], 'Free the mouse for the show controls'],
     ],
   ],

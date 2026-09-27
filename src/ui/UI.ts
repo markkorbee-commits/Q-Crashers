@@ -126,7 +126,7 @@ export class UI {
     // ---- app events
     const ev = app.events;
     ev.on('loading:progress', ({ label, progress, next, etaMs }) => this.landing?.setProgress(label, progress, next, etaMs));
-    ev.on('toast', ({ text, ms }) => this.toast(text, ms));
+    ev.on('toast', ({ text, ms, icon }) => this.toast(text, ms, icon));
     ev.on('show:ended', () => {
       if (!this.entered || this.autostart) return;
       // let the last firework / cold-fire moment breathe before the card fades in over it
@@ -486,6 +486,7 @@ export class UI {
     if (id === 'dj') this.toast('DJ-booth — zo ziet de DJ het veld', 3600, 'music');
     else if (id === 'dancers') this.toast("Dancers' podium — walk up the grey steps into the vault to the DJ booth", 3200, 'pin');
     else if (id === 'castle') this.toast('Castle gallery — up the stone stairs, between the skull cube and the portal', 3000, 'pin');
+    else if (id === 'ferris') this.toast(`Ferris wheel — ${this.touch ? 'tap “Board the Ferris wheel”' : 'press E'} to step into the next gondola`, 3400, 'wheel');
     else return false;
     return true;
   }
@@ -545,7 +546,10 @@ export class UI {
   }
 
   private promptTap() {
-    if (this.nearest && (this.externalLabel || !this.externalPrompt)) this.nearest.onInteract();
+    // the prompt shows the player's own target (bars, the Ferris wheel): act on exactly that one
+    const pl = player(this.app);
+    if (this.externalPrompt && this.externalLabel && pl?.interact) pl.interact();
+    else if (this.nearest && (this.externalLabel || !this.externalPrompt)) this.nearest.onInteract();
     else if (this.barSys()?.holding) this.barSys()!.sip();
     this.poke();
   }

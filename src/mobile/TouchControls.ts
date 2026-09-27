@@ -76,6 +76,8 @@ export class TouchControls {
   private lift = 0;
   /** hidden by the overlay UI (cinema, menus): swipes only look around, nothing walks */
   private hidden = false;
+  /** on the Ferris wheel: no walking (joystick, run, jump hidden), the whole screen swipes to look */
+  private riding = false;
   /** joystick radius in CSS px (knob travel) */
   readonly radius = 56;
   /** swipe-look speed multiplier (1 = right half of the screen is ~110 degrees); × the viewer's setting */
@@ -118,6 +120,13 @@ export class TouchControls {
     this.app.events.on('interact:prompt', ({ label }) => {
       this.el.classList.toggle('can-interact', !!label);
       if (label) this.interactLabel.textContent = label;
+    });
+    this.app.events.on('ride:state', ({ phase }) => {
+      const on = phase !== 'off';
+      if (on === this.riding) return;
+      this.riding = on;
+      this.el.classList.toggle('riding', on);
+      if (on) this.releaseJoy();
     });
     this.onResize();
     if (store.get(HINTS_KEY)) this.hideHints();
@@ -268,7 +277,7 @@ export class TouchControls {
   private onDown = (e: PointerEvent): void => {
     if (e.pointerType === 'mouse' || e.target !== this.app.canvas || this.group === 'watch') return;
     e.preventDefault();
-    if (e.clientX < window.innerWidth * 0.5 && this.joyId === null && !this.hidden) {
+    if (e.clientX < window.innerWidth * 0.5 && this.joyId === null && !this.hidden && !this.riding) {
       this.joyId = e.pointerId;
       const R = this.radius + 8;
       this.ox = Math.min(Math.max(e.clientX, this.safe.l + R), window.innerWidth * 0.5);

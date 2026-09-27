@@ -70,6 +70,7 @@ const P: Record<string, string> = {
   ticket: '<path d="M3 8.5V6.5A1.5 1.5 0 0 1 4.5 5h15A1.5 1.5 0 0 1 21 6.5v2a3.5 3.5 0 0 0 0 7v2a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5v-2a3.5 3.5 0 0 0 0-7Z"/><path d="M14.5 5v14" stroke-dasharray="2 2"/>',
   grip: '<circle cx="9" cy="6.5" r="1.2" fill="currentColor" stroke="none"/><circle cx="15" cy="6.5" r="1.2" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="9" cy="17.5" r="1.2" fill="currentColor" stroke="none"/><circle cx="15" cy="17.5" r="1.2" fill="currentColor" stroke="none"/>',
   resize: '<path d="M14 4h6v6M10 20H4v-6"/><path d="m20 4-6.5 6.5M4 20l6.5-6.5"/>',
+  wheel: '<circle cx="12" cy="9.5" r="6.5"/><path d="M12 3v13M5.5 9.5h13M7.4 4.9l9.2 9.2M16.6 4.9l-9.2 9.2"/><path d="m8.5 21 3.5-11.5L15.5 21M6.5 21h11"/>',
   terrace: '<path d="M3 20h18"/><path d="M5 20v-7h14v7"/><path d="M5 13 8.5 9h7l3.5 4"/><path d="M9 20v-3.5M15 20v-3.5"/><circle cx="12" cy="5" r="1.6"/>',
   platform: '<path d="M3 19h18"/><path d="M5 19v-4h14v4"/><path d="M8 15v-3.5h8V15"/><path d="M12 11.5V6"/><path d="m9.5 8 2.5-2 2.5 2"/>',
   motion: '<path d="M3 8c3-3 6 3 9 0s6 3 9 0"/><path d="M3 16c3-3 6 3 9 0s6 3 9 0"/>',

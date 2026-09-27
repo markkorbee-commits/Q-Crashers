@@ -7,6 +7,7 @@ import { ARM, BACKSTAGE_Z, LAKE, PILLARS, PIT_Z, terraceHeight, terrainHeight, W
 import { TimeSlicer } from '../core/yieldTo';
 import { cloudNoiseTextureAsync, groundDetailTexture, makeCanvas, canvasTexture } from './tex';
 import { Vegetation } from './vegetation';
+import { WHEEL_GATE, wheelDeckHeight } from './ferris';
 import { patchWorldMaterial, SKY_REFLECT_GLSL, worldUniforms } from './worldLights';
 
 /**
@@ -65,7 +66,7 @@ export class TerrainSystem implements System {
 
   /** walkable ground height at x,z (metres, floor = 0): terrain, or the photo terrace deck / stairs */
   heightAt(x: number, z: number): number {
-    return terraceHeight(x, z) ?? terrainHeight(x, z);
+    return terraceHeight(x, z) ?? wheelDeckHeight(x, z) ?? terrainHeight(x, z);
   }
 
   // -------------------------------------------------------------------------------------------
@@ -325,23 +326,34 @@ export class TerrainSystem implements System {
   // crowd barriers); this outline closes the rest: the backstage fences on both crests (Z −6 from the
   // corner towers to the crest edge), the crest edges above the tree belts, the back corners, the road
   // / decking edge by the lake. The crest behind the arms (the bars) is reached through the arm gates
-  // (Z 28…56) or around the arm ends (Z > 60).
+  // (Z 28…56) or around the arm ends (Z > 60). The lake-front edge has one gate: the Ferris wheel
+  // walkway (world/ferris.ts WHEEL_GATE; its railings, registered by the grounds, close the sides).
   private registerBounds(): void {
     const cx = ARM.x0 + 3;
-    const B: [number, number][] = [
-      [cx, BACKSTAGE_Z],
-      [108.5, BACKSTAGE_Z],
-      [108.5, 99],
-      [130, 150],
-      [125, 173],
-      [-120, 173],
-      [-135, 150],
-      [-108.5, 120],
-      [-108.5, BACKSTAGE_Z],
-      [-cx, BACKSTAGE_Z],
+    const r = 0.8;
+    // the segment boxes grow by r on every side: end them r short of the gate posts
+    const gx0 = WHEEL_GATE.x0 - r,
+      gx1 = WHEEL_GATE.x1 + r;
+    const runs: [number, number][][] = [
+      [
+        [gx1, 173],
+        [125, 173],
+        [130, 150],
+        [108.5, 99],
+        [108.5, BACKSTAGE_Z],
+        [cx, BACKSTAGE_Z],
+      ],
+      [
+        [gx0, 173],
+        [-120, 173],
+        [-135, 150],
+        [-108.5, 120],
+        [-108.5, BACKSTAGE_Z],
+        [-cx, BACKSTAGE_Z],
+      ],
     ];
     const add = (c: Collider2D) => this.app.addCollider(c);
-    for (let i = 1; i < B.length; i++) segmentColliders(B[i - 1], B[i], 0.8, 'bounds').forEach(add);
+    for (const B of runs) for (let i = 1; i < B.length; i++) segmentColliders(B[i - 1], B[i], r, 'bounds').forEach(add);
   }
 
   // -------------------------------------------------------------------------------------------

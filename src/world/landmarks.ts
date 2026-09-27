@@ -1,14 +1,16 @@
 import * as THREE from 'three';
 import { hash32, Rng } from '../core/rng';
 import { GeoBuilder, lin } from './geom';
-import { dirFromAzAlt, FERRIS_WHEEL, GOLIATH, GOLIATH_H, OTHER_AREAS, terrainHeight } from './site';
+import { GONDOLA, GONDOLAS, gondolaPose, RIM_HALF, WHEEL_DECK, WHEEL_GATE, WHEEL_HUB_Y, WHEEL_R, WHEEL_WALK, WHEEL_X, WHEEL_Z, wheelAngle } from './ferris';
+import { dirFromAzAlt, GOLIATH, GOLIATH_H, OTHER_AREAS, terrainHeight } from './site';
 import { patchWorldMaterial } from './worldLights';
 
 /**
  * The skyline around the RED field:
  *  - Walibi Holland's Goliath coaster (46.9 m, FACT OSM track) behind stage-left, a dark silhouette
  *    over the tree belt with an obstruction light on the lift hill
- *  - the PURPLE-area Ferris wheel (floorplan deco, 2024 aerial Ø ≈ 32 m) behind the audience-right
+ *  - the PURPLE-area Ferris wheel (floorplan deco, 2024 aerial Ø ≈ 32 m) behind the audience-right,
+ *    turning from show time with 16 hanging gondolas — a ride (world/ferris.ts, player/FerrisRide.ts)
  *  - the other festival areas to the +X side (SW): work lights and dim stage glows (frames f004/f005/
  *    f014/f022: "clusters of orange/red, pink/purple and white lights right of and behind the stage")
  *  - Flevoland wind turbines on the N–E horizon with synchronised red obstruction lights
@@ -23,7 +25,11 @@ export interface LightPoint {
   color: string;
   /** world size (m) of the glow sprite */
   size: number;
-  /** 0 steady, 1 obstruction blink (W-rot), 2 slow flicker, 3 steady red obstruction, 4 broad haze glow */
+  /**
+   * 0 steady, 1 obstruction blink (W-rot), 2 slow flicker, 3 steady red obstruction, 4 broad haze glow,
+   * 5 steady bulb on the Ferris wheel rims (turns with the wheel), 6 gondola lamp (rim point turned with
+   * the wheel, hanging below it)
+   */
   kind: number;
 }
 
@@ -34,8 +40,20 @@ export class Landmarks {
   private rotors!: THREE.InstancedMesh;
   private rotorBase: THREE.Matrix4[] = [];
   private wheel!: THREE.Group;
+  private gondolas!: THREE.InstancedMesh;
   private lights!: THREE.Points;
-  private readonly U = { uTime: { value: 0 }, uPx: { value: 1 }, uGain: { value: 1 }, uViewH: { value: 720 } };
+  private readonly U = {
+    uTime: { value: 0 },
+    uPx: { value: 1 },
+    uGain: { value: 1 },
+    uViewH: { value: 720 },
+    /** Ferris wheel: hub y, hub z, cos / sin of the wheel angle (bulbs kind 5/6 turn with the rims) */
+    uWheel: { value: new THREE.Vector4(WHEEL_HUB_Y, WHEEL_Z, 1, 0) },
+  };
+  private readonly pv = new THREE.Vector3();
+  private readonly q = new THREE.Quaternion();
+  private readonly one = new THREE.Vector3(1, 1, 1);
+  private readonly xAxis = new THREE.Vector3(1, 0, 0);
   private readonly m = new THREE.Matrix4();
   private readonly r = new THREE.Matrix4();
   triangles = 0;
@@ -46,7 +64,7 @@ export class Landmarks {
     const mat = patchWorldMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0.4 }), { key: 'landmark', lamps: false });
     const lights: LightPoint[] = [...extraLights];
     this.buildGoliath(mat, lights);
-    this.buildWheel(mat, lights);
+    this.buildWheel(mat, lights, lowDetail);
     this.buildTurbines(mat, lights, lowDetail);
     this.buildAreas(mat, lights);
     this.buildLights(lights);
@@ -92,19 +110,44 @@ export class Landmarks {
     lights.push({ x: liftB.x, y: liftB.y + 1.5, z: liftB.z, color: '#ff1a0a', size: 3.5, kind: 3 });
   }
 
-  private buildWheel(mat: THREE.Material, lights: LightPoint[]): void {
-    const { x, z, r } = FERRIS_WHEEL;
+  /**
+   * The Ferris wheel (world/ferris.ts): static A-frame + the ride's gate arch, ramp walkway and
+   * boarding platform (one merged mesh); the rims, spokes and gondola axles as one mesh in a group
+   * at the hub turned about X from show time; the 16 open gondolas as one instanced mesh that
+   * hangs (and gently swings) under the axles. Rim bulbs and gondola lamps live in the shared
+   * distant-lights buffer and turn in its vertex shader (no extra draw call).
+   */
+  private buildWheel(mat: THREE.Material, lights: LightPoint[], low: boolean): void {
+    const x = WHEEL_X,
+      z = WHEEL_Z,
+      r = WHEEL_R;
     const y0 = terrainHeight(x, z);
-    const hub = new THREE.Vector3(x, y0 + r + 3, z);
+    const hub = new THREE.Vector3(x, WHEEL_HUB_Y, z);
     const b = new GeoBuilder();
     const white = lin('#c8ccd2');
     // A-frame legs (wheel plane parallel to Z => axle along X)
     for (const sx of [-1.6, 1.6])
       for (const sz of [-7, 7]) b.beam(new THREE.Vector3(x + sx * 1.6, y0, z + sz), new THREE.Vector3(x + sx, hub.y, z), 0.6, white, true);
+    // axle through the hub, bearing housings
+    b.beam(new THREE.Vector3(x - 1.75, hub.y, z), new THREE.Vector3(x + 1.75, hub.y, z), 0.5, white, true);
     this.add(b.build(), mat, 'ferris-frame');
+    // the ride's cars and its platform glow softly in their own string lights / canopy lamps at night:
+    // an emissive term tinted by the vertex (and per-car instance) colour
+    const rideMat = patchWorldMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.75, metalness: 0.2, emissive: new THREE.Color(0.055, 0.04, 0.026) }), {
+      key: 'ferris-ride',
+      lamps: false,
+      edit: (sh) => {
+        sh.fragmentShader = sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n\ttotalEmissiveRadiance *= vColor.rgb;');
+      },
+    });
+    const acc = new GeoBuilder();
+    this.buildAccess(acc, lights, low);
+    this.add(acc.build(), rideMat, 'ferris-access');
+
+    // rims, spokes and the gondola axles between the rims: turn with the wheel
     const w = new GeoBuilder();
     const N = 32;
-    for (const sx of [-0.9, 0.9]) {
+    for (const sx of [-RIM_HALF, RIM_HALF]) {
       for (let k = 0; k < N; k++) {
         const a0 = (k / N) * Math.PI * 2,
           a1 = ((k + 1) / N) * Math.PI * 2;
@@ -112,9 +155,9 @@ export class Landmarks {
         if (k % 2 === 0) w.beam(new THREE.Vector3(sx, 0, 0), new THREE.Vector3(sx, Math.sin(a0) * r, Math.cos(a0) * r), 0.14, white);
       }
     }
-    for (let k = 0; k < 16; k++) {
-      const a = (k / 16) * Math.PI * 2;
-      w.box(1.6, 1.8, 1.6, 0, Math.sin(a) * r - 1.2, Math.cos(a) * r, lin(k % 2 ? '#7a2a8a' : '#d8d2c0'));
+    for (let k = 0; k < GONDOLAS; k++) {
+      const a = (k / GONDOLAS) * Math.PI * 2;
+      w.beam(new THREE.Vector3(-RIM_HALF, Math.sin(a) * r, Math.cos(a) * r), new THREE.Vector3(RIM_HALF, Math.sin(a) * r, Math.cos(a) * r), 0.12, white, true);
     }
     const wm = new THREE.Mesh(w.build(), mat);
     wm.name = 'ferris-wheel';
@@ -123,11 +166,130 @@ export class Landmarks {
     this.wheel.add(wm);
     this.group.add(this.wheel);
     this.triangles += wm.geometry.getAttribute('position').count / 3;
-    // rim bulbs (static positions; the wheel stands still on the closed festival night)
-    for (let k = 0; k < 48; k++) {
-      const a = (k / 48) * Math.PI * 2;
-      lights.push({ x: hub.x - 1, y: hub.y + Math.sin(a) * r, z: hub.z + Math.cos(a) * r, color: k % 2 ? '#ffd9a0' : '#c77dff', size: 0.9, kind: 0 });
+
+    // the gondolas: one instanced open car (tinted per instance: purple / cream as before)
+    const gg = gondolaGeometry(low);
+    this.gondolas = new THREE.InstancedMesh(gg, rideMat, GONDOLAS);
+    this.gondolas.name = 'ferris-gondolas';
+    this.gondolas.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    const tint = new THREE.Color();
+    for (let k = 0; k < GONDOLAS; k++) this.gondolas.setColorAt(k, tint.setRGB(...lin(k % 2 ? '#7a2a8a' : '#d8d2c0')));
+    // the cars never leave the wheel's circle (+ their hang): a fixed bound keeps frustum culling on
+    gg.boundingSphere = new THREE.Sphere(hub.clone(), r + 4);
+    this.gondolas.boundingSphere = new THREE.Sphere(hub.clone(), r + 4);
+    this.group.add(this.gondolas);
+    this.triangles += (gg.getAttribute('position').count / 3) * GONDOLAS;
+    this.poseWheel(0);
+
+    // rim bulbs on both rims (turn with the wheel in the vertex shader: kind 5), a warm lamp under
+    // every canopy (kind 6)
+    for (const side of [-1, 1]) {
+      for (let k = 0; k < 48; k++) {
+        const a = (k / 48) * Math.PI * 2;
+        lights.push({ x: hub.x + side, y: hub.y + Math.sin(a) * r, z: hub.z + Math.cos(a) * r, color: k % 2 ? '#ffd9a0' : '#c77dff', size: 0.9, kind: 5 });
+      }
     }
+    for (let k = 0; k < GONDOLAS; k++) {
+      const a = (k / GONDOLAS) * Math.PI * 2;
+      lights.push({ x: hub.x, y: hub.y + Math.sin(a) * r, z: hub.z + Math.cos(a) * r, color: '#ffc88a', size: 0.55, kind: 6 });
+    }
+  }
+
+  /**
+   * The ride's access (world/ferris.ts): a bulb-lit arch over the gate in the lake-front fence, the
+   * timber ramp walkway with railings, the boarding platform on steel legs (railings on three sides,
+   * the east edge open with a yellow safety line where the gondolas pass), a small operator cabin.
+   */
+  private buildAccess(b: GeoBuilder, lights: LightPoint[], low: boolean): void {
+    const D = WHEEL_DECK,
+      W = WHEEL_WALK,
+      G = WHEEL_GATE;
+    const timber = lin('#8a7458');
+    const skirt = lin('#2a2530');
+    const steel = lin('#9aa0a6');
+    const purple = lin('#5c2470');
+    const yellow = lin('#e0b422');
+    const g0 = terrainHeight(W.x0, W.z0);
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const v = new THREE.Vector3();
+    const sc = new THREE.Vector3();
+    // ramp: a sloped timber slab from the field level up to the deck
+    {
+      const len = Math.hypot(W.z1 - W.z0, D.y - g0);
+      const pitch = Math.atan2(D.y - g0, W.z1 - W.z0);
+      q.setFromAxisAngle(new THREE.Vector3(1, 0, 0), pitch);
+      v.set((W.x0 + W.x1) / 2, (g0 + D.y) / 2 - 0.06, (W.z0 + W.z1) / 2);
+      m.compose(v, q, sc.set(W.x1 - W.x0, 0.12, len + 0.02));
+      b.add(GeoBuilder.unit('box'), m, timber);
+    }
+    // platform deck + skirt + legs, safety line along the open edge
+    const cx = (D.x0 + D.x1) / 2,
+      cz = (D.z0 + D.z1) / 2;
+    b.box(D.x1 - D.x0, 0.14, D.z1 - D.z0, cx, D.y - 0.07, cz, timber);
+    b.box(D.x1 - D.x0, D.y - g0, D.z1 - D.z0 - 0.3, cx, (D.y + g0) / 2 - 0.07, cz, skirt);
+    b.box(0.14, 0.012, D.z1 - D.z0 - 0.2, D.x1 - 0.12, D.y + 0.006, cz, yellow);
+    // railings: posts every ~1.4 m, top + mid rail
+    const rail = (ax: number, az: number, bx: number, bz: number, ya: number, yb: number) => {
+      const len = Math.hypot(bx - ax, bz - az);
+      const n = Math.max(1, Math.round(len / 1.4));
+      for (let i = 0; i <= n; i++) {
+        const t = i / n;
+        const px = ax + (bx - ax) * t,
+          pz = az + (bz - az) * t,
+          py = ya + (yb - ya) * t;
+        b.box(0.06, 1.05, 0.06, px, py + 0.525, pz, steel);
+      }
+      for (const h of [1.05, 0.55]) b.beam(new THREE.Vector3(ax, ya + h, az), new THREE.Vector3(bx, yb + h, bz), 0.05, h > 1 ? purple : steel);
+      // string lights on the top rail
+      if (!low || n > 3) {
+        const nb = Math.max(2, Math.round(len / 1.1));
+        for (let i = 0; i <= nb; i++) {
+          const t = (i + 0.5) / (nb + 1);
+          lights.push({ x: ax + (bx - ax) * t, y: ya + (yb - ya) * t + 1.12, z: az + (bz - az) * t, color: i % 3 === 1 ? '#c77dff' : '#ffd9a0', size: 0.28, kind: 0 });
+        }
+      }
+    };
+    const zg = G.z + 0.3;
+    rail(W.x0, zg, W.x0, D.z0, g0 + (D.y - g0) * ((zg - W.z0) / (W.z1 - W.z0)), D.y);
+    rail(W.x1, zg, W.x1, D.z0, g0 + (D.y - g0) * ((zg - W.z0) / (W.z1 - W.z0)), D.y);
+    rail(D.x0, D.z0, D.x0, D.z1, D.y, D.y);
+    rail(D.x0, D.z1, D.x1, D.z1, D.y, D.y);
+    rail(W.x1, D.z0, D.x1, D.z0, D.y, D.y);
+    // short rail stubs at both ends of the open boarding edge
+    rail(D.x1, D.z0, D.x1, D.z0 + 1.0, D.y, D.y);
+    rail(D.x1, D.z1 - 1.0, D.x1, D.z1, D.y, D.y);
+    // gate arch over the fence gap, bulbs along it
+    const gy = terrainHeight((G.x0 + G.x1) / 2, G.z);
+    for (const gx of [G.x0 - 0.12, G.x1 + 0.12]) b.box(0.18, 3.6, 0.18, gx, gy + 1.8, G.z, purple);
+    b.box(G.x1 - G.x0 + 0.6, 0.55, 0.14, (G.x0 + G.x1) / 2, gy + 3.35, G.z, purple);
+    for (let i = 0; i <= 8; i++) {
+      const t = i / 8;
+      lights.push({ x: G.x0 - 0.2 + (G.x1 - G.x0 + 0.4) * t, y: gy + 3.68, z: G.z - 0.1, color: i % 2 ? '#c77dff' : '#ffd9a0', size: 0.35, kind: 0 });
+    }
+    for (const gx of [G.x0 - 0.12, G.x1 + 0.12]) for (let i = 0; i < 4; i++) lights.push({ x: gx, y: gy + 0.6 + i * 0.8, z: G.z - 0.12, color: '#ffd9a0', size: 0.3, kind: 0 });
+    // operator cabin at the platform's south-west corner (outside the rail), lit window
+    const ox = D.x0 - 1.1,
+      oz = D.z0 + 0.9;
+    const og = terrainHeight(ox, oz);
+    b.box(1.5, 2.3, 1.5, ox, og + 1.15, oz, lin('#3a2d44'));
+    b.box(1.8, 0.12, 1.8, ox, og + 2.36, oz, purple);
+    lights.push({ x: ox + 0.78, y: og + 1.5, z: oz, color: '#ffe2b0', size: 0.9, kind: 0 });
+  }
+
+  /** wheel angle + gondola matrices at show time t (no allocations) */
+  private poseWheel(t: number): void {
+    const th = wheelAngle(t);
+    this.wheel.rotation.x = th;
+    this.U.uWheel.value.z = Math.cos(th);
+    this.U.uWheel.value.w = Math.sin(th);
+    for (let k = 0; k < GONDOLAS; k++) {
+      const sway = gondolaPose(k, t, this.pv);
+      this.q.setFromAxisAngle(this.xAxis, sway);
+      this.m.compose(this.pv, this.q, this.one);
+      this.gondolas.setMatrixAt(k, this.m);
+    }
+    this.gondolas.instanceMatrix.needsUpdate = true;
   }
 
   private buildTurbines(mat: THREE.Material, lights: LightPoint[], low: boolean): void {
@@ -211,7 +373,9 @@ export class Landmarks {
       if (a.name === 'PURPLE') {
         // open tensile roofs (three white sails on masts) over the lakeside dance floor
         for (let k = 0; k < 3; k++) {
-          const ox = (k - 1) * 12,
+          // the west sail (k 2, ox +12) stood in the Ferris wheel's plane (gondolas would sweep through
+          // it): it goes to the east end of the row instead (same random stream)
+          const ox = (k === 2 ? -3 : k - 1) * 12,
             oz = rng.range(-3, 3);
           const g = new THREE.PlaneGeometry(11, 9, 6, 4);
           const pa = g.getAttribute('position') as THREE.BufferAttribute;
@@ -398,9 +562,20 @@ export class Landmarks {
         uniform float uPx;
         uniform float uGain;
         uniform float uViewH;
+        uniform vec4 uWheel;
         varying vec3 vCol;
         void main() {
-          vec4 mv = modelViewMatrix * vec4( position, 1.0 );
+          vec3 p = position;
+          float kind = aKind;
+          if ( aKind > 4.5 ) {
+            // Ferris wheel bulbs: turn about the axle (X) with the rims; gondola lamps hang below it
+            vec2 d = p.yz - uWheel.xy;
+            p.y = uWheel.x + d.x * uWheel.z - d.y * uWheel.w;
+            p.z = uWheel.y + d.x * uWheel.w + d.y * uWheel.z;
+            if ( aKind > 5.5 ) p.y -= 0.5;
+            kind = 0.0;
+          }
+          vec4 mv = modelViewMatrix * vec4( p, 1.0 );
           gl_Position = projectionMatrix * mv;
           float dist = max( 1.0, - mv.z );
           // projected size of the glow sprite, at least ~1.6 px (distant lamps stay visible points)
@@ -408,17 +583,17 @@ export class Landmarks {
           gl_PointSize = clamp( px, 1.6 * uPx, 48.0 * uPx );
           px /= uPx;
           float k = 1.0;
-          if ( aKind > 0.5 && aKind < 1.5 ) {
+          if ( kind > 0.5 && kind < 1.5 ) {
             // synchronised W-rot obstruction lights: 1 s on, 0.5 off, 1 on, 1.5 off
             float ph = mod( uTime, 4.0 );
             k = ( ph < 1.0 || ( ph > 1.5 && ph < 2.5 ) ) ? 1.0 : 0.04;
-          } else if ( aKind > 1.5 && aKind < 2.5 || aKind > 3.5 ) {
+          } else if ( kind > 1.5 && kind < 2.5 || kind > 3.5 ) {
             k = 0.65 + 0.35 * sin( uTime * ( 1.3 + aSeed * 2.0 ) + aSeed * 30.0 );
           }
           // small sprites carry the energy of the whole lamp: brighter when sub-pixel
           float area = max( 1.0, 2.6 / max( px, 0.3 ) );
           // kind 4 = broad dim haze glow over a lit area (no hot core)
-          float gain = aKind > 3.5 ? 0.12 : ( aKind > 0.5 && aKind < 1.5 || aKind > 2.5 ? 3.0 : 1.6 );
+          float gain = kind > 3.5 ? 0.12 : ( kind > 0.5 && kind < 1.5 || kind > 2.5 ? 3.0 : 1.6 );
           vCol = color * k * uGain * min( area, 4.0 ) * gain;
         }`,
       fragmentShader: /* glsl */ `
@@ -455,5 +630,51 @@ export class Landmarks {
       this.rotors.setMatrixAt(i, this.m);
     }
     this.rotors.instanceMatrix.needsUpdate = true;
+    this.poseWheel(t);
   }
+}
+
+/**
+ * One open gondola (world/ferris.ts GONDOLA frame: axle at the origin, hanging down): a yoke to a
+ * peaked canopy, four posts, a tub with a door gap on the boarding (-X) side, two facing benches.
+ * White parts take the per-instance tint.
+ */
+function gondolaGeometry(low: boolean): THREE.BufferGeometry {
+  const G = GONDOLA;
+  const b = new GeoBuilder();
+  const body = lin('#ffffff');
+  const steel = lin('#b4b8be');
+  const wood = lin('#8a7a66');
+  const hw = G.w / 2,
+    hd = G.d / 2;
+  const fy = G.floorY,
+    wt = fy + G.wallH,
+    ry = G.roofY;
+  // yoke from the axle down to the canopy
+  for (const sx of [-0.5, 0.5]) b.box(0.06, -ry, 0.06, sx, ry / 2, 0, steel);
+  // canopy: flat roof + a low four-sided peak
+  b.box(G.w + 0.2, 0.07, G.d + 0.2, 0, ry + 0.035, 0, body);
+  if (!low) {
+    const cone = new THREE.ConeGeometry(Math.SQRT1_2, 0.3, 4);
+    cone.rotateY(Math.PI / 4);
+    b.add(cone, new THREE.Matrix4().compose(new THREE.Vector3(0, ry + 0.22, 0), new THREE.Quaternion(), new THREE.Vector3(G.w + 0.2, 1, G.d + 0.2)), body);
+  }
+  // corner posts
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) b.box(0.05, ry - wt, 0.05, sx * (hw - 0.03), (ry + wt) / 2, sz * (hd - 0.03), steel);
+  // floor + tub walls (thin boxes: seen from inside too); the -X wall has the door gap
+  b.box(G.w, 0.06, G.d, 0, fy - 0.03, 0, wood);
+  for (const sz of [-1, 1]) b.box(G.w, G.wallH, 0.04, 0, fy + G.wallH / 2, sz * (hd - 0.02), body);
+  b.box(0.04, G.wallH, G.d, hw - 0.02, fy + G.wallH / 2, 0, body);
+  const seg = hd - G.door;
+  for (const sz of [-1, 1]) b.box(0.04, G.wallH, seg, -(hw - 0.02), fy + G.wallH / 2, sz * (G.door + seg / 2), body);
+  // rim cap on the tub
+  for (const sz of [-1, 1]) b.box(G.w + 0.04, 0.04, 0.07, 0, wt, sz * (hd - 0.02), steel);
+  // benches facing each other (the rider sits on the +Z one, facing the stage)
+  for (const sz of [-1, 1]) {
+    b.box(G.w - 0.1, 0.07, 0.42, 0, fy + G.seatH - 0.035, sz * (hd - 0.27), wood);
+    // low backrests (top level with the tub wall): the rider looks over the opposite one
+    b.box(G.w - 0.1, 0.3, 0.05, 0, fy + G.seatH + 0.19, sz * (hd - 0.07), wood);
+    if (!low) b.box(G.w - 0.1, G.seatH - 0.07, 0.04, 0, fy + (G.seatH - 0.07) / 2, sz * (hd - 0.47), wood);
+  }
+  return b.build();
 }

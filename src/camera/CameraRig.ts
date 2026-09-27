@@ -23,6 +23,8 @@ const GLIDE = new Set<CameraMode>(['first', 'third', 'free']);
  * 1 -> 27.9 %, 0.7 -> 31.8 %, 0.6 -> 32.9 %, 0.5 -> 34.0 %, 0.4 -> 34.3 % (colour starts to drop).
  */
 const SHOWCAM_EXPOSURE = 0.5;
+/** shortest third-person arm (m) in a Ferris wheel gondola: the lens stays outside the car */
+const RIDE_ARM = 2.4;
 
 /**
  * All camera modes:
@@ -305,9 +307,10 @@ export class CameraRig implements System {
     const armPitch = pitch + (Math.min(pitch, -0.08) - pitch) * lift;
     const rx = Math.cos(yaw),
       rz = -Math.sin(yaw);
-    // follow the head with a little lag (vertical lag softens jumps)
+    // follow the head with a little lag (vertical lag softens jumps); seated in a Ferris wheel gondola
+    // the head is ~0.45 m lower
     const tx = p.x + rx * pl.eyeOffset.x * 0.5,
-      ty = p.y + 1.62 + pl.jumpY * 0.6,
+      ty = p.y + 1.62 - 0.45 * pl.seated + pl.jumpY * 0.6,
       tz = p.z + rz * pl.eyeOffset.x * 0.5;
     this.pivot.x += (tx - this.pivot.x) * damp(16, dt);
     this.pivot.z += (tz - this.pivot.z) * damp(16, dt);
@@ -322,11 +325,14 @@ export class CameraRig implements System {
     const side = 0.34 * (1 - 0.35 * lift),
       up = 0.28 + 1.0 * lift;
     const L = this.armLength * (1 + 0.1 * lift);
-    // desired camera position and spring-arm collision against the 2D colliders
+    // desired camera position and spring-arm collision against the 2D colliders. In a Ferris wheel
+    // gondola the arm swings freely above the grounds (the platform rails would pinch it at every
+    // height) and stays long enough to keep the lens outside the car.
     const dx = -fx * L + rx * side,
       dz = -fz * L + rz * side;
-    const free = this.armFree(this.pivot.x, this.pivot.z, this.pivot.x + dx, this.pivot.z + dz, this.pivot.y - fy * L + up);
-    const want = Math.max(0.35, L * free - (free < 1 ? 0.25 : 0));
+    const mounted = pl.mounted;
+    const free = mounted ? 1 : this.armFree(this.pivot.x, this.pivot.z, this.pivot.x + dx, this.pivot.z + dz, this.pivot.y - fy * L + up);
+    const want = mounted ? Math.max(RIDE_ARM, L) : Math.max(0.35, L * free - (free < 1 ? 0.25 : 0));
     this.arm += (want - this.arm) * damp(want < this.arm ? 30 : 3, dt);
     const k = this.arm / L;
     const x = this.pivot.x + dx * k;
@@ -360,6 +366,8 @@ export class CameraRig implements System {
     const onDeck = this.player.onPlatform;
     for (const c of this.app.colliders) {
       if (onDeck && !(c.tag && c.tag.startsWith('deck'))) continue;
+      // the Ferris wheel's low walkway / platform rails never block a lens at head height
+      if (c.tag === 'wheel') continue;
       if (c.kind === 'circle') tMin = Math.min(tMin, segCircle(ax, az, dx, dz, c.x, c.z, c.r + m));
       else tMin = Math.min(tMin, segBox(ax, az, dx, dz, c.minX - m, c.maxX + m, c.minZ - m, c.maxZ + m));
     }

@@ -421,8 +421,11 @@ export class Avatar {
   update(ctx: FrameContext, pl: PlayerController, pos: THREE.Vector3): void {
     const dt = ctx.dt;
     const v = pl.speed;
-    // facing follows the walking direction; standing still the camera can orbit freely
-    if (v > 0.25) this.bodyYaw = approachAngle(this.bodyYaw, Math.atan2(-pl.velocity.x, -pl.velocity.z), damp(7, dt));
+    // facing follows the walking direction; standing still the camera can orbit freely; sitting down in
+    // a Ferris wheel gondola the body turns to the bench's facing
+    const seat = pl.seated;
+    if (seat > 0.01) this.bodyYaw = approachAngle(this.bodyYaw, pl.ride.seatYaw, damp(6, dt));
+    else if (v > 0.25) this.bodyYaw = approachAngle(this.bodyYaw, Math.atan2(-pl.velocity.x, -pl.velocity.z), damp(7, dt));
     const lookDelta = wrapAngle(pl.yaw - this.bodyYaw);
     // head tracks the look direction, easing back to neutral when looking from the front
     const track = 1 - smoothstep(1.6, 2.3, Math.abs(lookDelta));
@@ -476,6 +479,10 @@ export class Avatar {
     const air = pl.grounded ? 0 : clamp(pl.jumpY / 0.3, 0, 1);
 
     this.hips.position.y = 0.95 + wHipsY * w - 0.053 * bounce * i - 0.04 * air;
+    // seated (gondola bench 0.45 m): hips down onto the seat, thighs forward, shins down; the upper
+    // body keeps bouncing and pumping on the kick
+    const sitHips = 0.5 + 0.012 * bounce;
+    this.hips.position.y += (sitHips - this.hips.position.y) * seat;
     this.hips.position.x = 0.012 * s * w + (0.02 * sway + 0.014) * i; // weight over the right leg
     this.hips.rotation.set(0, 0.1 * c * w, (0.035 * sway + 0.028) * i);
     this.spine.rotation.set(wLean * w + 0.05 * bounce * i, -0.14 * c * w + clamp(lookDelta, -1, 1) * 0.15 * track, -0.03 * sway * i);
@@ -487,6 +494,14 @@ export class Avatar {
     this.hipR.rotation.set(wThR * w + thI * i, 0, 0.03);
     this.kneeL.rotation.x = wKnL * w + (knI - 0.14) * i; // relaxed left knee
     this.kneeR.rotation.x = wKnR * w + knI * i;
+    if (seat > 0) {
+      this.hipL.rotation.x = lerp(this.hipL.rotation.x, 1.5, seat);
+      this.hipR.rotation.x = lerp(this.hipR.rotation.x, 1.46, seat);
+      this.hipL.rotation.z = lerp(this.hipL.rotation.z, -0.1, seat);
+      this.hipR.rotation.z = lerp(this.hipR.rotation.z, 0.1, seat);
+      this.kneeL.rotation.x = lerp(this.kneeL.rotation.x, -1.45, seat);
+      this.kneeR.rotation.x = lerp(this.kneeR.rotation.x, -1.5, seat);
+    }
     this.ankleL.rotation.x = -(this.hipL.rotation.x + this.kneeL.rotation.x) * 0.8;
     this.ankleR.rotation.x = -(this.hipR.rotation.x + this.kneeR.rotation.x) * 0.8;
 

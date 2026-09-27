@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Rng } from '../core/rng';
 import type { Collider2D } from '../core/types';
+import { WHEEL_GATE } from './ferris';
 import { GeoBuilder, lin } from './geom';
 import { ARM, BACKSTAGE_Z, CAM_PEN, DECKING, FOH_PEN, PILLAR, PILLARS, PREMIUM, TERRACE, terrainHeight, WATER_Y } from './site';
 import { BARRIER_SOLID_UV, barrierTexture, canvasTexture, makeCanvas } from './tex';
@@ -134,7 +135,9 @@ export function buildStructures(scene: THREE.Object3D, lowDetail: boolean): Stru
     }
     // lake front: bare mesh so the water stays visible
     herasBare.push(...panelsAlong([[-120, 173.5], [DECKING.x0, 173.5]], 3.5));
-    herasBare.push(...panelsAlong([[DECKING.x1 + 4, 173.5], [125, 173.5]], 3.5));
+    // … with the gate to the Ferris wheel walkway (world/ferris.ts; its arch is built with the wheel)
+    herasBare.push(...panelsAlong([[DECKING.x1 + 4, 173.5], [WHEEL_GATE.x0, 173.5]], 3.5));
+    herasBare.push(...panelsAlong([[WHEEL_GATE.x1, 173.5], [125, 173.5]], 3.5));
   }
   const herasFrame = herasFrameGeometry();
   addInst(herasFrame, metal, [...herasScrim, ...herasBare], 'heras-frames');
