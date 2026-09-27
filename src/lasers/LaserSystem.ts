@@ -50,7 +50,7 @@ type Preset =
   | 'fan' | 'sheet' | 'tunnel' | 'sweep' | 'crossfire' | 'sky' | 'wave' | 'cone' | 'grid' | 'burst' | 'chevron'
   | 'zigzag' | 'x' | 'rings' | 'dashes' | 'trees';
 
-const G: Record<EmitterGroup, number> = { deck: 1, tower: 2, high: 4, corner: 8, pillar: 16, base: 32, turret: 64, dragon: 128, piano: 256, rampart: 512 };
+const G: Record<EmitterGroup, number> = { deck: 1, tower: 2, high: 4, corner: 8, pillar: 16, base: 32, turret: 64, dragon: 128, piano: 256, rampart: 512, floor: 1024 };
 /** (the side-section wall-walk units, round 9, are not part of it: only their own tokens select them) */
 const STAGE_MASK = G.deck | G.tower | G.high | G.corner | G.dragon;
 /** |x| (m) from which a `sky` fan leans by the full `splay` (round 9: the white fans of v802.8-803.4) */
@@ -78,6 +78,12 @@ const AUD_XMAX = 125;
 /** default visible reach (m) of fans / sweeps / bursts from the side sections and arm turrets: the side
  *  fans of the video stay a short bright spray at the source instead of crossing the whole sky */
 const SIDE_REACH = 70;
+/** `cloud` (round 11): a beam below the deck lights it less the further below it ends (e-folding, m); only the first
+ *  CLOUD_MAX_LEN m of a beam count (a flat unlimited beam would light the clouds hundreds of metres out) */
+const CLOUD_GAP = 12;
+/** `steps` under the photosensitivity option: the step clock advances in CALM_STEP s ticks (at most ~2.9 Hz) */
+const CALM_STEP = 0.34;
+const CLOUD_MAX_LEN = 120;
 /** default length of a `rings` cone (m) */
 const RING_REACH = 42;
 /** presets whose side-projector beams get SIDE_REACH by default */
@@ -232,6 +238,10 @@ const TOKENS: Record<string, [number, number]> = {
   side_rampart: [G.rampart, 0],
   side_sections: [G.rampart, 0],
   front_line: [G.rampart | G.tower, 0],
+  // round 11: the side-section floor units (|x| 40-85, Y 2) and, with the deck units, the whole U front at field level
+  // (the flat fans low on the outer side sections v317.3-320.8, the sunburst fans across the front v810.24-810.9)
+  side_floor: [G.floor, 0],
+  front_floor: [G.floor | G.deck, 0],
 };
 
 /** crude solid volumes of the stage set (design-bible §5): beams from the field stop on them */
@@ -324,6 +334,25 @@ class LookSlot {
   splay = 0;
   /** `front_line` without another tower token: only the castle units on the front line (LaserRig `front`) */
   frontOnly = false;
+  /** cone (round 11): angular radius (rad) of the aperture halo seen from inside the cone (0 = the fixed tune.glowSize sprite) + its level */
+  halo = 0;
+  haloK = 1;
+  /** scanned figures (trees, zigzag; round 11): level multiplier past intensity 1, line width multiplier, lit fill of a tent */
+  gain = 1;
+  widthMul = 1;
+  fill = 0;
+  /** sheet (round 11): wave amplitude multiplier, thin-band thickness (m, 0 = off), extent near / far (m), patches (0-1) */
+  wave = 1;
+  band = 0;
+  near = 0;
+  far = 0;
+  patches = 0;
+  /** round 11: height (m) of the low cloud deck the look lights (0 = off), its level and the lit patch size (m) */
+  cloud = 0;
+  cloudK = 1;
+  cloudSize = 18;
+  /** zigzag (round 11): the lit wedge over each V drawn as a dense fan of scan lines instead of a smooth glow */
+  lines = false;
 }
 
 export class LaserSystem implements System {
@@ -346,6 +375,8 @@ export class LaserSystem implements System {
   private flare = new Float32Array(0); // per emitter: r, g, b, eye
   /** per emitter: haze glow (r, g, b) of the beams heading towards the camera (looking into a fan / cone) */
   private glowA = new Float32Array(0);
+  /** per emitter: angular radius (rad) of that glow when a cone asks for a `halo` (0 = the fixed tune.glowSize sprite) */
+  private haloA = new Float32Array(0);
   private readonly tmpColor = new THREE.Color();
   private readonly tmpColor2 = new THREE.Color();
   private readonly v2 = new THREE.Vector2();
@@ -444,6 +475,8 @@ export class LaserSystem implements System {
    *   webGlow         level of the lit smoke wedge over each rising zigzag V (0 = none, the round-8 look)
    *   webFade         fraction of a zigzag line's length from which it fades out towards the top line (was 0.75)
    *   webEdge         level of a zigzag fan's two edge lines relative to its inner lines (1 = even)
+   *   haloGain        level of a cone's angular `halo` (round 11) on top of the cue's `haloK`
+   *   cloudGain       level of the lit cloud deck (`cloud`, round 11) on top of the cue's `cloudK`
    */
   readonly tune = {
     blueR: 0,
@@ -468,7 +501,16 @@ export class LaserSystem implements System {
     webGlow: 2,
     webFade: 0.45,
     webEdge: 2,
+    haloGain: 1,
+    cloudGain: 1,
   };
+  /** `steps` (round 11): merged params per cue (built once per show revision), the level dip at a calm step change */
+  private readonly stepCache = new Map<Cue, Record<string, any>[]>();
+  private stepRev = -1;
+  private stepDip = 1;
+  /** `cloud` deck height (m) of the look being generated (0 = off) + per-unit accumulators (2 lateral bins: w, x, z, r, g, b) */
+  private cloudH = 0;
+  private readonly cloudAcc = new Float32Array(12);
   /** half-width of the lit sea this frame (FOG_ZONE_X, wider on a dense bank with tune.seaBank) */
   private seaZoneX = FOG_ZONE_X;
   /** second scan colour (lights the crests) */
@@ -508,6 +550,7 @@ export class LaserSystem implements System {
     this.toCam = new Float32Array(n * 3);
     this.flare = new Float32Array(n * 4);
     this.glowA = new Float32Array(n * 3);
+    this.haloA = new Float32Array(n);
     this.gfx.buildHousings(this.rig.emitters);
     // chevron side bands: mean |x| of the deck units outside the dark centre pair, and their pitch
     const deck = this.rig.byGroup.deck;
@@ -582,6 +625,7 @@ export class LaserSystem implements System {
     }
     this.flare.fill(0);
     this.glowA.fill(0);
+    this.haloA.fill(0);
     this.lensE = -1;
     this.envR = this.envG = this.envB = this.envPow = 0;
     this.audienceWash = 0;
@@ -727,7 +771,11 @@ export class LaserSystem implements System {
     for (let i = 0; i < nE; i++) if (this.cur[i * 2] >= 0 || this.cur[i * 2 + 1] >= 0) active++;
     st.active = active;
     let sig = this.slotCount;
-    for (let si = 0; si < this.slotCount; si++) sig = sig * 31 + (this.slots[si].cue?.id ?? 0) + 1;
+    // (the preset joins the signature: a `steps` look changes its figure within one cue)
+    for (let si = 0; si < this.slotCount; si++) {
+      const pr = this.slots[si].preset;
+      sig = (sig * 31 + (this.slots[si].cue?.id ?? 0) + 1 + pr.charCodeAt(0) * 7919 + pr.length * 104729) % 2147483647;
+    }
     if (sig !== this.looksSig) {
       this.looksSig = sig;
       let names = '';
@@ -778,9 +826,20 @@ export class LaserSystem implements System {
       if (c.fx !== 'lowfog') continue;
       const d = typeof c.p.density === 'number' ? c.p.density : 0.6;
       // the fog needs a few seconds to flow off the deck and build a layer (v1460.5: the sea shows from
-      // ~v1466, not with the cue): 6 s build-up, 3 s release before the cue ends
-      const a = clamp01((ctx.showTime - c.t) / 6) * clamp01((c.t + c.dur - ctx.showTime) / 3);
-      low = Math.max(low, d * a);
+      // ~v1466, not with the cue): 6 s build-up, 3 s release before the cue ends. Round 11: the lowfog cue's
+      // `rise` (s) sets the build-up (0 = there at the cue, as FogSystem's prewarmed bank; the golden haze shots
+      // v1373.8-1380.1), and its `release` (s, FogSystem's own param: the bank thins out over it after the cue)
+      // makes the layer follow the bank out after the cue end instead of fading before it
+      const rise = num(c.p.rise, 6, 0, 30);
+      const tt = ctx.showTime;
+      const up = rise > 0 ? clamp01((tt - c.t) / rise) : tt >= c.t ? 1 : 0;
+      const rel = c.p.release;
+      let down: number;
+      if (typeof rel === 'number' && Number.isFinite(rel)) {
+        const x = clamp01((tt - c.t - c.dur) / Math.min(30, Math.max(0.1, rel)));
+        down = 1 - x * x * (3 - 2 * x);
+      } else down = clamp01((c.t + c.dur - tt) / 3);
+      low = Math.max(low, d * up * down);
     }
     this.lowHaze = low;
     u.uLowHaze.value = low * 0.9;
@@ -822,8 +881,46 @@ export class LaserSystem implements System {
   }
 
   // ------------------------------------------------------------------------------------ cue parsing
+  /**
+   * `steps` (round 11): a look that runs a sequence of figures — a list of `{at, ...params}` (at = s from the cue start,
+   * the params override the cue's own for that step), optionally repeated every `loop` s. The step active at t gives
+   * the params (before the first step: the cue's own). The merged params are built once per cue and show revision
+   * (no per-frame allocation). With the photosensitivity option the step clock is quantised to CALM_STEP s, so the
+   * figure changes at most ~3 Hz (the 4-6 Hz tents / bursts of v1056-1057.8 become a slower alternation) and every
+   * change dips to half over 0.12 s instead of switching hard (this.stepDip).
+   */
+  private cueParams(c: Cue, t: number): Record<string, any> {
+    this.stepDip = 1;
+    const st = c.p.steps;
+    if (!Array.isArray(st) || st.length === 0) return c.p;
+    if (this.app.show.revision !== this.stepRev) {
+      this.stepCache.clear();
+      this.stepRev = this.app.show.revision;
+    }
+    let merged = this.stepCache.get(c);
+    if (!merged) {
+      const base = c.p;
+      merged = st.map((step: unknown) => {
+        if (!step || typeof step !== 'object' || Array.isArray(step)) return base;
+        const m: Record<string, any> = { ...base, ...(step as Record<string, unknown>) };
+        delete m.steps;
+        delete m.at;
+        return m;
+      });
+      this.stepCache.set(c, merged);
+    }
+    const rel = t - c.t;
+    const loop = num(c.p.loop, 0, 0, 120);
+    // (calm: the absolute step clock is quantised first, so the loop seam cannot make a shorter interval)
+    const relQ = this.calm ? Math.floor(rel / CALM_STEP) * CALM_STEP : rel;
+    const k = stepIndex(st, relQ, loop);
+    // calm: a change of figure at a tick dips to half over 0.12 s (a tick without a change does not dip)
+    if (this.calm && rel >= CALM_STEP && k !== stepIndex(st, relQ - CALM_STEP, loop)) this.stepDip = 0.5 + 0.5 * clamp01((rel - relQ) / 0.12);
+    return k < 0 ? c.p : merged[k];
+  }
+
   private resolveSlot(s: LookSlot, c: Cue, t: number): boolean {
-    const p = c.p;
+    const p = this.cueParams(c, t);
     s.cue = c;
     s.hit = c.fx === 'hit';
     s.layer = c.fx === 'look' && p.preset === 'sheet' ? 1 : 0;
@@ -887,9 +984,30 @@ export class LaserSystem implements System {
       s.parallel = p.parallel === true;
       s.distance = num(p.distance, pr === 'x' ? 15 : pr === 'dashes' ? 14 : 70, pr === 'chevron' ? 20 : 2, 200);
       s.splay = num(p.splay, 0, -80, 80) * DEG;
+      s.halo = num(p.halo, 0, 0, 40) * DEG;
+      s.haloK = num(p.haloK, 1, 0, 8);
+      s.gain = num(p.gain, 1, 0.1, 4);
+      s.widthMul = num(p.width, 1, 0.25, 6);
+      // (trees: the lit tent, default none; zigzag: the lit wedge over each V, default the engine level tune.webGlow)
+      s.fill = num(p.fill, pr === 'zigzag' ? 1 : 0, 0, 4);
+      s.wave = num(p.wave, 1, 0, 3);
+      s.band = num(p.band, 0, 0, 20);
+      s.patches = num(p.patches, 0, 0, 1);
+      s.lines = p.lines === true;
+      s.cloud = num(p.cloud, 0, 0, 200);
+      s.cloudK = num(p.cloudK, 1, 0, 8);
+      s.cloudSize = num(p.cloudSize, 18, 4, 80);
+      const ex = p.extent;
+      s.near = 0;
+      s.far = 0;
+      if (typeof ex === 'number' && Number.isFinite(ex)) s.far = Math.min(400, Math.max(5, ex));
+      else if (Array.isArray(ex) && ex.length === 2 && Number.isFinite(ex[0]) && Number.isFinite(ex[1])) {
+        s.near = Math.min(390, Math.max(0, ex[0] as number));
+        s.far = Math.min(400, Math.max(s.near + 5, ex[1] as number));
+      }
       const a = t - c.t;
       const b = c.t + c.dur - t;
-      s.env = this.calm ? clamp01(a / 0.12) * clamp01(b / 0.12) : clamp01(a / 0.03) * clamp01(b / 0.05);
+      s.env = (this.calm ? clamp01(a / 0.12) * clamp01(b / 0.12) : clamp01(a / 0.03) * clamp01(b / 0.05)) * this.stepDip;
       if (s.env <= 0) return false;
     }
     // origin + target tokens
@@ -1028,6 +1146,9 @@ export class LaserSystem implements System {
       this.reachNow =
         s.reach > 0 ? s.reach : (e.group === 'corner' || e.group === 'turret') && SIDE_REACH_PRESETS.has(s.preset) ? SIDE_REACH : 0;
       this.reachFade = 0.35;
+      // `cloud` (round 11): the beams of this unit light the low cloud deck (collected by beam(), drawn per unit)
+      this.cloudH = s.cloud;
+      if (s.cloud > 0) this.cloudAcc.fill(0);
       switch (s.preset) {
         case 'fan':
           this.genFan(s, e, I);
@@ -1079,8 +1200,56 @@ export class LaserSystem implements System {
           this.genTrees(s, e, I);
           break;
       }
+      if (s.cloud > 0) this.flushCloud(s, e);
     }
     this.reachNow = 0;
+    this.cloudH = 0;
+  }
+
+  /**
+   * `cloud` (round 11, v206.7-218.5: green / cyan smoke clouds lit over the set and the field while the sheets and
+   * fans skim below them): where a beam of the unit crosses the cloud deck (height s.cloud) it lights the cloud there;
+   * a beam that stays below it lights the cloud above where it ends, less the further below (e-folding CLOUD_GAP m).
+   * Collected per unit in two lateral bins by beam(), drawn as up to two soft smoke sprites (kind 6).
+   */
+  private cloudAt(e: Emitter, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, len: number, col: THREE.Color, power: number): void {
+    const H = this.cloudH;
+    const L = Math.min(len, CLOUD_MAX_LEN);
+    const ey = oy + dy * L;
+    let t: number;
+    let w: number;
+    if (oy >= H) return;
+    if (ey >= H) {
+      t = (H - oy) / Math.max(1e-4, dy);
+      w = 1;
+    } else {
+      t = L;
+      w = Math.exp(-(H - ey) / CLOUD_GAP);
+    }
+    const pw = w * power;
+    if (pw <= 1e-5) return;
+    const b = (dx * e.lat.x + dz * e.lat.z < 0 ? 0 : 1) * 6;
+    const a = this.cloudAcc;
+    a[b] += pw;
+    a[b + 1] += (ox + dx * t) * pw;
+    a[b + 2] += (oz + dz * t) * pw;
+    a[b + 3] += col.r * pw;
+    a[b + 4] += col.g * pw;
+    a[b + 5] += col.b * pw;
+  }
+
+  private flushCloud(s: LookSlot, e: Emitter): void {
+    if (this.recording) return;
+    const a = this.cloudAcc;
+    for (let b = 0; b < 12; b += 6) {
+      const w = a[b];
+      if (w < 1e-3) continue;
+      const k = s.cloudK * this.tune.cloudGain;
+      // (the unit's position keeps the two bins of a narrow fan apart by at least a few metres)
+      const x = a[b + 1] / w + (b ? 1 : -1) * 0.5 * e.lat.x;
+      const z = a[b + 2] / w + (b ? 1 : -1) * 0.5 * e.lat.z;
+      this.gfx.pushSprite(x, this.cloudH, z, s.cloudSize, a[b + 3] * k, a[b + 4] * k, a[b + 5] * k, 6);
+    }
   }
 
   /** per-beam power: a projector splits its output over the beams it draws */
@@ -1328,7 +1497,10 @@ export class LaserSystem implements System {
       const ch = Math.cos(h);
       if (cc > ch && this.tune.glowK > 0 && !this.recording) {
         const x = (cc - ch) / Math.max(1e-4, 1 - ch);
-        const gl = I * this.tune.glowK * x * x;
+        // (`halo`, round 11: the glow is sized in angle — the lantern starburst's violet halo covers ~0.3 of the
+        // frame from a drone ~90 m away, v1383-1395 — and `haloK` sets its level)
+        const gl = I * this.tune.glowK * x * x * (s.halo > 0 ? s.haloK : 1);
+        if (s.halo > this.haloA[e.index]) this.haloA[e.index] = s.halo;
         const c2 = s.hasColor2 ? s.color2 : s.color;
         this.glowA[i3] += (s.color.r + c2.r) * 0.5 * gl;
         this.glowA[i3 + 1] += (s.color.g + c2.g) * 0.5 * gl;
@@ -1540,9 +1712,9 @@ export class LaserSystem implements System {
     const sl = Math.sin(lean);
     const spreadT = s.spread * (0.8 + 0.2 * Math.sin(ph + alt * 1.3));
     const top = (s.heightGiven ? s.height : 11) + this.figureLift(e);
-    const pb = I * this.perBeam(n) * 0.9 * this.tune.scanK;
+    const pb = I * this.perBeam(n) * 0.9 * this.tune.scanK * s.gain;
     const r0 = this.reachNow;
-    this.widthK = this.tune.scanW;
+    this.widthK = this.tune.scanW * s.widthMul;
     for (let i = 0; i < n; i++) {
       const u = n > 1 ? i / (n - 1) : 0.5;
       const a = (u - 0.5) * spreadT;
@@ -1569,7 +1741,7 @@ export class LaserSystem implements System {
     // the scan lights the smoke in its plane: a soft luminous wedge over the rising V (sprite kind 3). The deck
     // units stand 6 m apart, so their wedges overlap into one band: they glow at pitch / 15 m (v838.2 shows
     // distinct Vs), the front line (12-18 m pitch) at full level
-    const gk = this.tune.webGlow * (e.group === 'deck' ? Math.min(1, this.deckPitch / 15) : 1);
+    const gk = this.tune.webGlow * s.fill * (e.group === 'deck' ? Math.min(1, this.deckPitch / 15) : 1);
     if (gk > 0 && sl > 0.3 && !this.recording) {
       const H = top > e.pos.y + 0.3 ? top - e.pos.y : 12 * sl;
       // (half aperture capped at 74°: the sprite kind carries tan / 4 < 1)
@@ -1579,7 +1751,7 @@ export class LaserSystem implements System {
       const c = s.color;
       this.gfx.pushSprite(
         e.pos.x + cl * e.fwd.x * k, e.pos.y + sl * k, e.pos.z + cl * e.fwd.z * k,
-        0.5 * H * Math.sqrt(1 + 4 * tH * tH), c.r * P, c.g * P, c.b * P, 3 + tH / 4,
+        0.5 * H * Math.sqrt(1 + 4 * tH * tH), c.r * P, c.g * P, c.b * P, (s.lines ? 7 : 3) + tH / 4,
       );
     }
   }
@@ -1609,10 +1781,10 @@ export class LaserSystem implements System {
     const alt = e.order % 2 ? 1 : -1;
     const spreadT = Math.min(170 * DEG, s.spread * (0.86 + 0.14 * Math.sin(ph + alt * 1.3)));
     // (a scanned tent is a dense figure: the film's trees read nearly white-hot at their core)
-    const pb = I * this.perBeam(n) * 1.4 * this.tune.scanK;
+    const pb = I * this.perBeam(n) * 1.4 * this.tune.scanK * s.gain;
     const ax = e.pos.x;
     const az = e.pos.z;
-    this.widthK = this.tune.scanW;
+    this.widthK = this.tune.scanW * s.widthMul;
     for (let i = 0; i < n; i++) {
       const u = n > 1 ? i / (n - 1) : 0.5;
       const a = (u - 0.5) * spreadT;
@@ -1623,6 +1795,15 @@ export class LaserSystem implements System {
     }
     this.widthK = 1;
     if (!this.recording) this.gfx.pushSprite(ax, top, az, 0.7, s.color.r * pb * 0.5, s.color.g * pb * 0.5, s.color.b * pb * 0.5, 1);
+    // `fill` (round 11): the scan lights the smoke inside the tent — seen from the terrace (~170 m) the filmed tents
+    // (v1052-1053.9, v1056, v1061.3-1063.2) are luminous filled Λs with brighter legs, not a few thin lines. A soft Λ
+    // sprite (kind 5 + tan(half aperture) / 4) standing on the unit, apex at the top
+    if (s.fill > 0 && !this.recording) {
+      const tH = Math.tan(Math.min(0.5 * spreadT, 1.3));
+      const P = pb * Math.sqrt(n) * s.fill;
+      const c = s.color;
+      this.gfx.pushSprite(ax, e.pos.y + 0.5 * h, az, 0.5 * h * Math.sqrt(1 + 4 * tH * tH), c.r * P, c.g * P, c.b * P, 5 + tH / 4);
+    }
     // the unit on the deck is the projector: its aperture glows faintly
     this.glow(e, s.color, I * 0.2);
   }
@@ -1792,9 +1973,16 @@ export class LaserSystem implements System {
     // through the requested height after 50–60 m and cutting into the ground in front of the camera
     const reach = e.pos.y - h > 1.5 ? (stage ? 150 : 110) : stage ? 62 : 48;
     let pitch = s.tiltGiven ? s.tilt : Math.atan2(h - e.pos.y, reach);
-    const yaw = e.group === 'deck' ? e.side * 0.1 * (0.3 + Math.abs(e.pos.x) / 50) : 0;
+    let yaw = e.group === 'deck' ? e.side * 0.1 * (0.3 + Math.abs(e.pos.x) / 50) : 0;
+    // `aim` (round 11): the plane runs from the aperture through that world point (laterally level) — e.g. the
+    // eye-level line of v1470-1471.3: a sheet through the terrace lens, seen edge-on
+    if (this.aimYP(s, e)) {
+      yaw = this.aimYaw;
+      pitch = this.aimPitch;
+    }
     const half = Math.min(Math.PI * 0.49, s.spread * 0.5);
-    const range = stage ? 250 : 150;
+    // `extent` (round 11): the sheet only exists out to `far` m (and from `near` m) along its rays
+    const range = s.far > 0 ? s.far : stage ? 250 : 150;
     // Tribe mode: the whole fan footprint (field, banks, crest) stays >= 4.5 m above the local head plane
     if (tr) pitch = Math.max(pitch, this.sheetClearancePitch(e, yaw, half, range));
     this.dirYP(e, yaw, pitch);
@@ -1820,7 +2008,7 @@ export class LaserSystem implements System {
       ny = -ny;
       nz = -nz;
     }
-    const amp = 0.011 + 0.004 * Math.sin(ph * 0.25);
+    const amp = (0.011 + 0.004 * Math.sin(ph * 0.25)) * s.wave;
     const seed = rand01(hash32(e.index * 977 + (s.cue?.id ?? 0)));
     const ph1 = ph + seed * TAU;
     const ph2 = ph * 0.73 + seed * 3.1;
@@ -1831,7 +2019,9 @@ export class LaserSystem implements System {
     // also one rising to 14 m over the field (v1505.8) — keeps its crisp line up to ~12 m under it
     const up = e.pos.y > 8 ? clamp01((fy - 0.03) / 0.08) : 0;
     const ceilK = 1 + (this.tune.ceilRoofK - 1) * up;
-    if (!this.recording) this.gfx.pushSurface(e.pos.x, e.pos.y, e.pos.z, range, fx, fy, fz, half, nx, ny, nz, SURF_SHEET, c.r * P, c.g * P, c.b * P, amp, ph1, ph2, 0, seed * TAU, 0, 1, 0, 0, 0, 0, 0, ceilK);
+    if (!this.recording && this.gfx.pushSurface(e.pos.x, e.pos.y, e.pos.z, range, fx, fy, fz, half, nx, ny, nz, SURF_SHEET, c.r * P, c.g * P, c.b * P, amp, ph1, ph2, 0, seed * TAU, 0, 1, 0, 0, 0, 0, 0, ceilK))
+      // (round 11: the sheet's own extras ride in the cone-figure slots — near edge, thin band, patches)
+      this.gfx.setSheetExtras(s.near, s.band, s.patches);
     // a sheet skimming a low fog lights the fog tops ("laser sea"): collected here, drawn once (pushSea)
     if (!this.recording && !tr && this.lowHaze > 0.05) {
       const hField = e.pos.y + Math.tan(pitch) * 40;
@@ -2174,6 +2364,7 @@ export class LaserSystem implements System {
         reachK = 1 - x * x * (3 - 2 * x);
       }
     }
+    if (this.cloudH > 0 && !this.recording) this.cloudAt(e, ox, oy, oz, dx, dy, dz, len, col, power);
     const r = col.r * power;
     const g = col.g * power;
     const b = col.b * power;
@@ -2245,7 +2436,15 @@ export class LaserSystem implements System {
       const gb = this.glowA[i3 + 2];
       if (gr + gg + gb > 0.01) {
         const k = this.tune.glowK;
-        this.gfx.pushSprite(x, e.pos.y, z, this.tune.glowSize, gr * k, gg * k, gb * k, 1);
+        const ha = this.haloA[i];
+        if (ha > 0) {
+          // `halo` (round 11): a soft disc of that angular radius from the camera (sprite kind 4, pulled towards the
+          // camera by a fifth of its distance and shrunk to keep its angle); the level spreads over the larger disc
+          const d = Math.max(1, Math.hypot(this.camPos.x - x, this.camPos.y - e.pos.y, this.camPos.z - z));
+          const S = Math.max(this.tune.glowSize, d * Math.tan(ha));
+          const kk = k * Math.sqrt(this.tune.glowSize / S) * this.tune.haloGain;
+          this.gfx.pushSprite(x, e.pos.y, z, S, gr * kk, gg * kk, gb * kk, 4);
+        } else this.gfx.pushSprite(x, e.pos.y, z, this.tune.glowSize, gr * k, gg * k, gb * k, 1);
       }
       // a beam (nearly) straight into the lens: veiling glare over a large part of the frame, sized in
       // angle (not metres) so a drone 400 m out is flooded as much as a camera in the pit. The `lens`
@@ -2284,6 +2483,19 @@ export class LaserSystem implements System {
     this.app?.scene.remove(this.gfx.group);
     this.gfx.dispose();
   }
+}
+
+/** `steps`: index of the step active at `rel` s into the cue (looped every `loop` s when > 0.05; -1 = before the first) */
+function stepIndex(st: readonly unknown[], rel: number, loop: number): number {
+  let r = rel;
+  if (loop > 0.05 && r > 0) r -= Math.floor(r / loop) * loop;
+  let k = -1;
+  for (let i = 0; i < st.length; i++) {
+    const s = st[i];
+    const at = s && typeof s === 'object' ? (s as { at?: unknown }).at : undefined;
+    if ((typeof at === 'number' && Number.isFinite(at) ? at : 0) <= r + 1e-6) k = i;
+  }
+  return k;
 }
 
 /**

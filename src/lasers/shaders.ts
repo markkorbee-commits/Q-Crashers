@@ -242,6 +242,9 @@ varying float vLift;
 varying vec3 vColor2;
 varying vec2 vRing;
 varying float vCeilK;
+// sheet extras (round 11): near edge (m), thin band (m), patches (0-1)
+varying vec3 vSheet;
+uniform float uPixAng;
 // the lit low-fog layer on the side banks (a dense bank floods the bowl): x = amount (0 = flat at the fog top),
 // y = bank toe |x| (m), z = slope, w = crest height (terrain-layout.json sideBanks, Z -20..105, ramp to 115)
 uniform vec4 uBank;
@@ -282,6 +285,15 @@ void main() {
   vNormal = normalize(cross(d, d1 - d0));
   vec3 P = sA.xyz + d * r;
   if (sC.w > 1.5 && uBank.x > 0.0) P.y += uBank.x * bankY(P);
+  // a thin sheet (band param) seen edge-on from inside its plane projects to a line of zero area: vertices near the
+  // camera's plane are pushed off it by ~1.5 px, alternately to either side, so the eye-level line keeps its width
+  if (sC.w < 0.5 && sG.y > 0.0) {
+    vec3 Np = normalize(sC.xyz);
+    float need = length(cameraPosition - P) * uPixAng * 1.5;
+    float pd = abs(dot(cameraPosition - P, Np));
+    float alt = mod(float(gl_VertexID), 2.0) < 0.5 ? 1.0 : -1.0;
+    P += Np * alt * need * (1.0 - smoothstep(need, 2.0 * need, pd));
+  }
   vWorld = P;
   vDir = d;
   vColor = sD.rgb;
@@ -295,6 +307,7 @@ void main() {
   vLift = sF.z;
   vCeilK = sF.w > 0.0 ? sF.w : 1.0;
   vRing = sG.xy;
+  vSheet = sG.xyz;
   // low-fog layer: the crest colour rides in the (unused) wave-phase slots
   vColor2 = sC.w > 1.5 ? sE.xyz : sD.rgb;
   gl_Position = projectionMatrix * viewMatrix * vec4(P, 1.0);
@@ -325,6 +338,7 @@ varying float vCeilK;
 varying float vLift;
 varying vec3 vColor2;
 varying vec2 vRing;
+varying vec3 vSheet;
 
 // anti-aliased family of thin lines at u*n: fades to its mean where lines get denser than pixels
 float lines(float x, float sharp) {
@@ -423,6 +437,16 @@ void main() {
     kNear = max(kNear, 10.0 * (1.0 - above) * (1.0 - farBelow));
     float E = inversesqrt(nv * nv + mix(0.0005, 0.002, smoothstep(1.0, 4.0, planeDist))) * exp(-nv * kNear);
     float I = uGainS * haze * hazePhase(c) * pow(max(vR, 4.0), -0.75) * E * (1.0 + farBelow * uCeil.x);
+    // round 11 extras: the sheet starts vSheet.x m out (extent); a thin sheet (band vSheet.y m) reads only as the
+    // edge-on line from inside its band and fades out when the eye is further off its plane (no broad wash from
+    // just below it: v1470-1471.3); patches (vSheet.z) break it into a few lit clouds (v1505.6-1507)
+    if (vSheet.x > 0.0) I *= smoothstep(vSheet.x, vSheet.x * 1.15 + 2.0, vR);
+    if (vSheet.y > 0.0) I *= 1.0 - smoothstep(vSheet.y, 2.0 * vSheet.y, planeDist);
+    if (vSheet.z > 0.0) {
+      float nP = texture(uNoise, vWorld * vec3(0.0075, 0.02, 0.0075) + uDrift * 0.5).r * 0.75 + n1 * 0.25;
+      float t0 = mix(0.66, 0.42, vSheet.z);
+      I *= smoothstep(t0, t0 + 0.1, nP);
+    }
     // scan structure: the fan of discrete beams the scanner draws (+ a second, sliding family -> moire)
     float s1 = lines(vU * 41.0 + uTime * 0.21, 5.0);
     float s2 = lines(vU * 53.0 - uTime * 0.16, 3.0);
@@ -468,14 +492,20 @@ void main() {
 // ------------------------------------------------------------------------------------------------
 export const SPRITE_VERT = /* glsl */ `
 attribute vec4 pA; // position.xyz, world size
-attribute vec4 pB; // colour (rgb), kind (0 aperture flare, 1 hit spot, 2 lens veil, 3 + tan(half aperture) / 4 lit V wedge)
+attribute vec4 pB; // colour (rgb), kind (0 aperture flare, 1 hit spot, 2 lens veil, 3 + tan(half aperture) / 4 lit V wedge,
+                 // 4 cone halo, 5 + tan(half aperture) / 4 lit tent, 6 lit cloud, 7 + tan / 4 lined V wedge)
 uniform float uPixAng;
 varying vec2 vUv;
 varying vec3 vColor;
 varying float vKind;
 varying float vDist;
+// world point under the fragment (at the sprite's own position, before the pull): the lit cloud's smoke texture
+varying vec3 vWp;
 void main() {
   vec3 P = pA.xyz;
+  vec3 camR = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
+  vec3 camU = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
+  vWp = pA.xyz + (camR * position.x + camU * position.y) * pA.w;
   vec3 toCam = cameraPosition - P;
   float dist = max(length(toCam), 1e-3);
   float size;
@@ -491,7 +521,9 @@ void main() {
     size = max(pA.w, minSize);
     // pull towards the camera so the billboard is not cut by the surface it sits on (a lit V wedge stands
     // in the air in front of the set: pulled less, and shrunk to keep its angular size)
-    float pull = pB.w > 2.5 ? min(size * 0.3, dist * 0.2) : min(size * 1.1, dist * 0.5);
+    // (a cone halo, kind 4, is the air between the camera and the aperture lit by the beams: pulled halfway, so the
+    // ground in front of the lantern does not cut it)
+    float pull = pB.w > 3.95 && pB.w < 4.5 ? dist * 0.5 : pB.w > 2.5 ? min(size * 0.3, dist * 0.2) : min(size * 1.1, dist * 0.5);
     P += toCam / dist * pull;
     // energy conservation when clamped to the minimum pixel footprint
     float k = pA.w / size;
@@ -517,11 +549,52 @@ varying vec2 vUv;
 varying vec3 vColor;
 varying float vKind;
 varying float vDist;
+varying vec3 vWp;
 void main() {
   float r2 = dot(vUv, vUv);
   if (r2 > 1.0) discard;
   float I;
-  if (vKind > 2.5) {
+  if (vKind > 5.95 && vKind < 6.5) {
+    // a smoke cloud of the low cloud deck lit by the beams (cloud param, round 11): the smoke texture in world space
+    // (it drifts with show time like the haze), a soft round falloff
+    float n1 = texture(uNoise, vWp * vec3(0.011, 0.028, 0.011) + uDrift * 0.6).r;
+    float n2 = texture(uNoise, vWp * vec3(0.034, 0.07, 0.034) - uDrift).r;
+    // (sparse: a few separate lit clouds, not a continuous ceiling — v207.5-217.5 shows one to three patches)
+    float cl = smoothstep(0.46, 0.8, n1 * 0.7 + n2 * 0.3);
+    I = cl * cl * 2.4 * exp(-r2 * 2.2) * (1.0 - r2);
+  } else if (vKind > 3.95 && vKind < 4.5) {
+    // the halo of a cone seen from inside it (round 11, halo param): the smoke around the aperture lit by the beams all
+    // around the view direction — a broad soft disc with a brighter core, sized in angle
+    // (the rays: the beams of the cone converging on the aperture, seen end-on through the smoke)
+    float r = sqrt(r2);
+    float a = atan(vUv.y, vUv.x);
+    float ray = pow(0.5 + 0.5 * cos(a * 23.0 + 3.0 * sin(a * 7.0)), 6.0) + 0.6 * pow(0.5 + 0.5 * cos(a * 37.0 + 1.3), 12.0);
+    I = exp(-r * 4.5) * (1.0 - r2) * (0.3 + 1.4 * ray);
+  } else if (vKind > 4.95 && vKind < 6.0) {
+    // the smoke inside a scanned tent (trees, fill param): a soft Λ standing on its base, apex at the top, the legs
+    // (where the galvo turns) brighter than the inside, a little dimmer towards the base
+    float tH = fract(vKind) * 4.0;
+    float h = inversesqrt(1.0 + 4.0 * tH * tH);
+    float yy = h - vUv.y;
+    float d = abs(vUv.x) - max(yy, 0.0) * tH;
+    float inside = smoothstep(0.03, -0.03, d) * smoothstep(-0.02, 0.03, yy) * (1.0 - smoothstep(2.0 * h - 0.03, 2.0 * h + 0.01, yy));
+    float legs = exp(-d * d * 500.0) * step(0.0, yy) * step(yy, 2.0 * h);
+    float down = clamp(yy / (2.0 * h), 0.0, 1.0);
+    I = (inside * 0.45 + legs * 0.9) * (1.0 - 0.35 * down) + exp(-r2 * 4.0) * 0.03;
+  } else if (vKind > 6.95 && vKind < 8.0) {
+    // a scanned V fan drawn as a dense fan of scan lines (zigzag lines param, round 11: the dense low web of
+    // v1258.3-1259 / v1264.3-1265 / v1269.2-1271.2 — many thin lines, not a smooth glow): 16 rays from the apex
+    // across the wedge, the edges brighter, fading out to the top line
+    float tH = fract(vKind) * 4.0;
+    float h = inversesqrt(1.0 + 4.0 * tH * tH);
+    float yy = vUv.y + h;
+    float ang = atan(vUv.x, max(yy, 1e-4)) / max(atan(tH), 1e-3);
+    float inside = step(abs(ang), 1.0) * smoothstep(-0.02, 0.03, yy);
+    float up = clamp(yy / (2.0 * h), 0.0, 1.0);
+    float ray = pow(0.5 + 0.5 * cos(ang * 3.14159265 * 8.0), 10.0);
+    float edge = exp(-(1.0 - abs(ang)) * (1.0 - abs(ang)) * 400.0);
+    I = inside * (ray * 1.2 + edge * 0.8 + 0.06) * (1.0 - up * up) * (0.25 + 0.75 * exp(-up * 2.5));
+  } else if (vKind > 2.5) {
     // the smoke lit by a scanned V fan (zigzag web): a soft wedge, apex at the bottom, brightest near the
     // apex where the scan is densest, fading out to the top line; a faint bloom around it
     float tH = fract(vKind) * 4.0;
