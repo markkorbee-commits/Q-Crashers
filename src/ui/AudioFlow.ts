@@ -1,5 +1,5 @@
 import { SilentTrack } from '../audio/AudioTrack';
-import { IS_ARTIFACT } from '../core/target';
+import { DEFAULT_SOURCE, IS_ARTIFACT } from '../core/target';
 import { h, store } from './dom';
 import { icon } from './icons';
 import type { UI } from './UI';
@@ -54,8 +54,9 @@ export class AudioFlow {
     const usable = (rem === 'youtube' && !IS_ARTIFACT) || rem === 'synth' || rem === 'silent';
     // immediate feedback while the audio file is looked for: the chooser (options wait for the
     // search) or, for a remembered choice, a small status card
-    const chooser = usable ? null : this.openChooser(true, true);
-    if (usable) this.openSearching();
+    const direct = usable || DEFAULT_SOURCE !== null;
+    const chooser = direct ? null : this.openChooser(true, true);
+    if (direct) this.openSearching();
     let found = false;
     try {
       found = await app.sources.autoDetect();
@@ -74,8 +75,32 @@ export class AudioFlow {
       await this.openChooser(true);
       return;
     }
+    // shareable web build: no local audio here, so play with the official video (synced PiP) by default
+    if (DEFAULT_SOURCE) {
+      const ok = await this.use(DEFAULT_SOURCE, undefined, true);
+      if (ok) {
+        if (DEFAULT_SOURCE === 'youtube') this.hintTapToStart();
+        return;
+      }
+      await this.openChooser(true);
+      return;
+    }
     this.setDetecting(false);
     await chooser;
+  }
+
+  /**
+   * Phones may refuse to start the YouTube video with sound until the viewer taps the video itself
+   * (autoplay rules): if it has not started a few seconds after play, say so once.
+   */
+  private hintTapToStart() {
+    const app = this.ui.app;
+    window.setTimeout(() => {
+      const track = app.clock.track as { kind?: string; playing?: boolean };
+      if (track.kind === 'youtube' && !track.playing) {
+        this.ui.toast('Tap the official video to start the show with sound', 6000, 'broadcast');
+      }
+    }, 4000);
   }
 
   /** small modal while the Endshow audio file is looked for (remembered source) */
