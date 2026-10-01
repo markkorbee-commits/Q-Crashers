@@ -423,6 +423,11 @@ Eerdere stand (cloud, vóór de overdracht):
   `docs/handoff/findings/r4_contracts_*.txt` en het plan voor de volgende ronde in `docs/handoff/findings/r5_next.md`.
 - MC-close-ups 347-459 s volgen de MC via `camera.shot` `p.subject='mc'` (`docs/show-format-ext/core.md`).
 - Podium beloopbaar (spots `dj`, `dancers`), lege DJ-booth met CDJ-achtige set zonder merklogo's, geen DJ in de show.
+- **Openbare deelversie (1 okt 2026): https://markkorbee-commits.github.io/Q-Crashers/** — GitHub Pages (branch
+  `gh-pages`), zonder eigen audiobestand: de officiële YouTube-video is standaard de bron (venstertje, show synchroon;
+  de show wacht tijdens een YouTube-reclame). Bijwerken: `tools/deploy-pages.sh`. Per link te forceren: `?src=youtube`
+  of `?src=synth`. De claude.ai-artifact kon niet openbaar gedeeld worden (review mislukte; YouTube-embeds zijn daar
+  geblokkeerd).
 - Artifact: https://claude.ai/artifact/8ZTMp8XW6hczruUKoiJhDi — bijgewerkt zo 27 sep ± 11:10 (versie 5, eindstand; privé;
   zonder vergelijkmodus, die werkt alleen lokaal; audio = de eerder gepubliceerde mp4/webm)
 - Meetkanttekening: dezelfde code gaf in de cloud op 1047,25 s eenmaal 27,3 % en eenmaal 12,1 % (zwaardere CPU-last,
