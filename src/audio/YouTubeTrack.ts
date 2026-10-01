@@ -121,6 +121,8 @@ export class YouTubeTrack implements AudioTrack {
   get playing() {
     return this.state === 1;
   }
+  /** last content time (video clock) seen while playing; see getTime() */
+  private held = 0;
 
   async load(): Promise<void> {
     const YT = await loadApi();
@@ -172,10 +174,18 @@ export class YouTubeTrack implements AudioTrack {
     if (this.ready) this.player.pauseVideo();
   }
   seek(t: number) {
-    if (this.ready) this.player.seekTo(Math.max(0, t + this.offset), true);
+    this.held = Math.max(0, t + this.offset);
+    if (this.ready) this.player.seekTo(this.held, true);
   }
+  /**
+   * Only the content clock while PLAYING: before the video starts the embed may play YouTube ads, and
+   * getCurrentTime() then reports the ad's time. The show holds at the last content time until the
+   * official video itself runs (seek() moves the held time too).
+   */
   getTime() {
-    return this.ready ? (this.player.getCurrentTime?.() ?? 0) - this.offset : 0;
+    if (!this.ready) return 0;
+    if (this.state === 1) this.held = this.player.getCurrentTime?.() ?? this.held;
+    return this.held - this.offset;
   }
   setVolume(v: number) {
     if (this.ready) this.player.setVolume(Math.round(v * 100));

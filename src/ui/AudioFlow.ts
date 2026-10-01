@@ -98,7 +98,7 @@ export class AudioFlow {
     window.setTimeout(() => {
       const track = app.clock.track as { kind?: string; playing?: boolean };
       if (track.kind === 'youtube' && !track.playing) {
-        this.ui.toast('Tap the official video to start the show with sound', 6000, 'broadcast');
+        this.ui.toast('Waiting for the official video (YouTube may show an ad first). If it does not start, tap the video.', 6000, 'broadcast');
       }
     }, 4000);
   }

@@ -840,7 +840,7 @@ export class UI {
     else this.stall = 0;
     if (this.stall > 8 && !this.stallWarned) {
       this.stallWarned = true;
-      this.toast('The official video is not playing (unavailable, blocked or buffering). Switch the audio source in the top bar.', 6000, 'warning');
+      this.toast('The official video is not playing yet (an ad, buffering, or blocked). The show waits for it; tap the video, or switch the audio source in the top bar.', 6000, 'warning');
     }
     if (tr.kind !== 'youtube') this.stallWarned = false;
   }
